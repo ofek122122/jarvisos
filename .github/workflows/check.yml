@@ -64,7 +64,10 @@ jobs:
         working-directory: services/jarvisd
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          # 3.11, not newer: openwakeword hard-depends on tflite-runtime
+          # on Linux (unused by us — we run its ONNX path) and tflite
+          # wheels stop at 3.11.
+          python-version: "3.11"
       - uses: actions/cache@v4
         with:
           path: models-cache
