@@ -1,0 +1,25 @@
+# BRIEF-phase0 task 5: nix flake check on every commit.
+# CI has no GPU and no disks, so it verifies what it can: the flake
+# evaluates, and the full ares system instantiates to a derivation.
+name: flake check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: nix flake check (evaluation)
+        run: nix flake check --no-build
+
+      - name: instantiate the ares system
+        run: nix eval --raw .#nixosConfigurations.ares.config.system.build.toplevel.drvPath
