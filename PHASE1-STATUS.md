@@ -10,7 +10,7 @@ install day; anything needing real hardware is mocked and tagged
 | 2 | `services/jarvisd` broker + `jv` CLI (Rust) | **DONE** — 7 tests green (routing, fanout, disconnect, drop-oldest + health report, envelope rejection); `jv sub/pub/tap --latency/health`; Nix package in flake |
 | 3 | `services/jv-ears` (Python) | **DONE** — wake(oww)+VAD(silero)+ASR(faster-whisper) verified on 4 fixtures incl. music-bed and mid-sentence-pause requirements; see REVIEW-ears.md; pylib bus client + models/fetch.sh landed with it |
 | 4 | `services/jv-voice` (Python) | **DONE** — piper ryan-high + §06 chain (intensity knob in personality/voice.toml, default 0.4 PROVISIONAL); wake barge-in, urgent-preempts, low-drops all tested vs real bus; **audition samples in harness/fixtures/voice-samples/ (dry / 0.2 / 0.4 / 0.7) — listen and lock intensity** |
-| 5 | `services/jv-brain` v0 (Python) | not started — LLM model choice goes to Ofek |
+| 5 | `services/jv-brain` v0 (Python) | **DONE** — conversation-only vs llama-server API; jv-llm-launch implements the VRAM ladder (headroom-based, KV-in-budget, rung → rung-file → sys.health metrics); personality/system.md DRAFT awaiting review; 12 tests (7 ladder, 5 service vs stub LLM) |
 | 6 | `modules/jarvis-services.nix` + model fetching | not started |
 | 7 | Harness seed (`record.py` / `replay.py` + fixtures) | not started |
 | CI | schema validation, codegen drift, jarvisd tests, ears-on-fixtures | not started |

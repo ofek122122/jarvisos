@@ -62,3 +62,21 @@ changed on review.
 - **Preempted speech is dropped, not resumed** (v0). Why: resuming
   mid-sentence sounds broken; the brain can re-say if it matters. Alt:
   requeue the interrupted utterance (rejected for v0 complexity).
+- **VRAM guard lives in `jv-llm-launch`**, the ExecStart of the
+  llama-server unit — it probes free VRAM at launch, picks the rung,
+  writes /run/jarvis/llm-rung, and execs llama-server. jv-brain reads
+  the rung file and surfaces it as sys.health metrics (llm_rung,
+  llm_gpu) and brain.response.backend. Why: the guard must run where
+  the loading happens; the brain shouldn't manage a sibling unit's
+  process. Alt: brain spawns llama-server itself (rejected: brief says
+  own systemd unit; a brain crash shouldn't kill the model server).
+- **KV-cache budget from Qwen3-8B geometry** (36 layers x 8 KV heads x
+  128 dim -> ~147 KB/token f16), pinned by a unit test. Compute
+  overhead 400 MB + safety margin 300 MB. On the real card the numbers
+  get verified at exit-checklist time; constants live in config.py.
+- **personality/system.md v0 drafted** (spoken-style, English replies,
+  disagree-with-reason, no-tools honesty, the §05 "point outward" mental
+  -health line). Marked DRAFT — your review pass is expected.
+- **Wake-prefix stripping in jv-brain** via regex ("hey/ok jarvis," at
+  utterance start only); an utterance that is ONLY the wake word is
+  passed through unchanged so the brain can respond to being called.
