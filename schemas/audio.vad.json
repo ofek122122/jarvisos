@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/audio.vad/v1",
+  "title": "audio.vad body v1",
+  "description": "Voice-activity boundaries. Publisher: jv-ears (Silero VAD).",
+  "type": "object",
+  "required": ["event"],
+  "additionalProperties": false,
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": ["speech_start", "speech_end"],
+      "description": "Speech segment boundary."
+    },
+    "utterance_id": {
+      "type": "string",
+      "description": "UUID minted at speech_start; threads this segment through audio.transcript and onward. Present on both events once known."
+    },
+    "duration_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Segment length; only on speech_end."
+    }
+  }
+}

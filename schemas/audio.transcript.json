@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/audio.transcript/v1",
+  "title": "audio.transcript body v1",
+  "description": "ASR output, partial and final. Publisher: jv-ears (whisper.cpp streaming, CPU). Partials with the same utterance_id supersede each other; exactly one final per utterance_id. Envelope conf = ASR confidence for the text.",
+  "type": "object",
+  "required": ["kind", "utterance_id", "text", "lang"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["partial", "final"],
+      "description": "Partials are provisional and may be rewritten; only finals are acted on."
+    },
+    "utterance_id": {
+      "type": "string",
+      "description": "UUID from audio.vad speech_start; ties partials to their final."
+    },
+    "text": {
+      "type": "string",
+      "description": "Transcript so far (partial) or complete utterance (final)."
+    },
+    "lang": {
+      "type": "string",
+      "description": "Detected language, BCP-47 primary tag ('en', 'he'). Whisper may detect Hebrew; replies stay English (locked decision)."
+    },
+    "t0": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Start of transcribed audio, seconds relative to utterance start."
+    },
+    "t1": {
+      "type": "number",
+      "minimum": 0,
+      "description": "End of transcribed audio, seconds relative to utterance start."
+    },
+    "words": {
+      "type": "array",
+      "description": "Optional word-level timing (finals only, if the ASR provides it).",
+      "items": {
+        "type": "object",
+        "required": ["w", "t0", "t1"],
+        "additionalProperties": false,
+        "properties": {
+          "w": { "type": "string" },
+          "t0": { "type": "number", "minimum": 0 },
+          "t1": { "type": "number", "minimum": 0 },
+          "p": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    }
+  }
+}

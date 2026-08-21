@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/speech.state/v1",
+  "title": "speech.state body v1",
+  "description": "Speech output state. Publisher: jv-voice. State topic: envelope conf = 1.0. Emitted on every transition; 'interrupted' is followed by 'idle' or the next 'speaking'.",
+  "type": "object",
+  "required": ["state"],
+  "additionalProperties": false,
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": ["idle", "speaking", "interrupted"],
+      "description": "Current output state."
+    },
+    "say_id": {
+      "type": "string",
+      "description": "The speech.say output (say_id) this transition concerns. Absent only for the initial idle on startup."
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["completed", "wake", "preempted", "error"],
+      "description": "Why the previous utterance ended. Present on transitions out of 'speaking'."
+    }
+  }
+}

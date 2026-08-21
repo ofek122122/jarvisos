@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/audio.wake/v1",
+  "title": "audio.wake body v1",
+  "description": "Wake-word detection event. Publisher: jv-ears. Envelope conf mirrors `score`.",
+  "type": "object",
+  "required": ["model", "score", "threshold"],
+  "additionalProperties": false,
+  "properties": {
+    "model": {
+      "type": "string",
+      "description": "Wake model that fired, e.g. 'hey_jarvis' (openWakeWord pretrained)."
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Model activation score at the moment of firing."
+    },
+    "threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Threshold that was configured when this event fired — makes tuning auditable from the log."
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/sys.health/v1",
+  "title": "sys.health body v1",
+  "description": "Heartbeat every service publishes on a fixed period (and immediately on state change). Also how jarvisd reports slow-consumer drops (invariant 5). Envelope conf = 1.0.",
+  "type": "object",
+  "required": ["service", "state", "uptime_s", "period_s"],
+  "additionalProperties": false,
+  "properties": {
+    "service": {
+      "type": "string",
+      "description": "Service name; matches envelope src."
+    },
+    "state": {
+      "type": "string",
+      "enum": ["starting", "ok", "degraded", "error", "stopping"],
+      "description": "'degraded' = alive but impaired (e.g. brain fell back to CPU, ears lost the mic)."
+    },
+    "uptime_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Seconds since this process started."
+    },
+    "period_s": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Nominal heartbeat interval. Missing 2 consecutive periods = presumed dead."
+    },
+    "drops": {
+      "type": "object",
+      "description": "Frames dropped since the last heartbeat, keyed by topic. Published by jarvisd per slow subscriber; empty/absent = none.",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Free-form numeric gauges (queue depths, RSS MB, VRAM MB, ...). Names are service-local; not part of the frozen contract.",
+      "additionalProperties": { "type": "number" }
+    },
+    "notes": {
+      "type": "string",
+      "description": "Human-readable detail for degraded/error states."
+    }
+  }
+}

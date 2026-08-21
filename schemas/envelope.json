@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/envelope/v1",
+  "title": "Envelope",
+  "description": "The frame every message on the bus uses (CLAUDE.md invariant 4). Serialized as a MessagePack map with exactly these keys. The body is constrained by the topic's own schema at the version given in `v`.",
+  "type": "object",
+  "required": ["topic", "ts", "seq", "src", "conf", "v", "body"],
+  "additionalProperties": false,
+  "properties": {
+    "topic": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "description": "Dotted namespace, e.g. 'audio.transcript'. Subscriptions may use a trailing '*' segment for prefix matching ('audio.*'); the wildcard never appears in a published topic."
+    },
+    "ts": {
+      "type": "number",
+      "description": "Capture time in seconds, CLOCK_MONOTONIC (float64). Comparable across processes on one machine; used by `jv tap --latency` for per-hop latency. NOT wall-clock — wall time is stamped by consumers that archive (jv-memory, Phase 4+)."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Per-publisher counter, strictly increasing per (src, topic). Gaps visible to a subscriber = frames dropped by the slow-consumer policy."
+    },
+    "src": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Publishing service name, e.g. 'jv-ears'."
+    },
+    "conf": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Producer confidence (invariant 4). Perception topics: model confidence. Command/state topics: 1.0. Consumers MUST handle missing/late/low-confidence input."
+    },
+    "v": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version of `body` for this topic. Bumped only by a reviewed schema-change commit (invariant 2)."
+    },
+    "body": {
+      "type": "object",
+      "description": "Topic-specific payload; see the topic's schema file."
+    }
+  }
+}

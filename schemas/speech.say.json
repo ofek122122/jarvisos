@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/speech.say/v1",
+  "title": "speech.say body v1",
+  "description": "TTS request. Publishers: jv-brain (Phase 1); later any service with speech capability. Consumer: jv-voice. Command topic: envelope conf = 1.0.",
+  "type": "object",
+  "required": ["text", "say_id", "in_reply_to_utterance"],
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What to say. Plain text; spoken-style, no markup."
+    },
+    "say_id": {
+      "type": "string",
+      "description": "UUID minted by the requester for THIS spoken output. Output utterances (Jarvis speaking) are distinct from input utterances (the user speaking) — jv-memory (Phase 4) tells them apart by this split. speech.state reports progress against say_id."
+    },
+    "in_reply_to_utterance": {
+      "type": ["string", "null"],
+      "description": "The input utterance_id (from audio.vad/audio.transcript) that triggered this speech, or null when there is no trigger (e.g. a system announcement). Required, nullable. End-to-end voice latency = VAD utterance_id -> matching in_reply_to_utterance."
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["low", "normal", "urgent"],
+      "default": "normal",
+      "description": "low: dropped if anything else is queued. normal: FIFO. urgent: preempts an interruptible utterance in progress."
+    },
+    "interruptible": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether a wake event or an urgent request may stop this mid-sentence (BRIEF-phase1: wake-while-speaking interrupts)."
+    },
+    "voice": {
+      "type": "string",
+      "description": "Override of the personality/ default voice. Omit in normal operation — consistency is identity (blueprint §06)."
+    }
+  }
+}
