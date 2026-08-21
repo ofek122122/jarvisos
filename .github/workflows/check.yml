@@ -23,3 +23,28 @@ jobs:
 
       - name: instantiate the ares system
         run: nix eval --raw .#nixosConfigurations.ares.config.system.build.toplevel.drvPath
+
+  bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: schema bindings drift gate
+        run: python3 tools/gen_bindings.py --check
+
+  jarvisd:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/jarvisd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/jarvisd
+      - name: tests (unix socket path)
+        run: cargo test --locked
+      - name: clippy
+        run: cargo clippy --all-targets --locked -- -D warnings

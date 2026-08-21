@@ -6,8 +6,8 @@ install day; anything needing real hardware is mocked and tagged
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Schemas (`schemas/`) | **DRAFTED — awaiting Ofek's review before freeze** |
-| 2 | `services/jarvisd` broker + `jv` CLI (Rust) | not started (blocked on schema freeze) |
+| 1 | Schemas (`schemas/`) | **FROZEN v1** (76f3c84) + codegen w/ CI drift gate |
+| 2 | `services/jarvisd` broker + `jv` CLI (Rust) | **DONE** — 7 tests green (routing, fanout, disconnect, drop-oldest + health report, envelope rejection); `jv sub/pub/tap --latency/health`; Nix package in flake |
 | 3 | `services/jv-ears` (Python) | not started |
 | 4 | `services/jv-voice` (Python) | not started |
 | 5 | `services/jv-brain` v0 (Python) | not started — LLM model choice goes to Ofek |

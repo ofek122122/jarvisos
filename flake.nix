@@ -28,6 +28,13 @@
       };
 
       packages.${system} = {
+        jarvisd = pkgs.rustPlatform.buildRustPackage {
+          pname = "jarvisd";
+          version = "0.1.0";
+          src = ./services/jarvisd;
+          cargoLock.lockFile = ./services/jarvisd/Cargo.lock;
+          meta.mainProgram = "jarvisd";
+        };
         cuda-smoke = pkgs.callPackage ./pkgs/cuda-smoke { };
         jarvis-doctor = pkgs.callPackage ./pkgs/jarvis-doctor {
           cuda-smoke = self.packages.${system}.cuda-smoke;
