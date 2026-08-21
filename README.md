@@ -16,6 +16,7 @@ awaiting install day.
 | Bootloader | systemd-boot on the WD Green's own ESP; Windows **not** registered — firmware F12 menu picks the OS |
 | Compositor (Phases 0–4) | Niri (+ greetd/tuigreet) |
 | Windows ESP | Migrate to NVMe with recovery-USB + 3-boot soak protocol (see below) |
+| Secure Boot | Off for the install; **lanzaboote lands right after Phase 0, then Secure Boot is re-enabled** (Riot Vanguard requires it on Windows 11) |
 | `/tank` (2 TB disk) | **Deferred** — disk completely untouched in Phase 0 |
 | Kernel | Stock first; custom kernel is a second pass after first boot works |
 
@@ -43,8 +44,14 @@ Do these in order. Nothing on this list is optional.
 6. **Disable Fast Startup**: Control Panel → Power Options → "Choose what
    the power buttons do" → untick "Turn on fast startup". Prevents
    hibernation-locked NTFS during dual boot.
-7. **In the Gigabyte UEFI**: disable Secure Boot (lanzaboote may return
-   later); confirm F12 shows the one-time boot menu.
+7. **In the Gigabyte UEFI**: disable Secure Boot; confirm F12 shows the
+   one-time boot menu.
+   > ⚠️ **While Secure Boot is off, Riot Vanguard titles (Valorant, League
+   > of Legends) will NOT launch on Windows 11** — Vanguard enforces Secure
+   > Boot + TPM 2.0. This is temporary: the post-Phase-0 lanzaboote task
+   > (below) signs JarvisOS for Secure Boot, after which you **re-enable
+   > Secure Boot in the UEFI** and both OSes — and Vanguard — work again.
+   > Plan the outage window accordingly.
 8. **Write the NixOS minimal ISO** (x86_64) to a *spare* USB stick with
    Rufus in dd mode. Never one of the three internal drives.
 
@@ -191,6 +198,16 @@ sudo nixos-rebuild switch --flake .#ares  # 4. only when test behaves
 
 ## Deferred / next
 
+- **Secure Boot via lanzaboote** (post-Phase-0, prioritized — it unblocks
+  Vanguard gaming on Windows): create and enroll our own signing keys with
+  `sbctl create-keys` + `sbctl enroll-keys --microsoft` (**`--microsoft` is
+  mandatory** — it keeps Microsoft's certificates in the db so Windows still
+  boots), switch the flake from `boot.loader.systemd-boot` to lanzaboote,
+  `nixos-rebuild build` → diff → `test` → `switch` (this IS a boot change —
+  full change-flow discipline), verify both OSes boot with Secure Boot still
+  off, then **re-enable Secure Boot in the Gigabyte UEFI** and verify:
+  JarvisOS boots, Windows boots, and a Vanguard title actually launches.
+  Keep a live-USB + the recovery USB at hand for this task.
 - `/tank` on the 2 TB disk — blocked on data backup + old-ESP removal.
 - Custom kernel (localmodconfig seed, PREEMPT full, HZ=1000, uvcvideo +
   uinput built in) — second pass, own session, stock generation kept.
