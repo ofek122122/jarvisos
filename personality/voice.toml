@@ -1,0 +1,22 @@
+# Jarvis's voice — versioned identity (CLAUDE.md invariant 9).
+# Changing anything here changes how Jarvis sounds; do it deliberately,
+# in its own commit. jv-dream may PROPOSE diffs; a human applies them.
+
+[voice]
+# Locked by Ofek 2026-08-21. Consistency is identity — do not swap.
+model = "en_US-ryan-high"
+
+[chain]
+# The §06 signature chain, applied to everything Jarvis says.
+# `intensity` scales the synthetic character (shimmer + reverb + ring
+# mod); 0.0 = plain ryan, 1.0 = full sci-fi. Three auditioning samples
+# live in harness/fixtures/voice-samples/ (0.2 / 0.4 / 0.7).
+# PROVISIONAL default until Ofek listens and picks.
+intensity = 0.4
+
+highpass_hz = 120.0     # gentle low cut — "speaker in the room", not a chest
+shimmer_base = 0.10     # octave-up harmonic layer, linear gain at intensity=1
+reverb_seconds = 0.2    # short plate tail
+reverb_wet_base = 0.35  # wet mix at intensity=1
+ringmod_hz = 55.0       # only audible above intensity ~0.5
+limiter_drive = 1.5     # soft-clip drive into the tanh limiter

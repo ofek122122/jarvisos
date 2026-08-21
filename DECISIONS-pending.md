@@ -50,3 +50,15 @@ changed on review.
 - **Q4_K_S rung source**: Qwen's official GGUF repo ships no Q4_K_S, so
   ladder rung 3 pins bartowski/Qwen_Qwen3-8B-GGUF (hash-pinned like all
   models). Alt: skip rung 3 (rejected: your ladder spec named it).
+- **Octave-up shimmer via full-wave rectification** (|x| doubles the
+  fundamental, band-passed 900–5000 Hz) instead of a phase-vocoder pitch
+  shifter. Why: zero extra deps, deterministic, plenty subtle at the
+  -20 dB-ish levels the blueprint calls for. Alt: librosa pitch_shift
+  (rejected: heavy dependency for one effect; revisit if your ears
+  disagree with the samples).
+- **Ring modulator (55 Hz) fades in only above intensity 0.5** — so your
+  0.2/0.4 candidates are "processed natural" and 0.7 is overtly synthetic;
+  a `dry.wav` reference sample was added alongside the three requested.
+- **Preempted speech is dropped, not resumed** (v0). Why: resuming
+  mid-sentence sounds broken; the brain can re-say if it matters. Alt:
+  requeue the interrupted utterance (rejected for v0 complexity).

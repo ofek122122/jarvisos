@@ -71,16 +71,19 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: models-cache
-          key: models-ears-v1-${{ hashFiles('models/fetch.sh') }}
-      - name: fetch ears models (pinned SHA256)
-        run: ./models/fetch.sh --only ears
+          key: models-earsvoice-v1-${{ hashFiles('models/fetch.sh') }}
+      - name: fetch ears+voice models (pinned SHA256)
+        run: ./models/fetch.sh --only ears,voice
       - name: install packages
         run: |
           python -m pip install -q pytest pytest-asyncio
-          python -m pip install -q -e services/pylib -e services/jv-ears
+          python -m pip install -q -e services/pylib -e services/jv-ears -e services/jv-voice
       - name: pylib tests (client vs real jarvisd)
         run: python -m pytest tests -q
         working-directory: services/pylib
       - name: jv-ears tests (fixtures, real models, no mic)
         run: python -m pytest tests -q
         working-directory: services/jv-ears
+      - name: jv-voice tests (real piper, fake player)
+        run: python -m pytest tests -q
+        working-directory: services/jv-voice
