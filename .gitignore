@@ -17,3 +17,12 @@ target/
 *.key
 *.keyfile
 secrets/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# model weights (fetched, never committed)
+models-cache/
