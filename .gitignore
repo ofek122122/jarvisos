@@ -1,0 +1,16 @@
+# Nix build outputs
+result
+result-*
+
+# direnv
+.direnv/
+
+# editor droppings
+*.swp
+.vscode/
+.idea/
+
+# never commit secrets or keys
+*.key
+*.keyfile
+secrets/

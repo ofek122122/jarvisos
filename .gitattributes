@@ -1,0 +1,6 @@
+# This repo is authored on Windows but consumed on NixOS.
+# Everything is committed with LF so scripts and Nix files work on the target.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gguf binary

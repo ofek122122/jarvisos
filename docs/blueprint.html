@@ -1,0 +1,1075 @@
+<title>JarvisOS Blueprint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+:root{
+  --ink:#10161C;
+  --ground:#EDEFF1;
+  --surface:#F7F8F9;
+  --surface-2:#E3E7EA;
+  --line:#CBD3D9;
+  --line-soft:#DDE3E7;
+  --text:#10161C;
+  --text-2:#4A5762;
+  --text-3:#78868F;
+  --ember:#C8431F;
+  --ember-soft:#F4E2DC;
+  --teal:#0E6A72;
+  --teal-soft:#DCEAEB;
+  --ok:#1F6B45;
+  --warn:#8A5A0B;
+  --risk:#A32A2A;
+  --shadow:0 1px 2px rgba(16,22,28,.06), 0 8px 24px rgba(16,22,28,.05);
+  --measure:66ch;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0C1116;
+    --surface:#141B21;
+    --surface-2:#1C252C;
+    --line:#2A353D;
+    --line-soft:#212B32;
+    --text:#E4EAEE;
+    --text-2:#9FADB7;
+    --text-3:#6E7E89;
+    --ember:#F0714A;
+    --ember-soft:#2A1710;
+    --teal:#4FB8BF;
+    --teal-soft:#0F2326;
+    --ok:#5BC08D;
+    --warn:#D9A441;
+    --risk:#E8756B;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0C1116;
+  --surface:#141B21;
+  --surface-2:#1C252C;
+  --line:#2A353D;
+  --line-soft:#212B32;
+  --text:#E4EAEE;
+  --text-2:#9FADB7;
+  --text-3:#6E7E89;
+  --ember:#F0714A;
+  --ember-soft:#2A1710;
+  --teal:#4FB8BF;
+  --teal-soft:#0F2326;
+  --ok:#5BC08D;
+  --warn:#D9A441;
+  --risk:#E8756B;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground);
+  color:var(--text);
+  font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+  font-size:17px;
+  line-height:1.62;
+  margin:0;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1120px;margin:0 auto;padding:0 28px 120px}
+.col{max-width:var(--measure)}
+p{margin:0 0 1.1em}
+a{color:var(--ember)}
+
+h1,h2,h3,h4,.mono,.eyebrow,.lbl{font-family:Archivo,"Helvetica Neue",Arial,sans-serif}
+.mono,code,pre,.tag,.num{font-family:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace}
+
+/* ---------- masthead ---------- */
+.mast{
+  padding:78px 0 44px;
+  border-bottom:2px solid var(--text);
+}
+.eyebrow{
+  font-family:"JetBrains Mono",monospace;
+  font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--ember);font-weight:500;margin:0 0 22px;
+  display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+}
+.eyebrow span:not(:last-child)::after{content:"";}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--ember);display:inline-block}
+h1{
+  font-size:clamp(48px,8.5vw,104px);
+  font-weight:800;line-height:.92;letter-spacing:-.035em;
+  margin:0 0 26px;text-wrap:balance;
+}
+h1 em{font-style:normal;color:var(--ember)}
+.deck{font-size:clamp(19px,2.2vw,23px);line-height:1.5;color:var(--text-2);max-width:56ch;margin:0}
+
+.specbar{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:1px;background:var(--line);border:1px solid var(--line);
+  margin:44px 0 0;
+}
+.specbar div{background:var(--ground);padding:16px 18px}
+.specbar dt{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:0 0 6px}
+.specbar dd{margin:0;font-family:Archivo,sans-serif;font-weight:600;font-size:15px;line-height:1.35}
+
+/* ---------- sections ---------- */
+section{padding:64px 0 8px;border-top:1px solid var(--line-soft)}
+section:first-of-type{border-top:none}
+.shead{display:flex;gap:20px;align-items:baseline;margin:0 0 28px}
+.snum{
+  font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700;
+  color:var(--ember);letter-spacing:.06em;padding-top:.55em;flex:none;
+}
+h2{font-size:clamp(28px,4vw,40px);font-weight:700;letter-spacing:-.025em;line-height:1.06;margin:0;text-wrap:balance}
+h3{font-size:21px;font-weight:700;letter-spacing:-.012em;margin:38px 0 12px}
+h4{font-size:14px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin:26px 0 10px;color:var(--text-2)}
+
+.lead{font-size:19px;color:var(--text-2);max-width:60ch}
+
+/* ---------- callout ---------- */
+.callout{
+  background:var(--surface);border:1px solid var(--line);
+  padding:26px 28px;margin:30px 0;box-shadow:var(--shadow);
+}
+.callout.hot{border-left:3px solid var(--ember)}
+.callout.cool{border-left:3px solid var(--teal)}
+.callout h4{margin-top:0;color:var(--text)}
+.callout p:last-child{margin-bottom:0}
+
+/* ---------- layer stack ---------- */
+.stack{display:flex;flex-direction:column;gap:6px;margin:34px 0}
+.layer{
+  display:grid;grid-template-columns:64px 1fr;align-items:stretch;
+  border:1px solid var(--line);background:var(--surface);
+}
+.layer .lid{
+  background:var(--surface-2);display:flex;align-items:center;justify-content:center;
+  font-family:"JetBrains Mono",monospace;font-weight:700;font-size:13px;color:var(--text-2);
+  border-right:1px solid var(--line);
+}
+.layer .lbody{padding:15px 20px}
+.layer h5{font-family:Archivo,sans-serif;font-size:16px;font-weight:700;margin:0 0 4px;letter-spacing:-.01em}
+.layer p{font-size:14.5px;color:var(--text-2);margin:0;line-height:1.5}
+.layer.you{border-color:var(--ember);background:var(--ember-soft)}
+.layer.you .lid{background:var(--ember);color:#fff;border-right-color:var(--ember)}
+.layer.you h5{color:var(--ember)}
+.layer.you p{color:var(--text)}
+.stacknote{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);margin:0 0 10px}
+
+/* ---------- tables ---------- */
+.tscroll{overflow-x:auto;margin:26px 0;border:1px solid var(--line);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:14.5px}
+th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+thead th{
+  font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--text-3);font-weight:500;background:var(--surface-2);border-bottom:1px solid var(--line);
+  white-space:nowrap;
+}
+tbody tr:last-child td{border-bottom:none}
+td.p{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--ember);white-space:nowrap}
+td strong{font-family:Archivo,sans-serif;font-weight:700}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+
+.tag{
+  display:inline-block;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  padding:2px 7px;border:1px solid var(--line);color:var(--text-2);white-space:nowrap;
+}
+.tag.gpu{border-color:var(--teal);color:var(--teal);background:var(--teal-soft)}
+.tag.pick{border-color:var(--ember);color:var(--ember);background:var(--ember-soft);font-weight:700}
+.tag.no{border-color:var(--risk);color:var(--risk)}
+.tag.ok{border-color:var(--ok);color:var(--ok)}
+
+/* ---------- phases ---------- */
+.phases{margin:32px 0;border-top:1px solid var(--line)}
+.phase{
+  display:grid;grid-template-columns:88px 1fr;gap:0;
+  border-bottom:1px solid var(--line);
+}
+.phase .pmeta{
+  padding:22px 18px 22px 0;border-right:1px solid var(--line);
+}
+.phase .pnum{font-family:Archivo,sans-serif;font-size:30px;font-weight:800;line-height:1;color:var(--ember);letter-spacing:-.03em}
+.phase .ptime{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);margin-top:8px}
+.phase .pbody{padding:22px 0 22px 24px}
+.phase h3{margin:0 0 8px;font-size:19px}
+.phase p{font-size:15px;color:var(--text-2);margin:0 0 10px;max-width:62ch}
+.done{
+  font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--text);
+  background:var(--surface-2);padding:8px 12px;display:inline-block;line-height:1.45;
+  border-left:2px solid var(--ok);
+}
+
+/* ---------- code ---------- */
+pre{
+  background:var(--surface);border:1px solid var(--line);
+  padding:20px 22px;overflow-x:auto;font-size:13px;line-height:1.65;margin:22px 0;
+  color:var(--text-2);
+}
+pre b{color:var(--text);font-weight:500}
+pre i{color:var(--text-3);font-style:normal}
+pre u{color:var(--ember);text-decoration:none}
+code{background:var(--surface-2);padding:1px 5px;font-size:.86em;border:1px solid var(--line-soft)}
+pre code{background:none;padding:0;border:none;font-size:inherit}
+
+ul,ol{margin:0 0 1.1em;padding-left:1.3em;max-width:var(--measure)}
+li{margin-bottom:.5em}
+li::marker{color:var(--text-3)}
+ul.rules{list-style:none;padding-left:0;max-width:none}
+ul.rules li{
+  display:grid;grid-template-columns:28px 1fr;gap:12px;
+  padding:14px 0;border-bottom:1px solid var(--line-soft);margin:0;
+}
+ul.rules li:last-child{border-bottom:none}
+ul.rules .k{font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700;color:var(--ember);padding-top:.35em}
+ul.rules strong{font-family:Archivo,sans-serif;display:block;margin-bottom:2px}
+ul.rules span.d{color:var(--text-2);font-size:15px}
+
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px;margin:26px 0}
+.card{background:var(--surface);border:1px solid var(--line);padding:22px}
+.card h4{margin-top:0}
+.card p{font-size:15px;color:var(--text-2);margin-bottom:0}
+
+footer{
+  margin-top:80px;padding-top:30px;border-top:2px solid var(--text);
+  font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--text-3);line-height:1.9;
+}
+footer a{color:var(--text-2)}
+
+@media (max-width:640px){
+  body{font-size:16px}
+  .wrap{padding:0 18px 80px}
+  .shead{flex-direction:column;gap:6px}
+  .snum{padding-top:0}
+  .phase{grid-template-columns:1fr}
+  .phase .pmeta{border-right:none;border-bottom:1px solid var(--line-soft);padding:18px 0 12px;display:flex;gap:14px;align-items:baseline}
+  .phase .ptime{margin-top:0}
+  .phase .pbody{padding:18px 0}
+}
+@media (prefers-reduced-motion:no-preference){
+  html{scroll-behavior:smooth}
+}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow"><span class="dot"></span> Build blueprint <span class="dot"></span> Single-workstation Linux <span class="dot"></span> Rev. 21 Aug 2026</p>
+  <h1>Jarvis<em>OS</em></h1>
+  <p class="deck">A declarative Linux system you assemble layer by layer, with hands, eyes, voice and presence wired into the desktop as first-class input devices — not as an app running on top of one. Windows binaries run on it too — and at its center, an assistant that remembers you.</p>
+
+  <dl class="specbar">
+    <div><dt>Base</dt><dd>NixOS flake</dd></div>
+    <div><dt>Shell</dt><dd>Own compositor</dd></div>
+    <div><dt>Brain</dt><dd>Local LLM, offline</dd></div>
+    <div><dt>Inputs</dt><dd>Hand · Gaze · Voice</dd></div>
+    <div><dt>Runs</dt><dd>Linux + .exe</dd></div>
+    <div><dt>First usable</dt><dd>~3 weeks</dd></div>
+  </dl>
+</header>
+
+<section>
+  <div class="shead"><span class="snum">00</span><h2>Start here: the honest read</h2></div>
+  <div class="col">
+    <p>You picked <em>custom distro</em>, and that is the right call — but it's worth being precise about what it buys you, because the word "OS" hides two very different projects.</p>
+    <p>Writing a kernel from scratch means writing GPU drivers, a USB video stack, a network stack and an audio stack before your camera turns on. Nobody gets to Jarvis that way. What you actually want is the thing that <em>feels</em> like your OS: a machine where every package, service, kernel option and pixel of the desktop exists because you declared it, and where the interface is one you designed. That's completely achievable, and it's what this blueprint builds.</p>
+  </div>
+
+  <div class="callout hot">
+    <h4>The constraint that shapes everything</h4>
+    <p>This is your only PC and you still need Windows for gaming. So: <strong>a second physical SSD</strong>, not a shrunk partition. Windows keeps its own disk and its own bootloader, untouched. You pick the OS from the UEFI boot menu (F12 at POST on your Gigabyte board), never from a shared EFI partition that a Windows update can stomp on. Good news from your specs: you already own three drives, so this costs you nothing — see §07.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">01</span><h2>Choosing the base</h2></div>
+  <p class="lead">Four ways to build a distro that's genuinely yours. Two of them are traps given your situation.</p>
+
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Base</th><th>What "from scratch" means</th><th>Cost to you</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>NixOS</strong><br><span class="tag pick">Pick this</span></td>
+        <td>Nothing exists on the machine unless you declared it in code. The entire OS — kernel config, services, users, desktop, your Jarvis daemons — is one Git repo.</td>
+        <td>The Nix language is genuinely strange for a week or two. Some binary blobs need <code>nix-ld</code> or a container to run.</td>
+        <td>Atomic rollback. Every previous build stays in the boot menu, so a broken experiment is one reboot from fixed. On a single-PC project this is decisive.</td>
+      </tr>
+      <tr>
+        <td><strong>Arch + custom kernel</strong></td>
+        <td>You install every package by hand and compile your own kernel. Very hands-on, very transparent.</td>
+        <td>State drifts. Six months in, nobody — including you — knows why the machine is configured the way it is.</td>
+        <td>Great teacher, poor foundation for a system an agent edits daily.</td>
+      </tr>
+      <tr>
+        <td><strong>Gentoo</strong></td>
+        <td>Literally compile the whole userland from source with your own USE flags and <code>-march=native</code>.</td>
+        <td>Days of compile time. Marginal real-world speedup.</td>
+        <td>Satisfying, but you'd spend your first month watching GCC instead of building Jarvis.</td>
+      </tr>
+      <tr>
+        <td><strong>Linux From Scratch</strong></td>
+        <td>Bootstrap the toolchain and every core package by hand, following the book.</td>
+        <td>No package manager, no security updates, not reproducible.</td>
+        <td><span class="tag no">Trap</span> Do it once in a VM as education. Never as your daily driver.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout cool">
+    <h4>Why NixOS specifically, given that Claude Code is doing the building</h4>
+    <p>An agent editing a mutable system leaves you with a machine whose current state is the sum of a thousand commands nobody logged. An agent editing a NixOS flake leaves you with a <em>diff you can read</em>. Every change is reviewable before it's applied, the build either succeeds or fails atomically, and if a change is bad you boot the previous generation. That property is the difference between "my agent is building my OS" and "my agent broke my only computer."</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">02</span><h2>The layer stack</h2></div>
+  <p class="lead">Seven layers, bottom to top. The ember ones are the parts you write; the rest you configure and compile.</p>
+
+  <p class="stacknote">L0 → L6 · build order is <em>not</em> bottom-to-top — see §09</p>
+
+  <div class="stack">
+    <div class="layer you">
+      <div class="lid">L6</div>
+      <div class="lbody">
+        <h5>Jarvis HUD</h5>
+        <p>The face. A Wayland layer-shell overlay: ambient status ring, live transcript, gesture-target highlight, gaze reticle, notification triage. Always on top, never stealing focus.</p>
+      </div>
+    </div>
+    <div class="layer you">
+      <div class="lid">L5</div>
+      <div class="lbody">
+        <h5>Agent core — <code>jv-brain</code>, <code>jv-act</code>, <code>jv-memory</code></h5>
+        <p>Fuses perception into intent, decides, and acts. The only layer allowed to change the state of your machine.</p>
+      </div>
+    </div>
+    <div class="layer you">
+      <div class="lid">L4</div>
+      <div class="lbody">
+        <h5>Perception services + message bus</h5>
+        <p>Independent processes for hands, face, gaze, presence, speech and system context, all publishing to one local pub/sub bus. One crashing must never take down the others.</p>
+      </div>
+    </div>
+    <div class="layer you">
+      <div class="lid">L3</div>
+      <div class="lbody">
+        <h5>Compositor — your Wayland shell</h5>
+        <p>Windows, input routing, and the IPC surface Jarvis drives. Built on Smithay (Rust) or wlroots (C). Rent an existing one for the first six months.</p>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="lid">L2</div>
+      <div class="lbody">
+        <h5>Userland</h5>
+        <p>systemd units for every Jarvis service, PipeWire for audio, greetd for login, CUDA + cuDNN + TensorRT, ONNX Runtime, llama.cpp — all pinned in the flake.</p>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="lid">L1</div>
+      <div class="lbody">
+        <h5>Kernel</h5>
+        <p>Your own <code>.config</code>, seeded from <code>make localmodconfig</code> so it contains drivers for <em>your</em> hardware and nothing else. <code>PREEMPT</code> full and <code>CONFIG_HZ=1000</code> for input latency; NVIDIA open modules; <code>uvcvideo</code> and <code>uinput</code> built in.</p>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="lid">L0</div>
+      <div class="lbody">
+        <h5>Hardware</h5>
+        <p>NVIDIA GPU, dedicated NVMe, IR webcam, hand-tracking sensor, far-field mic. See §07.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">03</span><h2>How Jarvis is wired</h2></div>
+  <div class="col">
+    <p>The single most important architectural decision: <strong>every sense is its own process</strong>, and they only ever talk through a bus. Not one big Python script. The reason is boring and non-negotiable — a segfault in the CUDA hand-tracking path must not silence your voice assistant, and you need to be able to restart, replace or rewrite any one sense without touching the rest.</p>
+  </div>
+
+  <h3>The bus</h3>
+  <div class="col">
+    <p>A broker, <code>jarvisd</code>, listening on a Unix socket at <code>/run/jarvis/bus.sock</code>. Topic-based publish/subscribe, MessagePack frames, one schema directory that both Rust and Python generate their types from. Define those schemas <em>before</em> any service is written — see §10.</p>
+  </div>
+
+<pre><i># frame envelope — every message on the bus</i>
+{
+  <u>"topic"</u>:  <b>"vision.hands"</b>,        <i>// dotted namespace</i>
+  <u>"ts"</u>:     <b>1755772800.041</b>,        <i>// capture time, monotonic</i>
+  <u>"seq"</u>:    <b>184203</b>,
+  <u>"src"</u>:    <b>"jv-hands"</b>,
+  <u>"conf"</u>:   <b>0.94</b>,                  <i>// producers always state confidence</i>
+  <u>"body"</u>:   { <i>… topic-specific payload …</i> }
+}</pre>
+
+  <h3>The services</h3>
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Process</th><th>Job</th><th>Stack</th><th>Rate</th><th>Runs on</th></tr></thead>
+    <tbody>
+      <tr><td class="p">jv-hands</td><td>21 landmarks per hand → gesture classifier</td><td>MediaPipe Hands or Ultraleap Hyperion, via ONNX Runtime</td><td class="num">60 Hz</td><td><span class="tag gpu">GPU</span></td></tr>
+      <tr><td class="p">jv-face</td><td>478-point face mesh incl. iris → head pose, gaze vector, blink</td><td>MediaPipe Face Landmarker</td><td class="num">30 Hz</td><td><span class="tag gpu">GPU</span></td></tr>
+      <tr><td class="p">jv-presence</td><td>Is someone there · is it <em>you</em> · are you paying attention</td><td>Derived from jv-face + the IR stream; ArcFace embedding for identity</td><td class="num">5 Hz</td><td><span class="tag">CPU</span></td></tr>
+      <tr><td class="p">jv-ears</td><td>Wake word → voice activity → transcript</td><td>openWakeWord → Silero VAD → whisper.cpp or NVIDIA Parakeet</td><td>event</td><td><span class="tag gpu">GPU</span></td></tr>
+      <tr><td class="p">jv-voice</td><td>Speech out</td><td>Piper for latency, Kokoro when you want it to sound good</td><td>event</td><td><span class="tag">CPU</span></td></tr>
+      <tr><td class="p">jv-context</td><td>Active window, workspace, calendar, battery, network, what's on screen</td><td>Compositor IPC + a small VLM for screen reading</td><td class="num">1 Hz</td><td><span class="tag">CPU</span></td></tr>
+      <tr><td class="p">jv-memory</td><td>Episodic log + semantic recall</td><td>SQLite + sqlite-vec, local embedding model</td><td>event</td><td><span class="tag">CPU</span></td></tr>
+      <tr><td class="p">jv-dream</td><td>Nightly consolidation: episodes → facts, contradictions → questions, patterns → rules, decay</td><td>Batch job on the local LLM, machine idle</td><td>nightly</td><td><span class="tag gpu">GPU</span></td></tr>
+      <tr><td class="p">jv-brain</td><td>Intent, planning, tool calling, conversation</td><td>llama.cpp server, OpenAI-compatible, function calling on</td><td>event</td><td><span class="tag gpu">GPU</span></td></tr>
+      <tr><td class="p">jv-act</td><td><strong>The only privileged process.</strong> Synthetic input via <code>uinput</code>, window management, shell, files, smart home</td><td>Rust, capability-gated tool registry</td><td>event</td><td><span class="tag">CPU</span></td></tr>
+      <tr><td class="p">jv-compat</td><td>Owns the Windows-binary lifecycle: fingerprint, prefix, silent install, desktop entry</td><td>Wine / Proton-GE via umu-launcher, recipe database</td><td>event</td><td><span class="tag">CPU</span></td></tr>
+      <tr><td class="p">jv-guard</td><td>Screens binaries, watches sandbox escapes, audits system drift against the flake</td><td>ClamAV, hash intel, eBPF watchers</td><td>event</td><td><span class="tag">CPU</span></td></tr>
+      <tr><td class="p">jv-hud</td><td>Draws everything you see</td><td>Wayland layer-shell client</td><td class="num">60 Hz</td><td><span class="tag gpu">GPU</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Latency budget</h3>
+  <div class="col"><p>Gesture-to-effect over <strong>100 ms</strong> feels broken to the hand. Voice can be slower; the hand cannot. Design to this and measure it from day one:</p></div>
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Stage</th><th>Budget</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Sensor exposure → frame in RAM</td><td class="num">8–16 ms</td><td>60 fps sensor halves this vs. a 30 fps webcam</td></tr>
+      <tr><td>Landmark inference</td><td class="num">6–15 ms</td><td>TensorRT/FP16 on your GPU; this is not the bottleneck</td></tr>
+      <tr><td>Gesture classify + temporal smoothing</td><td class="num">10–20 ms</td><td>Smoothing is where latency hides. Keep the window short.</td></tr>
+      <tr><td>Bus hop + fusion</td><td class="num">1–3 ms</td><td>Unix socket, no serialization of raw frames</td></tr>
+      <tr><td><code>uinput</code> event → compositor → pixels</td><td class="num">8–16 ms</td><td>One display refresh</td></tr>
+      <tr><td><strong>Total</strong></td><td class="num"><strong>~35–70 ms</strong></td><td>Comfortably under the threshold, with room to spare</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">04</span><h2>The design problem nobody warns you about</h2></div>
+  <div class="col">
+    <p>Hand tracking is a solved problem. You will have working landmark detection in an afternoon. The thing that kills these projects is different, and it has a name.</p>
+  </div>
+
+  <div class="callout hot">
+    <h4>The Midas touch problem</h4>
+    <p>Once the camera watches your hands, <em>everything you do with your hands becomes a command.</em> You scratch your face and the volume drops. You reach for coffee and a window closes. Within two days you turn the feature off. Every gesture-control demo works; almost no gesture-control system survives contact with an actual work day.</p>
+  </div>
+
+  <div class="col"><p>Four mechanisms fix it, and you need all four:</p></div>
+
+  <ul class="rules">
+    <li><span class="k">01</span><span><strong>An explicit engagement gate.</strong> Gestures do nothing until you arm them — an open palm held toward the sensor for 300 ms, or a hand entering a defined volume above the desk. Disarm on timeout. The gate must be visible in the HUD so you always know whether you're being read.</span></li>
+    <li><span class="k">02</span><span><strong>Gaze selects, hand confirms.</strong> This is why your two chosen features are worth more together than apart. Looking at a target is effortless and unambiguous; a pinch is a clean, deliberate confirm. Look at the window, pinch to focus. Look at the volume tile, pinch-and-drag. It is the interaction model Vision Pro shipped, and it is correct.</span></li>
+    <li><span class="k">03</span><span><strong>Design for a resting hand.</strong> Gorilla arm is real — a raised arm fatigues in under two minutes. Every gesture in your vocabulary should be performable with your forearm on the desk and your hand moving a few centimetres. This is also the strongest argument for a desk-mounted upward-facing sensor rather than a monitor-top webcam.</span></li>
+    <li><span class="k">04</span><span><strong>Hysteresis everywhere.</strong> Different thresholds to enter and leave a gesture state, plus a minimum dwell before firing. Without it, every classifier boundary flickers and your desktop twitches.</span></li>
+  </ul>
+
+  <div class="callout cool">
+    <h4>Calibrate your expectations for gaze</h4>
+    <p>Webcam-based gaze estimation lands around <strong>2–5° of visual angle</strong>. At 60 cm that's a 2–5 cm error circle — enough to know <em>which window or monitor</em> you're looking at, nowhere near enough to drive a cursor. Build zone-level attention features (auto-pause video when you look away, notify only in the region you're watching, dim the monitor you're ignoring) and treat cursor-grade gaze as a hardware upgrade, not a software problem.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">05</span><h2>The mind that remembers you</h2></div>
+  <div class="col">
+    <p>"It gets stronger every time I talk to it" is a memory-architecture problem, and it has a specific failure mode worth understanding before you write a line of it.</p>
+  </div>
+
+  <div class="callout hot">
+    <h4>Why the obvious approach makes it worse over time</h4>
+    <p>The default build is: embed every conversation, drop it in a vector database, retrieve the top-k similar chunks. This works beautifully for a month and then degrades — because as the store grows, retrieval returns more <em>plausibly relevant</em> and less <em>actually relevant</em> material, and the model drowns in it. Worse, it has no idea that something you said in March was superseded by something you said in August. It confidently tells you that you love a job you quit. A raw episodic pile doesn't compound; it accumulates.</p>
+  </div>
+
+  <div class="col"><p>What compounds is a system that <em>distils</em>. Five tiers, each with a different job and a different lifetime:</p></div>
+
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Tier</th><th>Holds</th><th>Written by</th><th>Lifetime</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Working</strong></td><td>The current conversation and the last few hours of context</td><td>Live, in-context</td><td>Hours</td></tr>
+      <tr><td><strong>Episodic</strong></td><td>Append-only log of what happened: utterances, timestamps, active app, detected state. Ground truth, never edited.</td><td>Every service</td><td>Forever (encrypted)</td></tr>
+      <tr><td><strong>Semantic</strong></td><td>Distilled, <em>typed</em> facts about you — people, projects, preferences, routines, constraints, goals. This is the profile.</td><td><code>jv-dream</code></td><td>Until superseded or decayed</td></tr>
+      <tr><td><strong>Procedural</strong></td><td>Learned behaviour rules: <em>don't talk before the first coffee</em>, <em>"fine" after 11pm means not fine</em>. Each with an evidence count.</td><td><code>jv-dream</code>, promoted from patterns</td><td>Until contradicted</td></tr>
+      <tr><td><strong>Narrative</strong></td><td>Daily → weekly → monthly rollups. How you hold a five-year horizon in a finite context window.</td><td><code>jv-dream</code></td><td>Forever, compressing</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>The profile is a schema, not a blob</h3>
+  <div class="col">
+    <p>Every fact carries its own evidence. This is what lets you ask <em>"why do you think that?"</em> and get a real answer — and lets you correct it when it's wrong.</p>
+  </div>
+
+<pre><i># one row in the semantic store</i>
+{
+  <u>"id"</u>:          <b>"fact:person:maya"</b>,
+  <u>"kind"</u>:        <b>"person"</b>,
+  <u>"value"</u>:       <b>"Maya — sister, lives in Haifa, studying architecture"</b>,
+  <u>"confidence"</u>:  <b>0.91</b>,
+  <u>"first_seen"</u>:  <b>"2026-09-03T21:14:02"</b>,
+  <u>"last_confirmed"</u>: <b>"2026-11-27T08:41:55"</b>,
+  <u>"evidence"</u>:    [<i>"ep:8841"</i>, <i>"ep:9102"</i>, <i>"ep:11733"</i>],   <i>// traceable to episodes</i>
+  <u>"supersedes"</u>:  <i>"fact:person:maya@v1"</i>,               <i>// she moved; v1 said Tel Aviv</i>
+  <u>"decay"</u>:       <b>"slow"</b>                              <i>// people decay slower than moods</i>
+}</pre>
+
+  <h3><code>jv-dream</code> — where the strengthening actually happens</h3>
+  <div class="col">
+    <p>A nightly job that runs when the machine is idle and you're not at it. It is the single most important service in the whole memory design, and it's the one everybody skips.</p>
+    <ol>
+      <li><strong>Read</strong> today's episodes.</li>
+      <li><strong>Extract</strong> candidate facts, each with a proposed type and confidence.</li>
+      <li><strong>Reconcile</strong> against the existing profile — confirm (bump confidence, refresh <code>last_confirmed</code>), update, or mark superseded.</li>
+      <li><strong>Flag contradictions</strong> it can't resolve. These become questions for tomorrow, which is a far better reason to ask you something than a scripted prompt.</li>
+      <li><strong>Promote patterns</strong> seen enough times into procedural rules.</li>
+      <li><strong>Decay</strong> facts that haven't been reconfirmed. Forgetting is a feature — without it the profile fills with stale trivia and the signal drops.</li>
+      <li><strong>Write</strong> the day's narrative summary, and on Sundays fold the week into a weekly one.</li>
+    </ol>
+    <p>This is the loop that makes it feel like it's growing. Talking to it adds episodes; <code>jv-dream</code> is what turns episodes into understanding.</p>
+  </div>
+
+  <h3>First boot: the interview</h3>
+  <div class="col">
+    <p>The first conversation seeds the profile, so it's worth designing like a scene, not a settings wizard. Two constraints shape it: a wall of questions on day one is an interrogation, and generic questions get generic answers — "what are your hobbies?" produces a list <code>jv-dream</code> can do almost nothing with.</p>
+    <p>So: <strong>three questions on first boot, then two per day for the first week</strong>, each asked at a natural moment, each answerable only by you specifically. The questions that work share a trick — they ask for a <em>relationship between things</em>, not a list. Relationships are what the semantic store is made of.</p>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h4 style="color:var(--risk)">Asks for a list</h4>
+      <p>"What are your hobbies?"<br><br>"What music do you like?"<br><br>"Tell me about yourself."</p>
+      <p style="margin-top:14px;font-size:13.5px;color:var(--text-3)">Answerable on autopilot. Produces facts with no edges.</p>
+    </div>
+    <div class="card">
+      <h4 style="color:var(--ok)">Asks for a relationship</h4>
+      <p>"What's something you keep starting and abandoning — and what usually kills it?"<br><br>"Who in your life do you talk to less than you'd like?"<br><br>"What does a genuinely good day look like, hour by hour? Not a special day — a good ordinary one."<br><br>"When you're stressed, do you want to be handled with silence, distraction, or a plan?"<br><br>"What's a thing you're supposed to care about but don't?"</p>
+      <p style="margin-top:14px;font-size:13.5px;color:var(--text-3)">Each answer writes preferences, people, patterns and constraints in one pass — and question four calibrates its own behaviour toward you forever.</p>
+    </div>
+  </div>
+
+  <div class="col">
+    <p>Three rules for the interview itself: every answer gets a follow-up drawn from the answer (that's what makes it a conversation and proves it listened); "skip" is always accepted without comment; and at the end of the week it plays back what it thinks it learned — "here's my picture of you so far, what did I get wrong?" — which both corrects the profile and teaches you that the profile is <em>yours to edit</em>. After that, scripted questions end forever; from then on, the only questions it asks are the ones <code>jv-dream</code> generates from real contradictions and gaps.</p>
+  </div>
+
+  <h3>The greeting</h3>
+  <div class="col">
+    <p>Boot → <code>jv-presence</code> confirms it's you by IR face → <code>jv-brain</code> assembles time of day, time since last shutdown, calendar, and any open loops from yesterday's narrative. One or two sentences. Never a dashboard read aloud.</p>
+    <p><strong>The rule that makes it feel real:</strong> the second sentence must be something only <em>your</em> assistant could say. If it would make sense on anyone's machine, cut it.</p>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h4 style="color:var(--risk)">Generic</h4>
+      <p>"Good morning! How can I help you today?"<br><br>"Good evening. You have 3 notifications."</p>
+      <p style="margin-top:14px;font-size:13.5px;color:var(--text-3)">Wallpaper by day three. You stop hearing it.</p>
+    </div>
+    <div class="card">
+      <h4 style="color:var(--ok)">Earned</h4>
+      <p>"Morning. You left the compositor branch half-merged — want me to open it?"<br><br>"It's 2am and that's the third night this week. The build will still be there tomorrow."</p>
+      <p style="margin-top:14px;font-size:13.5px;color:var(--text-3)">Requires memory. That's the whole point.</p>
+    </div>
+  </div>
+
+  <div class="col">
+    <p>Use real signals rather than the clock alone: is this the first boot of the day or a reboot at 3pm? How long was the machine off — did you actually sleep? Is it a workday? Did yesterday end badly? A greeting derived from six signals feels alive; one derived from <code>strftime</code> feels like a screensaver.</p>
+  </div>
+
+  <h3>Asking how you are — without it becoming a survey</h3>
+  <div class="col">
+    <p>You asked for this specifically, and it's the easiest thing in the whole project to get wrong. A scripted "how are you feeling?" becomes noise in about four days. Six rules keep it meaningful:</p>
+  </div>
+
+  <ul class="rules">
+    <li><span class="k">01</span><span><strong>Never on entry.</strong> Nobody wants to be interviewed the second they sit down. Ask after a natural pause — a finished task, a closed window, a stretch of quiet.</span></li>
+    <li><span class="k">02</span><span><strong>Never while you're focused.</strong> <code>jv-context</code> and <code>jv-face</code> already know: gaze locked on the editor, fast typing, headphones on. Focus is sacred; the question waits.</span></li>
+    <li><span class="k">03</span><span><strong>Once a day, maximum.</strong> And skip days. Predictable check-ins get answered on autopilot, which makes the answers worthless.</span></li>
+    <li><span class="k">04</span><span><strong>Ask about something specific.</strong> "How did the thing with your landlord go?" beats "how are you feeling?" every time — it proves it was listening, and it's much harder to deflect with "fine".</span></li>
+    <li><span class="k">05</span><span><strong>Accept a non-answer.</strong> "Nothing" or silence ends it. No follow-up, no second attempt, no logging it as evasion. Pushing is how you teach yourself to resent it.</span></li>
+    <li><span class="k">06</span><span><strong>The answer must change its behaviour, not just fill a field.</strong> If you say you're wiped, it should go quiet, hold non-urgent notifications, and offer to move tomorrow's early meeting — visibly. An assistant that asks how you are and then behaves identically has learned nothing, and you'll know.</span></li>
+  </ul>
+
+  <h3>The proactivity budget</h3>
+  <div class="col">
+    <p>Silence is the default state. Give <code>jv-brain</code> a hard daily allowance of unprompted utterances — start at five — and make every category spend from it. When you dismiss or ignore something, that category's allowance shrinks; when you act on it, it grows. Within a couple of weeks the budget has been reallocated to whatever is actually useful to you, and it did that on its own.</p>
+    <p>This one constraint is the difference between an assistant and a nag, and it's five lines of code.</p>
+  </div>
+
+  <h3>Personality is a file in the repo</h3>
+  <div class="col">
+    <p>Keep the system prompt, the voice, the wake word and the behavioural rules in <code>personality/</code> under version control. Then "it's being too chatty this week" is a diff you can read and revert, not a mystery. Let <code>jv-dream</code> <em>propose</em> edits to it based on what it's learned; never let it apply them unreviewed. You should always be able to answer the question "why is it acting like this?" by reading a file.</p>
+  </div>
+
+  <div class="callout hot">
+    <h4>Four things to build in now, not later</h4>
+    <p><strong>Encrypt the episodic log.</strong> It will become the most sensitive file you have ever owned — years of what you said, when, and how you seemed. LUKS on the partition isn't enough once you're logged in; encrypt the store itself with a key that isn't sitting next to it.</p>
+    <p><strong>Make "forget that" real.</strong> A command that genuinely deletes from episodic <em>and</em> semantic <em>and</em> narrative, and shows you what it removed. If forgetting is fake, you'll start self-censoring around your own computer, and then the whole thing is worthless.</p>
+    <p><strong>Don't let it flatter you.</strong> An assistant that learns from you and agrees with everything builds a feedback loop that gets more confident and less useful over time. Put "disagree with me when you have reason to, and say why" in the personality file, and check periodically that it still does.</p>
+    <p><strong>Point it outward, not inward.</strong> It has genuine information nobody else has — that you haven't seen anyone in nine days, that you've been up past 2am all week. The right use of that is a nudge toward the people in your life, not becoming the one you talk to instead. And there's a hard line worth writing into the personality file from day one: if it ever picks up on something serious — sustained low mood, a bad stretch that isn't lifting — its job is to say so plainly and encourage you to talk to a real person, not to try to be your therapist. Build the thing that makes your life bigger.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">06</span><h2>The face: a sci-fi UI that stays out of your way</h2></div>
+  <div class="col">
+    <p>Sci-fi UI is a trap with a narrow exit. The trap is the movie version — spinning rings, scrolling hex, radar sweeps over nothing. It demos well for a week and then it's noise you pay 15% of a GPU for. The exit is one rule, enforced without exceptions:</p>
+  </div>
+
+  <div class="callout hot">
+    <h4>Every moving pixel encodes a real signal</h4>
+    <p>Films fill screens with decoration because their interfaces don't have to be used for eight hours. Yours does. The ambient ring pulses <em>because the mic is hot</em>. The glow on a window edge means <em>gaze-selected, awaiting confirm</em>. A particle drifts toward the tray <em>because a download is actually moving</em>. If an element would animate the same way with all sensors unplugged, it's set dressing — cut it. What makes an interface feel like the future isn't ornament; it's the eerie sense that the machine knows what's happening. You have the perception stack to actually deliver that.</p>
+  </div>
+
+  <h3>Parallax you can't get anywhere else</h3>
+  <div class="col">
+    <p>Everyone's parallax follows the mouse. Yours can follow <em>your head</em> — <code>jv-face</code> already publishes head pose at 30 Hz. Offset each depth layer by a small multiple of head position and the desktop stops being wallpaper and becomes a window into a volume: shift in your chair and the near layers slide past the far ones. This is the same head-coupled rendering trick behind the famous Wii-remote "VR without glasses" demo, it costs almost nothing on a modern GPU, and it is the single most sci-fi thing you will ever show anyone — precisely because it uses a sensor no normal desktop has.</p>
+  </div>
+
+<pre><i># depth model — five layers, one uniform each</i>
+L-4  scene      <i>far   ×0.010</i>   <i>slow drift, time-of-day palette, your "world"</i>
+L-3  grid       <i>      ×0.025</i>   <i>faint structural field, brightens near activity</i>
+L-2  workspace  <i>      ×0.000</i>   <i>windows — LOCKED. Content never parallaxes.</i>
+L-1  glass      <i>near  ×0.045</i>   <i>HUD panels, blur + tint, slight counter-shift</i>
+L-0  reticle    <i>      gaze</i>    <i>selection glow, gesture arm state, voice ring</i>
+
+<u>rules:</u> ease toward target over ~200ms (never raw pose) · full stop when
+a window is fullscreen · off on battery · off with prefers-reduced-motion</pre>
+
+  <div class="col">
+    <p>The one inviolable line in that table: <strong>the layer you read and type in never moves.</strong> Parallax lives in the frame around your work, not in it — that's the difference between depth and seasickness.</p>
+  </div>
+
+  <h3>Clean means earned emptiness</h3>
+  <div class="col">
+    <p>The default state of the screen is your work and nothing else. No taskbar, no persistent widgets, no icon grid. Chrome exists only while it's being used:</p>
+    <ul>
+      <li><strong>Summoned, not resident.</strong> The status layer appears on a palm-up gesture, a wake word, or a glance at a hot corner — and evaporates when your gaze returns to work. <code>jv-face</code> knows where you're looking; use it to make UI yield.</li>
+      <li><strong>Notifications respect attention.</strong> Focused (fast typing, gaze locked)? They queue silently and the ring shifts hue one step — glanceable, ignorable. Idle? They surface. This is <code>jv-presence</code> doing UI's job.</li>
+      <li><strong>One accent color, and it means "Jarvis".</strong> The cyan (or whatever you choose) appears only where the system is speaking to you: selection, listening state, confirmations. Scarcity is what makes it read as a voice rather than a theme.</li>
+      <li><strong>Sound as UI.</strong> Three or four short, quiet, distinct cues — armed, confirmed, dismissed. Films get their atmosphere from sound design as much as graphics; desktops ignore this entirely.</li>
+    </ul>
+  </div>
+
+  <h3>Build it in two stages, like the compositor</h3>
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Stage</th><th>Stack</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Phases 1–4</strong><br><span class="tag pick">Start here</span></td>
+        <td><a href="https://quickshell.org">Quickshell</a> (QML) as layer-shell panels over Hyprland/Niri, plus a wgpu overlay for the parallax scene and reticle</td>
+        <td>QML is built for exactly this — declarative, animated, GPU-composited glass panels — and iterating on a panel takes minutes, not compositor rebuilds. The wgpu layer subscribes to the bus like any other client.</td>
+      </tr>
+      <tr>
+        <td><strong>Phase 5+</strong></td>
+        <td>Fold the scene into your Smithay compositor as native render layers</td>
+        <td>Now blur, depth and the reticle are part of composition itself — zero-copy, one frame lower latency, and effects (dim unfocused windows, glow gaze targets) that an overlay client physically can't do.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+
+  <h3>The voice: engineered, not synthesized-sounding</h3>
+  <div class="col">
+    <p>Counter-intuitive but critical: you don't get a "voice from the future" by picking a robotic TTS — cheap robot voices read as <em>old</em>, not futuristic, and you'll be listening to this thing hundreds of times a day. The film trick is the opposite: start from an excellent, calm, natural voice and pass it through a signature effects chain. JARVIS in the films is just a great voice actor with subtle processing.</p>
+    <ul>
+      <li><strong>Base:</strong> Piper for instant responses, Kokoro when quality matters — pick one voice and never change it. Consistency is identity.</li>
+      <li><strong>The chain</strong> (a PipeWire filter-chain node, so it applies system-wide to anything <code>jv-voice</code> says): a gentle high-pass at ~120 Hz → a barely-audible harmonic layer pitched an octave up, mixed at −20 dB (the "synthetic shimmer") → a short plate reverb, 0.2 s, so it sounds like it's speaking from the room's speakers, not a phone → a soft limiter. Subtle is the entire game: at the right levels people ask "what voice is that?", at the wrong levels it's a Dalek.</li>
+      <li><strong>Sidechain everything else:</strong> when it speaks, music and app audio duck by a few dB and recover. That single touch — the room making space for it — does more "future" than any filter.</li>
+      <li><strong>Keep the chain in <code>personality/voice.toml</code></strong> with the rest of the identity, and A/B it with your own ears before you commit.</li>
+    </ul>
+  </div>
+
+  <div class="callout cool">
+    <h4>Performance is part of the aesthetic</h4>
+    <p>Nothing reads "cheap sci-fi" faster than a stuttering hologram. Budget the whole ambient scene — parallax, grid, particles — at <strong>under 2 ms of GPU per frame and near-zero when nothing changed</strong>, so it never contends with <code>jv-hands</code> inference or a game. Damage-track everything; an idle desktop should render at 0 fps, not 60. And theme tokens live in <code>personality/theme.toml</code> next to the voice and wake word — the look is versioned like everything else about it.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">07</span><h2>Hardware</h2></div>
+  <div class="col">
+    <p>Your <strong>Lenovo 510 FHD</strong> is a better starting point than you probably realise: it's an IR model with Windows Hello facial recognition, which means a second infrared stream. On Linux that typically appears as an extra <code>/dev/video*</code> node — the same one the <a href="https://github.com/boltgolt/howdy">Howdy</a> face-unlock project uses. Infrared gives you presence detection and face identity <em>in a dark room</em>, for free. Keep it, mount it on the monitor, and use it for face, gaze and presence.</p>
+    <p>What it can't do is hands. 1080p30, rolling shutter, no depth, and a downward-from-the-monitor angle that forces you to raise your arm. That's the one purchase worth making first.</p>
+  </div>
+
+    <h3>Your machine, pinned</h3>
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Component</th><th>What you have</th><th>What it means for the build</th></tr></thead>
+    <tbody>
+      <tr><td><strong>GPU</strong></td><td class="num">GTX 1660 SUPER · 6 GB</td><td>Speccy's "2047MB" is a misread — the 1660 SUPER is a 6 GB card. Turing, CUDA-capable, fine for vision + speech. 6 GB is the one real ceiling in this build: it caps the brain at ~8B. See the tier table below.</td></tr>
+      <tr><td><strong>CPU</strong></td><td>Core i5 (Comet Lake, 6c/12t)</td><td>Enough to run Whisper streaming and MediaPipe on CPU when the GPU is busy — that flexibility matters a lot at 6 GB of VRAM.</td></tr>
+      <tr><td><strong>RAM</strong></td><td class="num">32 GB DDR4</td><td>The quiet hero. Lets <code>jv-dream</code> run a far bigger model on CPU overnight than the GPU could ever hold — the nightly job doesn't care about tokens/sec.</td></tr>
+      <tr><td><strong>Storage</strong></td><td class="num">500 GB NVMe · 1 TB SATA SSD · 2 TB HDD</td><td><span class="tag ok">Buy nothing</span> Three drives means one can be Linux's, whole. Find which one holds Windows (almost certainly the NVMe), then give JarvisOS the 1 TB WD Green outright — never a shared drive. The 2 TB disk becomes model + episodic-log storage.</td></tr>
+      <tr><td><strong>Monitors</strong></td><td>1440p·144 Hz + 2× 1080p·60 Hz</td><td>Mixed refresh rates across three heads is exactly the case Wayland handles and X11 never did — one more reason the whole plan is Wayland-native. The 1440p is the primary; gaze zones map beautifully onto a three-monitor spread.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>The 6 GB playbook</h3>
+  <div class="col">
+    <p>Everything fits, but nothing fits <em>simultaneously at full size</em> — so the design is about scheduling, not sacrifice:</p>
+    <ul>
+      <li><strong>Daytime brain:</strong> an 8B-class model, Q4, ~4.7 GB resident via llama.cpp — smart enough for tool-calling and conversation, small enough to leave headroom.</li>
+      <li><strong>Ears on CPU:</strong> distil-Whisper small streams comfortably on the i5, keeping the GPU for the brain and hands. Wake word and VAD are trivially CPU.</li>
+      <li><strong>Vision is cheap:</strong> MediaPipe hands + face together need well under 1 GB. They coexist with the brain.</li>
+      <li><strong>Night brain:</strong> when you sleep, <code>jv-dream</code> swaps the 8B out and runs a much larger model (a ~30B MoE runs at usable speed on 32 GB of RAM, CPU-only) for consolidation. Your assistant literally thinks deeper about your day while the machine idles — this is where the 32 GB pays for itself.</li>
+      <li><strong>Gaming:</strong> when a game launches, <code>jv-brain</code> unloads from VRAM automatically and voice falls back to CPU-only mode. One systemd target handles it.</li>
+    </ul>
+  </div>
+
+  <div class="callout cool">
+    <h4>The one upgrade that changes the project</h4>
+    <p>Nothing on your machine needs replacing — but if you ever spend money on this build beyond the sensors, spend it on a <strong>16 GB GPU</strong> (used RTX 3090s and 16 GB 4060 Ti / 5060 Ti-class cards are the value picks in 2026). It moves the daytime brain from 8B to 24–32B, which is the difference between an assistant that follows instructions and one that feels sharp. Everything in this blueprint is designed so that upgrade is a one-line change in the flake.</p>
+  </div>
+
+<div class="tscroll">
+  <table>
+    <thead><tr><th>Need</th><th>Recommendation</th><th>Why</th><th>Rough cost</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Hand tracking</strong><br><span class="tag pick">Buy first</span></td>
+        <td><a href="https://leap2.ultraleap.com/downloads/leap-motion-controller-2/">Ultraleap Leap Motion Controller 2</a> + Hyperion</td>
+        <td>Purpose-built stereo IR hand sensor. Sits on the desk facing up, so your hand tracks at rest. Works in total darkness, ~120 fps, no depth reconstruction to fight. Linux x64 is <a href="https://docs.ultraleap.com/linux/">officially supported</a> by Ultraleap's Gemini/Hyperion SDK — verified.</td>
+        <td class="num">~$140</td>
+      </tr>
+      <tr>
+        <td><strong>Microphone</strong><br><span class="tag pick">Buy first</span></td>
+        <td>A far-field array — ReSpeaker 4-Mic / Mic Array v2.0, or any decent cardioid desk mic</td>
+        <td>Underrated by everyone. Wake-word accuracy across a room lives or dies here; no model fixes a bad signal. Arrays also give you beamforming and rough speaker direction.</td>
+        <td class="num">$70–160</td>
+      </tr>
+      <tr>
+        <td><strong>Face / gaze / presence</strong></td>
+        <td>Keep the Lenovo 510 FHD</td>
+        <td>Already IR-capable. Good for zone-level gaze, identity, attention state. Add a cheap second RGB cam later if you want a wider field of view.</td>
+        <td class="num">$0</td>
+      </tr>
+      <tr>
+        <td><strong>Cursor-grade eye tracking</strong></td>
+        <td>Defer. Pupil Labs Beam / Neon if you must.</td>
+        <td>Tobii's consumer Eye Tracker 5 is a Windows-only software stack and effectively unusable here — don't buy one. Research-grade kit is accurate but costs more than the rest of this build combined. Revisit at Phase 4 once you know whether you actually want it.</td>
+        <td class="num">$0 now</td>
+      </tr>
+      <tr>
+        <td><strong>Depth (optional)</strong></td>
+        <td>Orbbec Gemini / Femto</td>
+        <td>Intel spun RealSense out as a separate company; Orbbec is the safer long-term bet for Linux drivers. Only needed for full-body or room-scale presence, which is a Phase 6 luxury.</td>
+        <td class="num">$200–400</td>
+      </tr>
+      <tr>
+        <td><strong>Storage</strong></td>
+        <td>Your 1 TB WD Green SSD, dedicated whole</td>
+        <td>You already own three drives — no purchase needed. Windows keeps its drive untouched; Linux gets its own; the 2 TB disk holds models and the episodic log.</td>
+        <td class="num">$0</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>GPU: what your VRAM buys you</h3>
+  <div class="col"><p>For reference as you consider the upgrade path:</p></div>
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>VRAM</th><th>Brain model</th><th>Room left for vision + speech</th><th>Feel</th></tr></thead>
+    <tbody>
+      <tr><td class="num">6 GB</td><td>7–8B, Q4</td><td>Whisper moves to CPU; vision coexists fine.</td><td><span class="tag pick">You are here</span> Works well with the scheduling playbook above.</td></tr>
+      <tr><td class="num">8 GB</td><td>7–9B, Q4</td><td>Tight. Run vision on CPU or timeshare the GPU.</td><td>Works. Occasionally dumb.</td></tr>
+      <tr><td class="num">12 GB</td><td>12–14B, Q4</td><td>Comfortable for landmarks + Whisper.</td><td>The practical minimum for a Jarvis that feels smart.</td></tr>
+      <tr><td class="num">16 GB</td><td>24–32B, Q4</td><td>Everything resident simultaneously.</td><td><span class="tag pick">Sweet spot</span> Buy here if you're upgrading.</td></tr>
+      <tr><td class="num">24 GB+</td><td>32–70B, Q4</td><td>Plus a vision-language model for screen understanding.</td><td>Genuinely capable, fully offline.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">08</span><h2>Running Windows software</h2></div>
+  <div class="col">
+    <p>This is not a compromise or a bolt-on — done properly it's a <em>system-level</em> capability, and there's a specific technique that makes the difference between "I have Wine installed" and "my OS runs <code>.exe</code> files."</p>
+    <p>Three layers, in increasing cost. Roughly 90% of Windows software needs only the first.</p>
+  </div>
+
+  <h3>Layer A — PE binaries as first-class executables</h3>
+  <div class="col">
+    <p>The trick most Wine setups skip: register the PE format with the kernel through <code>binfmt_misc</code>. Once you do, <code>./setup.exe</code> works from any shell, scripts can call Windows binaries directly, and double-clicking an installer in a file manager does the obvious thing. The kernel hands the file to Wine the same way it hands a <code>#!</code> script to bash. NixOS exposes this declaratively:</p>
+  </div>
+
+<pre><i># modules/windows-compat.nix</i>
+{ pkgs, ... }: {
+  <u>boot.binfmt.registrations</u>.<b>windows</b> = {
+    magicOrExtension = <b>"MZ"</b>;          <i>// every PE file starts with these two bytes</i>
+    interpreter      = <i>"${pkgs.wineWowPackages.stagingFull}/bin/wine"</i>;
+    fixBinary        = <b>true</b>;           <i>// resolve interpreter at registration, not exec</i>
+    preserveArgvZero = <b>false</b>;
+  };
+
+  <i>// so the file manager and xdg-open agree</i>
+  <u>environment.systemPackages</u> = with pkgs; [
+    wineWowPackages.stagingFull  winetricks
+    <b>bottles</b>       <i>// per-app prefix management, GUI</i>
+    <b>umu-launcher</b>  <i>// Proton outside of Steam</i>
+    <b>lutris</b>
+  ];
+}</pre>
+
+  <div class="col">
+    <p>Pair it with MIME associations for <code>application/x-ms-dos-executable</code>, <code>application/x-msi</code> and <code>application/x-ms-shortcut</code> so <code>xdg-open</code> routes them correctly. Wine's native Wayland driver has been on by default since 9.22 and matured through the 10.x and 11.x series, so most apps now render straight to your compositor with no XWayland detour.</p>
+  </div>
+
+  <div class="callout hot">
+    <h4>Prefix hygiene is the whole game</h4>
+    <p>The single biggest cause of "Wine is unreliable" is one shared <code>~/.wine</code>. A bad DLL override, a half-installed .NET runtime or a corrupt registry key then poisons every application at once. <strong>One prefix per app, always.</strong> Treat prefixes as cattle, not pets: if one misbehaves, delete it and rebuild from its recipe.</p>
+  </div>
+
+  <h3>Picking a runner</h3>
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Runner</th><th>Use it for</th><th>What it brings</th></tr></thead>
+    <tbody>
+      <tr><td class="p">wine-staging</td><td>Ordinary desktop apps, installers, utilities, older software</td><td>Closest to upstream, most patches, best general compatibility</td></tr>
+      <tr><td class="p">Proton-GE <span class="tag pick">via umu</span></td><td>Anything graphical, anything with video, anything that was ever a game</td><td>DXVK + VKD3D-Proton for D3D9–12 over Vulkan, Media Foundation codecs, fsync/ntsync, a decade of shipped-game fixes. <a href="https://github.com/Open-Wine-Components/umu-launcher">umu-launcher</a> runs it outside Steam.</td></tr>
+      <tr><td class="p">Bottles</td><td>One-off installers and exploratory installs</td><td>Prefix creation, dependency installs and snapshots behind a GUI. Good for figuring out what an app needs before you write its recipe.</td></tr>
+      <tr><td class="p">Lutris</td><td>Apps with an existing community install script</td><td>Someone already solved it; don't re-solve it.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Layer B — Seamless Windows VM</h3>
+  <div class="col">
+    <p>For the software Wine will never handle: Office with full fidelity, the Adobe suite, anything with hardware DRM or a vendor driver stack. <a href="https://github.com/winapps-org/winapps">WinApps</a> (and the newer WinBoat) run a Windows VM under libvirt or Podman and expose individual applications over FreeRDP RemoteApp — so Excel appears as a normal window on your desktop, with its own taskbar entry and file associations, not as a Windows desktop in a box.</p>
+    <p>Cost: a Windows licence, ~40 GB of disk, and 4–8 GB of RAM while it's running. Worth it if two or three apps are blocking you; not worth it as a default.</p>
+  </div>
+
+  <h3>Layer C — VFIO GPU passthrough</h3>
+  <div class="col">
+    <p>Full GPU handed to a Windows VM. Real value only if you need native graphics performance inside Windows without rebooting. It wants a second GPU (single-GPU passthrough scripts exist but are fragile), cooperative IOMMU groups, and a weekend of your life. And since anti-cheat generally detects VMs anyway, gaming isn't the use case — that's what your dual boot is for. <span class="tag no">Skip unless proven necessary</span></p>
+  </div>
+
+  <h3>What genuinely won't work</h3>
+  <div class="col"><p>You asked for <em>all</em> games and software, so here is the honest boundary: the three layers above cover the overwhelming majority, and the dual boot covers the rest — but nothing makes kernel-anti-cheat titles run on Linux, and anyone who claims otherwise is selling something. The design goal is that rebooting into Windows becomes rare enough to feel like visiting, not living there.</p></div>
+  <div class="col">
+    <ul>
+      <li><strong>Kernel-level anti-cheat.</strong> Vanguard, Faceit AC and similar require a real Windows kernel driver. Not Wine, not a VM. Dual boot.</li>
+      <li><strong>EasyAntiCheat and BattlEye</strong> both <em>can</em> run under Proton — but only if the game's developer flipped the Linux switch. Many have; check <a href="https://www.protondb.com">ProtonDB</a> per title before you assume.</li>
+      <li><strong>Vendor driver stacks</strong> — printer/scanner suites, USB dongles, capture cards, anything installing a <code>.sys</code>.</li>
+      <li><strong>Some DRM-wrapped installers</strong> that check for kernel signatures at install time.</li>
+    </ul>
+  </div>
+
+  <div class="callout cool">
+    <h4>The part that makes it JarvisOS: <code>jv-compat</code></h4>
+    <p>Everything above is a stock Linux setup. The interesting version is handing the whole lifecycle to Jarvis. You drop an installer in a folder, or just say <em>"install this"</em>, and <code>jv-compat</code>:</p>
+    <ul>
+      <li>fingerprints the binary — architecture, .NET or VC++ dependency, installer framework (NSIS, Inno Setup, MSI, WiX, Squirrel);</li>
+      <li>looks up a recipe in a local database, or synthesises one from the fingerprint;</li>
+      <li>creates a dedicated prefix and runs the installer <em>silently</em> where the framework supports it — <code>/S</code> for NSIS, <code>/VERYSILENT</code> for Inno, <code>msiexec /qn</code> for MSI;</li>
+      <li>harvests the resulting shortcut, extracts the icon, writes a proper <code>.desktop</code> entry and registers the file types it claims;</li>
+      <li>commits the recipe to your flake, so that app is reproducible on a fresh install.</li>
+    </ul>
+    <p>The end state: Windows software installs on your machine the way an app installs on a phone. You never see a prefix, never open winecfg, never Google a DLL override.</p>
+  </div>
+
+  <div class="callout hot">
+    <h4>Wine is not a sandbox</h4>
+    <p>Worth being blunt: an <code>.exe</code> running under Wine executes as your user, with full read/write access to your home directory. Every advantage of "the OS runs Windows binaries transparently" is also an attack surface. Confine each prefix — bubblewrap or a Flatpak-style sandbox, with only the directories that app actually needs bind-mounted in, and no network unless it needs one. Build this into <code>jv-compat</code> from day one rather than retrofitting it, and make untrusted-binary confinement the default rather than the opt-in.</p>
+  </div>
+  <div class="callout cool">
+    <h4>Jarvis as guardian: <code>jv-guard</code></h4>
+    <p>Since the OS runs Windows binaries transparently, the OS must also distrust them by default — so protection becomes a service with the same standing as hands or voice:</p>
+    <ul>
+      <li><strong>Every incoming binary is screened before it can run.</strong> Downloads and installers get hashed, checked against local ClamAV signatures and a VirusTotal hash lookup (hash only — the file never leaves your machine), and fingerprinted for known packer/dropper patterns. <code>jv-compat</code> refuses to build a prefix for anything that fails.</li>
+      <li><strong>Detonation before trust.</strong> Unknown installers run first in a throwaway, network-blocked prefix while <code>jv-guard</code> watches what they touch. An installer that tries to write outside its prefix, register autostarts, or phone home gets reported to you in plain language — "this claims to be a PDF tool but it tried to reach three servers in the first ten seconds" — before anything permanent happens.</li>
+      <li><strong>The sandbox rules above are enforcement, not advice:</strong> no Windows app sees your home directory, camera, mic, or network unless its recipe grants it. Jarvis can tell you exactly what any app has ever been allowed to touch, because it wrote the grants.</li>
+      <li><strong>The Linux side is watched too:</strong> new systemd units, changed boot entries, unexpected listeners on the network — anything that diverges from what the flake declares is by definition suspect, which is a detection power normal antivirus can only dream of. The flake <em>is</em> the whitelist.</li>
+    </ul>
+    <p>Worth saying plainly: this makes the machine far safer than a stock Windows box for running strange software — but no guard is absolute, and <code>jv-guard</code> will say "I'm not sure about this one" rather than pretend certainty. That honesty is part of the personality file.</p>
+  </div>
+
+</section>
+
+<section>
+  <div class="shead"><span class="snum">09</span><h2>Roadmap</h2></div>
+  <p class="lead">Ordered so that every phase ends with something you actually use. Numbers here are a real sequence — later phases depend on earlier ones.</p>
+
+  <div class="phases">
+    <div class="phase">
+      <div class="pmeta"><div class="pnum">0</div><div class="ptime">Week 1</div></div>
+      <div class="pbody">
+        <h3>Ground</h3>
+        <p>Second SSD in. NixOS installed as a flake in a Git repo from hour one. Dual boot verified via the firmware menu. NVIDIA open modules + CUDA working. Both camera nodes enumerated — confirm you can pull the IR stream, not just RGB. Rent a desktop for now: Hyprland or Niri, both of which expose the IPC that Jarvis will drive.</p>
+        <div class="done">✓ You reboot into a Linux you declared, and <code>nvidia-smi</code> and <code>v4l2-ctl --list-devices</code> both look right.</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="pmeta"><div class="pnum">1</div><div class="ptime">Weeks 2–3</div></div>
+      <div class="pbody">
+        <h3>It speaks</h3>
+        <p>Schemas first, then <code>jarvisd</code> and the bus. Then the full voice loop: <code>jv-ears</code> → <code>jv-brain</code> → <code>jv-voice</code>. Wake word, transcript, local model, spoken reply, all offline. No tools yet — it can only talk.</p>
+        <div class="done">✓ You say its name across the room and it answers in your speakers. This is the phase that keeps you going.</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="pmeta"><div class="pnum">2</div><div class="ptime">Weeks 4–6</div></div>
+      <div class="pbody">
+        <h3>It acts</h3>
+        <p><code>jv-act</code> and the tool registry. Launch apps, control volume and media, search files, move windows via compositor IPC, answer questions about system state. <code>jv-context</code> starts feeding it the active window so "close this" resolves. Capability gating from the start: every tool declares its blast radius, and destructive ones require confirmation.</p>
+        <p>Stand up <code>jv-compat</code> here too — the <code>binfmt</code> registration and per-app prefixes are a day of work, and having <code>.exe</code> files just run removes the main reason you'd otherwise reboot into Windows.</p>
+        <div class="done">✓ Jarvis replaces your launcher and your media keys.</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="pmeta"><div class="pnum">3</div><div class="ptime">Weeks 6–9</div></div>
+      <div class="pbody">
+        <h3>Hands</h3>
+        <p><code>jv-hands</code> plus the engagement gate, hysteresis, and a deliberately tiny vocabulary — six gestures, no more. Synthetic input through <code>uinput</code>. Build the replay harness here (§10): record sensor sessions to disk so you can iterate on the classifier without sitting in front of the camera.</p>
+        <div class="done">✓ Palm up, pinch, scrub. Volume and window switching without touching the keyboard.</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="pmeta"><div class="pnum">4</div><div class="ptime">Weeks 9–12</div></div>
+      <div class="pbody">
+        <h3>Eyes and presence</h3>
+        <p><code>jv-face</code> and <code>jv-presence</code>. Auto-lock when you leave and IR face-unlock when you return. Attention-aware notifications. Auto-pause on look-away. Then the payoff: gaze-select fused with pinch-confirm in <code>jv-act</code>.</p>
+        <div class="done">✓ You look at a window and pinch, and it focuses. The machine knows when you're there. It greets you by name when you sit down — see §05.</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="pmeta"><div class="pnum">5</div><div class="ptime">Months 4–6</div></div>
+      <div class="pbody">
+        <h3>Your shell</h3>
+        <p>Now — and only now — write the compositor. Smithay if you want Rust and a modern codebase; wlroots if you'd rather stand on Sway's decade of hardening. Because you've been running against a rented compositor's IPC, you already know exactly which surface you need. Fold the HUD in as a native layer rather than an overlay client.</p>
+        <div class="done">✓ Boot splash to desktop, every pixel yours. This is when it becomes JarvisOS.</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="pmeta"><div class="pnum">6</div><div class="ptime">Ongoing</div></div>
+      <div class="pbody">
+        <h3>Ambient</h3>
+        <p><code>jv-memory</code> and <code>jv-dream</code> earn their keep: routines learned rather than configured, workspace state restored by time of day and task, proactive suggestions that stay quiet when you're focused. Smart-home tools in the registry. This phase never really ends, which is the point.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout hot">
+    <h4>Why the compositor is Phase 5 and not Phase 0</h4>
+    <p>It's the most seductive part and the most common place these projects die. A compositor is months of work before it can display a single usable window, and every one of those months is a month without Jarvis. Rent one, learn what you need from using it, then write the one you actually want.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">10</span><h2>Repo structure</h2></div>
+  <div class="col"><p>One repository. The OS and the assistant are the same artifact — that's the whole idea.</p></div>
+
+<pre><b>jarvisos/</b>
+├─ <u>flake.nix</u>                  <i>the entire OS, entry point</i>
+├─ <u>CLAUDE.md</u>                  <i>architecture invariants — read §11</i>
+├─ <b>hosts/</b>
+│   └─ <b>ares/</b>                  <i>your machine</i>
+│       ├─ hardware.nix          <i>generated, then hand-audited</i>
+│       ├─ kernel.nix            <i>your .config, PREEMPT, HZ=1000</i>
+│       └─ default.nix
+├─ <b>modules/</b>                   <i>reusable NixOS modules, one per concern</i>
+│   ├─ gpu-nvidia.nix
+│   ├─ boot-splash.nix
+│   ├─ jarvis-services.nix      <i>systemd units for every jv-* daemon</i>
+│   └─ security.nix             <i>uinput perms, camera/mic policy</i>
+├─ <b>schemas/</b>                   <span class="tag pick">write these first</span>
+│   ├─ vision.hands.json
+│   ├─ vision.gaze.json
+│   ├─ audio.transcript.json
+│   ├─ context.window.json
+│   └─ intent.action.json
+├─ <b>services/</b>                  <i>one directory = one process = one Claude Code task</i>
+│   ├─ jarvisd/                 <i>Rust — the bus broker</i>
+│   ├─ jv-hands/
+│   ├─ jv-face/
+│   ├─ jv-presence/
+│   ├─ jv-ears/
+│   ├─ jv-voice/
+│   ├─ jv-context/
+│   ├─ jv-memory/
+│   ├─ jv-brain/
+│   ├─ jv-compat/                <i>Windows app lifecycle + recipes</i>
+│   ├─ jv-guard/                 <i>screening, sandbox watch, drift audit</i>
+│   ├─ jv-dream/                 <i>nightly memory consolidation — §05</i>
+│   └─ jv-act/                  <i>the privileged one — review every line</i>
+├─ <b>shell/</b>
+│   ├─ compositor/              <i>Phase 5. Empty until then.</i>
+│   └─ jv-hud/
+├─ <b>personality/</b>               <i>system prompt · voice.toml · theme.toml · rules — versioned identity</i>
+├─ <b>models/</b>                    <i>weights, git-lfs or a Nix fetcher</i>
+└─ <b>harness/</b>
+    ├─ record.py                <i>dump sensor sessions to disk</i>
+    ├─ replay.py                <i>feed them back onto the bus</i>
+    └─ fixtures/                <i>your labelled gesture corpus</i></pre>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">11</span><h2>Rules for driving Claude Code on this</h2></div>
+  <div class="col"><p>You said you'd have Claude Code build it. That works well here, but only if you impose structure on it. These are the rules that make the difference.</p></div>
+
+  <ul class="rules">
+    <li><span class="k">01</span><span><strong>Contracts before code.</strong> Write every bus schema in <code>schemas/</code> and freeze them before a single service exists. Then each service is an independent, testable task with a defined input and output — which is exactly the shape an agent builds well. Skip this and you get ten services that each invented their own message format.</span></li>
+    <li><span class="k">02</span><span><strong>One service, one session.</strong> Don't ask for "the perception layer." Ask for <code>jv-hands</code>, with its schema, its systemd unit, and its tests. Small bounded tasks with a clear definition of done.</span></li>
+    <li><span class="k">03</span><span><strong>Build the replay harness in Phase 3, not Phase 5.</strong> Recorded sensor sessions are the single highest-leverage thing in this repo. They let an agent iterate on gesture classification without a human sitting in front of a camera, and they turn "does this feel right?" into a test that runs in CI.</span></li>
+    <li><span class="k">04</span><span><strong>A <code>CLAUDE.md</code> that states the invariants.</strong> Processes never share memory. Only <code>jv-act</code> touches system state. Every producer publishes a confidence value. Nothing blocks the bus. Latency budgets are limits, not goals. Write these down or they will erode.</span></li>
+    <li><span class="k">05</span><span><strong>Never let it apply an untested boot or kernel change.</strong> <code>nixos-rebuild build</code> and read the diff; <code>nixos-rebuild test</code> to try it without touching the bootloader; <code>switch</code> only when it works. Your generation history is the safety net — don't let anything garbage-collect it while you're experimenting.</span></li>
+    <li><span class="k">06</span><span><strong>Review <code>jv-act</code> by hand, always.</strong> Everything else can crash harmlessly. This one has your keyboard, your filesystem and your shell. Read every tool it gains.</span></li>
+  </ul>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">12</span><h2>Risks worth pricing in now</h2></div>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>The last 10% of Windows software</h4>
+      <p>Layers A and B in §08 cover most of it, but kernel-level anti-cheat and vendor driver stacks never will. Before you commit, list the Windows software you actually can't live without and check each one on <a href="https://appdb.winehq.org">WineHQ AppDB</a> and <a href="https://www.protondb.com">ProtonDB</a>. That list decides how often you're really rebooting.</p>
+    </div>
+    <div class="card">
+      <h4>NVIDIA on Wayland</h4>
+      <p>Vastly better than it was — open modules and explicit sync landed — but it's still the sharpest edge in this build, and it's the layer you can least afford to debug. Pin your driver version in the flake and change it deliberately.</p>
+    </div>
+    <div class="card">
+      <h4>Always-on camera and microphone</h4>
+      <p>You're building a machine that watches and listens to you continuously. Keep every model local, log what's captured, and wire a real hardware kill switch — a USB power toggle you can hit without thinking. Also: the HUD must always show whether sensors are live.</p>
+    </div>
+    <div class="card">
+      <h4>Scope, honestly</h4>
+      <p>Phases 0–4 are a solid full-time quarter and give you a Jarvis you use daily. Phase 5 is a second quarter on its own. Treat anything beyond that as bonus, and resist the urge to start the compositor early.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">13</span><h2>Decisions locked · ready for build</h2></div>
+  <div class="col">
+    <p>Everything this blueprint needed from you is now pinned:</p>
+    <ul>
+      <li><strong>Name:</strong> Jarvis — and <a href="https://github.com/dscripka/openWakeWord/blob/main/docs/models/hey_jarvis.md">openWakeWord ships a pretrained "hey jarvis" model</a>, so the wake word works on day one with zero training.</li>
+      <li><strong>Language:</strong> English voice in and out. Whisper will still understand you if you slip into Hebrew; replies stay in the English voice.</li>
+      <li><strong>Hardware:</strong> pinned in §07 — 1660 SUPER 6 GB playbook, 32 GB night brain, the WD Green 1 TB as the JarvisOS drive, sensors verified Linux-supported.</li>
+      <li><strong>Compatibility:</strong> three-layer Windows support with <code>jv-guard</code> screening everything that crosses the boundary; kernel anti-cheat stays on the Windows dual boot.</li>
+    </ul>
+    <p>The handoff package accompanying this blueprint contains the <code>CLAUDE.md</code> (architecture invariants Claude Code must never violate) and the Phase 0 task brief. Drop them into an empty <code>jarvisos/</code> repo, open Claude Code in it, and say: <em>"Read CLAUDE.md and BRIEF-phase0.md, then begin."</em></p>
+  </div>
+</section>
+
+
+<footer>
+  <p><strong>Sources</strong><br>
+  <a href="https://www.lenovo.com/us/en/p/accessories-and-software/webcams-and-video/webcams-and-video_webcams/gxc1d66063">Lenovo 510 FHD Webcam — Lenovo</a> · <a href="https://www.pbtech.com/pacific/product/CAMLEN66063/Lenovo-510-FHD-IR-Webcam-supports-Facial-Recogniti">510 FHD IR variant, facial recognition — PB Tech</a><br>
+  <a href="https://docs.ultraleap.com/hand-tracking/Hyperion/index.html">Ultraleap Hyperion documentation</a> · <a href="https://leap2.ultraleap.com/downloads/leap-motion-controller-2/">Leap Motion Controller 2 downloads</a><br>
+  <a href="https://smithay.github.io/index.html">Smithay — Wayland compositor toolkit</a> · <a href="https://github.com/Smithay/smithay">Smithay on GitHub</a><br>
+  <a href="https://www.therobotreport.com/after-intel-exit-realsense-maps-its-own-future-in-3d-vision/">After Intel's exit, RealSense maps its own future — The Robot Report</a> · <a href="https://www.roboticscenter.ai/blog/best-depth-cameras-robotics">Depth camera comparison 2026 — SVRC</a><br>
+  <a href="https://www.tobii.com/products/software/applications-and-developer-kits">Tobii eye tracking SDKs and developer kits</a><br>
+  <a href="https://github.com/Open-Wine-Components/umu-launcher">umu-launcher — Proton outside Steam</a> · <a href="https://github.com/winapps-org/winapps">WinApps — seamless Windows apps on Linux</a> · <a href="https://github.com/NixOS/nixpkgs/blob/master/nixos/modules/system/boot/binfmt.nix">NixOS binfmt module</a> · <a href="https://linuxiac.com/wine-11-9-improves-native-wayland-gaming-support/">Wine 11.9 Wayland improvements — Linuxiac</a><br>
+  <a href="https://docs.ultraleap.com/linux/">Ultraleap on Linux — official docs</a> · <a href="https://github.com/dscripka/openWakeWord">openWakeWord</a> · <a href="https://quickshell.org">Quickshell</a></p>
+</footer>
+
+</div>
