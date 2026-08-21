@@ -15,10 +15,19 @@ install day; anything needing real hardware is mocked and tagged
 | 7 | Harness seed (`record.py` / `replay.py` + fixtures) | not started |
 | CI | schema validation, codegen drift, jarvisd tests, ears-on-fixtures | not started |
 
-## Open decisions (Ofek decides, options to be presented)
+## Decisions (locked by Ofek, 2026-08-21)
 
-- LLM model (8B-class Q4 instruct) — options with sizes/tradeoffs pending
-- Piper voice — options pending
+- **Brain model: Qwen3-8B** (thinking mode OFF for voice latency). The VRAM
+  guard must budget **total headroom, not model size**: measure free VRAM
+  with the desktop already running on all three monitors, and include the
+  KV cache in the budget. Fallback ladder, explicit in config, in order:
+  1. KV cache quantized to q8
+  2. context 4k → 2k
+  3. Q4_K_S weights
+  4. CPU inference
+  The active rung is logged in `sys.health` (visible via `jv health`).
+- **Piper voice: en_US-ryan-high** — permanent (consistency is identity);
+  §06 effects chain applies on top later.
 
 ## Mocked / waiting for the machine
 
