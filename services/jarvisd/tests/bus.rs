@@ -74,6 +74,19 @@ async fn recv_frame(c: &mut BusClient, ms: u64) -> Option<rmpv::Value> {
         .unwrap()
 }
 
+/// Receive frames until one carries `topic`, skipping others (e.g.
+/// jarvisd's own sys.health on wildcard subscriptions).
+async fn recv_topic(c: &mut BusClient, topic: &str, ms: u64) -> Option<rmpv::Value> {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(ms);
+    while tokio::time::Instant::now() < deadline {
+        let f = recv_frame(c, ms).await?;
+        if topic_of(&f) == topic {
+            return Some(f);
+        }
+    }
+    None
+}
+
 #[tokio::test]
 async fn exact_and_prefix_routing() {
     let bus = start(Config::default()).await;
@@ -119,8 +132,31 @@ async fn fanout_and_wildcard() {
     .await
     .unwrap();
 
-    assert_eq!(topic_of(&recv_frame(&mut a, 1000).await.unwrap()), "brain.response");
+    // The wildcard subscriber may legitimately see jarvisd's own
+    // sys.health heartbeats interleaved — skip to the frame under test.
+    assert_eq!(
+        topic_of(&recv_topic(&mut a, "brain.response", 2000).await.unwrap()),
+        "brain.response"
+    );
     assert_eq!(topic_of(&recv_frame(&mut b, 1000).await.unwrap()), "brain.response");
+}
+
+/// jarvisd's own frames (sys.health) must be well-formed named-map
+/// envelopes — regression test for rmpv::ext::to_value's array-encoded
+/// structs leaking onto the bus.
+#[tokio::test]
+async fn broker_health_frame_is_valid_envelope() {
+    let cfg = Config {
+        health_period: Duration::from_millis(50),
+        ..Config::default()
+    };
+    let bus = start(cfg).await;
+    let mut c = BusClient::connect(&bus.addr, "health-watch").await.unwrap();
+    c.subscribe(&["sys.health"]).await.unwrap();
+
+    let f = recv_frame(&mut c, 2000).await.expect("heartbeat expected");
+    jarvisd::proto::validate_envelope(&f).expect("health frame must be a valid envelope");
+    assert_eq!(topic_of(&f), "sys.health");
 }
 
 #[tokio::test]

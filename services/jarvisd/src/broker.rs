@@ -131,6 +131,13 @@ impl OutQueue {
     }
 }
 
+/// Serialize with named (map) struct encoding, then decode back to a
+/// Value — the wire convention for every envelope on the bus.
+pub fn to_value_named<T: serde::Serialize>(v: &T) -> anyhow::Result<rmpv::Value> {
+    let bytes = rmp_serde::to_vec_named(v)?;
+    Ok(rmpv::decode::read_value(&mut &bytes[..])?)
+}
+
 pub struct Broker {
     cfg: Config,
     tx: broadcast::Sender<Arc<Delivery>>,
@@ -168,7 +175,10 @@ impl Broker {
     }
 
     fn publish_own<T: serde::Serialize>(&self, topic: &str, v: u32, body: &T) {
-        let body = match rmpv::ext::to_value(body) {
+        // NB: rmpv::ext::to_value serializes structs as ARRAYS (compact
+        // msgpack convention); envelopes on the bus are named maps, so we
+        // go through to_vec_named and decode back.
+        let body = match to_value_named(body) {
             Ok(b) => b,
             Err(e) => {
                 tracing::error!("health body encode: {e}");
@@ -184,8 +194,11 @@ impl Broker {
             v: v as u64,
             body,
         };
-        match rmpv::ext::to_value(&env) {
-            Ok(frame) => self.publish_value(topic.to_string(), frame),
+        match to_value_named(&env) {
+            Ok(frame) => {
+                debug_assert!(proto::validate_envelope(&frame).is_ok());
+                self.publish_value(topic.to_string(), frame);
+            }
             Err(e) => tracing::error!("health envelope encode: {e}"),
         }
     }
