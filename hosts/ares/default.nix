@@ -10,6 +10,7 @@
     ../../modules/audio.nix
     ../../modules/security.nix
     ../../modules/windows-compat.nix
+    ../../modules/jarvis-services.nix
   ];
 
   networking.hostName = "ares";
@@ -30,7 +31,7 @@
   users.users.ofek = {
     isNormalUser = true;
     description = "Ofek";
-    extraGroups = [ "wheel" "networkmanager" "video" "audio" "input" "uinput" ];
+    extraGroups = [ "wheel" "networkmanager" "video" "audio" "input" "uinput" "jarvis" ];
     # Placeholder for first login only — run `passwd` immediately after the
     # first boot (README runbook step). Not a secret; it is in a public repo.
     initialPassword = "jarvis-first-boot";
