@@ -1,14 +1,14 @@
 # Rented desktop for Phases 0-4: Niri (scrollable tiling, clean IPC that
 # Jarvis will drive) + greetd/tuigreet. Wayland only — no X11 server exists
 # on this system; legacy apps get XWayland via xwayland-satellite.
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
 {
   programs.niri.enable = true;
 
   services.greetd = {
     enable = true;
     settings.default_session = {
-      command = "${pkgs.greetd.tuigreet}/bin/tuigreet --time --remember --cmd niri-session";
+      command = "${lib.getExe pkgs.tuigreet} --time --remember --cmd niri-session";
       user = "greeter";
     };
   };
