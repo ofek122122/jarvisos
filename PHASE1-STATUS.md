@@ -11,9 +11,9 @@ install day; anything needing real hardware is mocked and tagged
 | 3 | `services/jv-ears` (Python) | **DONE** — wake(oww)+VAD(silero)+ASR(faster-whisper) verified on 4 fixtures incl. music-bed and mid-sentence-pause requirements; see REVIEW-ears.md; pylib bus client + models/fetch.sh landed with it |
 | 4 | `services/jv-voice` (Python) | **DONE** — piper ryan-high + §06 chain (intensity knob in personality/voice.toml, default 0.4 PROVISIONAL); wake barge-in, urgent-preempts, low-drops all tested vs real bus; **audition samples in harness/fixtures/voice-samples/ (dry / 0.2 / 0.4 / 0.7) — listen and lock intensity** |
 | 5 | `services/jv-brain` v0 (Python) | **DONE** — conversation-only vs llama-server API; jv-llm-launch implements the VRAM ladder (headroom-based, KV-in-budget, rung → rung-file → sys.health metrics); personality/system.md DRAFT awaiting review; 12 tests (7 ladder, 5 service vs stub LLM) |
-| 6 | `modules/jarvis-services.nix` + model fetching | not started |
-| 7 | Harness seed (`record.py` / `replay.py` + fixtures) | not started |
-| CI | schema validation, codegen drift, jarvisd tests, ears-on-fixtures | not started |
+| 6 | `modules/jarvis-services.nix` + model fetching | **DONE (eval-verified)** — hybrid units, hardened, personality in /etc; models/fetch.sh SHA256-pinned; ⚠ nix python packaging is BUILD-untested until first `nixos-rebuild build` (flagged in nix/jarvis-python.nix) |
+| 7 | Harness seed (`record.py` / `replay.py` + fixtures) | **DONE** — JSONL sessions w/ boot-anchor header, timing-preserving replay (--speed/--instant), 4 fixtures; roundtrip tested vs real jarvisd |
+| CI | schema validation, codegen drift, jarvisd tests, ears-on-fixtures | **DONE** — 4 jobs: flake eval, bindings drift, jarvisd (tests+clippy), python (pylib/ears/voice/brain/harness suites, cached models) |
 
 ## Decisions (locked by Ofek, 2026-08-21)
 
@@ -29,10 +29,26 @@ install day; anything needing real hardware is mocked and tagged
 - **Piper voice: en_US-ryan-high** — permanent (consistency is identity);
   §06 effects chain applies on top later.
 
-## Mocked / waiting for the machine
+## Your review queue (in order)
 
-- (none yet — will list every mock and its `TODO(machine)` tag here)
-- Exit checklist (BRIEF-phase1) runs only post-install on ares.
+1. `DECISIONS-pending.md` — every call taken while you were out
+2. `REVIEW-ears.md` — mock wiring + fixture table
+3. **Listen**: `harness/fixtures/voice-samples/` (dry / 0.2 / 0.4 / 0.7),
+   then lock `intensity` in `personality/voice.toml` (currently 0.4
+   PROVISIONAL)
+4. `personality/system.md` — v0 draft, edit to taste
+
+## Mocked / waiting for the machine (all tagged TODO(machine))
+
+- `MicSource` + `SoundDevicePlayer` — real mic array + speakers
+- `jv-llm-launch` against the real 1660 SUPER (ladder constants verified
+  live); llama-server + Qwen3 weights (`./models/fetch.sh --only brain`,
+  ~9.8 GB)
+- `nix/jarvis-python.nix` builds (openwakeword/piper wheels) — first
+  `nixos-rebuild build`
+- Real-voice wake tuning + Hebrew transcript fixture (needs your voice)
+- Entire BRIEF-phase1 exit checklist (latency <2.5s, kill-one-service,
+  offline demo, replay-to-brain with no mic)
 
 ## Phase 0 remainder (on Ofek, in parallel)
 

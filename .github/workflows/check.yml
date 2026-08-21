@@ -90,3 +90,6 @@ jobs:
       - name: jv-brain tests (stub LLM, mocked VRAM probe)
         run: python -m pytest tests -q
         working-directory: services/jv-brain
+      - name: harness tests (record/replay roundtrip)
+        run: python -m pytest tests -q
+        working-directory: harness
