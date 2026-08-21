@@ -1,2 +1,0 @@
-[console_scripts]
-jv-ears = jv_ears.main:cli

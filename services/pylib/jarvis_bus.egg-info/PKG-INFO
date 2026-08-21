@@ -1,6 +1,0 @@
-Metadata-Version: 2.4
-Name: jarvis-bus
-Version: 0.1.0
-Summary: Shared bus client + generated schema bindings for jv-* services
-Requires-Python: >=3.10
-Requires-Dist: msgpack>=1.0

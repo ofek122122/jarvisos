@@ -26,3 +26,4 @@ __pycache__/
 
 # model weights (fetched, never committed)
 models-cache/
+*.egg-info/
