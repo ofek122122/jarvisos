@@ -33,3 +33,20 @@ changed on review.
   `services/pylib` (jarvis-bus package), pytest, editable installs in a
   repo-local `.venv` (gitignored). Alt: monolithic requirements.txt
   (rejected: services must stay independent — invariant 1 in spirit).
+- **Fixture WAVs committed to the repo** (4 files, ~1 MB total, 16 kHz
+  mono) plus the deterministic generator script. Why: CI must not depend
+  on TTS to test ears; the WAVs ARE the contract. Alt: generate in CI
+  (rejected: nondeterministic piper versioning would move the test target).
+- **Wake phrase stays in the transcript** ("Hey Jarvis, what time is
+  it?"). Ears publishes what was said; stripping the address is jv-brain's
+  job (it gets the system prompt context to handle it). Alt: strip in ears
+  (rejected: ears would need language knowledge it shouldn't have).
+- **Retroactive wake gating**: the wake phrase sits inside the VAD
+  utterance (VAD confirms at ~200 ms, wake needs ~1 s), so a wake fired
+  mid-speech gates the already-running utterance and keeps its pre-roll
+  audio. Alt: only gate speech that starts after wake (rejected: would
+  drop every normal "hey jarvis, <command>" said as one breath — i.e.
+  the main use case).
+- **Q4_K_S rung source**: Qwen's official GGUF repo ships no Q4_K_S, so
+  ladder rung 3 pins bartowski/Qwen_Qwen3-8B-GGUF (hash-pinned like all
+  models). Alt: skip rung 3 (rejected: your ladder spec named it).

@@ -48,3 +48,36 @@ jobs:
         run: cargo test --locked
       - name: clippy
         run: cargo clippy --all-targets --locked -- -D warnings
+
+  python:
+    runs-on: ubuntu-latest
+    env:
+      JARVIS_MODELS_DIR: ${{ github.workspace }}/models-cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/jarvisd
+      - name: build jarvisd (pylib integration tests run against it)
+        run: cargo build --locked
+        working-directory: services/jarvisd
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: models-cache
+          key: models-ears-v1-${{ hashFiles('models/fetch.sh') }}
+      - name: fetch ears models (pinned SHA256)
+        run: ./models/fetch.sh --only ears
+      - name: install packages
+        run: |
+          python -m pip install -q pytest pytest-asyncio
+          python -m pip install -q -e services/pylib -e services/jv-ears
+      - name: pylib tests (client vs real jarvisd)
+        run: python -m pytest tests -q
+        working-directory: services/pylib
+      - name: jv-ears tests (fixtures, real models, no mic)
+        run: python -m pytest tests -q
+        working-directory: services/jv-ears

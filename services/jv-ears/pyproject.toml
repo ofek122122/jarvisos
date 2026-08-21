@@ -1,0 +1,29 @@
+[project]
+name = "jv-ears"
+version = "0.1.0"
+description = "JarvisOS ears: wake word -> VAD -> streaming ASR, publishing to the bus"
+requires-python = ">=3.10"
+dependencies = [
+  "jarvis-bus",
+  "numpy",
+  "onnxruntime",
+  "openwakeword>=0.6",
+  "faster-whisper>=1.0",
+  "soundfile",
+]
+
+[project.optional-dependencies]
+mic = ["sounddevice"]
+
+[project.scripts]
+jv-ears = "jv_ears.main:cli"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["jv_ears*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

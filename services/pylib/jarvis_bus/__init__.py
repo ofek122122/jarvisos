@@ -1,7 +1,8 @@
 """jarvis_bus — shared Python library for jv-* services.
 
-Phase 1 contents: generated schema bindings (see tools/gen_bindings.py).
-The bus client lands here with jv-ears.
+Contents: generated schema bindings (see tools/gen_bindings.py) and the
+asyncio bus client speaking jarvisd's wire protocol.
 """
 
 from . import schema  # noqa: F401
+from .client import BusClient, BusError, default_addr, mono_now  # noqa: F401
