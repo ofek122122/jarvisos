@@ -83,6 +83,8 @@ class Field:
             items = p.get("items", {})
             if items.get("type") == "object" and "properties" in items:
                 return "array_struct", items
+            if items.get("type") in ("string", "number", "integer", "boolean"):
+                return "array_scalar", items["type"]
             sys.exit(f"{self.owner}.{self.name}: unsupported array items")
         if t == "object":
             ap = p.get("additionalProperties")
@@ -133,6 +135,9 @@ def rust_type(fld: Field) -> str:
         base = fld.nested_name
     elif fld.kind == "array_struct":
         base = f"Vec<{fld.nested_name}>"
+    elif fld.kind == "array_scalar":
+        inner = {"string": "String", "number": "f64", "integer": "u64", "boolean": "bool"}
+        base = f"Vec<{inner[fld.detail]}>"
     if fld.nullable or not fld.required:
         return f"Option<{base}>"
     return base
@@ -200,6 +205,9 @@ def py_type(fld: Field) -> str:
         base = f'"{fld.nested_name}"'
     elif fld.kind == "array_struct":
         base = f'List["{fld.nested_name}"]'
+    elif fld.kind == "array_scalar":
+        inner = {"string": "str", "number": "float", "integer": "int", "boolean": "bool"}
+        base = f"List[{inner[fld.detail]}]"
     if fld.nullable or not fld.required:
         return f"Optional[{base}]"
     return base

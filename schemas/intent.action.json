@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/intent.action/v1",
+  "title": "intent.action body v1",
+  "description": "Brain -> act: run a tool. jv-act's own registry is AUTHORITATIVE for capability/confirmation — the fields here are the brain's claim and act re-derives them; a mismatch is rejected in action.result. Envelope conf = 1.0.",
+  "type": "object",
+  "required": ["request_id", "tool", "args", "capability"],
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "description": "UUID minted by the requester; threads intent.action -> action.confirm -> action.result and the audit log."
+    },
+    "tool": {
+      "type": "string",
+      "description": "Registry tool name, e.g. 'app.launch'."
+    },
+    "args": {
+      "type": "object",
+      "description": "Tool arguments; validated by jv-act against the tool's own args schema from the registry."
+    },
+    "capability": {
+      "type": "string",
+      "enum": ["observe", "benign", "destructive", "privileged"],
+      "description": "Capability level the requester believes applies (registry re-checked by act)."
+    },
+    "needs_confirmation": {
+      "type": "boolean",
+      "description": "Requester's claim; act decides from the registry regardless."
+    },
+    "utterance_id": {
+      "type": "string",
+      "description": "Voice provenance: the input utterance that led here."
+    },
+    "conversation_id": {
+      "type": "string"
+    }
+  }
+}

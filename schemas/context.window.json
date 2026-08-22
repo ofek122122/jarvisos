@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/context.window/v1",
+  "title": "context.window body v1",
+  "description": "Window/workspace events. Publisher: jv-context (compositor event stream — no polling). Titles are redacted (null + redacted=true) for blocklisted app_ids: password managers and private surfaces ship pre-seeded in the config. Envelope conf = 1.0.",
+  "type": "object",
+  "required": ["kind", "window_id", "app_id", "title"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["focus_changed", "opened", "closed", "title_changed"],
+      "description": "What happened. focus_changed frames define 'this'/'the active window' for jv-act resolution."
+    },
+    "window_id": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Compositor window id — stable for the window's lifetime; the handle jv-act targets."
+    },
+    "app_id": {
+      "type": "string",
+      "description": "Wayland app_id (e.g. 'firefox'). Empty string if the compositor doesn't know."
+    },
+    "title": {
+      "type": ["string", "null"],
+      "description": "Window title, or null when unavailable or redacted (see `redacted`)."
+    },
+    "workspace": {
+      "type": "string",
+      "description": "Workspace/output-space name if the compositor reports one."
+    },
+    "monitor": {
+      "type": "string",
+      "description": "Output connector (e.g. 'DP-1')."
+    },
+    "focused": {
+      "type": "boolean",
+      "description": "Whether this window has focus after the event."
+    },
+    "redacted": {
+      "type": "boolean",
+      "description": "True when the title was withheld by the privacy blocklist."
+    }
+  }
+}

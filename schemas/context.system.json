@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/context.system/v1",
+  "title": "context.system body v1",
+  "description": "1 Hz system snapshot. Publisher: jv-context. Envelope conf = 1.0.",
+  "type": "object",
+  "required": ["net_online", "load1", "mem_used_pct", "audio_volume", "audio_muted"],
+  "additionalProperties": false,
+  "properties": {
+    "net_online": {
+      "type": "boolean",
+      "description": "Default route exists and resolves."
+    },
+    "load1": {
+      "type": "number",
+      "minimum": 0,
+      "description": "1-minute load average."
+    },
+    "mem_used_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Physical memory in use, percent."
+    },
+    "audio_volume": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Default sink volume; 1.0 = 100%, may exceed 1.0."
+    },
+    "audio_muted": {
+      "type": "boolean"
+    },
+    "battery_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Absent on machines without a battery (ares)."
+    },
+    "gpu_vram_free_mb": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Free VRAM if a GPU is present — feeds the brain's own situational awareness."
+    }
+  }
+}

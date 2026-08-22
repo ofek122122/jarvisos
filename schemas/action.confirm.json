@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/action.confirm/v1",
+  "title": "action.confirm body v1",
+  "description": "Confirmation handshake for destructive+ tools. kind=request: act -> voice/HUD, spoken as a question. kind=answer: whoever heard the user (act itself from a scoped transcript window, or jv CLI) -> act. Timeout (15s) = denied. Envelope conf = 1.0.",
+  "type": "object",
+  "required": ["kind", "request_id"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["request", "answer"]
+    },
+    "request_id": {
+      "type": "string",
+      "description": "The intent.action request awaiting confirmation."
+    },
+    "tool": {
+      "type": "string",
+      "description": "request only: tool being confirmed."
+    },
+    "summary": {
+      "type": "string",
+      "description": "request only: the question to speak ('Delete 3 files from Downloads — yes or no?')."
+    },
+    "window_s": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "request only: how long the answer window stays open."
+    },
+    "granted": {
+      "type": "boolean",
+      "description": "answer only."
+    },
+    "answered_by": {
+      "type": "string",
+      "enum": ["voice", "cli", "timeout"],
+      "description": "answer only: where the answer came from."
+    }
+  }
+}

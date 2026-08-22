@@ -4,6 +4,72 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+pub const TOPIC_ACTION_CONFIRM: &str = "action.confirm";
+pub const V_ACTION_CONFIRM: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionConfirmKind {
+    Request,
+    Answer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionConfirmAnsweredBy {
+    Voice,
+    Cli,
+    Timeout,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionConfirm {
+    pub kind: ActionConfirmKind,
+    pub request_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_by: Option<ActionConfirmAnsweredBy>,
+}
+
+pub const TOPIC_ACTION_RESULT: &str = "action.result";
+pub const V_ACTION_RESULT: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionResultError {
+    UnknownTool,
+    InvalidArgs,
+    CapabilityMismatch,
+    Denied,
+    ConfirmTimeout,
+    ExecutionFailed,
+    Timeout,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionResult {
+    pub request_id: String,
+    pub ok: bool,
+    pub duration_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<rmpv::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ActionResultError>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
 pub const TOPIC_AUDIO_TRANSCRIPT: &str = "audio.transcript";
 pub const V_AUDIO_TRANSCRIPT: u32 = 1;
 
@@ -139,6 +205,121 @@ pub struct BrainResponse {
     pub latency_ms: Option<f64>,
 }
 
+pub const TOPIC_COMPAT_INSTALL: &str = "compat.install";
+pub const V_COMPAT_INSTALL: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatInstallEvent {
+    Fingerprinted,
+    Screened,
+    PrefixCreated,
+    Installed,
+    Failed,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatInstallInstaller {
+    Nsis,
+    Inno,
+    Msi,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatInstallArch {
+    X86,
+    X64,
+    Arm64,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompatInstall {
+    pub event: CompatInstallEvent,
+    pub app: String,
+    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installer: Option<CompatInstallInstaller>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arch: Option<CompatInstallArch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub const TOPIC_CONTEXT_SYSTEM: &str = "context.system";
+pub const V_CONTEXT_SYSTEM: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextSystem {
+    pub net_online: bool,
+    pub load1: f64,
+    pub mem_used_pct: f64,
+    pub audio_volume: f64,
+    pub audio_muted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub battery_pct: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_vram_free_mb: Option<f64>,
+}
+
+pub const TOPIC_CONTEXT_WINDOW: &str = "context.window";
+pub const V_CONTEXT_WINDOW: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextWindowKind {
+    FocusChanged,
+    Opened,
+    Closed,
+    TitleChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextWindow {
+    pub kind: ContextWindowKind,
+    pub window_id: u64,
+    pub app_id: String,
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redacted: Option<bool>,
+}
+
+pub const TOPIC_DIALOG_LISTEN: &str = "dialog.listen";
+pub const V_DIALOG_LISTEN: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DialogListenReason {
+    Confirm,
+    Onboarding,
+    Followup,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DialogListen {
+    pub listen_id: String,
+    pub window_s: f64,
+    pub reason: DialogListenReason,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Envelope {
@@ -149,6 +330,56 @@ pub struct Envelope {
     pub conf: f64,
     pub v: u64,
     pub body: rmpv::Value,
+}
+
+pub const TOPIC_GUARD_VERDICT: &str = "guard.verdict";
+pub const V_GUARD_VERDICT: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardVerdictVerdict {
+    Clean,
+    Suspicious,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuardVerdict {
+    pub sha256: String,
+    pub verdict: GuardVerdictVerdict,
+    pub reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanned_by: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+pub const TOPIC_INTENT_ACTION: &str = "intent.action";
+pub const V_INTENT_ACTION: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentActionCapability {
+    Observe,
+    Benign,
+    Destructive,
+    Privileged,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntentAction {
+    pub request_id: String,
+    pub tool: String,
+    pub args: rmpv::Value,
+    pub capability: IntentActionCapability,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_confirmation: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utterance_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
 }
 
 pub const TOPIC_SPEECH_SAY: &str = "speech.say";

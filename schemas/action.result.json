@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/action.result/v1",
+  "title": "action.result body v1",
+  "description": "Act -> brain: outcome of one intent.action. Every result is also appended to the audit log. Envelope conf = 1.0.",
+  "type": "object",
+  "required": ["request_id", "ok", "duration_ms"],
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "duration_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "output": {
+      "type": "string",
+      "description": "Human-readable outcome for the brain to phrase from ('Firefox launched', first 20 search hits, ...)."
+    },
+    "data": {
+      "type": "object",
+      "description": "Optional structured payload (e.g. search hits) when the brain needs more than prose."
+    },
+    "error": {
+      "type": "string",
+      "enum": [
+        "unknown_tool",
+        "invalid_args",
+        "capability_mismatch",
+        "denied",
+        "confirm_timeout",
+        "execution_failed",
+        "timeout"
+      ],
+      "description": "Present when ok=false. 'denied'/'confirm_timeout' are the confirmation-flow outcomes."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Free-text error detail for logs and debugging."
+    }
+  }
+}

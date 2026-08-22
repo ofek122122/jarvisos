@@ -31,6 +31,20 @@ Freeze rules:
 | `brain.response` | `brain.response.json` | jv-brain → requester, jv-voice | 1.0 in v0 |
 | `sys.health` | `sys.health.json` | every service | 1.0 (state) |
 
+Added 2026-08-22 (Phase 2, additive — new topics only, frozen v1 bodies
+untouched):
+
+| Topic | Schema | Publisher → Consumer | Envelope `conf` means |
+|---|---|---|---|
+| `context.window` | `context.window.json` | jv-context → brain, act, HUD | 1.0 (state) |
+| `context.system` | `context.system.json` | jv-context → anyone | 1.0 (state) |
+| `intent.action` | `intent.action.json` | jv-brain → jv-act | 1.0 (command) |
+| `action.result` | `action.result.json` | jv-act → jv-brain | 1.0 (state) |
+| `action.confirm` | `action.confirm.json` | jv-act ↔ voice/CLI | 1.0 (command) |
+| `dialog.listen` | `dialog.listen.json` | act/brain → jv-ears | 1.0 (command) |
+| `compat.install` | `compat.install.json` | jv-compat → anyone | 1.0 (state) |
+| `guard.verdict` | `guard.verdict.json` | jv-guard → jv-compat, HUD | 1.0 (state) |
+
 ## Conventions (part of the contract)
 
 - **`ts` is CLOCK_MONOTONIC seconds**, not wall-clock — chosen so

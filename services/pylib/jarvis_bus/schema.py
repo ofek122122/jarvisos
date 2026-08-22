@@ -9,6 +9,34 @@ from typing import Any, ClassVar, Dict, FrozenSet, List, Literal, Optional
 
 
 @dataclasses.dataclass
+class ActionConfirm:
+    kind: Literal["request", "answer"]
+    request_id: str
+    tool: Optional[str] = None
+    summary: Optional[str] = None
+    window_s: Optional[float] = None
+    granted: Optional[bool] = None
+    answered_by: Optional[Literal["voice", "cli", "timeout"]] = None
+    TOPIC: ClassVar[str] = "action.confirm"
+    V: ClassVar[int] = 1
+    _optional: ClassVar[FrozenSet[str]] = frozenset(['answered_by', 'granted', 'summary', 'tool', 'window_s'])
+
+
+@dataclasses.dataclass
+class ActionResult:
+    request_id: str
+    ok: bool
+    duration_ms: float
+    output: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[Literal["unknown_tool", "invalid_args", "capability_mismatch", "denied", "confirm_timeout", "execution_failed", "timeout"]] = None
+    detail: Optional[str] = None
+    TOPIC: ClassVar[str] = "action.result"
+    V: ClassVar[int] = 1
+    _optional: ClassVar[FrozenSet[str]] = frozenset(['data', 'detail', 'error', 'output'])
+
+
+@dataclasses.dataclass
 class AudioTranscriptWord:
     w: str
     t0: float
@@ -86,6 +114,60 @@ class BrainResponse:
 
 
 @dataclasses.dataclass
+class CompatInstall:
+    event: Literal["fingerprinted", "screened", "prefix_created", "installed", "failed", "blocked"]
+    app: str
+    sha256: str
+    path: Optional[str] = None
+    installer: Optional[Literal["nsis", "inno", "msi", "unknown"]] = None
+    arch: Optional[Literal["x86", "x64", "arm64", "unknown"]] = None
+    recipe: Optional[str] = None
+    error: Optional[str] = None
+    TOPIC: ClassVar[str] = "compat.install"
+    V: ClassVar[int] = 1
+    _optional: ClassVar[FrozenSet[str]] = frozenset(['arch', 'error', 'installer', 'path', 'recipe'])
+
+
+@dataclasses.dataclass
+class ContextSystem:
+    net_online: bool
+    load1: float
+    mem_used_pct: float
+    audio_volume: float
+    audio_muted: bool
+    battery_pct: Optional[float] = None
+    gpu_vram_free_mb: Optional[float] = None
+    TOPIC: ClassVar[str] = "context.system"
+    V: ClassVar[int] = 1
+    _optional: ClassVar[FrozenSet[str]] = frozenset(['battery_pct', 'gpu_vram_free_mb'])
+
+
+@dataclasses.dataclass
+class ContextWindow:
+    kind: Literal["focus_changed", "opened", "closed", "title_changed"]
+    window_id: int
+    app_id: str
+    title: Optional[str]
+    workspace: Optional[str] = None
+    monitor: Optional[str] = None
+    focused: Optional[bool] = None
+    redacted: Optional[bool] = None
+    TOPIC: ClassVar[str] = "context.window"
+    V: ClassVar[int] = 1
+    _optional: ClassVar[FrozenSet[str]] = frozenset(['focused', 'monitor', 'redacted', 'workspace'])
+
+
+@dataclasses.dataclass
+class DialogListen:
+    listen_id: str
+    window_s: float
+    reason: Literal["confirm", "onboarding", "followup"]
+    TOPIC: ClassVar[str] = "dialog.listen"
+    V: ClassVar[int] = 1
+    _optional: ClassVar[FrozenSet[str]] = frozenset([])
+
+
+@dataclasses.dataclass
 class Envelope:
     topic: str
     ts: float
@@ -95,6 +177,32 @@ class Envelope:
     v: int
     body: Dict[str, Any]
     _optional: ClassVar[FrozenSet[str]] = frozenset([])
+
+
+@dataclasses.dataclass
+class GuardVerdict:
+    sha256: str
+    verdict: Literal["clean", "suspicious", "blocked"]
+    reasons: List[str]
+    scanned_by: Optional[List[str]] = None
+    path: Optional[str] = None
+    TOPIC: ClassVar[str] = "guard.verdict"
+    V: ClassVar[int] = 1
+    _optional: ClassVar[FrozenSet[str]] = frozenset(['path', 'scanned_by'])
+
+
+@dataclasses.dataclass
+class IntentAction:
+    request_id: str
+    tool: str
+    args: Dict[str, Any]
+    capability: Literal["observe", "benign", "destructive", "privileged"]
+    needs_confirmation: Optional[bool] = None
+    utterance_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    TOPIC: ClassVar[str] = "intent.action"
+    V: ClassVar[int] = 1
+    _optional: ClassVar[FrozenSet[str]] = frozenset(['conversation_id', 'needs_confirmation', 'utterance_id'])
 
 
 @dataclasses.dataclass

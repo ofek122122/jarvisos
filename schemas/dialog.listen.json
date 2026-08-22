@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/dialog.listen/v1",
+  "title": "dialog.listen body v1",
+  "description": "Request a scoped NO-WAKE listening window from jv-ears (the bounded exception to wake-every-time approved 2026-08-22). Ears opens the window and publishes transcripts normally; the REQUESTER interprets them — ears stays dumb. Used by jv-act (confirmation answers) and jv-brain (onboarding/follow-up questions). Envelope conf = 1.0.",
+  "type": "object",
+  "required": ["listen_id", "window_s", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "listen_id": {
+      "type": "string",
+      "description": "UUID for correlating logs; not echoed in transcripts."
+    },
+    "window_s": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 60,
+      "description": "Seconds the no-wake window stays open. Hard-capped: this must never become an open mic."
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["confirm", "onboarding", "followup"],
+      "description": "Why the window was requested — audited, and the HUD will show it (sensor truthfulness, invariant 10)."
+    }
+  }
+}

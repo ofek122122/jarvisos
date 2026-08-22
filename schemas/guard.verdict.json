@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jarvis:schema/guard.verdict/v1",
+  "title": "guard.verdict body v1",
+  "description": "Screening result for one binary. Publisher: jv-guard. Policy (approved 2026-08-22): jv-compat FAILS CLOSED without a clean-or-overridden verdict; 'suspicious' may be overridden via the confirmation flow, 'blocked' never. Only hashes ever leave the machine (invariant 7). Envelope conf = 1.0.",
+  "type": "object",
+  "required": ["sha256", "verdict", "reasons"],
+  "additionalProperties": false,
+  "properties": {
+    "sha256": {
+      "type": "string"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["clean", "suspicious", "blocked"]
+    },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Human-readable reasons, spoken on request ('matched ClamAV signature X', 'packer entropy anomaly'). Empty for clean."
+    },
+    "scanned_by": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Engines that actually ran, e.g. ['clamav'] — outages are visible, not silent."
+    },
+    "path": {
+      "type": "string",
+      "description": "File screened (never uploaded anywhere)."
+    }
+  }
+}
