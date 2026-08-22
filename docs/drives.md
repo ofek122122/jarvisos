@@ -81,7 +81,25 @@ Chosen by Ofek, 2026-08-23 (supersedes the 2026-08-21 migration plan):
   `models/fetch.sh` and the service configs already default to
   `/var/lib/jarvis/...` on that root.
 
-Note: this migration is a **manual, user-performed operation from Windows**.
-It is the single sanctioned exception to "never write to the Windows NVMe",
-decided explicitly by the user — no JarvisOS tooling or install script may
-ever write to the NVMe.
+Note: no JarvisOS tooling or install command may ever write to the Windows
+NVMe or the 2 TB disk. Both are strictly read-at-most (os-prober reads the
+2 TB ESP read-only; nothing reads or writes the NVMe).
+
+## Pre-flight progress log
+
+- **2026-08-23 — BitLocker: NONE.** All four volumes (C:, D:, E:, F:)
+  report `ProtectionStatus=Off`, `FullyDecrypted`, 0% — checked elevated
+  via `Get-BitLockerVolume`. No recovery keys exist; toggling Secure Boot
+  will NOT trigger any BitLocker recovery. (No key material is ever stored
+  in this repo.) ✅
+- **2026-08-23 — Fast Startup: OFF.** `HiberbootEnabled=0`, `powercfg /h
+  off` ran clean (exit 0), no `hiberfil.sys`. ✅
+- **2026-08-23 — NixOS installer USB:** F: (7.4 GB SanDisk Cruzer Blade)
+  was too small for a recovery drive (<16 GB), so per plan it becomes the
+  **NixOS installer**. NixOS **26.05** minimal ISO (x86_64, 1.59 GB)
+  downloaded and **sha256 VERIFIED** against the official
+  `2fdadb46…16592` — MATCH. ✅ Rufus 4.15 portable staged. Write to F:
+  pending user "go" (GPT / UEFI / DD mode). ⏳
+- Windows **recovery USB**: deferred to a ≥16 GB stick (still open). Note:
+  with no BitLocker present, this is a general Windows-repair parachute,
+  not required for the Secure Boot change.
