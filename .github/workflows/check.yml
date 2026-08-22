@@ -77,7 +77,7 @@ jobs:
       - name: install packages
         run: |
           python -m pip install -q pytest pytest-asyncio
-          python -m pip install -q -e services/pylib -e services/jv-ears -e services/jv-voice -e services/jv-brain
+          python -m pip install -q -e services/pylib -e services/jv-ears -e services/jv-voice -e services/jv-brain -e services/jv-context
       - name: pylib tests (client vs real jarvisd)
         run: python -m pytest tests -q
         working-directory: services/pylib
@@ -87,6 +87,9 @@ jobs:
       - name: jv-voice tests (real piper, fake player)
         run: python -m pytest tests -q
         working-directory: services/jv-voice
+      - name: jv-context tests (mock compositor, stub probes)
+        run: python -m pytest tests -q
+        working-directory: services/jv-context
       - name: jv-brain tests (stub LLM, mocked VRAM probe)
         run: python -m pytest tests -q
         working-directory: services/jv-brain

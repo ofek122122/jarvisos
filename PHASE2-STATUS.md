@@ -12,8 +12,8 @@ stretch, 2026-08-22.
 
 | # | Item | Status |
 |---|---|---|
-| 0 | Additive schemas (7 new topics) | in progress |
-| 1 | `services/jv-context` (Python) | not started |
+| 0 | Additive schemas (8 new topics incl. dialog.listen) | **DONE** — CI green |
+| 1 | `services/jv-context` (Python) | **DONE** — niri event-stream backend (TODO(machine) field-verify) + mock for CI; pre-seeded privacy blocklist tested (keepass/bitwarden/1password/private/incognito); 1 Hz snapshots; 13 tests |
 | 2 | `services/jv-act` (Rust) — **REVIEW-REQUIRED** | not started |
 | 3 | jv-brain v1 tool calling | not started |
 | 4 | `services/jv-compat` + `services/jv-guard` + windows-compat.nix | not started |

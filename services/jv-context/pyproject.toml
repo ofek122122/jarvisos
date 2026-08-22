@@ -1,0 +1,22 @@
+[project]
+name = "jv-context"
+version = "0.1.0"
+description = "JarvisOS context: compositor window events + 1 Hz system snapshot onto the bus"
+requires-python = ">=3.10"
+dependencies = [
+  "jarvis-bus",
+  "psutil",
+]
+
+[project.scripts]
+jv-context = "jv_context.main:cli"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["jv_context*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
