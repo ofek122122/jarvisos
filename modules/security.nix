@@ -13,6 +13,7 @@
   users.groups.jarvis = { }; # umbrella group for jv-* state dirs (Phase 1)
 
   # No desktop automounter: nothing mounts the Windows NVMe or the 2 TB
-  # disk by accident. Mounts are declared in the flake or done by hand.
+  # disk by accident — both are permanently off-limits. Mounts are
+  # declared in the flake or done by hand.
   services.udisks2.enable = false;
 }

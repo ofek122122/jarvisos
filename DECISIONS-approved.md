@@ -8,13 +8,31 @@ Rules in effect (Ofek, 2026-08-21): take the reasonable option, record it,
 keep going. Hard stops (frozen schemas / Phase 0 boot config / hard to
 reverse) get a BLOCKED proposal instead.
 
+## Standing changes (user-directed)
+
+- **2026-08-22 — Bootloader = GRUB OS chooser** (replaces systemd-boot):
+  JarvisOS + Windows at every boot; os-prober reads the Windows ESP
+  read-only and chainloads it. Details in `modules/boot-grub.nix`.
+- **2026-08-23 — The 2 TB disk (D:) is permanently off-limits.** Same
+  standing as the Windows NVMe: never created/modified/deleted; the only
+  permitted interaction is os-prober reading its ESP read-only. There is
+  **no `/tank`** — models, episodic store, and all state live on the WD
+  Green. Added as a hard rule in CLAUDE.md.
+- **2026-08-23 — ESP migration CANCELLED.** Its purpose was freeing D:
+  for `/tank`; with D: off-limits it's moot. Windows keeps booting from
+  its ESP on D:; GRUB chainloads it there. Accepted tradeoff: Windows
+  boot depends on D:'s health (unchanged from today). Runbook B removed;
+  pre-flight is now just BitLocker+key, recovery USB, Secure Boot
+  decision, NixOS USB (E: already cleaned).
+
 ## Pre-approved in the departure Q&A (not pending — recorded for context)
 
 - ASR: **faster-whisper** (CT2 int8, distil-small.en) — brief said
   whisper.cpp; deviation approved.
 - Units: **hybrid** — jarvisd + jv-brain system; jv-ears + jv-voice user
   session (PipeWire); bus stays at /run/jarvis/bus.sock.
-- Models: **fetch.sh + SHA256** to /var/lib/jarvis/models (until /tank).
+- Models: **fetch.sh + SHA256** to /var/lib/jarvis/models on the WD Green
+  root (no /tank — the 2 TB disk is off-limits, see 2026-08-23 below).
 - Wake UX v0: **wake word every time**, no follow-up window.
 - Self-decided defaults announced before departure: continuous VAD,
   wake-gated transcription, 8s wake timeout, ~0.5s partials; sounddevice

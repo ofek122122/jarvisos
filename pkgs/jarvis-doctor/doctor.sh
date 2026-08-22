@@ -7,7 +7,7 @@
 #   4. PipeWire sees the microphone and records audio
 #   5. All three monitors run at native resolution+refresh under Wayland
 #   6. Windows NVMe is NOT mounted and NOT in the bootloader
-#   7. The 2 TB data disk is untouched (Phase 0: /tank deferred)
+#   7. The 2 TB data disk is not mounted (permanently off-limits)
 #
 # Exit code = number of failures. Run as your normal user inside a niri
 # session (check 5 talks to the compositor; check 3 needs `video` group).
@@ -139,17 +139,17 @@ else
   fail "/boot ESP is on '$esp_model' — expected the WD Green 1 TB"
 fi
 
-# ------------------------------------------- 7. 2 TB data disk untouched
-section "2 TB data disk (WD20EZAZ) untouched"
+# -------------------------------- 7. 2 TB data disk off-limits (not mounted)
+section "2 TB data disk (WD20EZAZ) off-limits — not mounted"
 hdd_dev=$(lsblk -dno NAME,MODEL | awk '/WD20EZAZ/ {print $1; exit}' || true)
 if [ -z "$hdd_dev" ]; then
   fail "2 TB WD20EZAZ not found"
 else
   hdd_mounts=$(lsblk -no MOUNTPOINTS "/dev/$hdd_dev" 2>/dev/null | grep -v '^$' || true)
   if [ -z "$hdd_mounts" ]; then
-    pass "2 TB disk has no mounted partitions (/tank decision deferred)"
+    pass "2 TB disk has no mounted partitions (permanently off-limits; os-prober reads its ESP RO only)"
   else
-    fail "2 TB disk is MOUNTED: $hdd_mounts — it must stay untouched in Phase 0"
+    fail "2 TB disk is MOUNTED: $hdd_mounts — it is off-limits, JarvisOS must never mount it"
   fi
 fi
 

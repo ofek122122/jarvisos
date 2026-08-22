@@ -52,4 +52,5 @@ install day; anything needing real hardware is mocked and tagged
 
 ## Phase 0 remainder (on Ofek, in parallel)
 
-- Pre-flight 3 & 4 tonight; ESP migration + 3-boot soak after; install day.
+- Pre-flight (BitLocker+key, recovery USB, Secure Boot decision, NixOS USB);
+  install day. (ESP migration cancelled 2026-08-23; 2 TB disk off-limits.)

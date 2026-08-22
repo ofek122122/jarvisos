@@ -5,8 +5,8 @@
 # #  - This file may reference exactly one disk: the WD Green 1 TB,          #
 # #    serial 23440S448710 (docs/drives.md).                                 #
 # #  - The Windows NVMe (CT500P2SSD8) and the 2 TB HDD (WD-WXL2A90L3KAP)     #
-# #    must NEVER appear here. The 2 TB disk also carries the live Windows   #
-# #    ESP until the migration soak completes — see docs/drives.md.          #
+# #    must NEVER appear here. Both are permanently off-limits. The 2 TB     #
+# #    disk carries the live Windows ESP; os-prober reads it read-only.      #
 # #  - INSTALL DAY, BEFORE RUNNING DISKO: confirm the exact by-id path on    #
 # #    the live USB (`ls -l /dev/disk/by-id/ | grep 23440S448710`) and fix   #
 # #    `device` below if it differs. The serial is the source of truth.      #
@@ -17,8 +17,9 @@
 # catch bit-rot on a DRAM-less budget SSD, and subvolume snapshots cover
 # /home — NixOS generations already cover the OS itself.
 #
-# /tank (the 2 TB disk) is deliberately absent: decision deferred, disk
-# untouched in Phase 0.
+# There is no /tank: the 2 TB disk is permanently off-limits (Windows
+# boots from its ESP). Everything JarvisOS stores — models, episodic
+# store, all state — lives on this WD Green root.
 { ... }:
 {
   disko.devices.disk.jarvis = {

@@ -24,9 +24,14 @@ exit checklist passes.
    (uinput group/udev rules, camera/mic group policy), `windows-compat.nix`
    (stub for Phase 2). Bootloader: systemd-boot on the WD Green's OWN ESP.
    Do not register Windows in it — firmware menu handles OS choice.
-2. **Storage layout.** LUKS2 on the WD Green root; the 2 TB disk mounted at
-   `/tank` (models, episodic store lives here later). ext4 or btrfs, your
-   call, justified in the commit message.
+   > SUPERSEDED (2026-08-22): bootloader is **GRUB** (an at-every-boot
+   > JarvisOS + Windows OS chooser), not systemd-boot. See
+   > `modules/boot-grub.nix` and `docs/drives.md`.
+2. **Storage layout.** LUKS2 on the WD Green root; btrfs+zstd.
+   > SUPERSEDED (2026-08-23): there is **no `/tank`**. The 2 TB disk is
+   > permanently off-limits (Windows boots from its ESP); models, the
+   > episodic store, and all state live on the WD Green root. See CLAUDE.md
+   > (hard rule) and `docs/drives.md`.
 3. **Verification module.** A `jarvis-doctor` script (packaged in the flake)
    that checks and prints PASS/FAIL for: `nvidia-smi` sees the 1660 SUPER;
    CUDA runs a trivial kernel; `v4l2-ctl --list-devices` shows the Lenovo

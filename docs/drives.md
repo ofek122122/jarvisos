@@ -9,21 +9,20 @@ boots and between Windows and Linux.**
 |---|---|---|---|---|
 | Disk 2 (C:) | Crucial **CT500P2SSD8** NVMe | `6479_A7FF_F000_1D71` ¹ | 465.8 GB | **Windows — NEVER TOUCH** |
 | Disk 1 (E:) | **WD Green 2.5 1000GB** SATA SSD | `23440S448710` | 931.5 GB | **JarvisOS target — wiped on install** |
-| Disk 0 (D:) | **WDC WD20EZAZ-00GGJB0** 2 TB HDD | `WD-WXL2A90L3KAP` | 1863 GB | Future `/tank` — **decision deferred, untouched in Phase 0** |
+| Disk 0 (D:) | **WDC WD20EZAZ-00GGJB0** 2 TB HDD | `WD-WXL2A90L3KAP` | 1863 GB | **Off-limits, permanently** — Windows boots from its ESP here; os-prober reads it read-only; JarvisOS never writes to it |
 
 > ⚠️ **E: is destroyed on install day.** disko `--mode destroy,format,mount`
-> wipes the entire WD Green — every current file on E: is gone, permanently.
-> **A final backup check of E: is a mandatory pre-flight item** (Runbook A):
-> confirm everything you want off E: is copied elsewhere *the day before*
-> install, not just "backed up at some point". The Crucial (C:/Windows) and
-> the 2 TB (D:) are never written to and keep their data.
+> wipes the entire WD Green. E: has already been cleaned and is ready; there
+> is nothing left to back up. The Crucial (C:/Windows) and the 2 TB (D:) are
+> never written to and keep their data.
 >
-> **Windows chooser note:** the bootloader is now GRUB (an at-every-boot
-> JarvisOS + Windows menu). GRUB's os-prober detects Windows on the NVMe
-> **read-only** and chainloads it — it never writes to the Windows disk.
-> Windows detection can't be proven until install day; the runbook has the
-> verify step + a manual-entry fallback, and F12 → Windows Boot Manager is
-> the always-works escape hatch.
+> **Windows chooser note:** the bootloader is GRUB (an at-every-boot
+> JarvisOS + Windows menu) on the WD Green's ESP. GRUB's os-prober reads the
+> **2 TB disk's ESP read-only** and chainloads Windows there — it never
+> writes to any Windows disk. Windows detection can't be proven until
+> install day; the runbook has the verify step + a manual-entry fallback,
+> and F12 → Windows Boot Manager (on the 2 TB disk) is the always-works
+> escape hatch.
 
 ¹ Windows WMI mangles NVMe serials; on Linux it will appear differently
 (`nvme-CT500P2SSD8_<serial>` in `/dev/disk/by-id/`). Match on the model
@@ -40,7 +39,7 @@ Expected:
 
 - `ata-…23440S448710` → the WD Green 1 TB → **the only disk disko may write to**
 - `nvme-CT500P2SSD8…` → Windows → must never appear in any command
-- `ata-WDC_WD20EZAZ…WD-WXL2A90L3KAP` → 2 TB data disk → must never appear in any command (Phase 0)
+- `ata-WDC_WD20EZAZ…WD-WXL2A90L3KAP` → 2 TB data disk → **off-limits, must never appear in any command** (os-prober reads its ESP read-only, that's all)
 
 The exact by-id name of the WD Green must be confirmed on the live USB and,
 if it differs, corrected in `hosts/ares/disko.nix` **before** running disko.
@@ -57,21 +56,30 @@ Partition scan from Windows (2026-08-21):
   Windows install. Nothing boots from it; it is destroyed with the rest of
   the WD Green on install day.
 
-Consequence: wiping or repurposing the 2 TB disk as `/tank` without first
-moving the ESP would make Windows unbootable.
+Windows therefore boots from the 2 TB disk's ESP. That is left exactly as
+it is (see the decision below).
 
-## Decision: migrate the Windows ESP to the NVMe (with soak protocol)
+## Decision: the 2 TB disk is permanently off-limits; ESP migration CANCELLED
 
-Chosen by Ofek, 2026-08-21:
+Chosen by Ofek, 2026-08-23 (supersedes the 2026-08-21 migration plan):
 
-1. **Before anything else:** create a Windows recovery USB.
-2. From Windows: shrink C: by ~300 MB, create a new ESP on the NVMe,
-   `bcdboot` into it. (Step-by-step in README → "ESP migration".)
-3. **The old ESP on the 2 TB disk stays completely intact until Windows has
-   booted from the NVMe ESP successfully at least 3 times across several
-   days.** Only after that soak period may the old ESP be removed.
-4. The 2 TB disk's future as `/tank` remains a separate, deferred decision;
-   Phase 0 does not mount, format, or reference it.
+- **The 2 TB disk (D:) is off-limits, permanently — same standing as the
+  Windows NVMe.** Nothing on it is ever created, modified, or deleted. The
+  only permitted interaction is **os-prober reading its ESP read-only** to
+  build the GRUB Windows-chainload entry.
+- **The ESP migration and its 3-boot soak are cancelled.** Their purpose
+  was to free the 2 TB disk for `/tank`; with the disk off-limits there is
+  nothing to free. Windows keeps booting from its existing ESP on the 2 TB
+  disk, and GRUB (on the WD Green) chainloads it there.
+- **Accepted tradeoff:** Windows's ability to boot depends on the 2 TB
+  disk's health — exactly as it does today. If that disk fails, Windows
+  won't boot (unchanged from the current situation); JarvisOS lives entirely
+  on the WD Green and is unaffected. F12 → Windows Boot Manager on the 2 TB
+  disk remains the firmware-level escape hatch.
+- **There is no `/tank`.** All JarvisOS storage — models, the episodic
+  store, every state dir — lives on the WD Green root (btrfs, 931 GB, ample).
+  `models/fetch.sh` and the service configs already default to
+  `/var/lib/jarvis/...` on that root.
 
 Note: this migration is a **manual, user-performed operation from Windows**.
 It is the single sanctioned exception to "never write to the Windows NVMe",

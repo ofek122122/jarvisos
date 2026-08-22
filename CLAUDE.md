@@ -10,12 +10,20 @@ the invariants that must never be violated, in any task, ever.
 
 - Intel i5 (Comet Lake, 6c/12t) · 32 GB DDR4 · GTX 1660 SUPER **6 GB VRAM**
 - Drives: 500 GB NVMe (**Windows — never touch**), 1 TB WD Green SATA SSD
-  (JarvisOS root), 2 TB disk (models + episodic store)
+  (JarvisOS root — models AND the episodic store live here), 2 TB disk
+  (**off-limits — Windows boots from its ESP**)
 - Monitors: 2560x1440@144 (primary) + 2x 1920x1080@60 — Wayland only, never X11-first
 - Sensors: Lenovo 510 FHD webcam (has an IR stream — use it), Ultraleap Leap
   Motion Controller 2 (desk-mounted, faces up), far-field mic array
-- Dual boot via UEFI firmware menu. NEVER write to the Windows drive or its
-  EFI partition. The Windows disk is out of scope for every command you run.
+- Dual boot via GRUB (an at-every-boot OS chooser on the WD Green's ESP).
+  **NEVER write to the Windows NVMe or its EFI partition** — the Windows
+  disk is out of scope for every command you run.
+- **The 2 TB disk (D:, WD20EZAZ, serial WD-WXL2A90L3KAP) is permanently
+  off-limits, exactly like the Windows NVMe.** Windows boots from an ESP
+  on it, so nothing on that disk is ever created, modified, or deleted.
+  The ONLY permitted interaction is os-prober READING its ESP read-only to
+  build the GRUB Windows-chainload entry. There is no `/tank`; everything
+  JarvisOS stores (models, episodic store, all state) lives on the WD Green.
 
 ## Architecture invariants
 
