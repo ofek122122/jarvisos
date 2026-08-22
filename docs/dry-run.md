@@ -29,6 +29,31 @@ which catches more than a hand-driven boot would.
   `configurationName="JarvisOS"`, systemd-boot disabled) and the
   **GRUB theme derivation builds** (dark theme + three pf2 fonts).
 
+## Two real build bugs the dry run caught (both fixed)
+
+The full `nix build` of the system — never run before, only evaluated in
+CI — surfaced two genuine packaging bugs in our own flake. Neither would
+have been caught by CI (which evaluates but does not build); both would
+have failed the install-day `nixos-install`:
+
+1. **`jv-act` nix package** — `buildAndTestSubdir` alone left the
+   `Cargo.lock` unfindable at the src root (`Missing Cargo.lock`), and
+   `cargoRoot` alone ran the build at the wrong dir (`could not find
+   Cargo.toml`). Fix: set **both** `cargoRoot` and `buildAndTestSubdir`
+   to `"jv-act"` (src stays `services/` so the `../jarvisd` path dep
+   resolves). Verified: `nix build .#jv-act` produces the binary.
+2. **`piper-tts` wheel** — its 1.7.0 runtime deps (`requires_dist`) list
+   `pathvalidate` alongside `onnxruntime`, which I'd omitted;
+   `pythonRuntimeDepsCheck` failed with `pathvalidate not installed`.
+   Fix: add `python3Packages.pathvalidate`. Verified: `voiceEnv` builds
+   and `import piper, pathvalidate, onnxruntime` succeeds on Python 3.14.
+
+**Not a bug — environmental:** the CUDA archives (`cuda_nvrtc`,
+`cuda_nvcc`, `cuda_cccl`) failed with "cannot download from any mirror" —
+the same flaky NVIDIA download servers that dropped the driver blob.
+These fetch normally on a reliable connection; if a nixpkgs fetch fails
+transiently on install day, just re-run `nixos-install` (nix resumes).
+
 ## Friction fixed in the runbook / repo as a result
 
 - Documented the disko confirm + LUKS prompt in step 4.

@@ -43,6 +43,12 @@
           pname = "jv-act";
           version = "0.1.0";
           src = ./services;
+          # The crate + its Cargo.lock live in services/jv-act; src stays
+          # services/ so the ../jarvisd path dep resolves. cargoRoot finds
+          # the Cargo.lock, buildAndTestSubdir runs cargo there. Needing
+          # BOTH was caught by the VM build (each alone fails a different
+          # phase).
+          cargoRoot = "jv-act";
           buildAndTestSubdir = "jv-act";
           cargoLock.lockFile = ./services/jv-act/Cargo.lock;
           meta.mainProgram = "jv-act";

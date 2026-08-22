@@ -39,7 +39,11 @@ let
     };
     nativeBuildInputs = [ pkgs.autoPatchelfHook ];
     buildInputs = [ pkgs.stdenv.cc.cc.lib ];
-    propagatedBuildInputs = [ py.pkgs.onnxruntime espeakng-loader ];
+    # piper-tts 1.7.0 core runtime deps (requires_dist, minus extras):
+    # onnxruntime + pathvalidate. espeakng-loader is used at runtime for
+    # the espeak-ng data path. The VM dry run caught the missing
+    # pathvalidate via pythonRuntimeDepsCheck.
+    propagatedBuildInputs = [ py.pkgs.onnxruntime py.pkgs.pathvalidate espeakng-loader ];
     pythonImportsCheck = [ "piper" ];
   };
 

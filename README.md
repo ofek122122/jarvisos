@@ -160,7 +160,12 @@ would name it, stop.
    sudo nixos-install --flake .#ares
    ```
 
-   Set the root password when prompted.
+   Set the root password when prompted. This is the first full **build**
+   of the system (CUDA, NVIDIA driver, wine, llama.cpp, the jv-* services)
+   — expect it to take a while. If a large fetch fails transiently
+   (`cannot download … from any mirror` — the NVIDIA/CUDA blobs are the
+   usual culprits), just run the command again; Nix resumes from what it
+   already has. The dry run confirmed the whole closure builds.
 7. `reboot`. The **GRUB OS chooser** should appear (dark theme, "JarvisOS"
    title, 5 s timeout, JarvisOS selected). Pick JarvisOS, enter the LUKS
    passphrase. Log in as `ofek` / `jarvis-first-boot` and immediately:
