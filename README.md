@@ -13,7 +13,7 @@ awaiting install day.
 |---|---|
 | Host name | `ares` |
 | Root filesystem | btrfs + zstd on LUKS2, WD Green 1 TB |
-| Bootloader | systemd-boot on the WD Green's own ESP; Windows **not** registered — firmware F12 menu picks the OS |
+| Bootloader | **GRUB** on the WD Green's own ESP, as an at-every-boot OS chooser (JarvisOS + Windows). os-prober detects Windows on the NVMe **read-only** and chainloads it; F12 firmware menu stays as the escape hatch. Nothing ever writes to the Windows NVMe or its ESP. |
 | Compositor (Phases 0–4) | Niri (+ greetd/tuigreet) |
 | Windows ESP | Migrate to NVMe with recovery-USB + 3-boot soak protocol (see below) |
 | Secure Boot | Off for the install; **lanzaboote lands right after Phase 0, then Secure Boot is re-enabled** (Riot Vanguard requires it on Windows 11) |
@@ -29,10 +29,12 @@ before every destructive step.**
 
 Do these in order. Nothing on this list is optional.
 
-1. **Confirm the drive map** in `docs/drives.md` matches reality and that
-   everything on **E: (WD Green)** is expendable or backed up — it will be
-   fully wiped.
-2. **Push this repo to a remote** (or copy it to a USB stick). It currently
+1. **Confirm the drive map** in `docs/drives.md` matches reality.
+2. **Final E: backup check — the day before install.** disko wipes the
+   entire **WD Green (E:)**; everything on it is destroyed permanently.
+   Confirm — freshly, not "at some point" — that everything you want off
+   E: is copied elsewhere. C: (Windows) and D: (2 TB) are never touched.
+3. **Push this repo to a remote** (or copy it to a USB stick). It currently
    lives on `D:` — the 2 TB disk — and must be reachable from the live USB.
 3. **Check BitLocker** (admin): `manage-bde -status C:`. If ON: back up the
    recovery key (Microsoft account or printout) *before* touching Secure
@@ -129,14 +131,20 @@ would name it, stop.
    path differs from `device` in `hosts/ares/disko.nix`, fix the file now
    and commit. The Crucial (`CT500P2SSD8`) and the 2 TB (`WD-WXL2A90L3KAP`)
    must not appear in any subsequent command.
-4. **Partition + format + mount** (destroys the WD Green only; prompts for
-   the LUKS passphrase — pick a strong one, it is asked at every boot):
+4. **Partition + format + mount** (destroys the WD Green only). disko
+   prints the plan and asks you to confirm wiping the disk, then prompts
+   for the LUKS passphrase — pick a strong one, it is asked at every boot:
 
    ```sh
    sudo nix --experimental-features "nix-command flakes" \
      run github:nix-community/disko/latest -- \
      --mode destroy,format,mount --flake .#ares
    ```
+
+   > **Dry-run verified.** This exact command + the by-id edit in step 3
+   > were executed end to end against a virtual disk (see
+   > `docs/dry-run.md`): it produces the 1 GiB ESP + LUKS2 + btrfs
+   > (`@root`/`@home`/`@nix`/`@log`) layout and mounts it under `/mnt`.
 
 5. **Regenerate + audit hardware config**:
 
@@ -153,12 +161,16 @@ would name it, stop.
    ```
 
    Set the root password when prompted.
-7. `reboot`, F12 → the **WD Green** entry ("Linux Boot Manager"). Enter the
-   LUKS passphrase. Log in as `ofek` / `jarvis-first-boot` and immediately:
+7. `reboot`. The **GRUB OS chooser** should appear (dark theme, "JarvisOS"
+   title, 5 s timeout, JarvisOS selected). Pick JarvisOS, enter the LUKS
+   passphrase. Log in as `ofek` / `jarvis-first-boot` and immediately:
 
    ```sh
    passwd
    ```
+
+   If GRUB doesn't appear, F12 at power-on → the **WD Green** entry is the
+   escape hatch (it always works).
 
 8. Clone the repo onto the machine (e.g. `~/jarvisos`) and prove
    reproducibility from a clean clone (exit-checklist item):
@@ -171,9 +183,57 @@ would name it, stop.
    `modules/gpu-nvidia.nix`, timezone confirmation, monitor layout in the
    Niri config (connector names are only knowable now).
 10. **Verify**: inside the Niri session run `jarvis-doctor`. Work each FAIL
-    until ALL PASS.
-11. **Windows still boots**: reboot → F12 → Windows (NVMe entry). Confirm,
-    then return to JarvisOS.
+    until ALL PASS. (In a VM most checks fail for want of hardware — see
+    the expected-results table below so you can tell a normal gap from a
+    real problem.)
+11. **Verify the GRUB OS chooser + Windows chainload** (first real run —
+    could not be proven in the dry run, which has no boot and no Windows):
+    - GRUB menu shows **JarvisOS** (default) and a **Windows** entry
+      (os-prober names it "Windows Boot Manager (on /dev/nvme…)").
+    - Older generations live under the **"All configurations"** submenu.
+    - Select the Windows entry → Windows boots. Then reboot → JarvisOS.
+    - **If the Windows entry is missing** (os-prober didn't detect it),
+      add it by hand: find the Windows ESP UUID and fill the template in
+      `modules/boot-grub.nix` (`extraEntries`), then rebuild:
+
+      ```sh
+      # find the Windows ESP (vfat, ~100 MB, on the Crucial NVMe):
+      lsblk -o NAME,MODEL,FSTYPE,SIZE,UUID | grep -iA4 CT500P2SSD8
+      # put that UUID in modules/boot-grub.nix extraEntries, then:
+      sudo nixos-rebuild switch --flake ~/jarvisos#ares
+      ```
+
+    - **Escape hatch, always**: F12 at power-on → "Windows Boot Manager"
+      on the Crucial NVMe. This never depends on GRUB or os-prober.
+
+### jarvis-doctor: expected results in a VM/dry-run vs on ares
+
+On the real machine every check must PASS. In a VM (or the WSL dry run)
+they split into two kinds of "fail" — this is how you tell them apart:
+
+| Check | In a VM | Why | On ares |
+|---|---|---|---|
+| GPU sees GTX 1660 SUPER | FAIL | no GPU passthrough | must PASS |
+| CUDA kernel runs | FAIL | no GPU | must PASS |
+| Camera RGB + IR frames | FAIL | no webcam | must PASS |
+| PipeWire mic + record | FAIL | no audio device | must PASS |
+| 3 monitors at native res | FAIL | one virtual display | must PASS |
+| **Windows NVMe not found** | FAIL* | the Crucial isn't in a VM | must PASS (present, unmounted) |
+| **/boot ESP on "WD Green"** | FAIL* | model string differs in a VM | must PASS |
+| **2 TB WD20EZAZ not found** | FAIL* | the disk isn't in a VM | must PASS |
+| No Windows entry in bootloader | PASS | genuinely true in a clean VM | must PASS |
+
+**\*** = "environment artifact": the check looks for a specific real disk
+by model that a VM lacks. Not a real problem — it flips to PASS on ares
+where the disks exist. The **hardware** fails (GPU/camera/mic/monitors)
+are the "no NVIDIA / no sensors / no triple-head" gaps and also pass once
+the hardware is present. So: **a fully-failing doctor in a VM is normal;
+on ares, any remaining FAIL is a real problem.**
+
+> One doctor caveat to check on first boot: the ESP-on-WD-Green check
+> greps the disk model for "WD Green" (with a space). If `lsblk` shows
+> the model with underscores (`WD_Green_…`), tweak the grep in
+> `pkgs/jarvis-doctor/doctor.sh`. Verify on ares.
 
 ## Runbook D — Rollback drill (do once, deliberately)
 

@@ -11,19 +11,22 @@
     ../../modules/security.nix
     ../../modules/windows-compat.nix
     ../../modules/jarvis-services.nix
+    ../../modules/boot-grub.nix
   ];
 
   networking.hostName = "ares";
   networking.networkmanager.enable = true;
 
-  # systemd-boot on the WD Green's OWN ESP. Windows is deliberately NOT
-  # registered here — the firmware F12 menu is the OS switch (CLAUDE.md).
-  boot.loader.systemd-boot.enable = true;
-  boot.loader.systemd-boot.editor = false;
-  boot.loader.efi.canTouchEfiVariables = true;
-  # No configurationLimit: every generation stays in the boot menu.
-  # Do NOT enable nix.gc during active development (CLAUDE.md: never
-  # garbage-collect old generations while experimenting).
+  # Boot: GRUB as an at-every-boot OS chooser (JarvisOS + Windows),
+  # installed on the WD Green's OWN ESP. See modules/boot-grub.nix.
+  # Windows is detected read-only via os-prober and chainloaded; the
+  # firmware F12 menu remains the always-works escape hatch. The hard
+  # rule stands: nothing ever writes to the Windows NVMe or its ESP.
+  boot.loader.efi.canTouchEfiVariables = true; # NVRAM only, not any disk
+  boot.loader.efi.efiSysMountPoint = "/boot"; # the WD Green's ESP
+  # No generation limit: every generation stays in the submenu. Do NOT
+  # enable nix.gc during active development (CLAUDE.md: never garbage-
+  # collect old generations while experimenting).
 
   time.timeZone = "Asia/Jerusalem"; # TODO(ofek): confirm
   i18n.defaultLocale = "en_US.UTF-8";

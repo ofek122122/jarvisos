@@ -11,6 +11,20 @@ boots and between Windows and Linux.**
 | Disk 1 (E:) | **WD Green 2.5 1000GB** SATA SSD | `23440S448710` | 931.5 GB | **JarvisOS target — wiped on install** |
 | Disk 0 (D:) | **WDC WD20EZAZ-00GGJB0** 2 TB HDD | `WD-WXL2A90L3KAP` | 1863 GB | Future `/tank` — **decision deferred, untouched in Phase 0** |
 
+> ⚠️ **E: is destroyed on install day.** disko `--mode destroy,format,mount`
+> wipes the entire WD Green — every current file on E: is gone, permanently.
+> **A final backup check of E: is a mandatory pre-flight item** (Runbook A):
+> confirm everything you want off E: is copied elsewhere *the day before*
+> install, not just "backed up at some point". The Crucial (C:/Windows) and
+> the 2 TB (D:) are never written to and keep their data.
+>
+> **Windows chooser note:** the bootloader is now GRUB (an at-every-boot
+> JarvisOS + Windows menu). GRUB's os-prober detects Windows on the NVMe
+> **read-only** and chainloads it — it never writes to the Windows disk.
+> Windows detection can't be proven until install day; the runbook has the
+> verify step + a manual-entry fallback, and F12 → Windows Boot Manager is
+> the always-works escape hatch.
+
 ¹ Windows WMI mangles NVMe serials; on Linux it will appear differently
 (`nvme-CT500P2SSD8_<serial>` in `/dev/disk/by-id/`). Match on the model
 string `CT500P2SSD8`, which is unambiguous — it is the only NVMe drive.

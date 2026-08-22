@@ -1,0 +1,52 @@
+# JarvisOS GRUB theme — minimal dark. Legibility first at 2560x1440.
+# No distro logos; the accent is the ember selection colour only.
+# Kept as a module so the Phase 5 boot-splash work can evolve it.
+# Palette from docs/blueprint.html: ground #0C1116, ember #C8431F,
+# text #E4EAEE / muted #9FADB7 / faint #4A5762.
+
+# Font names below are the pf2 internal names grub-mkfont assigns
+# (family + style + size), NOT the file names. NixOS loadfonts every
+# .pf2 in this dir; theme components must reference these exact strings.
+title-text: ""
+desktop-color: "#0C1116"
+terminal-font: "mono Regular 18"
+terminal-left: "0"
+terminal-top: "0"
+
+# --- title -----------------------------------------------------------
++ label {
+    id       = "__title__"
+    top      = "16%"
+    left     = "0"
+    width    = "100%"
+    align    = "center"
+    color    = "#C8431F"
+    font     = "title Bold 48"
+    text     = "JarvisOS"
+}
+
+# --- the OS chooser --------------------------------------------------
++ boot_menu {
+    top             = "38%"
+    left            = "34%"
+    width           = "32%"
+    height          = "44%"
+    item_font       = "item Regular 28"
+    item_color      = "#9FADB7"
+    selected_item_color = "#C8431F"
+    item_height     = "46"
+    item_padding    = "6"
+    item_spacing    = "10"
+    menu_pixmap_style = ""
+}
+
+# --- footer hint -----------------------------------------------------
++ label {
+    top   = "90%"
+    left  = "0"
+    width = "100%"
+    align = "center"
+    color = "#4A5762"
+    font  = "hint Regular 18"
+    text  = "hold F12 at power-on for the firmware boot menu"
+}
