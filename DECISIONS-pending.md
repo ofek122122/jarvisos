@@ -76,3 +76,18 @@ DECISIONS-approved.md.
   user" section assembled from the profile at prompt time; when no
   profile exists the section says it hasn't met its user yet, which is
   what makes the onboarding self-introduction in-character.
+
+- **jv-compat is on-demand CLI in v0** (`jv-compat install <path>`), not
+  a watch-folder daemon. Why: the brief's exit item is "double-click a
+  .exe" which binfmt+MIME route to jv-compat; a persistent folder
+  watcher is scope the brief doesn't ask for. Alt: inotify daemon
+  (deferred).
+- **suspicious verdict = refuse in v0** (with a spoken explanation of
+  how it *would* be overridden). The confirmation-flow override the
+  brief allows needs the HUD confirm surface (Phase 5) or at least the
+  voice confirm path wired into compat; rather than half-wire it,
+  compat refuses suspicious cleanly and says so. `blocked` is never
+  overridable regardless. Alt: wire compat->act confirm now (rejected:
+  couples two services ahead of the HUD; noted for review).
+- **sha256 helper duplicated** in jv-compat rather than imported from
+  jv-guard — services never import each other (invariant 1).

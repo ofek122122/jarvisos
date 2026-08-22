@@ -1,0 +1,22 @@
+[project]
+name = "jv-compat"
+version = "0.1.0"
+description = "JarvisOS compat: fingerprint -> screen -> confined prefix -> silent install for Windows binaries"
+requires-python = ">=3.10"
+dependencies = [
+  "jarvis-bus",
+  "tomli; python_version < '3.11'",
+]
+
+[project.scripts]
+jv-compat = "jv_compat.main:cli"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["jv_compat*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

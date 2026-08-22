@@ -83,7 +83,9 @@ jobs:
       - name: install packages
         run: |
           python -m pip install -q pytest pytest-asyncio
-          python -m pip install -q -e services/pylib -e services/jv-ears -e services/jv-voice -e services/jv-brain -e services/jv-context
+          python -m pip install -q -e services/pylib -e services/jv-ears -e services/jv-voice -e services/jv-brain -e services/jv-context -e services/jv-guard -e services/jv-compat
+      - name: build compat installer fixtures (headers only)
+        run: python services/jv-compat/tests/make_fixtures.py
       - name: pylib tests (client vs real jarvisd)
         run: python -m pytest tests -q
         working-directory: services/pylib
@@ -99,6 +101,12 @@ jobs:
       - name: jv-brain tests (stub LLM, mocked VRAM probe)
         run: python -m pytest tests -q
         working-directory: services/jv-brain
+      - name: jv-guard tests (verdict logic, EICAR, fail-closed)
+        run: python -m pytest tests -q
+        working-directory: services/jv-guard
+      - name: jv-compat tests (fingerprint, recipes, bwrap, pipeline)
+        run: python -m pytest tests -q
+        working-directory: services/jv-compat
       - name: harness tests (record/replay roundtrip)
         run: python -m pytest tests -q
         working-directory: harness
