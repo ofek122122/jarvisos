@@ -37,6 +37,30 @@ stretch, 2026-08-22.
 | 5 | Greeting v0 | **DONE** — time-of-day + name-if-known, session-start via jv-greeting oneshot unit |
 | 6 | First-boot onboarding (added mid-stretch) | **DONE** — de-hardcoded system.md (profile injected at prompt time), profile.json semantic-seed store, spoken meeting via dialog.listen (name + pronunciation confirm), name corrections as facts, follow-up trickle, `jv-onboard --reset`; 23 brain tests |
 
+## Install-day dry run (2026-08-22) — see `docs/dry-run.md`
+
+Rehearsed Runbook C in WSL2 (real Linux kernel, not a GUI VM — a headless
+agent can't drive an interactive installer console). Outcome:
+
+- ✅ **disko end-to-end** against a virtual disk: ESP + LUKS2 + btrfs
+  (`@root`/`@home`/`@nix`/`@log`); the by-id device swap verified + documented.
+- ✅ **First real `nix build` of the whole system** — evaluated before, never
+  built. Our entire custom surface builds on Python 3.14 (all jv-* python
+  envs, jarvisd, jv-act). **It found two genuine build bugs CI could not**
+  (eval-only): `jv-act` cargoRoot/subdir and `piper-tts` missing
+  `pathvalidate` — both fixed and re-built green.
+- ✅ **GRUB boot change** evaluates; theme derivation builds.
+- ⚠️ Full toplevel did not fully complete in WSL: the CUDA/NVIDIA blobs hit
+  "cannot download from any mirror" (flaky vendor servers, not our code —
+  re-run resolves; noted in runbook C).
+
+**Pens-down on code until ares boots.** First-run-on-ares items: GRUB
+menu rendering + Windows chainload, `nixos-install` + bootloader, and
+`jarvis-doctor` (expected-fail table in README).
+
 ## Waiting for the machine
 
-- (accumulates as built)
+- GRUB actually booting + the themed OS chooser + generations submenu.
+- Windows chainload via os-prober (+ manual `extraEntries` fallback).
+- Every Phase 1/2 exit-checklist item (all hardware- or boot-dependent).
+- `jarvis-doctor` all-PASS on real hardware.
