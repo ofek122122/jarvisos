@@ -91,3 +91,9 @@ DECISIONS-approved.md.
   couples two services ahead of the HUD; noted for review).
 - **sha256 helper duplicated** in jv-compat rather than imported from
   jv-guard — services never import each other (invariant 1).
+- **binfmt fixBinary=false** (blueprint §08 example showed true). nixpkgs
+  asserts fixBinary is invalid when the interpreter is a shell wrapper,
+  which wine's launcher is; flake eval caught it. Functionally fine —
+  fixBinary only pre-resolves the interpreter at registration; without
+  it the lookup happens at exec, which is what we want across rebuilds
+  anyway. This corrects a blueprint example, touches no Phase 0 config.

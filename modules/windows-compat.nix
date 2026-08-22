@@ -10,7 +10,11 @@
   boot.binfmt.registrations.windows = {
     magicOrExtension = "MZ";
     interpreter = "${pkgs.wineWowPackages.stagingFull}/bin/wine";
-    fixBinary = true;
+    # fixBinary must stay false: nixpkgs asserts against it when the
+    # interpreter resolves through a shell wrapper, which wine's launcher
+    # is. (The blueprint's example used true; the wrapper makes it
+    # invalid here — verified by flake eval.)
+    fixBinary = false;
     preserveArgvZero = false;
     # bwrap confinement is applied by jv-compat per-recipe, not here —
     # binfmt is only the "double-click runs it" convenience.
