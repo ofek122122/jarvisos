@@ -15,7 +15,7 @@ stretch, 2026-08-22.
 | 0 | Additive schemas (8 new topics incl. dialog.listen) | **DONE** — CI green |
 | 1 | `services/jv-context` (Python) | **DONE** — niri event-stream backend (TODO(machine) field-verify) + mock for CI; pre-seeded privacy blocklist tested (keepass/bitwarden/1password/private/incognito); 1 Hz snapshots; 13 tests |
 | 2 | `services/jv-act` (Rust) — **REVIEW-REQUIRED** | **BUILT + TESTED, NOT WIRED** — registry TOML (11 tools, observe/benign only), validation gauntlet, confirm flow (yes/no/timeout all tested), append-only audit + `jv act-log`, `jv confirm`; 11 tests + clippy clean; **deliberately absent from jarvis-services.nix until Ofek reads every line** |
-| 3 | jv-brain v1 tool calling | not started |
+| 3 | jv-brain v1 tool calling | **DONE** — registry-driven OpenAI tool defs, tool loop off the frame reader (no deadlock), 5-call cap, hallucinated tools never reach act (counted in health metrics), results fed back for spoken summaries; 15 tests |
 | 4 | `services/jv-compat` + `services/jv-guard` + windows-compat.nix | not started |
 | 5 | Greeting v0 | not started |
 
