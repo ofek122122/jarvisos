@@ -44,6 +44,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: services/jarvisd
+      - name: jv-act tests (mock executor, real broker)
+        run: cargo test --locked
+        working-directory: services/jv-act
+      - name: jv-act clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+        working-directory: services/jv-act
       - name: tests (unix socket path)
         run: cargo test --locked
       - name: clippy

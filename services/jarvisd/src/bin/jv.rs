@@ -48,6 +48,36 @@ enum Cmd {
     },
     /// Follow sys.health heartbeats.
     Health,
+    /// Read the jv-act audit log (newest last). Path: $JARVIS_ACT_AUDIT
+    /// or the platform default.
+    ActLog {
+        /// Only show the last N entries.
+        #[arg(long)]
+        tail: Option<usize>,
+    },
+    /// Answer a pending confirmation request.
+    Confirm {
+        request_id: String,
+        /// 'yes' or 'no'
+        answer: String,
+    },
+}
+
+fn act_audit_path() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("JARVIS_ACT_AUDIT") {
+        return p.into();
+    }
+    if cfg!(unix) {
+        "/var/lib/jarvis/act/audit.jsonl".into()
+    } else {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(".state")
+            .join("act-audit.jsonl")
+    }
 }
 
 fn get<'a>(frame: &'a rmpv::Value, key: &str) -> Option<&'a rmpv::Value> {
@@ -141,6 +171,56 @@ async fn main() -> anyhow::Result<()> {
                     _ => {}
                 }
             }
+        }
+
+        Cmd::ActLog { tail } => {
+            let path = act_audit_path();
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| anyhow::anyhow!("no audit log at {}: {e}", path.display()))?;
+            let lines: Vec<&str> = text.lines().collect();
+            let start = tail.map(|n| lines.len().saturating_sub(n)).unwrap_or(0);
+            for line in &lines[start..] {
+                let Ok(e) = serde_json::from_str::<serde_json::Value>(line) else {
+                    continue;
+                };
+                let confirm = e
+                    .get("confirm")
+                    .map(|c| {
+                        format!(
+                            " confirm={}/{}",
+                            c["granted"].as_bool().unwrap_or(false),
+                            c["answered_by"].as_str().unwrap_or("?")
+                        )
+                    })
+                    .unwrap_or_default();
+                println!(
+                    "{} {:<22} {:<11} {:<18} {:>7.0}ms{} args={}",
+                    e["ts"].as_str().unwrap_or("?"),
+                    e["tool"].as_str().unwrap_or("?"),
+                    e["capability"].as_str().unwrap_or("?"),
+                    e["outcome"].as_str().unwrap_or("?"),
+                    e["duration_ms"].as_f64().unwrap_or(0.0),
+                    confirm,
+                    e["args"]
+                );
+            }
+        }
+
+        Cmd::Confirm { request_id, answer } => {
+            let granted = match answer.as_str() {
+                "yes" | "y" => true,
+                "no" | "n" => false,
+                other => anyhow::bail!("answer must be yes or no, got '{other}'"),
+            };
+            let mut c = BusClient::connect(&addr, "jv-cli").await?;
+            let body = rmpv::Value::Map(vec![
+                ("kind".into(), "answer".into()),
+                ("request_id".into(), request_id.as_str().into()),
+                ("granted".into(), granted.into()),
+                ("answered_by".into(), "cli".into()),
+            ]);
+            c.publish("action.confirm", 1.0, 1, body).await?;
+            println!("answer sent: {request_id} -> {}", if granted { "yes" } else { "no" });
         }
 
         Cmd::Health => {

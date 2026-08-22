@@ -1,0 +1,116 @@
+# The jv-act tool registry — DATA, reviewed like code (invariant 3).
+# Deployed to /etc/jarvis/tools.toml; jv-act enforces it, jv-brain reads
+# it for tool definitions. Capability rule: destructive/privileged ALWAYS
+# confirm — structurally, no per-tool waiver exists.
+#
+# v0 (approved mapping, 2026-08-22): observe + benign only. NO uinput,
+# NO shell execution — those arrive in later phases with their own review.
+
+[[tool]]
+name = "app.launch"
+description = "Launch an application"
+capability = "benign"
+timeout_ms = 10000
+[tool.args.app]
+type = "string"
+required = true
+description = "Desktop id or application name, e.g. 'firefox'"
+
+[[tool]]
+name = "window.focus"
+description = "Focus a window"
+capability = "benign"
+[tool.args.window_id]
+type = "integer"
+required = true
+description = "Compositor window id from context.window"
+
+[[tool]]
+name = "window.close"
+description = "Close a window"
+capability = "benign"  # apps guard their own unsaved state (Ofek 2026-08-22)
+[tool.args.window_id]
+type = "integer"
+required = true
+
+[[tool]]
+name = "window.move_workspace"
+description = "Move a window to a workspace"
+capability = "benign"
+[tool.args.window_id]
+type = "integer"
+required = true
+[tool.args.workspace]
+type = "string"
+required = true
+
+[[tool]]
+name = "volume.set"
+description = "Set the output volume"
+capability = "benign"
+timeout_ms = 5000
+[tool.args.level]
+type = "number"
+required = true
+description = "0.0 to 1.5 (1.0 = 100%)"
+
+[[tool]]
+name = "volume.adjust"
+description = "Adjust the output volume by a delta"
+capability = "benign"
+timeout_ms = 5000
+[tool.args.delta]
+type = "number"
+required = true
+description = "-1.0 to 1.0, e.g. -0.1 for 'a bit quieter'"
+
+[[tool]]
+name = "media.control"
+description = "Control media playback"
+capability = "benign"
+timeout_ms = 5000
+[tool.args.command]
+type = "string"
+required = true
+one_of = ["play_pause", "next", "previous"]
+
+[[tool]]
+name = "file.search"
+description = "Search for files by name (or content) — read-only"
+capability = "observe"
+timeout_ms = 15000
+[tool.args.pattern]
+type = "string"
+required = true
+[tool.args.dir]
+type = "string"
+description = "Directory to search; defaults to home"
+[tool.args.content]
+type = "boolean"
+description = "true = search file contents (ripgrep)"
+
+[[tool]]
+name = "open.item"
+description = "Open a file or URL with the default application"
+capability = "benign"
+[tool.args.target]
+type = "string"
+required = true
+
+[[tool]]
+name = "speak.notify"
+description = "Say something through the speakers"
+capability = "benign"
+timeout_ms = 5000
+[tool.args.text]
+type = "string"
+required = true
+
+[[tool]]
+name = "unit.status"
+description = "Report a systemd unit's status — observe only"
+capability = "observe"
+timeout_ms = 5000
+[tool.args.unit]
+type = "string"
+required = true

@@ -1,0 +1,39 @@
+[package]
+name = "jv-act"
+version = "0.1.0"
+edition = "2021"
+description = "JarvisOS act — the only privileged service (CLAUDE.md invariant 3). REVIEW-REQUIRED before it runs anywhere."
+license = "MIT"
+
+[[bin]]
+name = "jv-act"
+path = "src/bin/jv-act.rs"
+
+[dependencies]
+# The bus library (client/proto/schema), NOT another service's logic —
+# same pattern as services/pylib for the Python side.
+jarvisd = { path = "../jarvisd" }
+
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+rmpv = { version = "1", features = ["with-serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "io-util",
+  "sync",
+  "time",
+  "signal",
+  "process",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
