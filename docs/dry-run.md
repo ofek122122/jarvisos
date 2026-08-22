@@ -21,10 +21,14 @@ which catches more than a hand-driven boot would.
   non-interactively via a throwaway passwordFile (the real run keeps the
   interactive passphrase prompt).
 - **`nix build` of the whole `ares` system** (`nixos-rebuild build`
-  equivalent) — the flake **evaluates** to `nixos-system-ares…drv` and the
-  custom packages **build on Python 3.14** (jarvis-bus, jv-brain,
-  jv-context, jv-guard, jv-compat, and the Rust jarvisd/jv-act via the
-  flake). This had never been built before — CI only evaluates.
+  equivalent) — **the complete system builds and closes**:
+  `nixos-system-ares…` with grub-2.12 + os-prober + our
+  `jarvisos-grub-theme`, the CUDA-enabled llama-cpp, the NVIDIA driver,
+  wine-wow-staging, and all six `jv-*` python services + jarvisd + jv-act.
+  `switch-to-configuration` uses grub. This had never been built before —
+  CI only evaluates. (The CUDA/NVIDIA blob downloads are flaky from this
+  connection; the first attempt failed on them, a retry pulled them and
+  the build completed.)
 - **GRUB boot change** — the GRUB config evaluates (`useOSProber=true`,
   `configurationName="JarvisOS"`, systemd-boot disabled) and the
   **GRUB theme derivation builds** (dark theme + three pf2 fonts).
@@ -75,6 +79,15 @@ These are environment artifacts of running disko in WSL2, not flake bugs:
   kernel and needs no such flag.
 - Single-user Nix run via `sudo` needs `build-users-group=` empty and a
   clean `/nix` ownership — artifacts of the WSL setup, not install day.
+
+## Definitive result
+
+The complete `nixos-system-ares` toplevel **builds and closes** — every
+layer from the GRUB bootloader through the CUDA/NVIDIA stack, wine, and
+all Jarvis services. Combined with the verified disko run, install day
+should be: boot USB → clone → disko → `nixos-install` (which builds this
+same closure) → reboot. The pieces below are the only first-run-on-ares
+unknowns.
 
 ## What the dry run could NOT prove (first run happens on ares)
 

@@ -44,15 +44,17 @@ agent can't drive an interactive installer console). Outcome:
 
 - ✅ **disko end-to-end** against a virtual disk: ESP + LUKS2 + btrfs
   (`@root`/`@home`/`@nix`/`@log`); the by-id device swap verified + documented.
-- ✅ **First real `nix build` of the whole system** — evaluated before, never
-  built. Our entire custom surface builds on Python 3.14 (all jv-* python
-  envs, jarvisd, jv-act). **It found two genuine build bugs CI could not**
-  (eval-only): `jv-act` cargoRoot/subdir and `piper-tts` missing
-  `pathvalidate` — both fixed and re-built green.
-- ✅ **GRUB boot change** evaluates; theme derivation builds.
-- ⚠️ Full toplevel did not fully complete in WSL: the CUDA/NVIDIA blobs hit
-  "cannot download from any mirror" (flaky vendor servers, not our code —
-  re-run resolves; noted in runbook C).
+- ✅ **The complete system builds and closes** — first real `nix build`
+  (evaluated before, never built): `nixos-system-ares` with grub-2.12 +
+  os-prober + our theme, CUDA llama-cpp, NVIDIA driver, wine, and all six
+  jv-* services + jarvisd + jv-act; `switch-to-configuration` uses grub.
+  **It found two genuine build bugs CI could not** (eval-only): `jv-act`
+  cargoRoot/subdir and `piper-tts` missing `pathvalidate` — both fixed
+  and re-built green. (CUDA/NVIDIA blob downloads are flaky from this
+  connection; first attempt failed on them, a retry completed — runbook C
+  notes to re-run `nixos-install` on a transient fetch drop.)
+- ✅ **GRUB boot change** is in the built system (theme + os-prober in the
+  closure, bootloader uses grub).
 
 **Pens-down on code until ares boots.** First-run-on-ares items: GRUB
 menu rendering + Windows chainload, `nixos-install` + bootloader, and
