@@ -17,7 +17,8 @@ stretch, 2026-08-22.
 | 2 | `services/jv-act` (Rust) — **REVIEW-REQUIRED** | **BUILT + TESTED, NOT WIRED** — registry TOML (11 tools, observe/benign only), validation gauntlet, confirm flow (yes/no/timeout all tested), append-only audit + `jv act-log`, `jv confirm`; 11 tests + clippy clean; **deliberately absent from jarvis-services.nix until Ofek reads every line** |
 | 3 | jv-brain v1 tool calling | **DONE** — registry-driven OpenAI tool defs, tool loop off the frame reader (no deadlock), 5-call cap, hallucinated tools never reach act (counted in health metrics), results fed back for spoken summaries; 15 tests |
 | 4 | jv-compat + jv-guard + windows-compat.nix | **DONE** — fingerprint (nsis/inno/msi/arch from headers), recipes (default-deny grants), bwrap confinement argv, fail-closed pipeline; guard verdict logic + EICAR + no-engine=no-verdict; windows-compat.nix completed (binfmt, wine/umu/bottles, clamav); 15 tests |
-| 5 | Greeting v0 | not started |
+| 5 | Greeting v0 | **DONE** — time-of-day + name-if-known, session-start via jv-greeting oneshot unit |
+| 6 | First-boot onboarding (added mid-stretch) | **DONE** — de-hardcoded system.md (profile injected at prompt time), profile.json semantic-seed store, spoken meeting via dialog.listen (name + pronunciation confirm), name corrections as facts, follow-up trickle, `jv-onboard --reset`; 23 brain tests |
 
 ## Waiting for the machine
 

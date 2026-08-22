@@ -102,9 +102,26 @@ let
     jarvis-bus
     httpx
   ]);
+
+  jv-context = mkLocal "jv-context" ../services/jv-context (with py.pkgs; [
+    jarvis-bus
+    psutil
+  ]);
+
+  jv-guard = mkLocal "jv-guard" ../services/jv-guard (with py.pkgs; [
+    jarvis-bus
+    httpx
+  ]);
+
+  jv-compat = mkLocal "jv-compat" ../services/jv-compat [ jarvis-bus ];
 in
 {
   earsEnv = py.withPackages (_: [ jv-ears ]);
   voiceEnv = py.withPackages (_: [ jv-voice ]);
   brainEnv = py.withPackages (_: [ jv-brain ]);
+  contextEnv = py.withPackages (_: [ jv-context ]);
+  guardEnv = py.withPackages (_: [ jv-guard ]);
+  compatEnv = py.withPackages (_: [ jv-compat ]);
+  # NOTE: jv-act (Rust) is intentionally NOT built into any service env
+  # here and NOT given a systemd unit — REVIEW-REQUIRED (invariant 3).
 }

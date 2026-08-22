@@ -60,10 +60,6 @@ in
     "d ${modelsDir} 0775 root jarvis -"
   ];
 
-  environment.systemPackages = [
-    jarvisd # also provides the jv debug CLI
-  ];
-
   # ------------------------------------------------------------- system
 
   systemd.services.jarvisd = {
@@ -102,7 +98,7 @@ in
   };
 
   systemd.services.jv-brain = {
-    description = "Jarvis brain v0 (conversation only)";
+    description = "Jarvis brain v1 (conversation + tool calling)";
     wantedBy = [ "multi-user.target" ];
     wants = [ "jarvisd.service" "jv-llm.service" ];
     after = [ "jarvisd.service" "jv-llm.service" ];
@@ -112,8 +108,48 @@ in
       Group = "jarvis";
       ExecStart = "${pyEnvs.brainEnv}/bin/jv-brain";
       ReadOnlyPaths = [ "/run/jarvis-llm" ];
+      # user profile (who the user is) lives here — writable, private
+      StateDirectory = "jarvis/brain";
+      Environment = [ "JARVIS_STATE_DIR=/var/lib/jarvis" ];
     };
   };
+
+  systemd.services.jv-guard = {
+    description = "Jarvis guard (screens Windows binaries)";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "jarvisd.service" ];
+    after = [ "jarvisd.service" ];
+    path = [ pkgs.clamav ];
+    environment = commonEnv;
+    serviceConfig = harden // {
+      User = "jv-guard";
+      Group = "jarvis";
+      ExecStart = "${pyEnvs.guardEnv}/bin/jv-guard";
+    };
+  };
+
+  users.users.jv-guard = {
+    isSystemUser = true;
+    group = "jarvis";
+  };
+
+  # jv-context runs in the user session (compositor IPC + PipeWire).
+  systemd.user.services.jv-context = {
+    description = "Jarvis context (window events + system snapshot)";
+    wantedBy = [ "default.target" ];
+    unitConfig.ConditionUser = "ofek";
+    environment = commonEnv;
+    serviceConfig = {
+      ExecStart = "${pyEnvs.contextEnv}/bin/jv-context";
+      Restart = "on-failure";
+      RestartSec = 2;
+    };
+  };
+
+  # jv-compat is on-demand (jv-compat install <path>), reachable via
+  # binfmt/MIME — no persistent unit. jv-act is deliberately ABSENT:
+  # REVIEW-REQUIRED (invariant 3). Both onboarding + greeting use jv-brain.
+  environment.systemPackages = [ jarvisd pyEnvs.compatEnv ];
 
   # --------------------------------------------------------------- user
   # PipeWire is a session service; ears and voice follow it. ConditionUser
@@ -140,6 +176,28 @@ in
       ExecStart = "${pyEnvs.voiceEnv}/bin/jv-voice";
       Restart = "on-failure";
       RestartSec = 2;
+    };
+  };
+
+  # Greeting / onboarding trigger: on session start, ask the brain to
+  # greet (or, on first boot, meet the user). A oneshot that publishes
+  # one brain.request(source=system). jv publishes then exits.
+  # TODO(machine): needs jv-ears/voice up; ordering verified on ares.
+  systemd.user.services.jv-greeting = {
+    description = "Jarvis greeting / first-boot onboarding trigger";
+    wantedBy = [ "default.target" ];
+    after = [ "jv-voice.service" ];
+    unitConfig.ConditionUser = "ofek";
+    environment = commonEnv;
+    serviceConfig = {
+      Type = "oneshot";
+      # small settle so voice/ears are subscribed before we speak
+      ExecStartPre = "${pkgs.coreutils}/bin/sleep 3";
+      ExecStart =
+        "${jarvisd}/bin/jv pub brain.request "
+        + "--src jv-session --body '"
+        + builtins.toJSON { text = "session_start"; source = "system"; conversation_id = "system"; speak = false; }
+        + "'";
     };
   };
 }

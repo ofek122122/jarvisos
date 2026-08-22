@@ -17,7 +17,9 @@ import httpx
 
 from jarvis_bus import BusClient
 
+from . import onboarding
 from .config import BrainConfig
+from .profile import Profile
 from .tools import load_tools, openai_tool_defs
 
 HEALTH_PERIOD_S = 5.0
@@ -37,6 +39,28 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 def strip_wake_prefix(text: str) -> str:
     stripped = _WAKE_PREFIX.sub("", text, count=1).strip()
     return stripped if stripped else text.strip()
+
+
+_YES = {"yes", "yeah", "yep", "yup", "correct", "right", "that's right", "perfect"}
+_NO = {"no", "nope", "wrong", "not quite", "not right", "incorrect"}
+
+
+def _yes_no(text: str) -> Optional[bool]:
+    n = " ".join(
+        "".join(c for c in text.lower() if c.isalnum() or c.isspace() or c == "'").split()
+    )
+    if n in _YES or n.startswith("yes"):
+        return True
+    if n in _NO or n.startswith("no"):
+        return False
+    return None
+
+
+def _now_iso() -> str:
+    try:
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    except (OSError, ValueError):
+        return "1970-01-01T00:00:00Z"
 
 
 class Conversation:
@@ -71,7 +95,8 @@ class BrainService:
     def __init__(self, bus: BusClient, cfg: BrainConfig) -> None:
         self.bus = bus
         self.cfg = cfg
-        self.system_prompt = self._load_system_prompt()
+        self.profile = Profile.load()
+        self.system_template = self._load_system_template()
         self.conversations: dict[str, Conversation] = {}
         self._started = time.monotonic()
         self._http = httpx.AsyncClient(timeout=cfg.request_timeout_s)
@@ -80,12 +105,26 @@ class BrainService:
         self.tool_defs = openai_tool_defs(self.tools)
         self._pending_results: dict[str, asyncio.Future] = {}
         self._hallucinated_calls = 0
+        # onboarding + follow-up state
+        self._onboarding_stage: Optional[str] = None
+        self._onboarding_name: Optional[str] = None
+        self._followup_asked_this_session = False
 
-    def _load_system_prompt(self) -> str:
+    def _load_system_template(self) -> str:
         path = self.cfg.personality_dir / "system.md"
         text = path.read_text(encoding="utf-8")
         # Strip HTML comments (repo annotations, not personality).
         return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL).strip()
+
+    @property
+    def system_prompt(self) -> str:
+        """Template + the profile's 'About your user' block, assembled
+        fresh each call so a name learned mid-session takes effect at
+        once. Nothing about the user is baked into the template."""
+        return (
+            f"{self.system_template}\n\n## About your user\n"
+            f"{self.profile.render_about_user()}"
+        )
 
     def _rung(self) -> tuple[Optional[int], str]:
         """(rung index, backend) as recorded by jv-llm-launch."""
@@ -189,6 +228,111 @@ class BrainService:
                     content = await self._run_tool(fname, fargs, utterance_id)
                 conv.add_raw({"role": "tool", "tool_call_id": tc_id, "content": content})
 
+    async def _speak(self, text: str, reply_to: Optional[str] = None) -> None:
+        await self.bus.publish(
+            "speech.say",
+            {"text": text, "say_id": str(uuid.uuid4()), "in_reply_to_utterance": reply_to},
+        )
+
+    async def _request_listen(self, reason: str, window_s: float = 12.0) -> None:
+        await self.bus.publish(
+            "dialog.listen",
+            {"listen_id": str(uuid.uuid4()), "window_s": window_s, "reason": reason},
+        )
+
+    # ------------------------------------------------- session start
+
+    async def _handle_session_start(self) -> None:
+        """Greeting v0, or first-boot onboarding if we've never met the
+        user. Triggered by brain.request(source=system, text=session_start)."""
+        if not self.profile.exists() and not self.profile.onboarding_complete:
+            self._onboarding_stage = "await_name"
+            await self._speak(onboarding.INTRO)
+            await self._request_listen("onboarding", 20.0)
+            return
+        await self._speak(self._greeting_text())
+
+    def _greeting_text(self) -> str:
+        """Time-of-day + name if known. Generic until onboarding is done
+        (requirement 4). A fuller LLM-phrased greeting is fine later; v0
+        keeps it deterministic and testable."""
+        try:
+            hour = time.localtime().tm_hour
+        except (OSError, ValueError):
+            hour = 12
+        part = "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
+        name = self.profile.name
+        return f"Good {part}, {name}. What can I do for you?" if name else f"Good {part}."
+
+    # ------------------------------------------------- onboarding turns
+
+    async def _handle_onboarding(self, text: str, utterance_id: Optional[str]) -> None:
+        stage = self._onboarding_stage
+        if stage and stage.startswith("followup:"):
+            # A trickle answer: store it as a free-form fact, briefly
+            # acknowledge, done. A non-answer ("nothing"/silence handled
+            # upstream by the window closing) is simply not stored.
+            fid = stage.split(":", 1)[1]
+            self._onboarding_stage = None
+            if _yes_no(text) is None and text.strip():
+                self.profile.set_fact(fid, text.strip(), "preference", _now_iso(), "followup")
+                self.profile.save()
+                await self._speak("Noted. Thanks.", utterance_id)
+            return
+        if stage == "await_name":
+            name = onboarding.extract_name(text) or await self._llm_extract_name(text)
+            if not name:
+                await self._speak(onboarding.ask_again(), utterance_id)
+                await self._request_listen("onboarding", 20.0)
+                return
+            self._onboarding_name = name
+            self._onboarding_stage = "confirm_pron"
+            await self._speak(onboarding.confirm_pronunciation(name), utterance_id)
+            await self._request_listen("onboarding", 12.0)
+        elif stage == "confirm_pron":
+            ans = _yes_no(text)
+            if ans is True:
+                now = _now_iso()
+                self.profile.set_fact("name", self._onboarding_name, "name", now, "onboarding")
+                self.profile.set_fact(
+                    "pronunciation", self._onboarding_name, "pronunciation", now, "onboarding"
+                )
+                self.profile.onboarding_complete = True
+                self.profile.save()
+                self._onboarding_stage = None
+                await self._speak(onboarding.welcome(self._onboarding_name), utterance_id)
+            else:
+                # got it wrong (or unclear) — ask for the name again
+                self._onboarding_stage = "await_name"
+                await self._speak(onboarding.ask_again(), utterance_id)
+                await self._request_listen("onboarding", 20.0)
+
+    async def _llm_extract_name(self, text: str) -> Optional[str]:
+        """Fallback name extraction via the LLM when rules miss."""
+        try:
+            resp = await self._http.post(
+                f"{self.cfg.llm_url}/v1/chat/completions",
+                json={
+                    "model": self.cfg.model_name,
+                    "messages": [
+                        {"role": "system", "content": "Extract only the person's name "
+                         "from the message. Reply with the name alone, or NONE."},
+                        {"role": "user", "content": text},
+                    ],
+                    "max_tokens": 12,
+                    "temperature": 0.0,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
+            )
+            resp.raise_for_status()
+            out = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            cand = out.split()[0] if out else ""
+            if cand and cand.upper() != "NONE" and cand.isalpha():
+                return cand.capitalize()
+        except (httpx.HTTPError, KeyError, ValueError, IndexError):
+            pass
+        return None
+
     async def _handle_input(
         self,
         text: str,
@@ -197,6 +341,23 @@ class BrainService:
         speak: bool,
         in_reply_to: dict,
     ) -> None:
+        # Session-start trigger (greeting / onboarding).
+        if conversation_id == "system" and text == "session_start":
+            await self._handle_session_start()
+            return
+        # Mid-onboarding: answers route to the interview, not the LLM.
+        if self._onboarding_stage is not None:
+            await self._handle_onboarding(text, utterance_id)
+            return
+        # A name correction at any time updates the profile (a fact).
+        if (corrected := onboarding.detect_name_correction(text)) and self.profile.name:
+            now = _now_iso()
+            self.profile.set_fact("name", corrected, "name", now, "correction")
+            self.profile.set_fact("pronunciation", corrected, "pronunciation", now, "correction")
+            self.profile.save()
+            await self._speak(f"Got it — {corrected}. I'll remember that.", utterance_id)
+            return
+
         conv = self.conversations.setdefault(conversation_id, Conversation(self.cfg))
         conv.add("user", text, time.monotonic())
         t0 = time.monotonic()
@@ -240,6 +401,24 @@ class BrainService:
                     "in_reply_to_utterance": utterance_id,
                 },
             )
+
+        # Follow-up trickle (v0 heuristic): at most one pending question
+        # per session, only via voice, only after a completed exchange —
+        # never at greeting or first boot. (§05 pause detection is Phase 4.)
+        if (
+            speak
+            and conversation_id == "voice"
+            and not self._followup_asked_this_session
+            and self.profile.onboarding_complete
+            and self.profile.pending_questions
+        ):
+            self._followup_asked_this_session = True
+            q = self.profile.pop_pending()
+            self.profile.save()
+            self._followup_id = q["id"]
+            self._onboarding_stage = f"followup:{q['id']}"
+            await self._speak(q["prompt"])
+            await self._request_listen("followup", 15.0)
 
     async def _health(self, state: str = "ok", notes: Optional[str] = None) -> None:
         rung, backend = self._rung()

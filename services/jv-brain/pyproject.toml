@@ -11,6 +11,7 @@ dependencies = [
 [project.scripts]
 jv-brain = "jv_brain.main:cli"
 jv-llm-launch = "jv_brain.launcher:cli"
+jv-onboard = "jv_brain.main:onboard_cli"
 
 [build-system]
 requires = ["setuptools>=64"]
