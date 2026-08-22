@@ -13,6 +13,7 @@
 let
   pyEnvs = import ../nix/jarvis-python.nix { inherit pkgs; };
   jarvisd = self.packages.x86_64-linux.jarvisd;
+  jv-act = self.packages.x86_64-linux.jv-act;
   llama = pkgs.llama-cpp.override { cudaSupport = true; };
 
   busSock = "/run/jarvis/bus.sock";
@@ -40,6 +41,10 @@ in
   # readable by every service, writable by none (invariant 9).
   environment.etc."jarvis/personality/system.md".source = ../personality/system.md;
   environment.etc."jarvis/personality/voice.toml".source = ../personality/voice.toml;
+
+  # The jv-act tool registry — reviewed like code (invariant 3), the
+  # authoritative capability table. /etc, read-only.
+  environment.etc."jarvis/tools.toml".source = ../services/jv-act/tools.toml;
 
   users.users.jarvisd = {
     isSystemUser = true;
@@ -146,10 +151,33 @@ in
     };
   };
 
+  # jv-act — REVIEW-PASSED 2026-08-22, now wired. User session: its
+  # executors drive the compositor (niri msg), PipeWire (wpctl/playerctl)
+  # and launch .desktop apps, all of which live in the session. It has
+  # NO uinput and NO shell tool in v0. The registry at /etc/jarvis/
+  # tools.toml is authoritative; the audit log is under the user's state.
+  systemd.user.services.jv-act = {
+    description = "Jarvis act (the privileged service — capability-gated tools)";
+    wantedBy = [ "default.target" ];
+    after = [ "jv-context.service" ];
+    unitConfig.ConditionUser = "ofek";
+    path = with pkgs; [
+      niri wireplumber playerctl fd ripgrep xdg-utils systemd
+    ];
+    environment = commonEnv // {
+      JARVIS_ACT_AUDIT = "%S/jarvis-act/audit.jsonl";
+    };
+    serviceConfig = {
+      ExecStart = "${jv-act}/bin/jv-act --registry /etc/jarvis/tools.toml";
+      StateDirectory = "jarvis-act";
+      Restart = "on-failure";
+      RestartSec = 2;
+    };
+  };
+
   # jv-compat is on-demand (jv-compat install <path>), reachable via
-  # binfmt/MIME — no persistent unit. jv-act is deliberately ABSENT:
-  # REVIEW-REQUIRED (invariant 3). Both onboarding + greeting use jv-brain.
-  environment.systemPackages = [ jarvisd pyEnvs.compatEnv ];
+  # binfmt/MIME — no persistent unit.
+  environment.systemPackages = [ jarvisd jv-act pyEnvs.compatEnv ];
 
   # --------------------------------------------------------------- user
   # PipeWire is a session service; ears and voice follow it. ConditionUser

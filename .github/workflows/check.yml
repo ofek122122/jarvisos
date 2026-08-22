@@ -43,8 +43,10 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: services/jarvisd
-      - name: jv-act tests (mock executor, real broker)
+          workspaces: |
+            services/jarvisd
+            services/jv-act
+      - name: jv-act tests (mock executor, real broker + argv unit tests)
         run: cargo test --locked
         working-directory: services/jv-act
       - name: jv-act clippy

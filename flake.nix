@@ -35,6 +35,18 @@
           cargoLock.lockFile = ./services/jarvisd/Cargo.lock;
           meta.mainProgram = "jarvisd";
         };
+        # jv-act — the privileged service. REVIEW-PASSED 2026-08-22.
+        # It depends on the jarvisd crate as its bus library (path dep
+        # ../jarvisd), so src is services/ (both crates as siblings) and
+        # we build the jv-act subdir.
+        jv-act = pkgs.rustPlatform.buildRustPackage {
+          pname = "jv-act";
+          version = "0.1.0";
+          src = ./services;
+          buildAndTestSubdir = "jv-act";
+          cargoLock.lockFile = ./services/jv-act/Cargo.lock;
+          meta.mainProgram = "jv-act";
+        };
         cuda-smoke = pkgs.callPackage ./pkgs/cuda-smoke { };
         jarvis-doctor = pkgs.callPackage ./pkgs/jarvis-doctor {
           cuda-smoke = self.packages.${system}.cuda-smoke;

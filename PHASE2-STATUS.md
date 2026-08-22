@@ -3,18 +3,35 @@
 Tracking per [`BRIEF-phase2.md`](BRIEF-phase2.md). Overnight autonomous
 stretch, 2026-08-22.
 
-> ## ⚠ REVIEW-REQUIRED: jv-act
-> The entire `services/jv-act` commit series (registry TOML included) is
-> built and tested but **must not run anywhere before Ofek has read
-> every line** (CLAUDE.md invariant 3, BRIEF-phase2 exit item 8). It is
-> deliberately NOT wired into `modules/jarvis-services.nix` until that
-> review happens.
+> ## ✅ REVIEW-PASSED: jv-act (2026-08-22)
+> Ofek + advisor read `services/jv-act` line by line. Architecture
+> approved; four required fixes applied and tested (see below). jv-act is
+> now **wired** into `modules/jarvis-services.nix` as a user-session unit
+> with the authoritative registry at `/etc/jarvis/tools.toml`.
+>
+> Review fixes, each with a regression test:
+> 1. **Confirm/transcript correlation tightened** — at most one confirm
+>    outstanding (a second destructive intent is `denied`); voice answers
+>    accepted only when the transcript's envelope ts is inside the open
+>    window. Tests: `stray_yes_no_with_no_window_open_is_ignored`,
+>    `voice_answer_outside_the_window_is_ignored`,
+>    `second_destructive_denied_while_one_pends`. (Airtight fix — a
+>    `listen_id` on `audio.transcript` — logged for the next schema bump.)
+> 2. **`window.move_workspace` keeps its window_id** — focus-then-move,
+>    tested in `move_workspace_keeps_the_window_id`.
+> 3. **Flag injection closed** — `--` terminator before every user
+>    positional; `open.item` rejects leading-dash targets. Tests:
+>    `user_positionals_are_flag_guarded`, `open_item_rejects_flag_targets`.
+> 4. **Audit-before-execute** — an intent line is written before any
+>    execution and a failed write refuses the action; outcome line after.
+>    Test: `benign_tool_executes_and_audits` asserts the intent→outcome
+>    ordering.
 
 | # | Item | Status |
 |---|---|---|
 | 0 | Additive schemas (8 new topics incl. dialog.listen) | **DONE** — CI green |
 | 1 | `services/jv-context` (Python) | **DONE** — niri event-stream backend (TODO(machine) field-verify) + mock for CI; pre-seeded privacy blocklist tested (keepass/bitwarden/1password/private/incognito); 1 Hz snapshots; 13 tests |
-| 2 | `services/jv-act` (Rust) — **REVIEW-REQUIRED** | **BUILT + TESTED, NOT WIRED** — registry TOML (11 tools, observe/benign only), validation gauntlet, confirm flow (yes/no/timeout all tested), append-only audit + `jv act-log`, `jv confirm`; 11 tests + clippy clean; **deliberately absent from jarvis-services.nix until Ofek reads every line** |
+| 2 | `services/jv-act` (Rust) — **REVIEW-PASSED + WIRED** | registry TOML (11 tools, observe/benign only), validation gauntlet, confirm flow, audit + `jv act-log`/`jv confirm`; **4 review fixes applied**; 18 tests (6 unit + 12 integration) + clippy clean; wired as a user-session unit |
 | 3 | jv-brain v1 tool calling | **DONE** — registry-driven OpenAI tool defs, tool loop off the frame reader (no deadlock), 5-call cap, hallucinated tools never reach act (counted in health metrics), results fed back for spoken summaries; 15 tests |
 | 4 | jv-compat + jv-guard + windows-compat.nix | **DONE** — fingerprint (nsis/inno/msi/arch from headers), recipes (default-deny grants), bwrap confinement argv, fail-closed pipeline; guard verdict logic + EICAR + no-engine=no-verdict; windows-compat.nix completed (binfmt, wine/umu/bottles, clamav); 15 tests |
 | 5 | Greeting v0 | **DONE** — time-of-day + name-if-known, session-start via jv-greeting oneshot unit |

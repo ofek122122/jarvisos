@@ -3,13 +3,19 @@
 //! Flow per intent.action:
 //!   validate tool → validate args → re-derive capability from the
 //!   registry (mismatch = reject) → confirm if destructive+ (blocks the
-//!   REQUEST, never the service) → execute with timeout → action.result
-//!   → audit line. Denials and rejections are audited too.
+//!   REQUEST, never the service) → AUDIT INTENT (refuse if it can't be
+//!   logged) → execute with timeout → action.result → audit outcome.
 //!
-//! Confirmation: publish action.confirm{kind=request} + dialog.listen
-//! (scoped no-wake window, reason=confirm), then wait for the first of:
-//! a yes/no-class transcript final, an action.confirm{kind=answer} from
-//! the CLI, or the timeout (=> denied, answered_by=timeout).
+//! Confirmation (destructive+): at most ONE confirmation is outstanding
+//! at a time — a second destructive intent while one pends is denied.
+//! We publish action.confirm{kind=request} + dialog.listen (scoped
+//! no-wake window, reason=confirm), then wait for the first of: a
+//! yes/no-class transcript final WHOSE ENVELOPE ts FALLS INSIDE THE OPEN
+//! WINDOW, an action.confirm{kind=answer} from the CLI, or the timeout
+//! (=> denied). A stray "no" from ordinary conversation cannot resolve a
+//! confirm: there is at most one window, and the transcript must land
+//! inside its [start, start+window_s]. (The airtight fix — a listen_id
+//! on audio.transcript — is logged in DECISIONS for the next schema bump.)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,7 +26,7 @@ use jarvisd::client::BusClient;
 use jarvisd::time::mono_now;
 use tokio::sync::{oneshot, Mutex};
 
-use crate::audit::{AuditEntry, AuditLog, ConfirmAudit, now_iso};
+use crate::audit::{now_iso, AuditEntry, AuditLog, ConfirmAudit};
 use crate::exec::{ExecError, Executor};
 use crate::registry::Registry;
 
@@ -58,6 +64,8 @@ pub fn classify_answer(text: &str) -> Option<bool> {
 
 struct Pending {
     tx: oneshot::Sender<(bool, &'static str)>, // (granted, answered_by)
+    window_start: f64,
+    window_end: f64,
 }
 
 pub struct ActService {
@@ -65,11 +73,22 @@ pub struct ActService {
     executor: Arc<dyn Executor>,
     audit: Arc<AuditLog>,
     cfg: ActConfig,
+    // At most one entry (single-outstanding-confirmation invariant), but a
+    // map keeps request_id correlation explicit for the CLI answer path.
     pending: Arc<Mutex<HashMap<String, Pending>>>,
 }
 
 fn get<'a>(frame: &'a rmpv::Value, key: &str) -> Option<&'a rmpv::Value> {
     frame.as_map()?.iter().find(|(k, _)| k.as_str() == Some(key)).map(|(_, v)| v)
+}
+
+fn as_f64(v: &rmpv::Value) -> Option<f64> {
+    match v {
+        rmpv::Value::F64(f) => Some(*f),
+        rmpv::Value::F32(f) => Some(*f as f64),
+        rmpv::Value::Integer(i) => i.as_f64(),
+        _ => None,
+    }
 }
 
 fn body_json(frame: &rmpv::Value) -> serde_json::Value {
@@ -136,33 +155,30 @@ impl ActService {
                 "action.confirm" => {
                     let body = body_json(&frame);
                     if body.get("kind").and_then(|v| v.as_str()) == Some("answer") {
-                        // CLI-sourced answer; ours carry answered_by we set.
-                        if let (Some(rid), Some(granted)) = (
+                        // Only the CLI's OWN answers (answered_by=cli) are
+                        // acted on; act's own request/answer echoes are
+                        // ignored here (they set answered_by=voice/timeout).
+                        if let (Some(rid), Some(granted), Some("cli")) = (
                             body.get("request_id").and_then(|v| v.as_str()),
                             body.get("granted").and_then(|v| v.as_bool()),
+                            body.get("answered_by").and_then(|v| v.as_str()),
                         ) {
-                            let by = body.get("answered_by").and_then(|v| v.as_str());
-                            if by == Some("cli") {
-                                self.resolve(rid, granted, "cli").await;
-                            }
+                            self.resolve_cli(rid, granted).await;
                         }
                     }
                 }
                 "audio.transcript" => {
+                    // A yes/no final only counts if it lands inside the
+                    // ONE open confirm window (envelope ts vs the window).
+                    let ts = get(&frame, "ts").and_then(as_f64);
                     let body = body_json(&frame);
                     let is_final = body.get("kind").and_then(|v| v.as_str()) == Some("final");
                     if is_final {
-                        if let Some(text) = body.get("text").and_then(|v| v.as_str()) {
+                        if let (Some(text), Some(ts)) =
+                            (body.get("text").and_then(|v| v.as_str()), ts)
+                        {
                             if let Some(granted) = classify_answer(text) {
-                                // First pending request wins; v0 has at
-                                // most one confirm outstanding in practice.
-                                let rid = {
-                                    let g = self.pending.lock().await;
-                                    g.keys().next().cloned()
-                                };
-                                if let Some(rid) = rid {
-                                    self.resolve(&rid, granted, "voice").await;
-                                }
+                                self.resolve_voice(granted, ts).await;
                             }
                         }
                     }
@@ -174,9 +190,26 @@ impl ActService {
         Ok(())
     }
 
-    async fn resolve(&self, request_id: &str, granted: bool, by: &'static str) {
+    /// CLI answer: explicit by request_id, so no time check needed.
+    async fn resolve_cli(&self, request_id: &str, granted: bool) {
         if let Some(p) = self.pending.lock().await.remove(request_id) {
-            let _ = p.tx.send((granted, by));
+            let _ = p.tx.send((granted, "cli"));
+        }
+    }
+
+    /// Voice answer: accept only if the single pending confirm's window
+    /// is open at the transcript's timestamp. A yes/no with no window
+    /// open, or one landing outside the window, is ignored.
+    async fn resolve_voice(&self, granted: bool, ts: f64) {
+        let mut g = self.pending.lock().await;
+        let hit = g
+            .iter()
+            .find(|(_, p)| p.window_start <= ts && ts <= p.window_end)
+            .map(|(rid, _)| rid.clone());
+        if let Some(rid) = hit {
+            if let Some(p) = g.remove(&rid) {
+                let _ = p.tx.send((granted, "voice"));
+            }
         }
     }
 
@@ -208,59 +241,88 @@ impl ActService {
                 }
             };
 
+            // Audit helper: log-on-error for non-critical (rejection /
+            // outcome) lines. The CRITICAL intent line is handled inline
+            // and refuses execution on failure.
+            let audit_soft = |entry: AuditEntry| {
+                if let Err(e) = audit.append(&entry) {
+                    tracing::error!("audit write failed: {e}");
+                }
+            };
+
+            let mk = |outcome: &str, cap: &str, confirm: Option<ConfirmAudit>, detail: Option<String>| AuditEntry {
+                ts: now_iso(), ts_mono: t0, request_id: rid.clone(), tool: tool.clone(),
+                args: args.clone(), capability: cap.to_string(), outcome: outcome.to_string(),
+                duration_ms: (mono_now() - t0) * 1e3, confirm, detail,
+            };
+
             let mut confirm_audit: Option<ConfirmAudit> = None;
 
             // -------- validation gauntlet
             let spec = match registry.get(&tool) {
                 Some(s) => s.clone(),
                 None => {
-                    // hallucinated tool: reject, audit, done
                     send("action.result", serde_json::json!({
                         "request_id": rid, "ok": false, "duration_ms": (mono_now()-t0)*1e3,
                         "error": "unknown_tool",
                         "detail": format!("no tool named '{tool}' in the registry"),
                     }), &out).await;
-                    let _ = audit.append(&AuditEntry {
-                        ts: now_iso(), ts_mono: t0, request_id: rid, tool, args,
-                        capability: "unknown".into(), outcome: "unknown_tool".into(),
-                        duration_ms: (mono_now() - t0) * 1e3, confirm: None, detail: None,
-                    });
+                    audit_soft(mk("unknown_tool", "unknown", None, None));
                     return;
                 }
             };
+            let cap = spec.capability.as_str();
 
             if let Err(msg) = Registry::validate_args(&spec, &args) {
                 send("action.result", serde_json::json!({
                     "request_id": rid, "ok": false, "duration_ms": (mono_now()-t0)*1e3,
                     "error": "invalid_args", "detail": msg,
                 }), &out).await;
-                let _ = audit.append(&AuditEntry {
-                    ts: now_iso(), ts_mono: t0, request_id: rid, tool, args,
-                    capability: spec.capability.as_str().into(), outcome: "invalid_args".into(),
-                    duration_ms: (mono_now() - t0) * 1e3, confirm: None, detail: None,
-                });
+                audit_soft(mk("invalid_args", cap, None, None));
                 return;
             }
 
-            if !claimed_cap.is_empty() && claimed_cap != spec.capability.as_str() {
+            if !claimed_cap.is_empty() && claimed_cap != cap {
                 send("action.result", serde_json::json!({
                     "request_id": rid, "ok": false, "duration_ms": (mono_now()-t0)*1e3,
                     "error": "capability_mismatch",
-                    "detail": format!("claimed {claimed_cap}, registry says {}", spec.capability.as_str()),
+                    "detail": format!("claimed {claimed_cap}, registry says {cap}"),
                 }), &out).await;
-                let _ = audit.append(&AuditEntry {
-                    ts: now_iso(), ts_mono: t0, request_id: rid, tool, args,
-                    capability: spec.capability.as_str().into(),
-                    outcome: "capability_mismatch".into(),
-                    duration_ms: (mono_now() - t0) * 1e3, confirm: None, detail: None,
-                });
+                audit_soft(mk("capability_mismatch", cap, None, None));
                 return;
             }
 
             // -------- confirmation (destructive+, structural rule)
             if spec.capability.needs_confirmation() {
-                let (tx, rx) = oneshot::channel();
-                pending.lock().await.insert(rid.clone(), Pending { tx });
+                // Single-outstanding: reserve the sole confirm slot, or
+                // deny if one is already pending. Reusing the `denied`
+                // error keeps the frozen v1 action.result body unchanged.
+                let rx = {
+                    let mut g = pending.lock().await;
+                    if !g.is_empty() {
+                        None
+                    } else {
+                        let (tx, rx) = oneshot::channel();
+                        let ws = mono_now();
+                        g.insert(rid.clone(), Pending {
+                            tx, window_start: ws, window_end: ws + confirm_window,
+                        });
+                        Some(rx)
+                    }
+                };
+                let rx = match rx {
+                    Some(rx) => rx,
+                    None => {
+                        send("action.result", serde_json::json!({
+                            "request_id": rid, "ok": false,
+                            "duration_ms": (mono_now()-t0)*1e3, "error": "denied",
+                            "detail": "another confirmation is already pending",
+                        }), &out).await;
+                        audit_soft(mk("denied", cap, None,
+                            Some("another confirmation pending".into())));
+                        return;
+                    }
+                };
 
                 send("action.confirm", serde_json::json!({
                     "kind": "request", "request_id": rid, "tool": tool,
@@ -281,7 +343,6 @@ impl ActService {
                         (false, "timeout")
                     }
                 };
-                // publish the answer for observability (incl. timeout)
                 send("action.confirm", serde_json::json!({
                     "kind": "answer", "request_id": rid,
                     "granted": granted, "answered_by": by,
@@ -294,19 +355,27 @@ impl ActService {
                         "request_id": rid, "ok": false, "duration_ms": (mono_now()-t0)*1e3,
                         "error": error,
                     }), &out).await;
-                    let _ = audit.append(&AuditEntry {
-                        ts: now_iso(), ts_mono: t0, request_id: rid, tool, args,
-                        capability: spec.capability.as_str().into(), outcome: error.into(),
-                        duration_ms: (mono_now() - t0) * 1e3, confirm: confirm_audit, detail: None,
-                    });
+                    audit_soft(mk(error, cap, confirm_audit, None));
                     return;
                 }
             }
 
+            // -------- AUDIT INTENT BEFORE EXECUTION (invariant 3 doctrine:
+            // a service that cannot log must not act). If this write
+            // fails, refuse to execute — nothing touches the machine
+            // without a durable record that it was about to.
+            if let Err(e) = audit.append(&mk("intent", cap, confirm_audit.clone(), None)) {
+                tracing::error!("intent audit write failed, refusing to act: {e}");
+                send("action.result", serde_json::json!({
+                    "request_id": rid, "ok": false, "duration_ms": (mono_now()-t0)*1e3,
+                    "error": "execution_failed",
+                    "detail": "audit log unavailable; refusing to act",
+                }), &out).await;
+                return;
+            }
+
             // -------- execute
-            // speak.notify is bus-internal: it publishes speech.say
-            // rather than spawning anything (the one tool whose effect
-            // IS a bus frame).
+            // speak.notify is bus-internal: its effect IS a bus frame.
             if tool == "speak.notify" {
                 let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 send("speech.say", serde_json::json!({
@@ -317,16 +386,12 @@ impl ActService {
                     "request_id": rid, "ok": true,
                     "duration_ms": (mono_now()-t0)*1e3, "output": "spoken",
                 }), &out).await;
-                let _ = audit.append(&AuditEntry {
-                    ts: now_iso(), ts_mono: t0, request_id: rid, tool, args,
-                    capability: spec.capability.as_str().into(), outcome: "ok".into(),
-                    duration_ms: (mono_now() - t0) * 1e3, confirm: confirm_audit, detail: None,
-                });
+                audit_soft(mk("ok", cap, confirm_audit, None));
                 return;
             }
 
             let timeout = Duration::from_millis(spec.timeout_ms);
-            let (outcome, result_body) = match executor.execute(&tool, &args, timeout).await {
+            let (outcome, result_body, detail) = match executor.execute(&tool, &args, timeout).await {
                 Ok(o) => {
                     let mut rb = serde_json::json!({
                         "request_id": rid, "ok": true,
@@ -335,24 +400,20 @@ impl ActService {
                     if let Some(d) = o.data {
                         rb["data"] = d;
                     }
-                    ("ok".to_string(), rb)
+                    ("ok".to_string(), rb, None)
                 }
                 Err(ExecError::Timeout) => ("timeout".into(), serde_json::json!({
                     "request_id": rid, "ok": false,
                     "duration_ms": (mono_now()-t0)*1e3, "error": "timeout",
-                })),
+                }), None),
                 Err(ExecError::Failed(msg)) => ("execution_failed".into(), serde_json::json!({
                     "request_id": rid, "ok": false,
                     "duration_ms": (mono_now()-t0)*1e3,
-                    "error": "execution_failed", "detail": msg,
-                })),
+                    "error": "execution_failed", "detail": msg.clone(),
+                }), Some(msg)),
             };
             send("action.result", result_body, &out).await;
-            let _ = audit.append(&AuditEntry {
-                ts: now_iso(), ts_mono: t0, request_id: rid, tool, args,
-                capability: spec.capability.as_str().into(), outcome,
-                duration_ms: (mono_now() - t0) * 1e3, confirm: confirm_audit, detail: None,
-            });
+            audit_soft(mk(&outcome, cap, confirm_audit, detail));
         });
     }
 }

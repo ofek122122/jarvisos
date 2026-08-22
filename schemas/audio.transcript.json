@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "jarvis:schema/audio.transcript/v1",
   "title": "audio.transcript body v1",
-  "description": "ASR output, partial and final. Publisher: jv-ears (whisper.cpp streaming, CPU). Partials with the same utterance_id supersede each other; exactly one final per utterance_id. Envelope conf = ASR confidence for the text.",
+  "description": "ASR output, partial and final. Publisher: jv-ears (whisper.cpp streaming, CPU). Partials with the same utterance_id supersede each other; exactly one final per utterance_id. Envelope conf = ASR confidence for the text. FUTURE (next version bump, see DECISIONS-approved): add nullable `listen_id` set when produced inside an open dialog.listen window, so confirmation answers bind to windows by id rather than by envelope-ts membership.",
   "type": "object",
   "required": ["kind", "utterance_id", "text", "lang"],
   "additionalProperties": false,

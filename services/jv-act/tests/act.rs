@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use jarvisd::broker::{Broker, BusAddr, Config, Listener};
 use jarvisd::client::BusClient;
+use jarvisd::time::mono_now;
 use jv_act::audit::AuditLog;
 use jv_act::exec::{ExecError, ExecOutput, Executor};
 use jv_act::registry::Registry;
@@ -117,6 +118,26 @@ async fn send_intent(c: &mut BusClient, rid: &str, tool: &str, args: serde_json:
     .unwrap();
 }
 
+/// Publish an audio.transcript final with an EXPLICIT envelope ts, so
+/// tests can place an answer inside or outside a confirm window.
+async fn publish_transcript(c: &mut BusClient, text: &str, ts: f64) {
+    let frame = rmpv::Value::Map(vec![
+        ("topic".into(), "audio.transcript".into()),
+        ("ts".into(), rmpv::Value::F64(ts)),
+        ("seq".into(), rmpv::Value::from(0u64)),
+        ("src".into(), "jv-ears".into()),
+        ("conf".into(), rmpv::Value::F64(0.9)),
+        ("v".into(), rmpv::Value::from(1u64)),
+        (
+            "body".into(),
+            body(serde_json::json!({
+                "kind": "final", "utterance_id": "u", "text": text, "lang": "en",
+            })),
+        ),
+    ]);
+    c.publish_env(frame).await.unwrap();
+}
+
 #[tokio::test]
 async fn benign_tool_executes_and_audits() {
     let rig = rig(15.0).await;
@@ -130,10 +151,17 @@ async fn benign_tool_executes_and_audits() {
     assert_eq!(res["request_id"], "r1");
     assert_eq!(rig.calls.lock().unwrap().len(), 1);
 
+    // Audit doctrine: an INTENT line is written BEFORE execution, then
+    // the outcome line after. Both present, in that order.
     let audit = std::fs::read_to_string(&rig.audit_path).unwrap();
-    let entry: serde_json::Value = serde_json::from_str(audit.lines().next().unwrap()).unwrap();
-    assert_eq!(entry["tool"], "volume.set");
-    assert_eq!(entry["outcome"], "ok");
+    let lines: Vec<serde_json::Value> = audit
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2, "intent + outcome");
+    assert_eq!(lines[0]["outcome"], "intent");
+    assert_eq!(lines[0]["tool"], "volume.set");
+    assert_eq!(lines[1]["outcome"], "ok");
 }
 
 #[tokio::test]
@@ -259,6 +287,89 @@ async fn cli_answer_works() {
     // next_on skips the interleaved confirm echoes and lands on the result
     let res = next_on(&mut c, "action.result").await;
     assert_eq!(res["ok"], true);
+}
+
+#[tokio::test]
+async fn stray_yes_no_with_no_window_open_is_ignored() {
+    // Fix 1: a yes/no from ordinary conversation must not resolve a
+    // confirm that opens later. We fire a stray "yes" with nothing
+    // pending, THEN a destructive intent: it must still ask, proving the
+    // stray answer was not consumed.
+    let rig = rig(15.0).await;
+    let mut c = BusClient::connect(&rig.addr, "t").await.unwrap();
+    c.subscribe(&["action.*"]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // stray yes — no window is open
+    publish_transcript(&mut c, "yes", mono_now()).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(rig.calls.lock().unwrap().is_empty(), "stray yes must do nothing");
+
+    // now a real destructive request: it must still request confirmation
+    send_intent(&mut c, "s1", "trash.empty", serde_json::json!({})).await;
+    let req = next_on(&mut c, "action.confirm").await;
+    assert_eq!(req["kind"], "request");
+
+    // a proper in-window yes now executes it
+    publish_transcript(&mut c, "yes", mono_now()).await;
+    let res = next_on(&mut c, "action.result").await;
+    assert_eq!(res["ok"], true);
+    assert_eq!(rig.calls.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn voice_answer_outside_the_window_is_ignored() {
+    // Fix 1: an answer whose envelope ts predates the open window does
+    // not count — the confirm proceeds to time out.
+    let rig = rig(0.6).await;
+    let mut c = BusClient::connect(&rig.addr, "t").await.unwrap();
+    c.subscribe(&["action.*"]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let before = mono_now() - 100.0; // long before the window opens
+    send_intent(&mut c, "s2", "trash.empty", serde_json::json!({})).await;
+    next_on(&mut c, "action.confirm").await; // request
+
+    // a yes stamped in the past must be rejected by the window check
+    publish_transcript(&mut c, "yes", before).await;
+
+    let ans = next_on(&mut c, "action.confirm").await; // must be the timeout
+    assert_eq!(ans["answered_by"], "timeout");
+    let res = next_on(&mut c, "action.result").await;
+    assert_eq!(res["error"], "confirm_timeout");
+    assert!(rig.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn second_destructive_denied_while_one_pends() {
+    // Fix 1: at most one confirmation outstanding. The second is denied
+    // (reusing the frozen-v1 `denied` error) without a second window.
+    let rig = rig(15.0).await;
+    let mut c = BusClient::connect(&rig.addr, "t").await.unwrap();
+    c.subscribe(&["action.*"]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    send_intent(&mut c, "p1", "trash.empty", serde_json::json!({})).await;
+    let req = next_on(&mut c, "action.confirm").await;
+    assert_eq!(req["request_id"], "p1");
+
+    // second destructive while p1 pends -> denied, no new confirm request
+    send_intent(&mut c, "p2", "trash.empty", serde_json::json!({})).await;
+    let res2 = next_on(&mut c, "action.result").await;
+    assert_eq!(res2["request_id"], "p2");
+    assert_eq!(res2["error"], "denied");
+    assert!(res2["detail"].as_str().unwrap().contains("pending"));
+
+    // p1 can still be answered and executes
+    publish_transcript(&mut c, "yes", mono_now()).await;
+    loop {
+        let res = next_on(&mut c, "action.result").await;
+        if res["request_id"] == "p1" {
+            assert_eq!(res["ok"], true);
+            break;
+        }
+    }
+    assert_eq!(rig.calls.lock().unwrap().len(), 1);
 }
 
 #[test]
