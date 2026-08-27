@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=JarvisOS
+Description=JarvisOS HUD boot splash
+ModuleName=script
+
+[script]
+ImageDir=@THEMEDIR@
+ScriptFile=@THEMEDIR@/jarvis.script

@@ -1,0 +1,138 @@
+# JarvisOS Plymouth splash — the post-GRUB boot sequence, HUD language.
+# Plymouth sprites cannot rotate or scale, so the spin is a pre-rendered
+# frame cycle (progress-0..35.png) and everything is CENTRED on the screen
+# so it holds at any resolution. Text is baked to PNGs at build time — no
+# fonts are needed inside the initrd. The password path is real: the LUKS
+# passphrase prompt is drawn here (label + ember bullets).
+
+# ---- geometry -------------------------------------------------------
+screen_width  = Window.GetWidth(0);
+screen_height = Window.GetHeight(0);
+cx = Window.GetX(0) + screen_width  / 2;
+cy = Window.GetY(0) + screen_height / 2;
+
+# ground (#090D12 top, a touch darker at the bottom)
+Window.SetBackgroundTopColor(0.035, 0.051, 0.071);
+Window.SetBackgroundBottomColor(0.020, 0.031, 0.047);
+
+fun place(sprite, image, dx, dy) {
+    sprite.SetX(cx - image.GetWidth()  / 2 + dx);
+    sprite.SetY(cy - image.GetHeight() / 2 + dy);
+}
+
+# ---- static instrument ---------------------------------------------
+glow_image = Image("glow.png");
+glow = Sprite(glow_image);
+glow.SetZ(0);
+place(glow, glow_image, 0, -80);
+glow.SetOpacity(0.35);
+
+rings_image = Image("rings.png");
+rings = Sprite(rings_image);
+rings.SetZ(1);
+place(rings, rings_image, 0, -80);
+
+core_image = Image("core.png");
+core = Sprite(core_image);
+core.SetZ(3);
+place(core, core_image, 0, -80);
+
+# ---- spinner frames -------------------------------------------------
+num_frames = 36;
+for (i = 0; i < num_frames; i++) {
+    spin_images[i] = Image("progress-" + i + ".png");
+}
+spin = Sprite(spin_images[0]);
+spin.SetZ(2);
+place(spin, spin_images[0], 0, -80);
+
+# ---- wordmark + captions -------------------------------------------
+wordmark_image = Image("wordmark.png");
+wordmark = Sprite(wordmark_image);
+wordmark.SetZ(2);
+place(wordmark, wordmark_image, 0, 150);
+wordmark.SetOpacity(0);
+
+boot_image = Image("label_boot.png");
+boot_label = Sprite(boot_image);
+boot_label.SetZ(2);
+place(boot_label, boot_image, 0, 235);
+boot_label.SetOpacity(0);
+
+unlock_image = Image("label_unlock.png");
+unlock_label = Sprite(unlock_image);
+unlock_label.SetZ(4);
+place(unlock_label, unlock_image, 0, 235);
+unlock_label.SetOpacity(0);
+
+bullet_image = Image("bullet.png");
+
+# ---- animation state ------------------------------------------------
+tick  = 0;
+frame = 0;
+pulse = 0.0;
+fade  = 0.0;
+
+fun refresh() {
+    # advance the spinner every other tick
+    tick++;
+    if (tick >= 2) {
+        tick = 0;
+        frame++;
+        if (frame >= num_frames) frame = 0;
+        spin.SetImage(spin_images[frame]);
+        place(spin, spin_images[frame], 0, -80);
+    }
+
+    # breathe the glow + reticle
+    pulse = pulse + 0.05;
+    a = 0.5 + 0.5 * Math.Sin(pulse);
+    glow.SetOpacity(0.20 + 0.30 * a);
+    core.SetOpacity(0.60 + 0.40 * a);
+
+    # ease the wordmark + boot caption in once
+    if (fade < 1.0) {
+        fade = fade + 0.03;
+        wordmark.SetOpacity(fade);
+        boot_label.SetOpacity(fade);
+    }
+}
+Plymouth.SetRefreshFunction(refresh);
+
+# ---- LUKS passphrase prompt ----------------------------------------
+fun display_password(prompt, bullets) {
+    boot_label.SetOpacity(0);
+    unlock_label.SetOpacity(1);
+
+    # clear any previous bullets
+    for (i = 0; i < 128; i++) {
+        if (bullet_sprites[i]) bullet_sprites[i].SetOpacity(0);
+    }
+
+    step      = bullet_image.GetWidth() + 12;
+    row_width = bullets * step;
+    start_x   = cx - row_width / 2;
+    by        = cy + 300;
+
+    for (i = 0; i < bullets; i++) {
+        if (!bullet_sprites[i]) bullet_sprites[i] = Sprite(bullet_image);
+        bullet_sprites[i].SetX(start_x + i * step);
+        bullet_sprites[i].SetY(by);
+        bullet_sprites[i].SetZ(5);
+        bullet_sprites[i].SetOpacity(1);
+    }
+}
+Plymouth.SetDisplayPasswordFunction(display_password);
+
+fun display_normal() {
+    unlock_label.SetOpacity(0);
+    boot_label.SetOpacity(1);
+    for (i = 0; i < 128; i++) {
+        if (bullet_sprites[i]) bullet_sprites[i].SetOpacity(0);
+    }
+}
+Plymouth.SetDisplayNormalFunction(display_normal);
+
+fun quit() {
+}
+Plymouth.SetQuitFunction(quit);

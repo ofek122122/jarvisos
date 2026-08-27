@@ -12,6 +12,7 @@
     ../../modules/windows-compat.nix
     ../../modules/jarvis-services.nix
     ../../modules/boot-grub.nix
+    ../../modules/boot-plymouth.nix
   ];
 
   networking.hostName = "ares";
