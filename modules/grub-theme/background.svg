@@ -38,8 +38,9 @@
     <circle r="486" fill="none" stroke="#26323B" stroke-width="1.5"/>
     <circle r="392" fill="none" stroke="#212B32" stroke-width="1"/>
     <circle r="205" fill="none" stroke="#26323B" stroke-width="1"/>
-    <!-- tick rings (dashes read as graduations) -->
-    <circle r="300" fill="none" stroke="#64747F" stroke-opacity="0.35" stroke-width="7" stroke-dasharray="2 24"/>
+    <!-- r≈300 graduation is drawn LIVE by circular_progress (theme.txt) so
+         it ticks down with the countdown; only a faint guide ring here. -->
+    <circle r="300" fill="none" stroke="#26323B" stroke-width="1"/>
     <circle r="392" fill="none" stroke="#F0714A" stroke-opacity="0.22" stroke-width="1.5" stroke-dasharray="2 14"/>
     <!-- live-looking accent arcs -->
     <path d="M 0 -392 A 392 392 0 0 1 277 -277" fill="none" stroke="#F0714A" stroke-opacity="0.7" stroke-width="3" stroke-linecap="round"/>

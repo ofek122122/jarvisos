@@ -33,18 +33,32 @@ terminal-top: "0"
     menu_pixmap_style   = ""
 }
 
-# --- countdown to the default entry ----------------------------------
-+ progress_bar {
-    id          = "__timeout__"
-    left        = "7.7%"
-    top         = "80%"
-    width       = "34%"
-    height      = "12"
-    font        = "jbhint Regular 18"
-    text_color  = "#64747F"
-    fg_color    = "#F0714A"
-    bg_color    = "#141B21"
-    border_color = "#26323B"
-    text        = "@TIMEOUT_NOTIFICATION_SHORT@"
-    show_text   = "true"
+# --- countdown: the instrument ticks itself down ---------------------
+# The one thing GRUB can actually animate. Ember ticks sit on the r≈300
+# ring of the baked instrument and disappear one per second as the
+# timeout runs out. Box is centred on the reticle (bg: 77.7% x, 40.8% y)
+# and square in real pixels (640x640) so the ticks form a true circle.
++ circular_progress {
+    id             = "__timeout__"
+    left           = "65.2%"
+    top            = "18.6%"
+    width          = "25%"
+    height         = "44.4%"
+    num_ticks      = "48"
+    ticks_disappear = "true"
+    start_angle    = "-90"
+    center_bitmap  = "hub.png"
+    tick_bitmap    = "tick.png"
+}
+
+# live seconds, under the instrument
++ label {
+    id     = "__timeout__"
+    left   = "60%"
+    top    = "62%"
+    width  = "35%"
+    align  = "center"
+    color  = "#F0714A"
+    font   = "jbhint Regular 18"
+    text   = "@TIMEOUT_NOTIFICATION_SHORT@"
 }

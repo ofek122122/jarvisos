@@ -30,5 +30,16 @@ runCommand "jarvisos-grub-theme" { nativeBuildInputs = [ grub2 resvg ]; } ''
   resvg --skip-system-fonts --use-fonts-dir "$fonts" \
     ${./background.svg} "$out/background.png"
 
+  # Countdown bitmaps for the circular_progress instrument: an ember tick
+  # and a transparent hub (the reticle is already in the background).
+  cat > tick.svg <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="10" height="34"><rect x="2" y="0" width="6" height="30" rx="3" fill="#F0714A"/></svg>
+SVG
+  cat > hub.svg <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="none"/></svg>
+SVG
+  resvg --skip-system-fonts tick.svg "$out/tick.png"
+  resvg --skip-system-fonts hub.svg  "$out/hub.png"
+
   cp ${./theme.txt} "$out/theme.txt"
 ''
