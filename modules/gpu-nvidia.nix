@@ -16,7 +16,10 @@
     # nixpkgs, hard-pin with:
     #   package = config.boot.kernelPackages.nvidiaPackages.mkDriver {
     #     version = "...", sha256_64bit = "...", ... };
-    # RUNNING VERSION: TODO(install-day) — fill from `nvidia-smi`.
+    # RUNNING VERSION: 595.91.07 (nvidia-smi, ares first boot 2026-08-25;
+    # CUDA 13.2, cuda-smoke vecAdd verified). `production` from the current
+    # flake.lock resolves to this. If we ever diverge from nixpkgs, hard-pin
+    # to 595.91.07 with mkDriver (fill the sha256 hashes then).
     package = config.boot.kernelPackages.nvidiaPackages.production;
 
     # Open kernel modules: supported on Turing and required direction for
