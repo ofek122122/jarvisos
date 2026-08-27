@@ -25,9 +25,11 @@ in
     # in the host). Never install to, or as removable on, the NVMe.
     efiInstallAsRemovable = false;
 
-    # The at-every-boot chooser: detect Windows on the NVMe (read-only)
-    # and chainload it.
-    useOSProber = true;
+    # Windows is added explicitly below (extraEntries), NOT via os-prober.
+    # os-prober produced no Windows entry on ares (2026-08-27) even with
+    # this on; a `search --file` chainload is deterministic and reviewable.
+    # Off also means nothing scans/mounts the Windows disks at rebuild time.
+    useOSProber = false;
 
     default = 0; # "JarvisOS - Default" is entry 0
     # No `default = "saved"` and no savedefault: last choice is NOT
@@ -45,19 +47,21 @@ in
     gfxmodeEfi = "2560x1440,auto";
     gfxpayloadEfi = "keep";
 
-    # Documented clean-"Windows" fallback (runbook C). If os-prober does
-    # not detect Windows, OR you prefer the clean name over os-prober's
-    # "Windows Boot Manager (on /dev/…)", drop the real ESP UUID in here
-    # (found on install day) and it appears as a tidy "Windows" entry.
-    # Left empty by default so it never points at a guessed partition.
-    extraEntries = "";
-    # Template (do NOT enable with a guessed UUID — see runbook C):
-    #   menuentry "Windows" --class windows {
-    #     insmod part_gpt
-    #     insmod fat
-    #     insmod chain
-    #     search --fs-uuid --set=root <WINDOWS-ESP-UUID>
-    #     chainloader /EFI/Microsoft/Boot/bootmgfw.efi
-    #   }
+    # Explicit Windows chainload — the at-every-boot chooser's second entry.
+    # `search --file` locates the Windows ESP by the bootloader file itself
+    # (only the 2 TB disk's ESP holds /EFI/Microsoft/Boot/bootmgfw.efi), so
+    # NO install-day UUID is hardcoded and nothing ever points at a guessed
+    # partition. GRUB reads that ESP READ-ONLY to hand off — the one
+    # permitted interaction with the off-limits 2 TB disk (see CLAUDE.md).
+    # Secure Boot is disabled, so bootmgfw.efi chainloads directly.
+    extraEntries = ''
+      menuentry "Windows" --class windows {
+        insmod part_gpt
+        insmod fat
+        insmod chain
+        search --no-floppy --file --set=root /EFI/Microsoft/Boot/bootmgfw.efi
+        chainloader /EFI/Microsoft/Boot/bootmgfw.efi
+      }
+    '';
   };
 }
