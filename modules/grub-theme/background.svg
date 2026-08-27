@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1440" viewBox="0 0 2560 1440" font-family="JetBrains Mono, monospace">
+  <!-- JarvisOS GRUB background. Authored as SVG, rasterised to PNG at build
+       time by resvg (see default.nix) so nothing binary is checked in.
+       Left column is left CLEAR for the live GRUB menu (see theme.txt);
+       everything here is static HUD atmosphere. Palette matches the HUD
+       concept: ground #090D12, ember #F0714A, teal #4FB8BF. -->
+  <defs>
+    <radialGradient id="emberGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#F0714A" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#F0714A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="tealGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#0E6A72" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#0E6A72" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="46%" cy="44%" r="78%">
+      <stop offset="0.5" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.6"/>
+    </radialGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#F0714A"/>
+      <stop offset="1" stop-color="#F0714A" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="82" height="82" patternUnits="userSpaceOnUse">
+      <path d="M82 0 H0 V82" fill="none" stroke="#4FB8BF" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <!-- ground + structural field -->
+  <rect width="2560" height="1440" fill="#090D12"/>
+  <rect width="2560" height="1440" fill="url(#grid)"/>
+  <ellipse cx="1980" cy="330" rx="1350" ry="950" fill="url(#emberGlow)"/>
+  <ellipse cx="320" cy="1320" rx="1150" ry="720" fill="url(#tealGlow)"/>
+
+  <!-- ============ right-side HUD instrument ============ -->
+  <g transform="translate(1988 588)">
+    <!-- concentric structure -->
+    <circle r="486" fill="none" stroke="#26323B" stroke-width="1.5"/>
+    <circle r="392" fill="none" stroke="#212B32" stroke-width="1"/>
+    <circle r="205" fill="none" stroke="#26323B" stroke-width="1"/>
+    <!-- tick rings (dashes read as graduations) -->
+    <circle r="300" fill="none" stroke="#64747F" stroke-opacity="0.35" stroke-width="7" stroke-dasharray="2 24"/>
+    <circle r="392" fill="none" stroke="#F0714A" stroke-opacity="0.22" stroke-width="1.5" stroke-dasharray="2 14"/>
+    <!-- live-looking accent arcs -->
+    <path d="M 0 -392 A 392 392 0 0 1 277 -277" fill="none" stroke="#F0714A" stroke-opacity="0.7" stroke-width="3" stroke-linecap="round"/>
+    <path d="M -486 0 A 486 486 0 0 0 -344 344" fill="none" stroke="#4FB8BF" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round"/>
+    <!-- crosshair with center gap -->
+    <g stroke="#64747F" stroke-opacity="0.3" stroke-width="1">
+      <line x1="-486" y1="0" x2="-44" y2="0"/>
+      <line x1="44" y1="0" x2="486" y2="0"/>
+      <line x1="0" y1="-486" x2="0" y2="-44"/>
+      <line x1="0" y1="44" x2="0" y2="486"/>
+    </g>
+    <!-- reticle core -->
+    <circle r="18" fill="none" stroke="#F0714A" stroke-opacity="0.65" stroke-width="1.5"/>
+    <circle r="5" fill="#F0714A"/>
+    <!-- diegetic captions -->
+    <g fill="#64747F" font-size="19" letter-spacing="2" font-weight="500">
+      <text x="212" y="-352">NODE // ARES</text>
+      <text x="212" y="-322" fill="#4A5762">UEFI · x86-64 · GRUB 2</text>
+      <text x="-486" y="470" fill="#4A5762">0xEF1 // OS-SELECT</text>
+      <text x="250" y="360" fill="#4A5762">SIG&#160;&#160;NOMINAL</text>
+    </g>
+    <circle cx="238" cy="354" r="4" fill="#5BC08D"/>
+  </g>
+
+  <!-- ============ left column (menu renders below the subtitle) ============ -->
+  <!-- eyebrow -->
+  <text x="198" y="300" fill="#F0714A" font-size="21" font-weight="500" letter-spacing="6">// JARVISOS BOOTLOADER</text>
+
+  <!-- wordmark -->
+  <text x="192" y="462" font-size="150" font-weight="700" letter-spacing="1" fill="#E6ECF0">Jarvis<tspan fill="#F0714A">OS</tspan></text>
+
+  <!-- rule + subtitle -->
+  <rect x="200" y="512" width="392" height="3" fill="url(#rule)"/>
+  <text x="200" y="576" fill="#9BAAB4" font-size="24" font-weight="500" letter-spacing="7">SELECT AN OPERATING SYSTEM</text>
+
+  <!-- (live GRUB menu occupies x≈198–1180, y≈660–1090) -->
+
+  <!-- key legend + firmware hint, bottom-left -->
+  <text x="200" y="1246" fill="#64747F" font-size="20" font-weight="500" letter-spacing="3">&#8593;&#8595; MOVE&#160;&#160;&#160;&#160;ENTER BOOT&#160;&#160;&#160;&#160;E EDIT&#160;&#160;&#160;&#160;C CONSOLE</text>
+  <text x="200" y="1286" fill="#4A5762" font-size="18" letter-spacing="2">hold F12 at power-on for the firmware boot menu</text>
+
+  <!-- vignette on top -->
+  <rect width="2560" height="1440" fill="url(#vignette)"/>
+</svg>

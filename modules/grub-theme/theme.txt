@@ -1,52 +1,50 @@
-# JarvisOS GRUB theme — minimal dark. Legibility first at 2560x1440.
-# No distro logos; the accent is the ember selection colour only.
-# Kept as a module so the Phase 5 boot-splash work can evolve it.
-# Palette from docs/blueprint.html: ground #0C1116, ember #C8431F,
-# text #E4EAEE / muted #9FADB7 / faint #4A5762.
+# JarvisOS GRUB theme — sci-fi HUD. The atmosphere (wordmark, grid, the
+# instrument rings, captions, key legend) is baked into background.png,
+# rendered from background.svg at build time. GRUB only draws the two
+# LIVE things on top: the OS list and the countdown bar. All positions are
+# percentages so they track the background at any boot resolution (the
+# image is stretched to fill). Palette matches the HUD: ground #090D12,
+# ember #F0714A, text #E6ECF0 / muted #9BAAB4 / faint #64747F.
+#
+# Font names below are the pf2 internal names grub-mkfont assigns in
+# default.nix (jbitem / jbsel / jbhint), NOT file names.
 
-# Font names below are the pf2 internal names grub-mkfont assigns
-# (family + style + size), NOT the file names. NixOS loadfonts every
-# .pf2 in this dir; theme components must reference these exact strings.
 title-text: ""
-desktop-color: "#0C1116"
-terminal-font: "mono Regular 18"
+desktop-image: "background.png"
+desktop-image-scale-method: "stretch"
+desktop-color: "#090D12"
+terminal-font: "jbhint Regular 18"
 terminal-left: "0"
 terminal-top: "0"
 
-# --- title -----------------------------------------------------------
-+ label {
-    id       = "__title__"
-    top      = "16%"
-    left     = "0"
-    width    = "100%"
-    align    = "center"
-    color    = "#C8431F"
-    font     = "title Bold 48"
-    text     = "JarvisOS"
-}
-
-# --- the OS chooser --------------------------------------------------
+# --- the OS chooser (left column, aligned to the baked layout) -------
 + boot_menu {
-    top             = "38%"
-    left            = "34%"
-    width           = "32%"
-    height          = "44%"
-    item_font       = "item Regular 28"
-    item_color      = "#9FADB7"
-    selected_item_color = "#C8431F"
-    item_height     = "46"
-    item_padding    = "6"
-    item_spacing    = "10"
-    menu_pixmap_style = ""
+    left                = "7.7%"
+    top                 = "46%"
+    width               = "46%"
+    height              = "30%"
+    item_font           = "jbitem Regular 30"
+    item_color          = "#9BAAB4"
+    selected_item_font  = "jbsel Bold 30"
+    selected_item_color = "#F0714A"
+    item_height         = "58"
+    item_padding        = "6"
+    item_spacing        = "16"
+    menu_pixmap_style   = ""
 }
 
-# --- footer hint -----------------------------------------------------
-+ label {
-    top   = "90%"
-    left  = "0"
-    width = "100%"
-    align = "center"
-    color = "#4A5762"
-    font  = "hint Regular 18"
-    text  = "hold F12 at power-on for the firmware boot menu"
+# --- countdown to the default entry ----------------------------------
++ progress_bar {
+    id          = "__timeout__"
+    left        = "7.7%"
+    top         = "80%"
+    width       = "34%"
+    height      = "12"
+    font        = "jbhint Regular 18"
+    text_color  = "#64747F"
+    fg_color    = "#F0714A"
+    bg_color    = "#141B21"
+    border_color = "#26323B"
+    text        = "@TIMEOUT_NOTIFICATION_SHORT@"
+    show_text   = "true"
 }
