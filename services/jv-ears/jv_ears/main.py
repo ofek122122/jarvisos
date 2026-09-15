@@ -35,6 +35,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
 
     cfg = EarsConfig()
     bus = await BusClient.connect(args.bus, src="jv-ears")
+    await bus.subscribe(["speech.state"])
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     started = time.monotonic()
@@ -67,6 +68,23 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     worker = threading.Thread(target=run_pipeline, name="ears-pipeline", daemon=True)
     worker.start()
 
+    async def follow_speech_state() -> None:
+        """Half-duplex: close the pipeline's utterance gate while jv-voice
+        speaks — Jarvis must not hear Jarvis (see pipeline.set_suppressed)."""
+        while True:
+            frame = await bus.next_frame()
+            if frame is None:
+                return
+            if frame["topic"] != "speech.state":
+                continue
+            state = frame["body"].get("state")
+            if state == "speaking":
+                pipeline.set_suppressed(True)
+            elif state in ("idle", "interrupted"):
+                pipeline.set_suppressed(False)
+
+    state_task = asyncio.create_task(follow_speech_state())
+
     async def health() -> None:
         while not done.is_set():
             await bus.publish(
@@ -90,6 +108,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
             await bus.publish(topic, body, conf=conf, v=v)
     finally:
         health_task.cancel()
+        state_task.cancel()
         await bus.close()
     return 1 if pipeline_failed.is_set() else 0
 

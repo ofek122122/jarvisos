@@ -45,6 +45,13 @@ class EarsPipeline:
 
         # sample clock
         self._pos = 0
+        # half-duplex gate — set from the bus thread while jv-voice speaks
+        # (Jarvis must not hear Jarvis; field-confirmed 2026-09-16). Plain
+        # bools: single writer per field, GIL-atomic reads.
+        self._suppress_tail = cfg.suppress_tail_ms * r // 1000
+        self._suppress_req = False
+        self._suppress_release_pending = False
+        self._suppress_until = -1
         # wake state
         self._armed_at: Optional[int] = None
         self._last_wake: int = -(10**12)
@@ -65,6 +72,13 @@ class EarsPipeline:
     def _t(self) -> float:
         """Sample clock in seconds (fixture-deterministic)."""
         return self._pos / self.cfg.sample_rate
+
+    def set_suppressed(self, value: bool) -> None:
+        """Half-duplex gate: True while jv-voice is speaking. Blocks only
+        utterance-open; wake detection stays live — that's barge-in."""
+        if not value and self._suppress_req:
+            self._suppress_release_pending = True
+        self._suppress_req = value
 
     # ------------------------------------------------------------- events
 
@@ -132,6 +146,13 @@ class EarsPipeline:
 
     def feed(self, chunk: np.ndarray) -> None:
         """Consume one chunk (any length; canonical is 80 ms)."""
+        # Half-duplex gate: closed while Jarvis speaks, and for a tail of
+        # samples afterwards (the room still carries its audio).
+        if self._suppress_release_pending:
+            self._suppress_release_pending = False
+            self._suppress_until = self._pos + self._suppress_tail
+        gate_closed = self._suppress_req or self._pos < self._suppress_until
+
         # Wake — continuous, with refractory.
         score = self.wake.feed(chunk)
         if (
@@ -157,6 +178,10 @@ class EarsPipeline:
                 self._silence_run = 0
             else:
                 self._silence_run += SileroVad.WINDOW
+                self._speech_run = 0
+            if gate_closed and not self._in_speech:
+                # evidence heard while gated is Jarvis's own voice — it
+                # must not carry over into the first open window
                 self._speech_run = 0
             if not self._in_speech and self._speech_run >= self._min_speech:
                 self._on_speech_start()

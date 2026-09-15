@@ -16,6 +16,12 @@ class FakeBus:
     async def publish(self, *args, **kwargs):
         pass
 
+    async def subscribe(self, topics):
+        pass
+
+    async def next_frame(self):
+        await asyncio.Event().wait()  # no frames ever; cancelled at exit
+
     async def close(self):
         pass
 

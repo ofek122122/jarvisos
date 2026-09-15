@@ -38,6 +38,11 @@ class EarsConfig:
     vad_min_speech_ms: int = 200
     vad_min_silence_ms: int = 1500
     pre_roll_ms: int = 400  # audio kept from before speech_start
+    # Half-duplex: utterances stay blocked this long AFTER jv-voice stops
+    # speaking. The sink+mic chain delivers Jarvis's last samples ~350 ms
+    # late (measured 2026-09-16: leak fired 350 ms after speech.state
+    # idle), so the tail must comfortably cover that.
+    suppress_tail_ms: int = 700
 
     # ASR
     partial_interval_s: float = 0.7

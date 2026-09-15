@@ -24,13 +24,19 @@ class SoundDevicePlayer(Player):
         import sounddevice as sd
 
         loop = asyncio.get_running_loop()
-        end = loop.time() + len(audio) / rate
         sd.play(audio, rate)
+        # Completion is decided by the STREAM, never by duration arithmetic:
+        # the device opens late (PortAudio -> PipeWire), so a wall-clock
+        # deadline always expired while the tail was still playing and the
+        # stop() below clipped it (field bug, 2026-09-16). The deadline
+        # here is only a stuck-device backstop, far past any real finish.
+        deadline = loop.time() + len(audio) / rate + 10.0
         try:
-            while loop.time() < end:
+            while loop.time() < deadline:
                 if abort.is_set():
-                    sd.stop()
                     return False
+                if not sd.get_stream().active:
+                    return True
                 await asyncio.sleep(0.05)
             return True
         finally:
