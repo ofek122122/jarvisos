@@ -56,7 +56,14 @@ exit checklist passes.
       8f1e68b from GitHub, `nix build ...toplevel` produced
       `llkyj9mh76l9kyjfd4nc8rngv7g4464p` — byte-identical to the store
       path the machine was running at that moment.)
-- [ ] Rollback demonstrated once: previous generation booted deliberately.
-- [ ] User has run the runbook themselves, not just watched.
+- [x] Rollback demonstrated once. (2026-09-15, Runbook D: htop added as
+      generation 8; user deliberately booted generation 7 from the GRUB
+      submenu — htop absent; rebooted default — htop present.)
+- [x] User has run the runbook themselves. (2026-08-27: pulled and
+      applied the GRUB Windows-entry rebuild by hand; 2026-09-15: drove
+      both rollback-drill reboots and generation selection at the GRUB
+      menu.)
+
+**PHASE 0 EXIT: COMPLETE (2026-09-15).**
 
 Then request BRIEF-phase1 (the bus + the voice loop).
