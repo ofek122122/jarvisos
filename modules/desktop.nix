@@ -24,6 +24,7 @@
     claude-code # replaces the interim `nix profile install` — declared, like everything
     git # was riding along inside the old imperative claude wrapper — now explicit
     gh # GitHub CLI: push auth via `gh auth setup-git`
+    htop # the Runbook D rollback-drill marker (and genuinely useful)
   ];
 
   environment.variables = {
