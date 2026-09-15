@@ -33,7 +33,11 @@
   # enable nix.gc during active development (CLAUDE.md: never garbage-
   # collect old generations while experimenting).
 
-  time.timeZone = "Asia/Jerusalem"; # TODO(ofek): confirm
+  time.timeZone = "Asia/Jerusalem"; # confirmed live 2026-09-15 (timedatectl)
+  # Dual boot: Windows keeps the RTC in LOCAL time and we never touch
+  # Windows, so JarvisOS matches it. Without this, every OS switch skewed
+  # the clock ±3 h until NTP caught up (seen in the journal, 2026-09-15).
+  time.hardwareClockInLocalTime = true;
   i18n.defaultLocale = "en_US.UTF-8";
 
   users.users.ofek = {
