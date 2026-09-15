@@ -90,6 +90,11 @@ class BrainConfig:
 
     max_turns: int = 16  # rolling window, user+assistant pairs counted singly
     max_context_chars: int = 12_000  # crude token cap (≈3k tokens)
+    # Batched-trim target: when max_context_chars is crossed, drop the
+    # oldest messages down to THIS size in one go. Trimming one message
+    # per add shifts the prompt prefix every turn and defeats the
+    # llama-server prompt cache (the 10 s re-prefills of 2026-09-15).
+    trim_target_chars: int = 7_000
     idle_reset_s: float = 600.0  # fresh conversation after 10 min silence
 
     request_timeout_s: float = 120.0

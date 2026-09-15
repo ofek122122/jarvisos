@@ -80,6 +80,14 @@ def llama_args(cfg: BrainConfig, rung: Rung, port: int) -> list[str]:
         "--jinja",  # Qwen3 chat template; thinking disabled per-request
         "--n-gpu-layers",
         "99" if rung.gpu else "0",
+        # One conversation, one slot: the default -np 4 round-robins
+        # requests across slots (full re-prefill on every switch) and
+        # splits ctx-size four ways. --cache-reuse lets the KV cache
+        # survive jv-brain's batched history trims via chunk shifting.
+        "--parallel",
+        "1",
+        "--cache-reuse",
+        "256",
     ]
     if rung.kv_type != "f16":
         args += ["--cache-type-k", rung.kv_type, "--cache-type-v", rung.kv_type]

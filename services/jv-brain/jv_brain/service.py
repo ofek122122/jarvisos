@@ -80,14 +80,25 @@ class Conversation:
     def add_raw(self, message: dict) -> None:
         """Append a pre-built message (assistant tool_calls, tool results)."""
         self.messages.append(message)
-        while len(self.messages) > self.cfg.max_turns * 2:
-            self.messages.popleft()
-        while (
-            sum(len(m.get("content") or "") for m in self.messages)
-            > self.cfg.max_context_chars
+        if len(self.messages) > self.cfg.max_turns * 2 or self._chars() > self.cfg.max_context_chars:
+            self._trim()
+
+    def _chars(self) -> int:
+        return sum(len(m.get("content") or "") for m in self.messages)
+
+    def _trim(self) -> None:
+        """Batched trim, well past the cap. The llama-server prompt cache
+        only reuses an unchanged PREFIX; dropping one message per add
+        shifted the prefix every turn and forced a full-history re-prefill
+        each exchange (measured 10 s / 1400 tokens on 2026-09-15)."""
+        target_msgs = max(2, int(self.cfg.max_turns * 2 * 0.6))
+        while len(self.messages) > 1 and (
+            len(self.messages) > target_msgs
+            or self._chars() > self.cfg.trim_target_chars
         ):
-            if len(self.messages) <= 1:
-                break
+            self.messages.popleft()
+        # never open the context mid-exchange (assistant/tool first)
+        while len(self.messages) > 1 and self.messages[0].get("role") != "user":
             self.messages.popleft()
 
 
@@ -138,20 +149,29 @@ class BrainService:
         except (OSError, ValueError):
             return None, "gpu"
 
-    async def _complete(self, conv: Conversation) -> tuple[dict, str]:
-        """-> (message, finish_reason). message may carry tool_calls."""
+    def _payload(self, messages: list[dict], max_tokens: Optional[int] = None) -> dict:
         payload = {
             "model": self.cfg.model_name,
-            "messages": [{"role": "system", "content": self.system_prompt}]
-            + list(conv.messages),
+            "messages": messages,
             "temperature": self.cfg.temperature,
-            "max_tokens": self.cfg.max_tokens,
+            "max_tokens": self.cfg.max_tokens if max_tokens is None else max_tokens,
             # Qwen3: keep the thinking mode off for voice latency.
             "chat_template_kwargs": {"enable_thinking": False},
+            # Prompt-cache contract with llama-server (--parallel 1 in
+            # jv-llm-launch): one pinned slot, explicit prefix reuse.
+            "cache_prompt": True,
+            "id_slot": 0,
         }
         if self.tool_defs:
             payload["tools"] = self.tool_defs
             payload["tool_choice"] = "auto"
+        return payload
+
+    async def _complete(self, conv: Conversation) -> tuple[dict, str]:
+        """-> (message, finish_reason). message may carry tool_calls."""
+        payload = self._payload(
+            [{"role": "system", "content": self.system_prompt}] + list(conv.messages)
+        )
         resp = await self._http.post(
             f"{self.cfg.llm_url}/v1/chat/completions", json=payload
         )
@@ -159,6 +179,30 @@ class BrainService:
         choice = resp.json()["choices"][0]
         finish = choice.get("finish_reason") or "stop"
         return choice["message"], ("length" if finish == "length" else "stop")
+
+    WARMUP_TRIES = 24
+    WARMUP_RETRY_S = 5.0
+
+    async def _warmup(self) -> None:
+        """Pay the cold system-prompt prefill at startup (10.5 s for 1415
+        tokens, measured 2026-09-16), not on the user's first exchange.
+        The payload must be byte-identical to a real request's prefix —
+        same system prompt, same tool defs — or the rendered prompt won't
+        match and the cache stays cold. Retries while llama-server is
+        still loading weights; gives up quietly (the first exchange then
+        just pays the prefill itself)."""
+        payload = self._payload(
+            [{"role": "system", "content": self.system_prompt}], max_tokens=1
+        )
+        for _ in range(self.WARMUP_TRIES):
+            try:
+                resp = await self._http.post(
+                    f"{self.cfg.llm_url}/v1/chat/completions", json=payload
+                )
+                resp.raise_for_status()
+                return
+            except httpx.HTTPError:
+                await asyncio.sleep(self.WARMUP_RETRY_S)
 
     async def _run_tool(self, name: str, args: dict, utterance_id: Optional[str]) -> str:
         """Publish intent.action, await the matching action.result.
@@ -456,6 +500,7 @@ class BrainService:
     async def run(self) -> None:
         await self.bus.subscribe(["audio.transcript", "brain.request", "action.result"])
         await self._health()
+        warmup = asyncio.create_task(self._warmup())
         inputs: asyncio.Queue = asyncio.Queue()
         worker = asyncio.create_task(self._input_worker(inputs))
         health_at = time.monotonic()
@@ -497,6 +542,7 @@ class BrainService:
                 elif topic == "action.result":
                     self._on_action_result(body)
         finally:
+            warmup.cancel()
             worker.cancel()
 
     async def close(self) -> None:

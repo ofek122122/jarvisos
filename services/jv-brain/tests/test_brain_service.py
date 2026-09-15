@@ -14,6 +14,7 @@ import pytest
 from jarvis_bus import BusClient
 from jv_brain.config import BrainConfig
 from jv_brain.service import BrainService, strip_wake_prefix
+from jv_brain.tools import load_tools
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -123,6 +124,13 @@ async def stack(tmp_path):
     proc.wait(timeout=10)
 
 
+def user_requests(stub: StubLLM) -> list[dict]:
+    """LLM requests that carry a user turn — i.e. not the startup warmup."""
+    return [
+        r for r in stub.requests if any(m["role"] == "user" for m in r["messages"])
+    ]
+
+
 async def next_topic(client, topic, timeout=10.0):
     async def inner():
         while True:
@@ -158,10 +166,31 @@ async def test_voice_final_gets_response_and_speech(stack):
     assert say["body"]["in_reply_to_utterance"] == "utt-1"  # the E2E thread
     assert say["body"]["text"] == resp["body"]["text"]
 
-    # system prompt reached the LLM
-    assert stub.requests[0]["messages"][0]["role"] == "system"
-    assert "Jarvis" in stub.requests[0]["messages"][0]["content"]
-    assert stub.requests[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    # system prompt reached the LLM (requests[0] is the startup warmup)
+    req = user_requests(stub)[0]
+    assert req["messages"][0]["role"] == "system"
+    assert "Jarvis" in req["messages"][0]["content"]
+    assert req["chat_template_kwargs"] == {"enable_thinking": False}
+    # prompt-cache contract with llama-server: explicit reuse, pinned slot
+    # (2026-09-15: slot roulette forced a full re-prefill nearly every turn)
+    assert req["cache_prompt"] is True
+    assert req["id_slot"] == 0
+
+
+async def test_warmup_prefills_system_prompt_at_startup(stack):
+    """The 10.5 s cold prefill (1415 tokens, measured 2026-09-16) must be
+    paid at service start, not on the user's first exchange: on startup
+    the brain sends one system-prompt-only request into the pinned slot."""
+    addr, stub, watcher = stack
+    # no user input at all — the fixture's startup settle is enough
+    assert len(stub.requests) == 1
+    warm = stub.requests[0]
+    assert [m["role"] for m in warm["messages"]] == ["system"]
+    assert warm["max_tokens"] == 1
+    assert warm["cache_prompt"] is True and warm["id_slot"] == 0
+    # identical prefix contract: warmup must carry the same tool defs
+    # the real requests carry, or the rendered prompt won't match
+    assert ("tools" in warm) == bool(load_tools())
 
 
 async def test_partials_are_ignored(stack):
@@ -175,7 +204,7 @@ async def test_partials_are_ignored(stack):
     )
     with pytest.raises(asyncio.TimeoutError):
         await next_topic(watcher, "brain.response", timeout=1.0)
-    assert stub.requests == []
+    assert user_requests(stub) == []
 
 
 async def test_cli_request_silent_and_context_grows(stack):
@@ -191,7 +220,7 @@ async def test_cli_request_silent_and_context_grows(stack):
         await next_topic(watcher, "brain.response")
 
     # rolling context: second request carries the first exchange
-    msgs = stub.requests[1]["messages"]
+    msgs = user_requests(stub)[1]["messages"]
     roles = [m["role"] for m in msgs]
     assert roles == ["system", "user", "assistant", "user"]
     assert msgs[1]["content"] == "first message"

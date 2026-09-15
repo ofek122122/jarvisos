@@ -63,6 +63,20 @@ def test_cpu_rung_args(tmp_path: Path):
     assert "backend=cpu" in (tmp_path / "llm-rung").read_text()
 
 
+def test_single_slot_and_cache_reuse_args(tmp_path: Path):
+    """One conversation, one slot: without --parallel 1, llama-server
+    (default -np 4 on current builds) round-robins requests across slots
+    — every slot switch is a full-history re-prefill (measured 10 s on
+    2026-09-15) AND the ctx is split per-slot. --cache-reuse lets the
+    cache survive the brain's batched history trims via KV shifting."""
+    cfg = BrainConfig(models_dir=tmp_path, rung_file=tmp_path / "llm-rung")
+    captured: list[list[str]] = []
+    launch(cfg, port=9999, probe=lambda: 16 * GB, exec_fn=captured.append)
+    args = captured[0]
+    assert "--parallel" in args and args[args.index("--parallel") + 1] == "1"
+    assert "--cache-reuse" in args and args[args.index("--cache-reuse") + 1] == "256"
+
+
 def test_kv_budget_matches_qwen3_geometry():
     """4k ctx f16 KV for Qwen3-8B ≈ 576 MB — sanity-pin the arithmetic
     the whole ladder rests on."""

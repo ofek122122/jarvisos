@@ -65,12 +65,18 @@ class ScriptedLLM:
             for line in head.decode("latin1").split("\r\n"):
                 if line.lower().startswith("content-length:"):
                     length = int(line.split(":", 1)[1])
-            self.requests.append(json.loads(await reader.readexactly(length)))
-            message = (
-                self.script.pop(0)
-                if self.script
-                else {"role": "assistant", "content": "script exhausted"}
-            )
+            payload = json.loads(await reader.readexactly(length))
+            self.requests.append(payload)
+            if not any(m["role"] == "user" for m in payload["messages"]):
+                # startup warmup (system prompt only): answer out-of-band,
+                # never consume the script
+                message = {"role": "assistant", "content": ""}
+            else:
+                message = (
+                    self.script.pop(0)
+                    if self.script
+                    else {"role": "assistant", "content": "script exhausted"}
+                )
             body = json.dumps(
                 {"choices": [{"message": message, "finish_reason": "stop"}]}
             ).encode()
@@ -168,7 +174,8 @@ async def test_tool_roundtrip_and_spoken_summary(bus_addr, tmp_path):
     assert say["body"]["in_reply_to_utterance"] == "u1"
 
     # the tool result reached the second LLM call as a tool message
-    tool_msgs = [m for m in stub.requests[1]["messages"] if m["role"] == "tool"]
+    # (requests[0] is the startup warmup, then the two scripted calls)
+    tool_msgs = [m for m in stub.requests[2]["messages"] if m["role"] == "tool"]
     assert tool_msgs and "launched firefox" in tool_msgs[0]["content"]
 
     task.cancel()
@@ -199,7 +206,8 @@ async def test_hallucinated_tool_never_reaches_act(bus_addr, tmp_path):
         await next_topic(watcher, "intent.action", timeout=0.8)
 
     # the rejection went back to the LLM, and the counter shows in health
-    tool_msgs = [m for m in stub.requests[1]["messages"] if m["role"] == "tool"]
+    # (requests[0] is the startup warmup, then the two scripted calls)
+    tool_msgs = [m for m in stub.requests[2]["messages"] if m["role"] == "tool"]
     assert "unknown_tool" in tool_msgs[0]["content"]
     assert svc._hallucinated_calls == 1
 
