@@ -15,6 +15,10 @@
     ../../modules/boot-plymouth.nix
   ];
 
+  # Branding: the OS calls itself JarvisOS — GRUB entries, /etc/os-release
+  # NAME, the works. distroId stays "nixos" (tools key off it).
+  system.nixos.distroName = "JarvisOS";
+
   networking.hostName = "ares";
   networking.networkmanager.enable = true;
 
