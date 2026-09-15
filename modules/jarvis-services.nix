@@ -186,6 +186,12 @@ in
   systemd.user.services.jv-ears = {
     description = "Jarvis ears (wake word -> VAD -> ASR)";
     wantedBy = [ "default.target" ];
+    # Declared, not just commented: PortAudio loses the ALSA race if the
+    # capture stream opens before PipeWire is up (seen at login,
+    # 2026-09-15). Ordering narrows the race; the non-zero exit in
+    # jv_ears/main.py + Restart=on-failure closes what's left of it.
+    after = [ "pipewire.service" "wireplumber.service" ];
+    wants = [ "pipewire.service" ];
     unitConfig.ConditionUser = "ofek";
     environment = commonEnv;
     serviceConfig = {
@@ -198,6 +204,9 @@ in
   systemd.user.services.jv-voice = {
     description = "Jarvis voice (speech.say -> piper + chain -> speakers)";
     wantedBy = [ "default.target" ];
+    # Same PipeWire ordering as jv-ears (playback side of the same race).
+    after = [ "pipewire.service" "wireplumber.service" ];
+    wants = [ "pipewire.service" ];
     unitConfig.ConditionUser = "ofek";
     environment = commonEnv;
     serviceConfig = {

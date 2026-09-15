@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -47,9 +48,18 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     )
     pipeline = EarsPipeline(cfg, publish)
 
+    # A pipeline death must become a non-zero exit, or systemd's
+    # Restart=on-failure never fires (2026-09-15 field bug: PortAudio lost
+    # the ALSA race against PipeWire at login, the thread died, jv-ears
+    # exited 0, and the mic stayed silently dead).
+    pipeline_failed = threading.Event()
+
     def run_pipeline() -> None:
         try:
             pipeline.run(source)
+        except Exception:
+            pipeline_failed.set()
+            traceback.print_exc()
         finally:
             done.set()
             loop.call_soon_threadsafe(queue.put_nowait, None)
@@ -81,7 +91,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     finally:
         health_task.cancel()
         await bus.close()
-    return 0
+    return 1 if pipeline_failed.is_set() else 0
 
 
 def cli() -> None:

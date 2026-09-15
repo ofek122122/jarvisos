@@ -1,0 +1,62 @@
+"""Regression for the 2026-09-15 field bug: jv-ears raced PipeWire at
+login, PortAudio failed to open the capture stream, the pipeline thread
+died — and the process exited 0, so systemd's Restart=on-failure never
+fired and the mic stayed silently dead. A dead pipeline must exit 1.
+
+No models, no bus, no mic: bus client and pipeline are faked."""
+
+import asyncio
+
+import pytest
+
+import jv_ears.main as main_mod
+
+
+class FakeBus:
+    async def publish(self, *args, **kwargs):
+        pass
+
+    async def close(self):
+        pass
+
+
+class FakeBusClient:
+    @staticmethod
+    async def connect(*args, **kwargs):
+        return FakeBus()
+
+
+class CrashingPipeline:
+    """PortAudio losing the ALSA race, distilled."""
+
+    def __init__(self, cfg, publish):
+        pass
+
+    def run(self, source):
+        raise RuntimeError("PaAlsaStream_Configure failed")
+
+
+class CleanPipeline:
+    """A pipeline that ends normally (e.g. --wav ran out of files)."""
+
+    def __init__(self, cfg, publish):
+        pass
+
+    def run(self, source):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def no_hardware(monkeypatch):
+    monkeypatch.setattr(main_mod, "BusClient", FakeBusClient)
+    monkeypatch.setattr(main_mod, "MicSource", lambda *a, **k: object())
+
+
+def test_pipeline_crash_exits_nonzero(monkeypatch):
+    monkeypatch.setattr(main_mod, "EarsPipeline", CrashingPipeline)
+    assert asyncio.run(main_mod.amain([])) == 1
+
+
+def test_clean_pipeline_end_exits_zero(monkeypatch):
+    monkeypatch.setattr(main_mod, "EarsPipeline", CleanPipeline)
+    assert asyncio.run(main_mod.amain([])) == 0
