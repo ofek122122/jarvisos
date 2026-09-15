@@ -42,9 +42,13 @@ in
 
     theme = theme;
     splashImage = null; # theme paints the background (desktop-color)
-    # Legibility first: ask for 1440p, fall back to whatever the firmware
-    # offers. `keep` holds the mode through to the loaded kernel.
-    gfxmodeEfi = "2560x1440,auto";
+    # Legibility first: ask for 1440p, then fall back through 16:9 modes
+    # ONLY. `auto` alone let the firmware pick a 4:3 mode (observed on the
+    # first themed boot, 2026-09-15: circles rendered as ellipses because
+    # the 4:3 framebuffer was stretched across the 16:9 panel — and via
+    # `keep` the distortion carried into Plymouth too). The theme's
+    # circular countdown (25% x 44.4%) is only square at 16:9.
+    gfxmodeEfi = "2560x1440,1920x1080,1600x900,1280x720,auto";
     gfxpayloadEfi = "keep";
 
     # Explicit Windows chainload — the at-every-boot chooser's second entry.

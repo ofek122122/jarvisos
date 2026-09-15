@@ -72,6 +72,9 @@ tick  = 0;
 frame = 0;
 pulse = 0.0;
 fade  = 0.0;
+in_password = 0; # while 1, refresh() must not repaint the boot caption
+                 # over the unlock caption (both sit at the same spot —
+                 # first themed boot showed them stacked mid-fade)
 
 fun refresh() {
     # advance the spinner every other tick
@@ -94,13 +97,16 @@ fun refresh() {
     if (fade < 1.0) {
         fade = fade + 0.03;
         wordmark.SetOpacity(fade);
-        boot_label.SetOpacity(fade);
+        if (in_password == 0) {
+            boot_label.SetOpacity(fade);
+        }
     }
 }
 Plymouth.SetRefreshFunction(refresh);
 
 # ---- LUKS passphrase prompt ----------------------------------------
 fun display_password(prompt, bullets) {
+    in_password = 1;
     boot_label.SetOpacity(0);
     unlock_label.SetOpacity(1);
 
@@ -125,6 +131,7 @@ fun display_password(prompt, bullets) {
 Plymouth.SetDisplayPasswordFunction(display_password);
 
 fun display_normal() {
+    in_password = 0;
     unlock_label.SetOpacity(0);
     boot_label.SetOpacity(1);
     for (i = 0; i < 128; i++) {

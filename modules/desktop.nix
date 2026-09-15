@@ -22,6 +22,8 @@
     firefox # native Wayland; jv-guard never sees it — it is not a Windows binary
     vim
     claude-code # replaces the interim `nix profile install` — declared, like everything
+    git # was riding along inside the old imperative claude wrapper — now explicit
+    gh # GitHub CLI: push auth via `gh auth setup-git`
   ];
 
   environment.variables = {
