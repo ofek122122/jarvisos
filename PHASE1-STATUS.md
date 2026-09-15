@@ -66,6 +66,14 @@ install day; anything needing real hardware is mocked and tagged
   jv-voice while the rest generates; decide the measurement anchor
   (VAD end vs start) and re-state the budget accordingly.
 
+  **UPDATE 2026-09-16 (d94807a): the re-prefill cliff is fixed** —
+  pinned slot + cache_prompt, --parallel 1 + --cache-reuse 256, batched
+  prefix-stable trims, and a startup warmup. Measured: first exchange
+  after boot 10 532 ms → 653 ms total LLM time; warm turns ~190 ms
+  prefill + generation. Voice re-measurement (`jv tap --latency`)
+  pending; sentence-streaming to TTS and the measurement-anchor decision
+  remain on the table if voice numbers are still over budget.
+
 ## Mocked / waiting for the machine (all tagged TODO(machine))
 
 - `MicSource` + `SoundDevicePlayer` — real mic array + speakers
