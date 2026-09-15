@@ -19,6 +19,9 @@
     wl-clipboard
     xwayland-satellite # rootless XWayland for the stray legacy client
     brightnessctl
+    firefox # native Wayland; jv-guard never sees it — it is not a Windows binary
+    vim
+    claude-code # replaces the interim `nix profile install` — declared, like everything
   ];
 
   environment.variables = {
