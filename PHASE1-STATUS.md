@@ -38,6 +38,34 @@ install day; anything needing real hardware is mocked and tagged
    PROVISIONAL)
 4. `personality/system.md` — v0 draft, edit to taste
 
+## First on-hardware exit measurements (2026-09-15/16)
+
+- **Offline demo: PASS.** ~5.5 h with connectivity `none` (logged every
+  2 s); 15 complete voice exchanges during the window. Nothing left the
+  machine — there was no network to leave on.
+- **Kill-one-service: PASS.** jv-context SIGKILLed; restarted in 2 s;
+  all other services unaffected. (Bonus find, fixed same day: jv-ears
+  died 0 on a PipeWire race and stayed down — see e3be821.)
+- **Latency < 2.5 s: FAIL.** `jv tap --latency` over 15 exchanges:
+  best 5353 ms, typical 5–7 s, degrading to ~18 s late in the evening,
+  worst 44.7 s. llama-server timings put the blame precisely:
+  - generation is fine (~43 tok/s, replies 0.5–1.5 s)
+  - **prompt prefill on cache miss is the killer**: 1400-token history
+    re-prefilled from scratch = 10.0 s (140 tok/s prefill on the 1660).
+    When the slot cache hits (task following task), prefill is ~0.5 s.
+  - the degradation curve = conversation history growing all evening
+    with no trimming, re-prefilled per exchange.
+  - measurement definition: `jv tap` anchors at **VAD start**, so the
+    number includes the user's own speaking time + endpoint silence
+    (~2–3 s). Even the "true" system latency (speech end → speech.say)
+    is ~2–4 s best case today — still over budget on cache misses.
+
+  Fix directions for the latency task (own session): pin llama slot +
+  `cache_prompt` so history never re-prefills; trim/summarize history
+  in jv-brain; cap spoken-reply length; stream first sentence to
+  jv-voice while the rest generates; decide the measurement anchor
+  (VAD end vs start) and re-state the budget accordingly.
+
 ## Mocked / waiting for the machine (all tagged TODO(machine))
 
 - `MicSource` + `SoundDevicePlayer` — real mic array + speakers
