@@ -48,9 +48,14 @@ exit checklist passes.
 
 ## Exit checklist
 
-- [ ] Machine boots JarvisOS from firmware menu; Windows boots untouched.
-- [ ] `jarvis-doctor` all PASS.
-- [ ] `nixos-rebuild switch --flake .#ares` from a clean clone reproduces it.
+- [x] Machine boots JarvisOS from firmware menu; Windows boots untouched.
+      (2026-08-27: dual boot verified — GRUB chooser boots both; Windows
+      NVMe untouched. 2026-09-15: themed GRUB + Plymouth verified too.)
+- [x] `jarvis-doctor` all PASS. (2026-08-27, run as ofek in a real session.)
+- [x] Clean-clone reproducibility. (2026-09-15: fresh `git clone` of
+      8f1e68b from GitHub, `nix build ...toplevel` produced
+      `llkyj9mh76l9kyjfd4nc8rngv7g4464p` — byte-identical to the store
+      path the machine was running at that moment.)
 - [ ] Rollback demonstrated once: previous generation booted deliberately.
 - [ ] User has run the runbook themselves, not just watched.
 
