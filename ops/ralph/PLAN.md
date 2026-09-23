@@ -27,10 +27,14 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       when genuinely active. This is the first real, data-backed UI.
 - [ ] A4. Live mic indicator from `audio.vad`/`audio.wake` — truthful, not fakeable;
       off when no signal. (Camera indicator waits for a vision-phase signal.)
-- [ ] A5. A tiny bus client for QML (do this BEFORE A3 — A3 has no real frames
-      to show until it exists) (or a thin bridge) so HUD elements subscribe to
-      the Unix-socket bus without violating invariant 1 (consumer only, no direct
-      imports into other services).
+- [x] A5. A tiny bus client for QML so HUD elements subscribe to the Unix-socket
+      bus without violating invariant 1 (consumer only). — bae8e03
+      (`services/jv-hud-bridge` writes one JSON line per envelope; `Bus.qml`
+      reads it with `Process` + `SplitParser`. Consumer-only is structural: the
+      pump holds a `ReadOnlyBus` with no publish method. `Bus.frames` is cleared
+      whenever the link drops. The singleton is lazy, so an idle HUD runs no
+      bridge. Tests: `bash ops/ralph/runtests.sh jv-hud-bridge` — 25, three of
+      them against a real jarvisd; smoked against the live bus on ares.)
 - [ ] A7. Motion primitives on top of A2: a `Ease` Behavior (Theme.easeMs) and a
       `prefers-reduced-motion` switch every animated element honours, so "motion
       off" is one place and not a rule each element remembers. Blocked on nothing;
@@ -38,6 +42,13 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 - [ ] A8. Font packaging: theme.toml names Archivo + JetBrains Mono, but nothing
       declares them in the system yet — a missing font silently becomes a
       different look. Add both to `fonts.packages` (its own small commit).
+- [ ] A9. Headless QML tests for the HUD (`qmltestrunner` / `qml -platform
+      offscreen`) wired into jv-hud's checkPhase. Nothing on the QML side is
+      tested today: `Bus.ingest` — JSON parsing, clearing the frame cache on
+      link down, the monotonic-clock pinning — is verified only by reading it,
+      and qmllint does not catch a typo'd self-assignment inside a file. This
+      makes every element from A3 onward cheap to test. Discovered building A5.
+
 - [ ] A6. `sys.health` glance: a quiet, edge-docked readout of service health +
       llm rung, 0 fps when nothing changes.
 
@@ -55,3 +66,4 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 - A1 — jv-hud Quickshell layer-shell skeleton (49046db, 2026-09-23)
 - A2 — theme tokens in personality/theme.toml -> generated Theme singleton
   (6c0eafb, 2026-09-24)
+- A5 — read-only bus link for QML: jv-hud-bridge + Bus.qml (bae8e03, 2026-09-24)

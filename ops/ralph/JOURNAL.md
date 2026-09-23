@@ -97,3 +97,75 @@ everything here (and every commit) since the last time you asked. Format per ent
   pixel already obeys §06) and A8 (Archivo + JetBrains Mono are named in
   theme.toml but not declared in `fonts.packages` — a missing font is a silent
   change of look).
+
+## 2026-09-24 — A5: a read-only bus link for QML (frames in, nothing out)
+- built: `services/jv-hud-bridge` + `shell/jv-hud/Bus.qml`. The HUD cannot
+  speak the bus itself — QML has no Unix socket and no MessagePack, and
+  invariant 1 forbids importing another service — so it gets exactly one
+  child process. The bridge subscribes to `speech.state`, `audio.wake`,
+  `audio.vad`, `sys.health` and writes each envelope as one line of JSON;
+  `Bus.qml` runs it via `Process` + `SplitParser`. The whole envelope is
+  forwarded, not just the body: `conf` and `ts` are how a consumer handles
+  low-confidence and late input (invariant 4), and `seq` is how it notices
+  the frames jarvisd dropped for it. Three design calls worth recording:
+  (1) **consumer-only is structural.** The pump is handed a `ReadOnlyBus`
+  whose whole public surface is subscribe/next_frame/close — there is no
+  publish method to reach for — and a test greps the package for `.publish`
+  on top of that. The HUD observes; only `jv-act` acts.
+  (2) **link state is not a bus topic.** `{"t":"link","up":false,"err":...}`
+  describes this pipe, not the machine; minting `hud.link` would be writing
+  schema without a reviewed schema commit (invariant 2). The HUD needs the
+  signal because `Bus.frames` is **emptied whenever the link drops** — an
+  indicator still showing what it heard before jarvisd died is worse than
+  no indicator, and that is invariant 10 in one line of code.
+  (3) **the link costs nothing when unused.** Quickshell builds a singleton
+  lazily, so as long as no element references `Bus`, no bridge runs and no
+  socket is held. That only holds if no binding touches it, so the
+  self-test plate moved inside a `Loader { active: selfTest }` rather than
+  relying on `visible: false`. Under `JV_HUD_SELFTEST=1` the plate now also
+  prints `bus up` / `bus down` — the state of the pipe, in plain words, in
+  text2/text3, deliberately not dressed as a sensor indicator.
+  `ageOf(env)` pins CLOCK_MONOTONIC against Qt's ElapsedTimer by keeping
+  the largest `ts - elapsed()` seen (in-flight delay only biases it low, so
+  the max converges from below) and returns Infinity until a first frame
+  makes the offset knowable — no age is better than a wrong one.
+  `tools/gen_theme_qml.py` now renders the qmldir from a `SINGLETONS` list,
+  because it owns that file and an unregistered singleton resolves to
+  nothing; a test asserts the list and the directory agree exactly.
+- tests: `bash ops/ralph/runtests.sh jv-hud-bridge` -> 25 passed (22 unit +
+  3 against a REAL jarvisd: a published frame arrives as one parseable
+  line, an unsubscribed topic never does, and killing the broker under a
+  running bridge reports the link down then recovers it). Tests were
+  written first; since I wrote both before running, I proved they bite by
+  mutation instead — dropping `allow_nan=False`, never resetting the
+  backoff, and swallowing the broken pipe each failed exactly one test and
+  only that one. `runtests.sh tools` -> 17 passed.
+- build: `nix build .#jv-hud` -> ok · `nixos-rebuild build --flake .#ares`
+  -> ok, jv-hud still absent from `default.target.wants`. Never test/switch.
+  Then the real proof: ran the PACKAGED `jv-hud-bridge` against the live
+  `/run/jarvis/bus.sock` on ares for 3 s — link up, then real `sys.health`
+  frames from jv-ears, jv-context, jv-guard and jarvisd, each one line of
+  parseable JSON. Also re-broke both gates on purpose: an unregistered
+  singleton fails the build as "stale generated files: qmldir", and
+  `Bus.linkUpp` read from shell.qml fails qmllint as `missing-property`.
+- known gap, honestly: qmllint type-checks CROSS-FILE singleton access but
+  does NOT catch a typo in a self-assignment inside `Bus.qml` itself
+  (`root.linkUpp = up` builds clean). Verified, noted in the HUD README,
+  and the reason A9 below is worth doing.
+- files: services/jv-hud-bridge/{pyproject.toml,jv_hud_bridge/*,tests/*},
+  shell/jv-hud/{Bus.qml,shell.qml,qmldir,README.md}, pkgs/jv-hud/default.nix,
+  nix/jarvis-python.nix, flake.nix, modules/jarvis-services.nix,
+  tools/gen_theme_qml.py, tools/tests/test_gen_theme_qml.py,
+  ops/ralph/runtests.sh
+- commit: bae8e03
+- next: A3 — the first data-backed element, now that `Bus` can deliver
+  frames: Jarvis's state from real `speech.state` + `audio.wake`, ember only
+  when genuinely active, nothing at all when `Bus.linkUp` is false. Do A7
+  (the one `prefers-reduced-motion` switch + `Theme.easeMs` Behavior) in the
+  same breath or just before, so the first moving pixel already obeys §06.
+  A9 fell out of this one: there is no headless test of the QML side at all,
+  so `Bus.ingest` — the JSON parsing, the frame-cache clearing on link down,
+  the clock pinning — is verified only by reading it. A `qmltestrunner`
+  (or `qml -platform offscreen`) suite in the jv-hud checkPhase would close
+  the largest untested gap in the HUD and make every later element cheap to
+  test.
