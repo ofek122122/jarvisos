@@ -42,15 +42,29 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 - [ ] A8. Font packaging: theme.toml names Archivo + JetBrains Mono, but nothing
       declares them in the system yet — a missing font silently becomes a
       different look. Add both to `fonts.packages` (its own small commit).
-- [ ] A9. Headless QML tests for the HUD (`qmltestrunner` / `qml -platform
-      offscreen`) wired into jv-hud's checkPhase. Nothing on the QML side is
-      tested today: `Bus.ingest` — JSON parsing, clearing the frame cache on
-      link down, the monotonic-clock pinning — is verified only by reading it,
-      and qmllint does not catch a typo'd self-assignment inside a file. This
-      makes every element from A3 onward cheap to test. Discovered building A5.
+- [x] A9. Headless QML tests for the HUD, wired into jv-hud's checkPhase.
+      — 4c7c048
+      (Quickshell links its QML plugin into its own binary, so its types can
+      never load under `qmltestrunner`. The HUD is therefore split:
+      `shell/jv-hud/core/` imports QtQuick ONLY and holds the logic —
+      `core/BusModel.qml`, the bus state machine, with an injected clock;
+      `Bus.qml` keeps the untestable half (bridge process, respawn timer,
+      ElapsedTimer) and forwards the API. 27 tests, mutation-checked 9 ways;
+      they found a real bug — a NaN clock offset made unknown-age frames read
+      as fresh. `nix build .#jv-hud` runs them after qmllint, and a tools test
+      fails if anything in core/ imports more than QtQuick.
+      **The rule for every element from here: logic goes in `core/`, and
+      Quickshell files stay wiring.** Tests: `bash ops/ralph/qmltest.sh`.)
 
 - [ ] A6. `sys.health` glance: a quiet, edge-docked readout of service health +
       llm rung, 0 fps when nothing changes.
+- [ ] A10. `shell.qml` is still untestable by construction: the surface
+      properties that make the HUD safe (keyboardFocus None, exclusionMode
+      Ignore, the empty input mask) are asserted by nobody — qmllint only
+      checks they resolve. A `core/` component cannot hold them, since they
+      ARE Quickshell types. Probably wants a different gate: grep the file for
+      the five properties, or a quickshell-run smoke test on ares. Small, and
+      it closes the last unguarded corner of invariant 10. Discovered in A9.
 
 ## Track B — Features / hardening (when UI is blocked, or for variety)
 - [~] B1. Pull the next safe item from `docs/optimization-backlog.md` that is NOT
@@ -83,3 +97,6 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 - A2 — theme tokens in personality/theme.toml -> generated Theme singleton
   (6c0eafb, 2026-09-24)
 - A5 — read-only bus link for QML: jv-hud-bridge + Bus.qml (bae8e03, 2026-09-24)
+- B2 — jv CLI: bounded, scriptable streams + --latency (62c440f, 2026-09-24)
+- A9 — headless QML tests + the core/ split that makes them possible
+  (4c7c048, 2026-09-24)

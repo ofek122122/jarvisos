@@ -264,3 +264,80 @@ everything here (and every commit) since the last time you asked. Format per ent
   untested — act-log now has a testable `cli::act_log_line`, but reading
   and tailing the file is not covered, and `jv confirm` has no test that
   the frame it publishes is the shape jv-act's resolve_voice expects.
+
+## 2026-09-24 — iteration 5 — A9: the QML side gets a test harness
+
+- picked: A9 (headless QML tests), exactly as iteration 4 suggested. Track A
+  was due, and A9 comes before A3 on purpose: the HUD's first data-backed
+  element should be born tested rather than retrofitted.
+- the obstacle, and the design that came out of it: quickshell links its QML
+  plugin INTO its own binary (there is no `quickshell-coreplugin.so` in the
+  package to point an engine at), so `import Quickshell` can never resolve in
+  `qmltestrunner`. Worse, importing a directory resolves every type its qmldir
+  lists — my first attempt put `BusModel.qml` next to `Bus.qml` and the whole
+  directory became unimportable because ONE listed singleton needed Quickshell.
+  So the HUD is now split by what can be loaded, not by taste:
+    shell/jv-hud/core/   QtQuick only   -> any QML engine, so: tests
+    shell/jv-hud/        Quickshell     -> the quickshell binary, only
+  `core/BusModel.qml` is the bus state machine (parse, cache, link, age);
+  `Bus.qml` keeps only what cannot be tested — the bridge child process, the
+  respawn timer, the ElapsedTimer — and forwards the whole API, so shell.qml
+  and every future element still see one `Bus` and did not change.
+  The one shape change: the monotonic clock is injected (`monotonic`, a
+  callable returning seconds). Bus.qml passes ElapsedTimer; tests pass one
+  they drive by hand, which is what makes the age arithmetic reproducible.
+- the tests found a real bug on their first green-ish run, which is the whole
+  argument for writing them: with no clock, `elapsed()` is NaN, so the offset
+  pinned to NaN and `ageOf()` returned NaN. NaN compares false against every
+  threshold — an unknown-age frame would have read as FRESH to any element
+  asking "is this stale?". That is precisely the quiet lie invariant 10 exists
+  to prevent. Fixed by refusing to pin a non-numeric reading; unknown age is
+  Infinity, which reads as stale everywhere.
+- on proving the tests bite, since I wrote them alongside the split rather
+  than strictly red-first for every case: 9 mutations, each run through the
+  suite. Stale cache on link down, `frames` mutated in place instead of
+  replaced (the one that kills bindings silently), `latest()` returning
+  undefined, NaN clock pinning, keeping the WORST offset estimate, uncounted
+  frames, topics that need not be strings — all 7 failed exactly the tests
+  that should have caught them. The 8th (`linkError = err` instead of
+  `up ? "" : err`) SURVIVED: it is equivalent on the wire, because a link-up
+  line never carries an err. That gap was real — the contract "up means no
+  error" was untested — so a test went in for it, and the 9th mutation
+  (linkError never cleared on reconnect) is caught too.
+- guardrails so the arrangement cannot rot, because a split that depends on
+  discipline is a split that dies:
+    · `nix build .#jv-hud` runs qmltestrunner (-platform offscreen) right
+      after qmllint. VERIFIED it bites: a deliberately broken BusModel failed
+      the build, not just the inner loop.
+    · a tools test fails if any file under core/ imports anything but QtQuick
+      (VERIFIED by adding a Quickshell.Io import — it failed).
+    · core/qmldir is generated from `CORE` in tools/gen_theme_qml.py, drift-
+      checked inside the build, and cross-checked against the files on disk —
+      the same treatment SINGLETONS already got.
+    · installPhase drops tests/: a build gate, not shipped QML.
+- tooling: `ops/ralph/qmltest.sh`, sibling of runtests.sh and cargotest.sh.
+  Resolves qtdeclarative from the flake's own nixpkgs and runs the suite
+  offscreen in ~5ms; extra args pass through to qmltestrunner for filtering.
+- tests: 27 QML green (also green INSIDE the nix sandbox), 20 tools green
+  (3 new), 25 jv-hud-bridge green (untouched, run as a counterpart check).
+- build: `nix build .#jv-hud` ok; `nixos-rebuild build --flake .#ares` ok.
+  Never test/switch. Nothing outside shell/, tools/, pkgs/jv-hud and ops/
+  was touched — no schema, no jv-act, no boot path.
+- files: shell/jv-hud/core/BusModel.qml (new), shell/jv-hud/core/qmldir (new,
+  generated), shell/jv-hud/tests/tst_busmodel.qml (new), shell/jv-hud/Bus.qml,
+  shell/jv-hud/README.md, pkgs/jv-hud/default.nix, tools/gen_theme_qml.py,
+  tools/tests/test_gen_theme_qml.py, ops/ralph/qmltest.sh (new)
+- commit: 4c7c048
+- next: **A7 then A3**, unchanged from last iteration's advice and now
+  cheaper. A7 (an `Ease` Behavior + one `prefers-reduced-motion` switch) is
+  small; note that the reduced-motion decision is pure logic and therefore
+  belongs in `core/` with a test, while the Behavior itself is wiring. Then
+  A3 — Jarvis's state from real `speech.state` + `audio.wake`, ember only
+  when genuinely active, nothing at all when `Bus.linkUp` is false: put the
+  frames-to-state mapping in `core/` and test every transition, including
+  "link down" and "frame too old", before drawing a single pixel.
+  Newly discovered: **A10** — shell.qml's safety properties (keyboardFocus
+  None, exclusionMode Ignore, empty input mask) are asserted by nobody, and
+  they cannot move into core/ because they ARE Quickshell types. That corner
+  of invariant 10 needs a different kind of gate.
+  A8 (fonts) is still a good 10-minute filler commit.
