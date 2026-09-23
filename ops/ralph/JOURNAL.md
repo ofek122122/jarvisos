@@ -341,3 +341,90 @@ everything here (and every commit) since the last time you asked. Format per ent
   they cannot move into core/ because they ARE Quickshell types. That corner
   of invariant 10 needs a different kind of gate.
   A8 (fonts) is still a good 10-minute filler commit.
+
+## 2026-09-24 — A7: one switch turns the HUD's motion off
+- built: the HUD's motion policy, and the single component every moving value
+  goes through. §06 gives motion four rules and three are about NOT moving —
+  "off with prefers-reduced-motion · off on battery · full stop when a window
+  is fullscreen" — plus "ease toward target over ~200ms, never raw pose". Left
+  to each element, one eventually forgets, and the forgetting is invisible: a
+  HUD that keeps breathing after a human asked it to stop. So:
+    · `core/MotionPolicy.qml` — the decision, pure QtQuick and therefore
+      tested: `animate`, `suppressedBy` (a reason, not a bare bool — "why did
+      it go still?" is a question someone will ask), and `ms(base)` which
+      returns 0 whenever motion is suppressed.
+    · `Motion.qml` — the wiring: binds the policy to real sources and
+      republishes the §06 durations already gated (`Motion.easeMs` etc.), so
+      an animation that forgot to check `animate` still cannot move anything.
+    · `Ease.qml` — `Ease on color {}`. A PropertyAnimation, not a Number one,
+      so the same component eases colours, which is most of what a HUD
+      settles. `base` picks how LONG a move takes; it can never pick whether
+      one happens, because the duration reaching the animation is always
+      `Motion.ms(base)`. Verified a QML-file-defined Behavior really does work
+      as a property interceptor before building on it.
+  Followed A9's rule exactly: logic in `core/`, Quickshell files stay wiring.
+- sources, and the honest state of each: the declared preference is
+  `personality/theme.toml [motion] reduced_motion` (versioned identity,
+  invariant 9), and `JV_HUD_REDUCED_MOTION=1`/`=0` overrides it for a session
+  — ONLY those two exact strings, because a machine that reads "true" as true
+  and "yes" as false is a machine nobody can predict. `onBattery` and
+  `fullscreen` have NO source: `context.system.battery_pct` says nothing about
+  discharging (and is absent on ares, so its absence cannot mean "on AC"
+  either), and `context.window` has no fullscreen field. They are real
+  properties rather than TODO comments — wiring one later is a single binding
+  — and they sit at false, which is the truth on ares, a desktop on AC.
+- guardrails hit: making those two real needs two additive fields in frozen
+  schemas. Did NOT touch `schemas/**`; wrote proposal **R1** into
+  `docs/optimization-backlog.md` under a new "Proposals from the Ralph loop"
+  section (kept separate so the 2026-09-23 pass's accounting stays intact).
+- first use: the self-test plate's `bus up`/`bus down` label eases its colour
+  — the one moving pixel in the HUD so far, and it moves only because the link
+  state actually changed.
+- proving the tests bite: 8 mutations through the suite, 7 caught — animate
+  frozen true, battery outranking the user's own wish in `suppressedBy`, the
+  env "0" branch dropped, `ms` ungated, loose truthiness for the env override,
+  fullscreen ignored, `animate` as a non-notifying property. The survivor is
+  `base >= 0` where the code says `base > 0`: they differ only at base 0,
+  where both return 0, so it is equivalent, not a gap.
+- the second gate, which is the point of the whole commit: a `tools/` test
+  fails the build if any QML file in the HUD declares an animation type
+  (`Behavior`, `*Animation`, `*Animator`, …) without mentioning `Motion.`.
+  VERIFIED it bites twice — a raw `NumberAnimation on opacity` in shell.qml
+  failed it, and so did an `OpacityAnimator`. `Ease` needs no exemption: it
+  consults Motion itself, so a file that only uses Ease is already gated.
+  Files in `core/` cannot reference Motion (a Quickshell singleton), which is
+  exactly right — core/ is logic, and logic does not animate.
+- also: `tools/gen_theme_qml.py` grew a `COMPONENTS` registry beside
+  `SINGLETONS`/`CORE`, since our qmldir replaces the one Quickshell would
+  synthesize and a qmldir exposes only what it lists — an unregistered `Ease`
+  is not a type at all, and the error lands in the USING file, miles away.
+  A test asserts the registry and the directory agree (verified: dropping Ease
+  from it fails).
+- footgun worth remembering: new QML files must be `git add`ed before
+  `nix build` sees them — the flake source is the git tree, so the first build
+  failed with "Motion.qml is listed in qmldir but does not exist".
+- tests: 52 QML green (25 new, also green INSIDE the nix sandbox), 22 tools
+  green (2 new). jv-hud-bridge untouched.
+- build: `nix build .#jv-hud` ok; `nixos-rebuild build --flake .#ares` ok.
+  Never test/switch. No schema, no jv-act, no boot path.
+- files: shell/jv-hud/core/MotionPolicy.qml (new), shell/jv-hud/Motion.qml
+  (new), shell/jv-hud/Ease.qml (new), shell/jv-hud/tests/tst_motionpolicy.qml
+  (new), shell/jv-hud/shell.qml, shell/jv-hud/README.md, shell/jv-hud/qmldir +
+  core/qmldir + Theme.qml (generated), personality/theme.toml,
+  tools/gen_theme_qml.py, tools/tests/test_gen_theme_qml.py,
+  docs/optimization-backlog.md
+- commit: 245926e
+- next: **A3**, and everything it needs now exists — `Bus` delivers frames and
+  is tested, `Motion`/`Ease` mean the first animated element obeys the switch
+  for free. Put the frames-to-state mapping in `core/` (call it
+  `SpeechState.qml`) and test every transition before drawing a pixel:
+  idle / listening / speaking / interrupted, plus the two that matter more —
+  `Bus.linkUp` false shows NOTHING, and a frame older than a threshold is
+  stale, not current (`Bus.ageOf` is there for exactly this and its Infinity
+  case is already tested). Ember only while genuinely active.
+  A8 (fonts: Archivo + JetBrains Mono in `fonts.packages`) is still a good
+  10-minute filler commit, and is now the only thing standing between the HUD
+  and the look it declares. A10 (shell.qml's unguarded safety properties) is
+  unchanged and still worth a grep-shaped gate — note that this iteration's
+  animation-gate test is exactly that shape, so the pattern now has a
+  precedent to copy.

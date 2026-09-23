@@ -35,10 +35,17 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       whenever the link drops. The singleton is lazy, so an idle HUD runs no
       bridge. Tests: `bash ops/ralph/runtests.sh jv-hud-bridge` — 25, three of
       them against a real jarvisd; smoked against the live bus on ares.)
-- [ ] A7. Motion primitives on top of A2: a `Ease` Behavior (Theme.easeMs) and a
-      `prefers-reduced-motion` switch every animated element honours, so "motion
-      off" is one place and not a rule each element remembers. Blocked on nothing;
-      worth doing next to A3 so the first moving pixel already obeys it.
+- [x] A7. Motion primitives on top of A2: an `Ease` Behavior and one
+      reduced-motion switch every animated element honours. — 245926e
+      (`core/MotionPolicy.qml` decides — tested, 25 new QML tests, 8 mutations
+      run through them; `Motion.qml` binds it to real sources and republishes
+      the §06 durations already gated; `Ease on color {}` is the one Behavior
+      every moving value uses, and its `base` picks how long a move takes,
+      never whether it happens. Sources: `personality/theme.toml [motion]
+      reduced_motion` + `JV_HUD_REDUCED_MOTION=1/0`. A tools test fails the
+      build if any HUD QML file animates without consulting `Motion`, so the
+      off switch cannot be bypassed — VERIFIED it bites. Tests:
+      `bash ops/ralph/qmltest.sh`, `bash ops/ralph/runtests.sh tools`.)
 - [ ] A8. Font packaging: theme.toml names Archivo + JetBrains Mono, but nothing
       declares them in the system yet — a missing font silently becomes a
       different look. Add both to `fonts.packages` (its own small commit).
@@ -55,6 +62,15 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       fails if anything in core/ imports more than QtQuick.
       **The rule for every element from here: logic goes in `core/`, and
       Quickshell files stay wiring.** Tests: `bash ops/ralph/qmltest.sh`.)
+
+- [ ] A11. Give `Motion.onBattery` and `Motion.fullscreen` real sources. Both
+      are live inputs in `core/MotionPolicy.qml` with nothing feeding them, so
+      two of §06's three "stop moving" rules cannot be honoured. Needs two
+      additive fields in FROZEN schemas (`context.system.on_battery`,
+      `context.window.fullscreen`) — proposal **R1** in
+      `docs/optimization-backlog.md`. **Blocked on human review; do not build
+      this autonomously.** When the schemas land it is one binding each in
+      `Motion.qml` plus the jv-context publisher work. Discovered in A7.
 
 - [ ] A6. `sys.health` glance: a quiet, edge-docked readout of service health +
       llm rung, 0 fps when nothing changes.
@@ -100,3 +116,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 - B2 — jv CLI: bounded, scriptable streams + --latency (62c440f, 2026-09-24)
 - A9 — headless QML tests + the core/ split that makes them possible
   (4c7c048, 2026-09-24)
+- A7 — one motion switch: MotionPolicy/Motion/Ease, and a build gate that
+  stops an element from animating around it (245926e, 2026-09-24)
