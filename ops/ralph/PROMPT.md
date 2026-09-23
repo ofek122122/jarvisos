@@ -31,8 +31,9 @@ excellent, finish it completely, and never break the build.
   `conf`, nothing blocks the bus, privacy is structural.
 
 ## STEP 3 — Verify (MANDATORY GATE — no commit without this)
-- Run the relevant test suite(s) for what you touched (use the service's test venv
-  or the flake checks; see `ops/ralph/README.md`).
+- Run the relevant test suite(s) for what you touched with
+  `bash ops/ralph/runtests.sh <service>` (nix build has doCheck=false, so this is
+  how Python tests actually run). Rust: `nix build .#jarvisd` runs its tests.
 - Run `nixos-rebuild build --flake .#ares` — it MUST succeed. **NEVER test/switch.**
 - If anything fails and you can't fix it quickly:
   `git checkout -- . && git clean -fd`, append a JOURNAL entry describing the
