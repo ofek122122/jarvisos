@@ -54,6 +54,16 @@
   # Fast-Startup-style hibernation is exactly what we disable on Windows).
   zramSwap.enable = true;
 
+  # A plugged-in desktop: hold the CPU at full clock so a voice/gesture
+  # burst starts computing immediately instead of paying the governor's
+  # ramp-up tax on the <100 ms latency budget.
+  powerManagement.cpuFreqGovernor = "performance";
+
+  # The WD Green is DRAM-less and degrades under sustained writes without
+  # TRIM. disko sets allowDiscards on the LUKS device (passthrough), but
+  # nothing issued TRIM until now — the weekly fstrim timer does.
+  services.fstrim.enable = true;
+
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
   nixpkgs.config.allowUnfree = true; # NVIDIA + CUDA
 

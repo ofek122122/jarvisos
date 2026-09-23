@@ -12,7 +12,7 @@
 # #    `device` below if it differs. The serial is the source of truth.      #
 # ############################################################################
 #
-# Layout: GPT → 1 GiB ESP (systemd-boot) + LUKS2 → btrfs (zstd) subvolumes.
+# Layout: GPT → 1 GiB ESP (GRUB) + LUKS2 → btrfs (zstd) subvolumes.
 # btrfs over ext4: transparent compression shrinks the Nix store, checksums
 # catch bit-rot on a DRAM-less budget SSD, and subvolume snapshots cover
 # /home — NixOS generations already cover the OS itself.
