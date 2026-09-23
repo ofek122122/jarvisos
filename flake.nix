@@ -53,6 +53,10 @@
           cargoLock.lockFile = ./services/jv-act/Cargo.lock;
           meta.mainProgram = "jv-act";
         };
+        # jv-hud — the Quickshell/QML HUD (blueprint §06). Pure QML in the
+        # store plus a wrapped quickshell; its check phase is qmllint, so a
+        # HUD that does not parse cannot reach a `nixos-rebuild build`.
+        jv-hud = pkgs.callPackage ./pkgs/jv-hud { };
         cuda-smoke = pkgs.callPackage ./pkgs/cuda-smoke { };
         jarvis-doctor = pkgs.callPackage ./pkgs/jarvis-doctor {
           cuda-smoke = self.packages.${system}.cuda-smoke;

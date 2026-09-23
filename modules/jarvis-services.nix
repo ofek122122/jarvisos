@@ -14,6 +14,7 @@ let
   pyEnvs = import ../nix/jarvis-python.nix { inherit pkgs; };
   jarvisd = self.packages.x86_64-linux.jarvisd;
   jv-act = self.packages.x86_64-linux.jv-act;
+  jv-hud = self.packages.x86_64-linux.jv-hud;
   llama = pkgs.llama-cpp.override { cudaSupport = true; };
 
   busSock = "/run/jarvis/bus.sock";
@@ -175,9 +176,26 @@ in
     };
   };
 
+  # jv-hud — the HUD shell (blueprint §06). Installed and startable, but
+  # deliberately NOT wanted by default.target yet: the skeleton has no bus
+  # subscription, so there is nothing truthful for it to display, and a
+  # resident-but-empty overlay is exactly the set dressing §06 forbids.
+  # `systemctl --user start jv-hud` (or JV_HUD_SELFTEST=1 jv-hud) runs it;
+  # PLAN A3 turns it on once real frames drive it.
+  systemd.user.services.jv-hud = {
+    description = "Jarvis HUD (Quickshell layer-shell overlay)";
+    unitConfig.ConditionUser = "ofek";
+    environment = commonEnv;
+    serviceConfig = {
+      ExecStart = "${jv-hud}/bin/jv-hud";
+      Restart = "on-failure";
+      RestartSec = 2;
+    };
+  };
+
   # jv-compat is on-demand (jv-compat install <path>), reachable via
   # binfmt/MIME — no persistent unit.
-  environment.systemPackages = [ jarvisd jv-act pyEnvs.compatEnv ];
+  environment.systemPackages = [ jarvisd jv-act jv-hud pyEnvs.compatEnv ];
 
   # --------------------------------------------------------------- user
   # PipeWire is a session service; ears and voice follow it. ConditionUser
