@@ -53,9 +53,25 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       llm rung, 0 fps when nothing changes.
 
 ## Track B — Features / hardening (when UI is blocked, or for variety)
-- [ ] B1. Pull the next safe item from `docs/optimization-backlog.md` that is NOT
-      marked human-review, and implement it under the verify gate.
-- [ ] B2. `jv tap`/CLI ergonomics: small, tested improvements to the debug CLI.
+- [~] B1. Pull the next safe item from `docs/optimization-backlog.md` that is NOT
+      marked human-review, and implement it under the verify gate. **Checked
+      2026-09-24: there is no such item — all 27 are human-review-gated.** Leave
+      this here in case a future pass adds auto-safe findings; do not re-check it
+      every iteration.
+- [x] B2. `jv tap`/CLI ergonomics: small, tested improvements to the debug CLI.
+      — 62c440f
+      (Every stream is bounded: `-n/--count`, `--for SECS`, Ctrl-C; an unmet
+      `--count` exits 1 so `jv` is scriptable. `jv tap --latency` prints a
+      per-topic p50/p95/max summary; end-to-end is reported once per utterance
+      as time-to-FIRST-word, and the utterance map is a bounded ring. Logic
+      moved to `jarvisd::cli`; 30 tests green, 8 of them running the real `jv`
+      binary against a real broker. Tests: `bash ops/ralph/cargotest.sh jarvisd`,
+      gate `nix build .#jarvisd`.)
+- [ ] B4. `jv act-log` / `jv confirm` are still untested: reading+tailing the
+      audit file has no coverage, and nothing asserts the `action.confirm` frame
+      `jv confirm` publishes is the shape jv-act's `resolve_voice` expects.
+      Small, and it guards the one path where the CLI can cause a real action.
+      Discovered building B2.
 - [ ] B3. More replay-harness fixtures for perception (recorded-session tests).
 
 ## Track C — Creative (within blueprint + invariants)

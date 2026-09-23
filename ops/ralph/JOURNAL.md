@@ -169,3 +169,98 @@ everything here (and every commit) since the last time you asked. Format per ent
   (or `qml -platform offscreen`) suite in the jv-hud checkPhase would close
   the largest untested gap in the HUD and make every later element cheap to
   test.
+
+## 2026-09-24 — iteration 4 — B2: `jv` streams are bounded, scriptable, tested
+
+- why this and not UI: the ladder says take a feature when the last three
+  iterations were UI, and A1/A2/A5 were all Track A. B1 was checked first
+  and is empty — all 27 items in `docs/optimization-backlog.md` are
+  human-review-gated, so there is no auto-applyable one to pull. B2 it is.
+- what: `jv sub`/`tap`/`health` ran until killed. That is fine to watch and
+  impossible to script or assert on, and it is why the CLI that is
+  supposed to be "how we debug everything forever" had zero tests. Now
+  every stream stops on `-n/--count N`, `--for SECS`, or Ctrl-C, and an
+  unmet `--count` exits 1 — a script can finally tell "here is the frame"
+  from "the bus went away" from "nothing was published", which all looked
+  like a clean exit before.
+- two behaviour fixes that only showed up once the tap was testable:
+  (1) the end-to-end line fired for EVERY `speech.say` answering an
+  utterance. jv-brain streams a reply sentence by sentence (reply_group),
+  so one utterance printed 340ms, then 1200ms, then 2600ms — which reads
+  as latency degrading and is only a long reply. It reports once per
+  utterance now and says what it actually measures: VAD start -> FIRST
+  speech.say, i.e. time to first word, which is the budget that exists.
+  (2) `utt_start` was an unbounded HashMap in a tool meant to be left
+  running for hours; it is a 256-entry ring now. Utterance start is also
+  the EARLIEST ts seen rather than the first frame delivered, because
+  vad / partial / final transcript frames need not arrive in ts order.
+- `jv tap --latency` prints a per-topic p50/p95/max summary when it stops.
+  A scrolling column of per-frame numbers is not a measurement, and
+  invariant 5 says measure, don't assume. Nearest-rank percentiles, so
+  every number printed is a latency that was really observed. Ctrl-C is
+  wired precisely so an interactive tap can ask for that summary: the
+  SIGINT future is registered ONCE and polled across iterations, because
+  a fresh `ctrl_c()` per loop pass can drop a signal that lands while
+  we are printing.
+- the reasoning moved into a new `jarvisd::cli` module (latency
+  accounting, utterance tracking, line formats, exit policy) so it can be
+  tested without a process; `bin/jv.rs` is argument parsing plus one
+  `select!` loop. Nothing here touches broker.rs, proto.rs or jv-act —
+  the bus hot path is byte-identical.
+- tooling: added `ops/ralph/cargotest.sh`, the Rust sibling of
+  `runtests.sh`. `nix build .#jarvisd` does run cargo test, but it copies
+  into the store and rebuilds the world per edit, which is far too slow
+  for red/green. This borrows the derivation's own build env (cargo,
+  rustc, the vendored registry — no network) and a cached target dir
+  outside the repo. It is the INNER loop, not the gate.
+- tests: 30 green — 16 unit + 6 broker + 8 new end-to-end that run the
+  REAL `jv` binary as a child process against a real broker on a real
+  socket. `tests/common/mod.rs` now holds the broker fixture that
+  `bus.rs` had inline, so both suites share it.
+  On flakiness, deliberately: whether a child has finished subscribing is
+  not observable from the test, and sleeping a guessed amount then
+  publishing once is exactly the flake that makes an unattended gate
+  worthless. So each test re-publishes its frames on a tick for the whole
+  window and asserts only things that are TRUE UNDER REPEATS — `-n 1`
+  prints one line however many frames arrive, and an end-to-end report
+  fires once per utterance by construction. `wait_out` panics rather than
+  hangs if the CLI overruns its bound, since "it stops when told" is the
+  thing under test.
+  I wrote tests and implementation together, so rather than claim
+  test-first I proved they bite by mutation: dropped eviction, forgotten
+  "already reported", inverted earliest-ts, always-zero exit code,
+  ignored `--count`, ignored `--for`, ignored Ctrl-C, and an invented
+  zero uptime each failed exactly the tests that should have caught them
+  and no others.
+- build: `nix build .#jarvisd` -> ok, and its checkPhase ran all 30 tests
+  green INSIDE the sandbox (the child-process tests included).
+  `nixos-rebuild build --flake .#ares` -> ok; jv-act rebuilt clean
+  against the changed jarvisd lib (it takes it as a path dep). Never
+  test/switch. Then the real proof: ran the PACKAGED `jv` against the
+  live `/run/jarvis/bus.sock` on ares — `jv health -n 3` returned real
+  heartbeats from jv-guard/jv-act/jv-voice and exited 0; `jv tap
+  --latency --for 6` saw real sys.health from all seven producers and
+  summarised **p50 0.24ms / p95 0.27ms / max 0.27ms per hop** (10 frames);
+  `jv sub 'sys.*' -n 1` returned exactly one parseable envelope; and
+  `jv sub jv.nothing -n 1 --for 1` exited 1 as designed.
+- one thing checked before changing anything: `modules/jarvis-services.nix`
+  uses only `jv pub` (the greeting unit), and that path is untouched.
+- files: services/jarvisd/src/cli.rs (new), services/jarvisd/src/lib.rs,
+  services/jarvisd/src/bin/jv.rs, services/jarvisd/tests/cli.rs (new),
+  services/jarvisd/tests/common/mod.rs (new),
+  services/jarvisd/tests/bus.rs, ops/ralph/cargotest.sh (new)
+- commit: 62c440f
+- next: back to Track A with the variety debt paid. Do **A7 then A3** in
+  that order: the `Ease`/`prefers-reduced-motion` switch first so the
+  first moving pixel in the HUD already obeys §06, then A3 — Jarvis's
+  state from real `speech.state` + `audio.wake`, ember only when
+  genuinely active, nothing at all when `Bus.linkUp` is false. **A9 is
+  now cheaper and more clearly worth it:** this iteration showed what a
+  real test harness buys (three behaviour bugs surfaced in an hour), and
+  the QML side still has zero tests, so `Bus.ingest` is verified only by
+  reading it. Consider A9 immediately before A3 so the new element is
+  born tested. A8 (fonts) stays a good 10-minute filler commit.
+  Newly discovered, small: `jv act-log` and `jv confirm` are still
+  untested — act-log now has a testable `cli::act_log_line`, but reading
+  and tailing the file is not covered, and `jv confirm` has no test that
+  the frame it publishes is the shape jv-act's resolve_voice expects.
