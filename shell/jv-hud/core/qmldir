@@ -7,3 +7,4 @@
 # New components go in CORE in tools/gen_theme_qml.py.
 BusModel 1.0 BusModel.qml
 MotionPolicy 1.0 MotionPolicy.qml
+SpeechState 1.0 SpeechState.qml

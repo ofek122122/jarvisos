@@ -67,6 +67,7 @@ SINGLETONS = (
 # deliberately not listed.
 COMPONENTS = (
     ("Ease", "Ease.qml"),  # the one gated Behavior every moving value uses
+    ("StatePlate", "StatePlate.qml"),  # what Jarvis is doing, on screen (A3)
 )
 
 # shell/jv-hud/core — the Quickshell-free half of the HUD. Importing a
@@ -80,6 +81,7 @@ COMPONENTS = (
 CORE = (
     ("BusModel", "BusModel.qml"),  # the bus state machine, minus Quickshell
     ("MotionPolicy", "MotionPolicy.qml"),  # is the HUD allowed to move? (§06)
+    ("SpeechState", "SpeechState.qml"),  # what is Jarvis doing? (A3)
 )
 
 HEX = re.compile(r"^#[0-9A-F]{6}$")

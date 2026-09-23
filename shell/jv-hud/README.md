@@ -4,12 +4,15 @@ Quickshell (QML) layer-shell surfaces over Niri. Blueprint §06: *every
 moving pixel encodes a real signal*, and the HUD **never** steals focus or
 fakes sensor state (invariant 10).
 
-## What exists today (A1 skeleton)
+## What exists today
 
-`shell.qml` maps one layer-shell surface per connected monitor and renders
-nothing. That is deliberate — the default state of the screen is your work
-and nothing else, and an unmapped surface renders at 0 fps. The skeleton's
-job is to pin the properties that make the HUD safe by construction:
+`shell.qml` maps one layer-shell surface per connected monitor, and that
+surface is **unmapped unless an element has something true to draw** — the
+default state of the screen is your work and nothing else, and an unmapped
+surface renders at 0 fps. Today the one element is `StatePlate` (A3), which
+draws only while Jarvis is listening, speaking, or was interrupted.
+
+The skeleton pins the properties that make the HUD safe by construction:
 
 | property | why |
 |---|---|
@@ -21,16 +24,21 @@ job is to pin the properties that make the HUD safe by construction:
 ## Running it
 
 The HUD is packaged as `jv-hud` and installed system-wide, but it is not
-started automatically yet — there is nothing truthful to display until the
-bus-backed elements land (PLAN A3–A6). Start it by hand in a Niri session:
+started automatically yet. Start it by hand in a Niri session:
 
 ```sh
-jv-hud                      # maps nothing (expected)
-JV_HUD_SELFTEST=1 jv-hud    # maps a small marker: the shell loaded
+jv-hud                      # nothing on screen until the bus says something
+JV_HUD_SELFTEST=1 jv-hud    # also maps a marker: the shell loaded
 ```
 
-`JV_HUD_SELFTEST` reports that the *shell* is alive. It never stands in for
-a sensor: no camera or microphone indicator is drawn by this file at all.
+Say "hey jarvis" with `jv-ears` running and the plate appears; it goes when
+Jarvis does. `jv tap speech.state audio.wake` shows the same frames the HUD
+is reading, which is the fastest way to tell a HUD bug from a bus one.
+
+`JV_HUD_SELFTEST` reports that the *shell* is alive, never a sensor — which
+is why its marker sits in the opposite corner from the real elements. The
+only sensor-backed thing on screen is `StatePlate`, and it comes off the bus
+or it does not appear.
 
 ## Theme tokens (A2)
 
@@ -104,12 +112,14 @@ lines drive lives in `core/BusModel.qml` and imports nothing but QtQuick —
 which is what makes it testable (see below). `Bus` forwards the whole API,
 so an element still sees one `Bus`.
 
-The singleton is built lazily, on first use. Nothing references it while
-the HUD has nothing to show, so an idle machine runs no bridge process and
-holds no socket — which is why the self-test plate lives inside a `Loader`
-rather than merely being `visible: false`. Under `JV_HUD_SELFTEST=1` that
-plate also prints `bus up` / `bus down`: the state of this pipe, in plain
-words, never dressed up as a sensor indicator.
+The singleton is built on first use. Since A3 that is at load: an element
+has to be watching the bus to know whether there is anything to show, so a
+running HUD always runs its bridge child and holds one subscription. What
+stays lazy is the *screen* — the surface maps only when a frame earns it.
+
+Under `JV_HUD_SELFTEST=1` the marker plate also prints `bus up` / `bus
+down`: the state of this pipe, in plain words, never dressed up as a sensor
+indicator.
 
 ```sh
 bash ops/ralph/runtests.sh jv-hud-bridge   # unit tests + a real-jarvisd e2e
@@ -204,8 +214,51 @@ a `tools/` test fails the build if any QML file in the HUD declares an
 animation type without consulting `Motion`, so the off switch cannot be
 quietly bypassed by the next element someone writes.
 
+## Jarvis's state (A3)
+
+The first element backed by real sensor topics. `StatePlate.qml` draws a
+dot and one word; `core/SpeechState.qml` decides which word, from three
+topics, and is where the tests are.
+
+| state | comes from | colour |
+|---|---|---|
+| `unknown` | no link, no frame, or no frame we can trust — **draws nothing** | — |
+| `idle` | `speech.state` = idle — **draws nothing** | — |
+| `listening` | `audio.wake` fired and the window is still open | teal — the open mic is *yours* |
+| `speaking` | `speech.state` = speaking | ember — Jarvis is doing something |
+| `interrupted` | `speech.state` = interrupted | quiet; a fact, not an alarm |
+
+`listening` is the claim that costs the most if it is wrong, because it is a
+claim about the microphone. jv-ears publishes when a window *opens* and
+nothing when it closes, so closing is inferred — and every rule is chosen to
+stop saying it too early rather than too late:
+
+- Jarvis answering (`speech.state` → `speaking`, newer than the wake) means
+  it already heard you. A `speaking` frame *older* than the wake is barge-in,
+  not an answer, so that still reads as listening.
+- `audio.vad` `speech_end` newer than the wake closes the window — ears
+  disarms there for a wake-gated utterance.
+- `interrupted` never closes it: jv-voice publishes that *because* of the
+  wake, and blanking the plate there would blank it while you are talking.
+- otherwise it expires after `wakeWindowS` (8 s, mirroring jv-ears'
+  `wake_timeout_s`). Nothing publishes ears' configuration, so this is a
+  HUD-side constant — **keep it at or below whatever ears is tuned to.**
+
+Frames are refused rather than guessed at: a body from a schema version we
+were not written against, a wake that scored below the threshold it declares
+(or whose envelope `conf` contradicts that score), a state topic hedging its
+confidence, or any frame without a numeric `ts` — ordering a wake against a
+speech transition is the whole rule, and an unorderable frame cannot be
+ordered. A state word we do not recognise reads as `unknown`, never as the
+nearest thing we do know.
+
+Age comes from `Bus.ageOf`, so with no clock pinned yet there is no age and
+therefore no `listening` — `Infinity` fails every freshness test by
+construction. The expiry timer is armed only while a window is actually
+open, and with whatever is *left* of it (a frame delayed in flight is
+already partway through its own window), so an idle HUD runs no timer.
+
 ## Next
 
-`A3` — the first data-backed element: Jarvis's state from real
-`speech.state` / `audio.wake` frames, now that `Bus` can deliver them, and
-now that its state machine is born tested.
+`A4` — the live microphone indicator from `audio.vad` / `audio.wake`, and
+`A6` — the `sys.health` glance.

@@ -1,9 +1,8 @@
 // jv-hud — the JarvisOS heads-up display (blueprint §06, Quickshell/QML).
 //
-// This is the skeleton (PLAN A1). It proves one thing: a layer-shell
-// surface maps on every monitor under Niri, takes no keyboard focus, and
-// reserves no screen space — and it renders NOTHING until a real signal
-// gives it something truthful to show.
+// A layer-shell surface on every monitor under Niri that takes no keyboard
+// focus, reserves no screen space, and shows NOTHING unless a real bus
+// frame gives it something truthful to say.
 //
 // Invariant 10 is enforced structurally here, not by convention:
 //   · WlrKeyboardFocus.None + focusable:false — the surface CANNOT take
@@ -12,17 +11,23 @@
 //     resized or pushed around by the HUD.
 //   · mask: Region {} — an empty input region: every click, scroll and
 //     hover passes straight through to the window underneath.
-//   · visible is false until something real is on screen. Earned
-//     emptiness is the default state, and an unmapped surface costs
-//     exactly 0 fps.
+//   · visible is false whenever nothing is on screen. Earned emptiness is
+//     the default state, and an unmapped surface costs exactly 0 fps.
 // Anything that moves goes through `Ease`/`Motion` (A7), which carries §06's
 // reduced-motion switch — so stillness is one setting, not a promise every
 // element has to keep on its own.
-// No sensor state is displayed yet, because no ELEMENT reads one yet
-// (A3/A4 add `speech.state`, `audio.wake`, `audio.vad` — real frames or
-// nothing; never a faked indicator). The read-only bus link exists as of
-// A5 (`Bus`), but it is only touched under JV_HUD_SELFTEST, so an idle
-// machine still runs no bridge process: the singleton is never built.
+//
+// What it shows today: `StatePlate` (A3), which is what jv-voice and
+// jv-ears actually published — idle / listening / speaking / interrupted,
+// or nothing at all when the bus is quiet or unreachable. The mapping is
+// in core/SpeechState.qml, where it is tested; no element in this shell
+// can display a state that did not come off the bus. The mic and camera
+// indicators (A4) and the sys.health glance (A6) come next.
+//
+// The HUD is a live bus consumer as of A3, so `Bus` is constructed on load
+// and its read-only bridge child runs for as long as the shell does. That
+// is the cost of telling the truth about the machine; the surface itself
+// still maps only when there is something to draw.
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -44,7 +49,8 @@ ShellRoot {
 
       // Self-test: `JV_HUD_SELFTEST=1 jv-hud` maps a small marker so a
       // human can confirm the layer-shell surface actually reaches the
-      // screen. It reports that the SHELL loaded — never a sensor state.
+      // screen. It reports that the SHELL loaded — never a sensor state,
+      // which is why it sits in the corner the real elements do not use.
       readonly property bool selfTest: Quickshell.env("JV_HUD_SELFTEST") === "1"
 
       screen: modelData
@@ -61,22 +67,40 @@ ShellRoot {
         top: true
         right: true
       }
-      // The inset is baked into the surface, not into `margins`: quickshell's
-      // `margins` grouped property has no resolvable type in its qmltypes, and
-      // a clean qmllint is worth more than two pixels of layout sugar.
-      implicitWidth: 112
+      // The edge inset is baked into the surface rather than into
+      // `margins`: quickshell's `margins` grouped property has no
+      // resolvable type in its qmltypes, and a clean qmllint is worth more
+      // than two pixels of layout sugar. The box is one plate plus its
+      // inset, with room for the longest state word — a surface no bigger
+      // than what it may ever draw.
+      implicitWidth: 260
       implicitHeight: 62
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
-      // Nothing real to show yet -> no surface at all.
-      visible: surface.selfTest
+      // Mapped only while something is genuinely on screen — including
+      // while a plate is fading out, or the exit would be a surface
+      // vanishing out from under it rather than an element evaporating.
+      visible: surface.selfTest || statePlate.shown || statePlate.lit
 
-      // Built only under the self-test. `active: false` means the plate's
-      // bindings never run, so `Bus` is never constructed and no bridge
-      // process is spawned: the empty HUD really does cost nothing.
+      // What Jarvis is doing, from speech.state + audio.wake + audio.vad.
+      // Draws nothing while idle or while the bus cannot be seen.
+      StatePlate {
+        id: statePlate
+
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: Theme.insetPx
+        anchors.rightMargin: Theme.insetPx
+      }
+
+      // Built only under the self-test, in the opposite corner: it is a
+      // developer marker, and it must never sit where a sensor state does.
       Loader {
-        anchors.fill: parent
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.topMargin: Theme.insetPx
+        anchors.leftMargin: Theme.insetPx
         active: surface.selfTest
         sourceComponent: plate
       }
@@ -85,8 +109,8 @@ ShellRoot {
         id: plate
 
         Rectangle {
-          anchors.fill: parent
-          anchors.margins: Theme.insetPx
+          implicitWidth: marker.implicitWidth + Theme.padPx * 2
+          implicitHeight: marker.implicitHeight + Theme.padPx * 2
           radius: Theme.radiusPx
           color: Theme.ground
           opacity: Theme.plateOpacity
@@ -94,6 +118,8 @@ ShellRoot {
           border.width: Theme.hairlinePx
 
           Column {
+            id: marker
+
             anchors.centerIn: parent
             spacing: 2
 
@@ -115,11 +141,9 @@ ShellRoot {
               font.pixelSize: Theme.labelPx
               font.letterSpacing: Theme.labelPx * Theme.labelTrackingEm
 
-              // The one moving pixel in the HUD so far, and it moves only
-              // because the link state actually changed (§06: ease toward
-              // the target, never snap). `Ease` carries the reduced-motion
-              // gate with it, so this settles or it assigns instantly —
-              // either way it says the same true thing.
+              // §06: ease toward the target, never snap. `Ease` carries
+              // the reduced-motion gate with it, so this settles or it
+              // assigns instantly — either way it says the same true thing.
               Ease on color {}
             }
           }
