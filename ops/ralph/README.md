@@ -22,9 +22,11 @@ git tag ralph-report-mark ralph/auto     # baseline for updates.sh
 The loop runs **inside `~/jarvisos-ralph`**. Your `~/jarvisos` stays yours.
 
 ## Launch — auto-restarting service (survives crashes + reboots)
-The `ralph-loop` plugin runs as a Stop hook INSIDE one long-lived `claude`
-session. The `ralph-loop` systemd USER service keeps that session alive in tmux
-and resumes it with `claude --continue` whenever it dies.
+The loop is the original "Ralph is a Bash loop": `loop-run.sh` feeds the SAME
+prompt to a FRESH headless `claude -p` each iteration; the repo is the only
+memory between iterations. (The `ralph-loop` PLUGIN's Stop-hook only works in an
+interactive session where plugins load — a headless/systemd context can't run it,
+so we don't use it.) No arming step; it builds immediately.
 
 One-time install:
 ```
@@ -34,21 +36,18 @@ systemctl --user daemon-reload
 systemctl --user enable --now ralph-loop.service
 loginctl enable-linger "$USER"     # keep running while logged out / after reboot
 ```
-Then arm the loop ONCE:
+Hands-off after that: on crash/OOM/reboot systemd relaunches it and it resumes
+building (the repo state IS the memory). Watch:
 ```
-tmux attach -t ralph
-# at the claude prompt, paste:
-#   /ralph-loop Read ops/ralph/PROMPT.md in full and follow it exactly for ONE iteration then stop. Working dir is this repo on branch ralph/auto. Obey ops/ralph/GUARDRAILS.md absolutely.
-# detach without stopping it: Ctrl-b then d
+journalctl --user -u ralph-loop -f     # live iteration output
+bash ops/ralph/updates.sh              # commit + journal delta since last check
 ```
-After that it's hands-off: on crash/OOM/reboot the service relaunches and
-`--continue` resumes the armed loop automatically (the loop's state file
-persists on disk). Watch anytime with `tmux attach -t ralph` or `updates.sh`.
 
-Stop for good:
+Pause / stop:
 ```
-systemctl --user disable --now ralph-loop.service
-tmux kill-session -t ralph
+touch ~/jarvisos-ralph/.ralph-STOP           # clean pause after the current iteration
+systemctl --user start ralph-loop.service    # (remove the STOP file first to resume)
+systemctl --user disable --now ralph-loop.service   # stop for good
 ```
 
 ## "Stop and give me updates" (loop keeps running)

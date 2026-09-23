@@ -6,23 +6,21 @@
 #   ln -sf ~/jarvisos/ops/ralph/ralph-loop.service ~/.config/systemd/user/ralph-loop.service
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now ralph-loop.service
-#   loginctl enable-linger "$USER"     # so it keeps running while logged out / after reboot
+#   loginctl enable-linger "$USER"     # keep running while logged out / after reboot
 #
-# Then ONE time, arm the loop:
-#   tmux attach -t ralph      # run:  /ralph-loop Read ops/ralph/PROMPT.md ... (see README)
-#   (detach with Ctrl-b then d — the loop keeps running)
-#
-# Stop for good:  systemctl --user stop ralph-loop && tmux kill-session -t ralph
+# No arming step: the loop is a headless bash while-loop (see loop-run.sh); it
+# starts building immediately.  Watch:  journalctl --user -u ralph-loop -f
+# Pause: touch ~/jarvisos-ralph/.ralph-STOP    Stop: systemctl --user stop ralph-loop
 
 [Unit]
-Description=JarvisOS Ralph autonomous build loop (tmux + claude on branch ralph/auto)
+Description=JarvisOS Ralph autonomous build loop (headless claude -p on branch ralph/auto)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 ExecStart=%h/jarvisos/ops/ralph/loop-run.sh
-Restart=always
+Restart=on-failure
 RestartSec=15
 # Never grant this unit privilege — build needs no root, and it must never switch.
 

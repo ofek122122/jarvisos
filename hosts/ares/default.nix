@@ -69,7 +69,7 @@
 
   environment.systemPackages = [
     self.packages.x86_64-linux.jarvis-doctor
-    pkgs.tmux # persistent session host for the ops/ralph autonomous build loop
+    pkgs.tmux # terminal multiplexer (handy for watching long-running work)
   ];
 
   # Kernel: STOCK for the first boots. The custom kernel (localmodconfig
