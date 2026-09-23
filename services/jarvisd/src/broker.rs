@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::{broadcast, Notify, RwLock};
+use std::sync::RwLock;
+use tokio::sync::{broadcast, Notify};
 
 use crate::proto::{self, ClientMsg, ServerMsg};
 use crate::schema::{Envelope, SysHealth, SysHealthState, TOPIC_SYS_HEALTH, V_SYS_HEALTH};
@@ -275,7 +276,10 @@ async fn handle_conn(broker: Arc<Broker>, stream: Box<dyn Conn>) {
             loop {
                 match rx.recv().await {
                     Ok(d) => {
-                        let pats = patterns.read().await;
+                        // std RwLock: this fan-out read runs per broadcast frame
+                        // per subscriber and holds no await — a cheap, non-suspending
+                        // load beats tokio's async lock on the bus hot path.
+                        let pats = patterns.read().unwrap();
                         if pats.iter().any(|p| proto::topic_matches(p, &d.topic)) {
                             queue.push(QItem::Frame(d));
                         }
@@ -307,7 +311,7 @@ async fn handle_conn(broker: Arc<Broker>, stream: Box<dyn Conn>) {
     loop {
         match proto::read_msg::<ClientMsg, _>(&mut r).await {
             Ok(Some(ClientMsg::Sub { patterns: ps })) => {
-                let mut g = patterns.write().await;
+                let mut g = patterns.write().unwrap();
                 for p in ps {
                     if !g.contains(&p) {
                         g.push(p);
@@ -315,7 +319,7 @@ async fn handle_conn(broker: Arc<Broker>, stream: Box<dyn Conn>) {
                 }
             }
             Ok(Some(ClientMsg::Unsub { patterns: ps })) => {
-                patterns.write().await.retain(|p| !ps.contains(p));
+                patterns.write().unwrap().retain(|p| !ps.contains(p));
             }
             Ok(Some(ClientMsg::Pub { frame })) => match proto::validate_envelope(&frame) {
                 Ok((topic, _ts)) => broker.publish_value(topic, frame),
