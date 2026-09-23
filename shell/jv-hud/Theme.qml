@@ -35,6 +35,7 @@ QtObject {
   readonly property real labelTrackingEm: 0.14
 
   // Motion. Every duration is a signal settling, never decoration.
+  readonly property bool reducedMotion: false
   readonly property int easeMs: 200
   readonly property int fadeInMs: 120
   readonly property int fadeOutMs: 180

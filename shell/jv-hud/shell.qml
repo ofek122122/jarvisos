@@ -15,6 +15,9 @@
 //   · visible is false until something real is on screen. Earned
 //     emptiness is the default state, and an unmapped surface costs
 //     exactly 0 fps.
+// Anything that moves goes through `Ease`/`Motion` (A7), which carries §06's
+// reduced-motion switch — so stillness is one setting, not a promise every
+// element has to keep on its own.
 // No sensor state is displayed yet, because no ELEMENT reads one yet
 // (A3/A4 add `speech.state`, `audio.wake`, `audio.vad` — real frames or
 // nothing; never a faked indicator). The read-only bus link exists as of
@@ -111,6 +114,13 @@ ShellRoot {
               font.family: Theme.familyMono
               font.pixelSize: Theme.labelPx
               font.letterSpacing: Theme.labelPx * Theme.labelTrackingEm
+
+              // The one moving pixel in the HUD so far, and it moves only
+              // because the link state actually changed (§06: ease toward
+              // the target, never snap). `Ease` carries the reduced-motion
+              // gate with it, so this settles or it assigns instantly —
+              // either way it says the same true thing.
+              Ease on color {}
             }
           }
         }

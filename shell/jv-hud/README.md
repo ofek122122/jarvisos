@@ -151,6 +151,59 @@ singletons are registered in `SINGLETONS`.
 
 The tests are a build gate, not shipped QML — `installPhase` drops them.
 
+## Motion (A7)
+
+§06 gives motion four rules, and three are about *not* moving: **off with
+`prefers-reduced-motion`, off on battery, full stop under a fullscreen
+window** — and, when it does move, *ease toward the target over ~200 ms,
+never snap to a raw value*. Those live in one place, so no element has to
+remember them:
+
+```qml
+// the common case — a value that settles instead of jumping
+Text {
+  color: Bus.linkUp ? Theme.text2 : Theme.text3
+  Ease on color {}                      // Theme.easeMs, gated
+}
+Rectangle { opacity: shown ? 1 : 0
+            Ease on opacity { base: Theme.fadeInMs } }
+
+// anything else that animates
+NumberAnimation { duration: Motion.easeMs; running: Motion.animate }
+```
+
+| member | meaning |
+|---|---|
+| `Motion.animate` | may the HUD move at all — gate `Behavior.enabled` / `running` on it |
+| `Motion.suppressedBy` | `""`, or `reduced-motion` / `battery` / `fullscreen` |
+| `Motion.easeMs` … `pulseMs` | the `[motion]` tokens, already **0** when suppressed |
+| `Motion.ms(base)` | gate any other duration through this |
+| `Ease on <prop> {}` | one `Behavior` that carries the gate with it |
+
+`Ease` is a `PropertyAnimation`, so the same component eases colours — which
+is most of what a HUD settles. Its `base` chooses *how long* a move takes;
+it can never choose *whether* one happens, because the duration that reaches
+the animation is always `Motion.ms(base)`.
+
+Sources, and which are real today:
+
+| input | source |
+|---|---|
+| declared preference | `personality/theme.toml` → `[motion] reduced_motion` |
+| session override | `JV_HUD_REDUCED_MOTION=1` (stop) / `=0` (force on); nothing else counts |
+| `onBattery` | **none yet** — `context.system.battery_pct` says nothing about discharging |
+| `fullscreen` | **none yet** — `context.window` has no fullscreen field |
+
+The two unsourced inputs are properties, not TODOs: wiring one later is a
+single binding. They sit at `false`, which is the truth on ares (a desktop
+with no battery), and whatever feeds them must feed them a real signal.
+
+The decision itself is `core/MotionPolicy.qml` — pure QtQuick, so it is
+tested (`qmltest.sh`); `Motion.qml` is only the binding to real sources. And
+a `tools/` test fails the build if any QML file in the HUD declares an
+animation type without consulting `Motion`, so the off switch cannot be
+quietly bypassed by the next element someone writes.
+
 ## Next
 
 `A3` — the first data-backed element: Jarvis's state from real

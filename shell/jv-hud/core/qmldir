@@ -6,3 +6,4 @@
 # one Quickshell import here would take the headless tests with it.
 # New components go in CORE in tools/gen_theme_qml.py.
 BusModel 1.0 BusModel.qml
+MotionPolicy 1.0 MotionPolicy.qml

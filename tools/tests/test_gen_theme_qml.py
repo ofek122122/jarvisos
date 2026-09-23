@@ -94,6 +94,73 @@ def test_every_qml_singleton_on_disk_is_registered_and_vice_versa():
         assert name == file[: -len(".qml")], "the type name is the file name"
 
 
+def test_qmldir_registers_every_plain_component_on_disk_and_vice_versa():
+    """A qmldir exposes only what it lists, so an unregistered component is
+    not a type at all — and the failure reads as a typo in the USING file,
+    miles from the missing line. shell.qml is exempt: it is loaded by path."""
+    hud = ROOT / "shell" / "jv-hud"
+    on_disk = {
+        q.name
+        for q in hud.glob("*.qml")
+        if q.name != "shell.qml" and "pragma Singleton" not in q.read_text("utf-8")
+    }
+    assert on_disk == {file for _, file in gen.COMPONENTS}
+    qmldir = gen.render_qmldir()
+    for name, file in gen.COMPONENTS:
+        assert f"{name} 1.0 {file}" in qmldir
+        assert f"singleton {name}" not in qmldir, f"{file} is a component, not a singleton"
+        assert name == file[: -len(".qml")], "the type name is the file name"
+
+
+# Every QML animation type. If one of these appears in a HUD file, that file
+# is capable of moving the screen, and §06 says something has to be able to
+# stop it.
+ANIMATION_TYPES = (
+    "Behavior",
+    "PropertyAnimation",
+    "NumberAnimation",
+    "ColorAnimation",
+    "RotationAnimation",
+    "SpringAnimation",
+    "SmoothedAnimation",
+    "SequentialAnimation",
+    "ParallelAnimation",
+    "PauseAnimation",
+    "PropertyAction",
+    "AnchorAnimation",
+    "PathAnimation",
+    r"\w*Animator",  # OpacityAnimator, XAnimator, …
+)
+
+
+def test_nothing_animates_without_going_through_motion():
+    """§06: motion is off with prefers-reduced-motion, on battery, and under
+    a fullscreen window. A9's rule keeps logic testable; this one keeps the
+    OFF switch reachable — an element that hand-rolls an animation without
+    consulting `Motion` would keep breathing after a human asked it to stop,
+    and nothing else in the build would notice.
+
+    Files under core/ cannot reference Motion (it is a Quickshell singleton),
+    which is exactly right: core/ is logic, and logic does not animate.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    offenders = []
+    for qml in sorted(hud.rglob("*.qml")):
+        if qml.is_relative_to(hud / "tests"):
+            continue
+        text = qml.read_text("utf-8")
+        code = "\n".join(
+            l for l in text.splitlines() if not l.lstrip().startswith("//")
+        )
+        used = [a for a in ANIMATION_TYPES if re.search(rf"\b{a}\b\s*(\{{|on\b)", code)]
+        if used and "Motion." not in code:
+            offenders.append(f"{qml.relative_to(ROOT)}: {', '.join(used)}")
+    assert not offenders, (
+        "these animate without consulting Motion, so reduced-motion cannot "
+        "turn them off:\n" + "\n".join(offenders)
+    )
+
+
 def test_core_qmldir_registers_every_component_and_no_module_name():
     qmldir = gen.render_core_qmldir()
     assert "BusModel 1.0 BusModel.qml" in qmldir

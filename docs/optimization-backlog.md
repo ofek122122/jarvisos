@@ -142,3 +142,21 @@ Confirmed total: 38 | auto-applied: 8 | in this list: 27
 - **Where:** `flake.nix:15`
 - **Change:** Consider deriving packages.* from the system's pkgs (or sharing one nixpkgs config) to avoid a second instantiation and duplicated allowUnfree.
 - **Why / verification:** Observation is REAL. Confirmed flake.nix:15-18 imports nixpkgs once with config.allowUnfree=true for packages.*, while nixosConfigurations.ares (lines 21-28) builds its own pkgs and default.nix:58 sets nixpkgs.config.allowUnfree=true again. So there are two nixpkgs evaluations and two allowUnfree surfaces. However this is not a defect: both configs are identical (allowUnfree=true) so there is no divergence in practice, and Nix caches evaluation, so the cost is minor eval hygiene — the finding itself calls it low priority 'for completeness'. The proposed fix is vague ('consider deriving packages.* from the system pkgs') and restructuring the flake package plumbing touches how jarvisd/jv-act (invariant 3, human-reviewed) and cuda packages build. Accurate but speculative and low-value; do not auto-apply, needs human judgment.
+
+---
+
+# Proposals from the Ralph loop (human review before any of this is built)
+
+These are not findings from the 2026-09-23 pass. They are changes the
+autonomous loop wanted to make and deliberately did not, because they touch a
+guarded area (`schemas/**`, `jv-act`, boot/NVIDIA). Each one names the work it
+is blocking.
+
+## R1. [ui / §06] Nothing publishes AC-vs-battery or fullscreen, so two of §06's three "stop moving" rules cannot be honoured
+- **Where:** `schemas/context.system.json`, `schemas/context.window.json` (frozen — invariant 2), publisher `jv-context`
+- **Blocking:** PLAN A7 — `Motion.onBattery` and `Motion.fullscreen` exist as inputs with no source, pinned at `false`.
+- **Change (proposed):** two additive, optional fields, each its own reviewed schema commit:
+  - `context.system`: `on_battery` (boolean) — "power supply is discharging", read from `/sys/class/power_supply/*/status`. `battery_pct` already exists but says nothing about direction, and it is absent on ares, so its absence cannot be read as "on AC" either — a laptop that never publishes it and a desktop that has no battery look identical today.
+  - `context.window`: `fullscreen` (boolean) — whether the focused window is fullscreen, which Niri already reports on its event stream. §06's rule is "full stop when a window is fullscreen", and the blueprint's stronger intent (the HUD yields entirely to fullscreen) needs the same bit.
+- **Why it is worth a schema commit:** both are cheap for `jv-context`, which already polls the system at 1 Hz and already subscribes to the compositor event stream, and both have a second consumer beyond motion — a fullscreen bit is what lets the HUD get out of the way of a game or a film, and `on_battery` belongs in the same conversation as the VRAM ladder. Until they exist, "off on battery" is a rule the code is shaped for and cannot obey.
+- **Not done autonomously because:** schemas are frozen law (GUARDRAILS: `schemas/**` is human-review-only). Nothing was worked around — the two inputs are real properties in `core/MotionPolicy.qml`, tested, and default to the value that is true on ares (a desktop, on AC). Wiring them later is one binding each in `Motion.qml`.
