@@ -21,6 +21,10 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+// The §06 tokens, generated from personality/theme.toml into Theme.qml next
+// door (invariant 9: the look is identity, and identity is versioned). No
+// QML file in this directory may carry a hex code of its own.
+import "."
 
 ShellRoot {
   // One surface per connected monitor. Quickshell.screens is live, so a
@@ -52,10 +56,9 @@ ShellRoot {
         top: true
         right: true
       }
-      // 16 px of inset is baked into the surface, not into `margins`:
-      // quickshell's `margins` grouped property has no resolvable type in
-      // its qmltypes, and a clean qmllint is worth more than two pixels
-      // of layout sugar.
+      // The inset is baked into the surface, not into `margins`: quickshell's
+      // `margins` grouped property has no resolvable type in its qmltypes, and
+      // a clean qmllint is worth more than two pixels of layout sugar.
       implicitWidth: 112
       implicitHeight: 44
       color: "transparent"
@@ -66,17 +69,20 @@ ShellRoot {
 
       Rectangle {
         anchors.fill: parent
-        anchors.margins: 16
-        radius: 4
-        color: "#0C1116" // ground, blueprint §06
-        border.color: "#F0714A" // ember — the one accent, used sparingly
-        border.width: 1
+        anchors.margins: Theme.insetPx
+        radius: Theme.radiusPx
+        color: Theme.ground
+        opacity: Theme.plateOpacity
+        border.color: Theme.ember // the one accent, used sparingly
+        border.width: Theme.hairlinePx
 
         Text {
           anchors.centerIn: parent
           text: "jv-hud"
-          color: "#F0714A"
-          font.pixelSize: 13
+          color: Theme.ember
+          font.family: Theme.familyMono
+          font.pixelSize: Theme.labelPx
+          font.letterSpacing: Theme.labelPx * Theme.labelTrackingEm
         }
       }
     }

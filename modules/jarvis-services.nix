@@ -42,6 +42,11 @@ in
   # readable by every service, writable by none (invariant 9).
   environment.etc."jarvis/personality/system.md".source = ../personality/system.md;
   environment.etc."jarvis/personality/voice.toml".source = ../personality/voice.toml;
+  # theme.toml is the HUD's §06 tokens. Nothing reads it at runtime — it is
+  # compiled into jv-hud's Theme singleton at build time — but identity is
+  # identity: the whole of what Jarvis is should be readable in one directory
+  # on the running machine, not two-thirds of it.
+  environment.etc."jarvis/personality/theme.toml".source = ../personality/theme.toml;
 
   # The jv-act tool registry — reviewed like code (invariant 3), the
   # authoritative capability table. /etc, read-only.

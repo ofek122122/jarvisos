@@ -1,0 +1,73 @@
+# Jarvis's look — versioned identity (CLAUDE.md invariant 9), exactly like
+# voice.toml and system.md. These are the blueprint §06 tokens and they are
+# the ONLY place a colour exists: `tools/gen_theme_qml.py` turns this file
+# into `shell/jv-hud/Theme.qml`, and the HUD build fails if the two drift.
+# jv-dream may PROPOSE diffs here; a human applies them.
+#
+# Regenerate after any edit:
+#     python tools/gen_theme_qml.py
+
+[palette]
+# Ground and surfaces, darkest first. `ground_deep` is the HUD's own plate —
+# it sits below the blueprint's page ground so a floating panel reads as
+# nearer than the desktop behind it. Everything else is §06 verbatim.
+ground_deep = "#090D12"
+ground = "#0C1116"
+surface = "#141B21"
+surface_2 = "#1C252C"
+line = "#2A353D"
+line_soft = "#212B32"
+
+# Text tiers: primary, secondary, and the quiet one for units and labels.
+text = "#E4EAEE"
+text_2 = "#9FADB7"
+text_3 = "#6E7E89"
+
+# Ember is THE accent and it means "Jarvis is doing something". §06: scarcity
+# is what makes it read as a voice rather than a theme — never decorate with
+# it. Teal is the second, cooler voice: your own state, not Jarvis's.
+ember = "#F0714A"
+ember_soft = "#2A1710"
+teal = "#4FB8BF"
+teal_soft = "#0F2326"
+
+# Status, used only where something is genuinely ok / degraded / at risk.
+ok = "#5BC08D"
+warn = "#D9A441"
+risk = "#E8756B"
+
+[type]
+# Two faces: a grotesque for words, a mono for anything measured. The HUD
+# shows far more numbers than prose, so mono is the default and sans is the
+# exception. Fallbacks are the generic families — a missing font must never
+# silently become a different look.
+family_sans = "Archivo"
+family_mono = "JetBrains Mono"
+# Sizes in px at 1x; the HUD scales with the surface's devicePixelRatio.
+label_px = 11
+body_px = 13
+readout_px = 17
+# Tracking for uppercase labels, in em (multiply by the size for QML's
+# pixel-valued letterSpacing). §06 labels are wide and quiet.
+label_tracking_em = 0.14
+
+[motion]
+# §06: ease toward a target over ~200 ms, never snap to a raw sensor value.
+# A frame is only allowed to move because a real signal moved.
+ease_ms = 200
+# Summon and evaporate. Chrome exists only while it is being used.
+fade_in_ms = 120
+fade_out_ms = 180
+# Slowest thing on screen: the ambient breath of an idle-but-listening state.
+# Nothing may animate faster than ease_ms without a signal behind it.
+pulse_ms = 1600
+
+[geometry]
+# Edge inset for a docked panel, and the internal rhythm.
+inset_px = 16
+gap_px = 8
+pad_px = 10
+radius_px = 4
+hairline_px = 1
+# Glass: tint opacity of a HUD plate over whatever it covers.
+plate_opacity = 0.86

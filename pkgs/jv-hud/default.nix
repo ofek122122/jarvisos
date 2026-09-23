@@ -10,6 +10,7 @@
   lib,
   stdenvNoCC,
   makeWrapper,
+  python3,
   quickshell,
   qt6,
 }:
@@ -20,8 +21,16 @@ stdenvNoCC.mkDerivation {
 
   nativeBuildInputs = [
     makeWrapper
+    python3 # the theme drift check below
     qt6.qtdeclarative # qmllint
   ];
+
+  # Theme tokens are identity and live in personality/ (invariant 9); the
+  # QML singleton is generated from them. Both are inputs here so the build
+  # itself can prove the committed Theme.qml still matches the toml — a HUD
+  # whose colours have drifted from the file you can diff never gets built.
+  themeToml = ../../personality/theme.toml;
+  themeGen = ../../tools/gen_theme_qml.py;
 
   dontConfigure = true;
   dontBuild = true;
@@ -37,6 +46,7 @@ stdenvNoCC.mkDerivation {
   # `uncreatable-type` fires on correct code.
   checkPhase = ''
     runHook preCheck
+    python3 $themeGen --check --theme $themeToml --out-dir .
     qmllint -W 0 --uncreatable-type disable \
       -I ${quickshell}/lib/qt-6/qml \
       -I ${qt6.qtdeclarative}/lib/qt-6/qml \

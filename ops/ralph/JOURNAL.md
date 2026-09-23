@@ -53,3 +53,47 @@ everything here (and every commit) since the last time you asked. Format per ent
   consumer-only bus bridge) before A3, since A3 needs real frames to exist.
   Note for A2/A3: quickshell's `margins` grouped property has no resolvable type
   in its qmltypes — use inner-item anchors margins, or the lint gate trips.
+
+## 2026-09-24 — A2: theme tokens live in personality/, the HUD only consumes them
+- built: `personality/theme.toml` — the blueprint §06 palette, type, motion and
+  geometry tokens, versioned beside `voice.toml` and `system.md` because a theme
+  is identity (invariant 9), and `tools/gen_theme_qml.py`, which compiles it into
+  `shell/jv-hud/Theme.qml` (a `pragma Singleton`) plus the `qmldir` that makes
+  `import "."` resolve. `shell.qml` now carries no colour of its own: ground,
+  ember, radius, inset, font and tracking all come from `Theme`. The point is
+  that "why is it that colour?" is answered by one diffable file, and that
+  jv-dream can propose a look the way it proposes a voice — as a patch a human
+  reads. Four gates keep it honest, and each one was checked by breaking it:
+  (1) `--check` runs in jv-hud's checkPhase before qmllint, so a Theme.qml that
+  has drifted from the toml cannot be built — verified by flipping ember to
+  #FF00FF, watching `nix build .#jv-hud` fail with "stale generated files", and
+  restoring; (2) qmllint type-checks token access through the singleton —
+  `Theme.doesNotExist` is `missing-property`, a build failure, not a silently
+  transparent rectangle at runtime; (3) a test forbids a literal `"#RRGGBB"` in
+  any QML file but the generated one — it caught shell.qml's three hardcoded
+  colours, which is what drove this change into shell.qml rather than leaving the
+  singleton unused; (4) a test parses `docs/blueprint.html`'s dark `:root` block
+  and asserts all 15 tokens still equal it, so the theme cannot wander off from
+  the design it came from. theme.toml is also /etc-deployed with the rest of
+  personality/ — nothing reads it at runtime (the HUD's copy is compiled in), but
+  the whole of what Jarvis is should be readable in one directory on the machine.
+- tests: `bash ops/ralph/runtests.sh tools` -> 16 passed (new suite:
+  tools/tests/test_gen_theme_qml.py). Written first and run red — the generator
+  did not exist, then the colour-literal test failed alone until shell.qml
+  consumed the singleton.
+- build: `nix build .#jv-hud` -> ok (Theme.qml + qmldir land in the store beside
+  shell.qml) · `nixos-rebuild build --flake .#ares` -> ok, and
+  `result/etc/jarvis/personality/theme.toml` is present. Never test/switch.
+- files: personality/theme.toml, tools/gen_theme_qml.py,
+  tools/tests/test_gen_theme_qml.py, shell/jv-hud/Theme.qml, shell/jv-hud/qmldir,
+  shell/jv-hud/shell.qml, shell/jv-hud/README.md, pkgs/jv-hud/default.nix,
+  modules/jarvis-services.nix, ops/ralph/PLAN.md
+- commit: <HASH>
+- next: A5 — the consumer-only bus bridge for QML (a small client that subscribes
+  to the Unix socket and exposes frames as QML properties, never importing another
+  service), because A3 has nothing truthful to display until real frames exist.
+  Two follow-ups fell out of this one and are in PLAN.md: A7 (a single
+  `prefers-reduced-motion` switch + `Theme.easeMs` Behavior, so the first moving
+  pixel already obeys §06) and A8 (Archivo + JetBrains Mono are named in
+  theme.toml but not declared in `fonts.packages` — a missing font is a silent
+  change of look).
