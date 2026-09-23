@@ -8,9 +8,13 @@ you discover. Keep items small enough to finish in one iteration.
 The HUD is a bus CONSUMER: it subscribes to real topics and reflects them
 truthfully. Never fake a sensor/state indicator (invariant 10).
 
-- [ ] A1. Quickshell skeleton: a minimal shell that launches under Niri as a
+- [x] A1. Quickshell skeleton: a minimal shell that launches under Niri as a
       non-focus-stealing overlay layer (layer-shell, `exclusive_zone` 0, no
-      keyboard focus). Prove it loads; qmllint clean.
+      keyboard focus). Prove it loads; qmllint clean. — 49046db
+      (pkg `.#jv-hud`, qmllint `-W 0` in checkPhase, user unit installed but
+      not auto-started; `JV_HUD_SELFTEST=1 jv-hud` proves the surface maps.
+      Still needs a human to eyeball it once on ares — the sandbox has no
+      compositor, so "it maps" is verified by construction, not by sight.)
 - [ ] A2. Theme singleton: a QML `Theme` object holding the blueprint §06 tokens
       (ground #090D12/#0C1116, ember #F0714A, teal #4FB8BF, text tiers) sourced
       from `personality/` where possible. Everything else consumes it.
@@ -19,7 +23,8 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       when genuinely active. This is the first real, data-backed UI.
 - [ ] A4. Live mic indicator from `audio.vad`/`audio.wake` — truthful, not fakeable;
       off when no signal. (Camera indicator waits for a vision-phase signal.)
-- [ ] A5. A tiny bus client for QML (or a thin bridge) so HUD elements subscribe to
+- [ ] A5. A tiny bus client for QML (do this BEFORE A3 — A3 has no real frames
+      to show until it exists) (or a thin bridge) so HUD elements subscribe to
       the Unix-socket bus without violating invariant 1 (consumer only, no direct
       imports into other services).
 - [ ] A6. `sys.health` glance: a quiet, edge-docked readout of service health +
@@ -36,4 +41,4 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       them — one line each, so a human can veto in the next `updates` read.
 
 ## Done
-(empty — the loop appends completed items here with hashes)
+- A1 — jv-hud Quickshell layer-shell skeleton (49046db, 2026-09-23)
