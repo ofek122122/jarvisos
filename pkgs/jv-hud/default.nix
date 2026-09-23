@@ -6,6 +6,11 @@
 # out of the working tree) and `quickshell` is wrapped to load it. The
 # build gate is qmllint: a HUD that does not parse can never reach a
 # `nixos-rebuild build`, let alone a screen.
+#
+# The wrapper also pins JV_HUD_BRIDGE to the read-only bus bridge the HUD
+# spawns as a child (see Bus.qml). Pinning it means the HUD's only window
+# onto the bus is the one this flake declares — never whatever binary named
+# `jv-hud-bridge` happens to be first on $PATH.
 {
   lib,
   stdenvNoCC,
@@ -13,6 +18,7 @@
   python3,
   quickshell,
   qt6,
+  hudBridge,
 }:
 stdenvNoCC.mkDerivation {
   pname = "jv-hud";
@@ -59,7 +65,8 @@ stdenvNoCC.mkDerivation {
     mkdir -p $out/share/jv-hud
     cp -r ./* $out/share/jv-hud/
     makeWrapper ${lib.getExe quickshell} $out/bin/jv-hud \
-      --add-flags "-p $out/share/jv-hud/shell.qml"
+      --add-flags "-p $out/share/jv-hud/shell.qml" \
+      --set JV_HUD_BRIDGE ${hudBridge}/bin/jv-hud-bridge
     runHook postInstall
   '';
 

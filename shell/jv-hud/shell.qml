@@ -15,9 +15,11 @@
 //   · visible is false until something real is on screen. Earned
 //     emptiness is the default state, and an unmapped surface costs
 //     exactly 0 fps.
-// No sensor state is displayed yet, because no sensor is subscribed yet
+// No sensor state is displayed yet, because no ELEMENT reads one yet
 // (A3/A4 add `speech.state`, `audio.wake`, `audio.vad` — real frames or
-// nothing; never a faked indicator).
+// nothing; never a faked indicator). The read-only bus link exists as of
+// A5 (`Bus`), but it is only touched under JV_HUD_SELFTEST, so an idle
+// machine still runs no bridge process: the singleton is never built.
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -60,29 +62,57 @@ ShellRoot {
       // `margins` grouped property has no resolvable type in its qmltypes, and
       // a clean qmllint is worth more than two pixels of layout sugar.
       implicitWidth: 112
-      implicitHeight: 44
+      implicitHeight: 62
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
       // Nothing real to show yet -> no surface at all.
       visible: surface.selfTest
 
-      Rectangle {
+      // Built only under the self-test. `active: false` means the plate's
+      // bindings never run, so `Bus` is never constructed and no bridge
+      // process is spawned: the empty HUD really does cost nothing.
+      Loader {
         anchors.fill: parent
-        anchors.margins: Theme.insetPx
-        radius: Theme.radiusPx
-        color: Theme.ground
-        opacity: Theme.plateOpacity
-        border.color: Theme.ember // the one accent, used sparingly
-        border.width: Theme.hairlinePx
+        active: surface.selfTest
+        sourceComponent: plate
+      }
 
-        Text {
-          anchors.centerIn: parent
-          text: "jv-hud"
-          color: Theme.ember
-          font.family: Theme.familyMono
-          font.pixelSize: Theme.labelPx
-          font.letterSpacing: Theme.labelPx * Theme.labelTrackingEm
+      Component {
+        id: plate
+
+        Rectangle {
+          anchors.fill: parent
+          anchors.margins: Theme.insetPx
+          radius: Theme.radiusPx
+          color: Theme.ground
+          opacity: Theme.plateOpacity
+          border.color: Theme.ember // the one accent, used sparingly
+          border.width: Theme.hairlinePx
+
+          Column {
+            anchors.centerIn: parent
+            spacing: 2
+
+            Text {
+              text: "jv-hud"
+              color: Theme.ember
+              font.family: Theme.familyMono
+              font.pixelSize: Theme.labelPx
+              font.letterSpacing: Theme.labelPx * Theme.labelTrackingEm
+            }
+
+            // The state of the HUD's own bus link — a property of this
+            // pipe, not of the room. It is NOT a sensor indicator and is
+            // never dressed as one: no ember, no dot, just the word.
+            Text {
+              text: Bus.linkUp ? "bus up" : "bus down"
+              color: Bus.linkUp ? Theme.text2 : Theme.text3
+              font.family: Theme.familyMono
+              font.pixelSize: Theme.labelPx
+              font.letterSpacing: Theme.labelPx * Theme.labelTrackingEm
+            }
+          }
         }
       }
     }

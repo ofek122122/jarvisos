@@ -182,11 +182,15 @@ in
   };
 
   # jv-hud — the HUD shell (blueprint §06). Installed and startable, but
-  # deliberately NOT wanted by default.target yet: the skeleton has no bus
-  # subscription, so there is nothing truthful for it to display, and a
-  # resident-but-empty overlay is exactly the set dressing §06 forbids.
-  # `systemctl --user start jv-hud` (or JV_HUD_SELFTEST=1 jv-hud) runs it;
-  # PLAN A3 turns it on once real frames drive it.
+  # deliberately NOT wanted by default.target yet: the HUD can now read the
+  # bus (A5), but no element renders a signal from it, so there is still
+  # nothing truthful to display — and a resident-but-empty overlay is
+  # exactly the set dressing §06 forbids. `systemctl --user start jv-hud`
+  # (or JV_HUD_SELFTEST=1 jv-hud) runs it; PLAN A3 turns it on for real.
+  #
+  # The bus bridge is NOT a unit of its own: the HUD spawns it as a child,
+  # so the socket lives and dies with the surface that reads it. It
+  # inherits JARVIS_BUS from commonEnv below.
   systemd.user.services.jv-hud = {
     description = "Jarvis HUD (Quickshell layer-shell overlay)";
     unitConfig.ConditionUser = "ofek";

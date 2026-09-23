@@ -16,6 +16,7 @@
         inherit system;
         config.allowUnfree = true; # NVIDIA driver + CUDA
       };
+      pyEnvs = import ./nix/jarvis-python.nix { inherit pkgs; };
     in
     {
       nixosConfigurations.ares = nixpkgs.lib.nixosSystem {
@@ -56,7 +57,11 @@
         # jv-hud — the Quickshell/QML HUD (blueprint §06). Pure QML in the
         # store plus a wrapped quickshell; its check phase is qmllint, so a
         # HUD that does not parse cannot reach a `nixos-rebuild build`.
-        jv-hud = pkgs.callPackage ./pkgs/jv-hud { };
+        jv-hud = pkgs.callPackage ./pkgs/jv-hud {
+          # The bridge is pinned into the wrapper, not looked up on PATH:
+          # the HUD's view of the bus is exactly the one the flake declares.
+          hudBridge = pyEnvs.hudBridgeEnv;
+        };
         cuda-smoke = pkgs.callPackage ./pkgs/cuda-smoke { };
         jarvis-doctor = pkgs.callPackage ./pkgs/jarvis-doctor {
           cuda-smoke = self.packages.${system}.cuda-smoke;

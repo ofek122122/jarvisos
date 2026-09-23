@@ -67,7 +67,53 @@ per directory and steps aside when it finds one; ours registers the singleton
 in the way a plain directory import (and qmllint) understands. Any future
 singleton has to be added to it.
 
+## The bus link (A5)
+
+QML cannot open a Unix socket or unpack MessagePack, and the HUD is
+forbidden from importing another service (invariant 1). So `Bus.qml` runs
+one child process — `services/jv-hud-bridge`, pinned into the wrapper as
+`JV_HUD_BRIDGE` — which subscribes to a few topics and writes each frame
+as one line of JSON. Frames come in; nothing goes out. The bridge's pump
+is handed a `ReadOnlyBus` that has no publish method to reach for, and a
+test greps the source for `.publish` on top of that.
+
+```
+{"t":"frame","frame":{topic,ts,seq,src,conf,v,body}}
+{"t":"link","up":true}                 subscribed to a live bus
+{"t":"link","up":false,"err":"..."}    not subscribed, and why
+```
+
+`link` is deliberately not a bus topic — it describes this pipe, not the
+machine, and a topic needs a reviewed schema commit (invariant 2). The HUD
+needs it because **`Bus.frames` is emptied whenever the link drops**: a HUD
+still drawing "listening" from a bus that died three minutes ago is lying,
+and a stale indicator is worse than none (invariant 10).
+
+What an element uses:
+
+| member | meaning |
+|---|---|
+| `Bus.linkUp` | gate every piece of content on this |
+| `Bus.latest(topic)` | last envelope, or `null` if unheard |
+| `Bus.ageOf(env)` | seconds since capture, or `Infinity` if not yet knowable |
+| `Bus.frameReceived(topic, env)` | per-frame signal |
+
+The singleton is built lazily, on first use. Nothing references it while
+the HUD has nothing to show, so an idle machine runs no bridge process and
+holds no socket — which is why the self-test plate lives inside a `Loader`
+rather than merely being `visible: false`. Under `JV_HUD_SELFTEST=1` that
+plate also prints `bus up` / `bus down`: the state of this pipe, in plain
+words, never dressed up as a sensor indicator.
+
+```sh
+bash ops/ralph/runtests.sh jv-hud-bridge   # unit tests + a real-jarvisd e2e
+```
+
+Note on the build gate: qmllint type-checks *cross-file* access, so
+`Bus.linkUpp` in any element is a build failure. It does **not** catch a
+typo in a self-assignment inside `Bus.qml` itself — keep that file small.
+
 ## Next
 
-`A3` — the first data-backed element: Jarvis's state from real `speech.state` / `audio.wake`
-frames off the bus, via a consumer-only bridge (invariant 1).
+`A3` — the first data-backed element: Jarvis's state from real
+`speech.state` / `audio.wake` frames, now that `Bus` can deliver them.

@@ -1,0 +1,21 @@
+[project]
+name = "jv-hud-bridge"
+version = "0.1.0"
+description = "JarvisOS HUD bridge: read-only bus frames as JSON lines for Quickshell"
+requires-python = ">=3.10"
+dependencies = [
+  "jarvis-bus",
+]
+
+[project.scripts]
+jv-hud-bridge = "jv_hud_bridge.main:cli"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["jv_hud_bridge*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

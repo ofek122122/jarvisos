@@ -69,12 +69,29 @@ def test_output_is_deterministic_and_ordered_like_the_toml():
     assert qml.index("ground:") < qml.index("familyMono:") < qml.index("easeMs:")
 
 
-def test_qmldir_registers_the_singleton_and_no_module_name():
+def test_qmldir_registers_every_singleton_and_no_module_name():
     qmldir = gen.render_qmldir()
     assert "singleton Theme 1.0 Theme.qml" in qmldir
+    assert "singleton Bus 1.0 Bus.qml" in qmldir
     # A `module` line would claim a module name Quickshell did not assign;
     # the directory import (`import "."`) needs no such line.
     assert not any(l.startswith("module ") for l in qmldir.splitlines())
+
+
+def test_every_qml_singleton_on_disk_is_registered_and_vice_versa():
+    """An unregistered singleton resolves to nothing at runtime and to a
+    confusing qmllint error at build time. The two must agree exactly."""
+    hud = ROOT / "shell" / "jv-hud"
+    on_disk = {
+        q.name for q in hud.glob("*.qml") if "pragma Singleton" in q.read_text("utf-8")
+    }
+    assert on_disk == {file for _, file in gen.SINGLETONS}
+    for name, file in gen.SINGLETONS:
+        assert (hud / file).exists(), f"{file} is registered but missing"
+        assert (hud / file).read_text("utf-8").startswith(
+            "//"
+        ), f"{file} should open with a comment saying what it is"
+        assert name == file[: -len(".qml")], "the type name is the file name"
 
 
 # --- validation: a bad token must never reach a screen ---------------------

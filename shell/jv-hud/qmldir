@@ -4,5 +4,7 @@
 # that off for this one, which is what makes the singleton resolvable to
 # qmllint as well as to the engine. No `module` line: the HUD is imported
 # by directory (`import "."`), and claiming a module name Quickshell did
-# not assign only invites a collision. New singletons go here too.
+# not assign only invites a collision. New singletons go in
+# SINGLETONS in tools/gen_theme_qml.py, which is what writes this.
 singleton Theme 1.0 Theme.qml
+singleton Bus 1.0 Bus.qml
