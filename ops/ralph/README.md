@@ -21,11 +21,35 @@ git tag ralph-report-mark ralph/auto     # baseline for updates.sh
 ```
 The loop runs **inside `~/jarvisos-ralph`**. Your `~/jarvisos` stays yours.
 
-## Launch (after installing the ralph loop plugin)
-Run the loop in `~/jarvisos-ralph`, feeding it `ops/ralph/PROMPT.md` every
-iteration with autonomous permissions. Keep it in tmux/systemd so it survives
-disconnects. (Exact invocation depends on the installed plugin — the setup
-session will finalize it.)
+## Launch — auto-restarting service (survives crashes + reboots)
+The `ralph-loop` plugin runs as a Stop hook INSIDE one long-lived `claude`
+session. The `ralph-loop` systemd USER service keeps that session alive in tmux
+and resumes it with `claude --continue` whenever it dies.
+
+One-time install:
+```
+mkdir -p ~/.config/systemd/user
+ln -sf ~/jarvisos/ops/ralph/ralph-loop.service ~/.config/systemd/user/ralph-loop.service
+systemctl --user daemon-reload
+systemctl --user enable --now ralph-loop.service
+loginctl enable-linger "$USER"     # keep running while logged out / after reboot
+```
+Then arm the loop ONCE:
+```
+tmux attach -t ralph
+# at the claude prompt, paste:
+#   /ralph-loop Read ops/ralph/PROMPT.md in full and follow it exactly for ONE iteration then stop. Working dir is this repo on branch ralph/auto. Obey ops/ralph/GUARDRAILS.md absolutely.
+# detach without stopping it: Ctrl-b then d
+```
+After that it's hands-off: on crash/OOM/reboot the service relaunches and
+`--continue` resumes the armed loop automatically (the loop's state file
+persists on disk). Watch anytime with `tmux attach -t ralph` or `updates.sh`.
+
+Stop for good:
+```
+systemctl --user disable --now ralph-loop.service
+tmux kill-session -t ralph
+```
 
 ## "Stop and give me updates" (loop keeps running)
 From either checkout, any time:

@@ -1,0 +1,30 @@
+# JarvisOS Ralph autonomous build loop — systemd USER service.
+#
+# Install (imperative, dev tooling — deliberately NOT in the OS flake, which
+# would run an AI loop at every boot forever):
+#   mkdir -p ~/.config/systemd/user
+#   ln -sf ~/jarvisos/ops/ralph/ralph-loop.service ~/.config/systemd/user/ralph-loop.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ralph-loop.service
+#   loginctl enable-linger "$USER"     # so it keeps running while logged out / after reboot
+#
+# Then ONE time, arm the loop:
+#   tmux attach -t ralph      # run:  /ralph-loop Read ops/ralph/PROMPT.md ... (see README)
+#   (detach with Ctrl-b then d — the loop keeps running)
+#
+# Stop for good:  systemctl --user stop ralph-loop && tmux kill-session -t ralph
+
+[Unit]
+Description=JarvisOS Ralph autonomous build loop (tmux + claude on branch ralph/auto)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/jarvisos/ops/ralph/loop-run.sh
+Restart=always
+RestartSec=15
+# Never grant this unit privilege — build needs no root, and it must never switch.
+
+[Install]
+WantedBy=default.target

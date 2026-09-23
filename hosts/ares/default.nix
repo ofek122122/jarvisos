@@ -1,6 +1,6 @@
 # hosts/ares — the machine itself.
 # i5 Comet Lake · 32 GB DDR4 · GTX 1660 SUPER 6 GB · 3 monitors (1440p144 + 2x 1080p60)
-{ self, ... }:
+{ self, pkgs, ... }:
 {
   imports = [
     ./hardware.nix
@@ -69,6 +69,7 @@
 
   environment.systemPackages = [
     self.packages.x86_64-linux.jarvis-doctor
+    pkgs.tmux # persistent session host for the ops/ralph autonomous build loop
   ];
 
   # Kernel: STOCK for the first boots. The custom kernel (localmodconfig
