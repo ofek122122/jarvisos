@@ -2,49 +2,13 @@
 //! drop-oldest slow-consumer policy, and envelope rejection.
 //! On unix they run over a real Unix socket; elsewhere over loopback TCP.
 
-use jarvisd::broker::{Broker, BusAddr, Config, Listener};
+mod common;
+
+use common::{body, start};
+use jarvisd::broker::Config;
 use jarvisd::client::BusClient;
 use jarvisd::proto::ServerMsg;
-use std::sync::Arc;
 use std::time::Duration;
-
-struct TestBus {
-    addr: BusAddr,
-    _broker: Arc<Broker>,
-    task: tokio::task::JoinHandle<()>,
-    #[cfg(unix)]
-    _tmp: tempfile::TempDir,
-}
-
-impl Drop for TestBus {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-async fn start(cfg: Config) -> TestBus {
-    #[cfg(unix)]
-    {
-        let tmp = tempfile::tempdir().unwrap();
-        let addr = BusAddr::Unix(tmp.path().join("bus.sock"));
-        let (listener, actual) = Listener::bind(&addr).await.unwrap();
-        let broker = Broker::new(cfg);
-        let task = broker.spawn(listener);
-        TestBus { addr: actual, _broker: broker, task, _tmp: tmp }
-    }
-    #[cfg(not(unix))]
-    {
-        let addr = BusAddr::Tcp("127.0.0.1:0".to_string());
-        let (listener, actual) = Listener::bind(&addr).await.unwrap();
-        let broker = Broker::new(cfg);
-        let task = broker.spawn(listener);
-        TestBus { addr: actual, _broker: broker, task }
-    }
-}
-
-fn body(pairs: &[(&str, rmpv::Value)]) -> rmpv::Value {
-    rmpv::Value::Map(pairs.iter().map(|(k, v)| ((*k).into(), v.clone())).collect())
-}
 
 fn topic_of(frame: &rmpv::Value) -> String {
     frame

@@ -2,6 +2,7 @@
 //! communicate ONLY via this bus) and the `jv` debug CLI's client library.
 
 pub mod broker;
+pub mod cli;
 pub mod client;
 pub mod proto;
 pub mod schema;

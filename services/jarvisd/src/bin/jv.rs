@@ -1,11 +1,26 @@
 //! jv — the bus debug CLI. "This CLI is how we debug everything forever."
+//!
+//! Every streaming subcommand is bounded: `-n/--count` stops after N frames,
+//! `--for` after a wall-clock budget, Ctrl-C at any time. Unbounded streams are
+//! fine to watch but impossible to script or assert on, and an unmet `--count`
+//! exits non-zero so a caller can tell "here is the frame" from "the bus went
+//! away". The reasoning (latency accounting, utterance tracking, formatting,
+//! exit policy) lives in `jarvisd::cli` where it is unit-tested; this file is
+//! argument parsing and one select loop.
 
 use clap::{Parser, Subcommand};
 use jarvisd::broker::BusAddr;
+use jarvisd::cli::{self, HopStats, Outcome, Utterances};
 use jarvisd::client::BusClient;
 use jarvisd::proto::ServerMsg;
 use jarvisd::time::mono_now;
-use std::collections::HashMap;
+use std::io::Write;
+use std::time::Duration;
+
+/// How many input utterances a tap remembers. Far past any plausible
+/// conversational overlap, and bounded because `jv tap` is meant to be left
+/// running for hours.
+const UTTERANCE_MEMORY: usize = 256;
 
 #[derive(Parser)]
 #[command(name = "jv", about = "JarvisOS bus debug CLI")]
@@ -13,6 +28,15 @@ struct Args {
     /// Bus address. Default: $JARVIS_BUS, else the platform default.
     #[arg(long, global = true)]
     bus: Option<String>,
+
+    /// Stop after N frames (sub/tap/health). Exits non-zero if the stream ends
+    /// with fewer than N delivered.
+    #[arg(short = 'n', long, global = true, value_name = "N")]
+    count: Option<usize>,
+
+    /// Stop after SECS seconds (sub/tap/health).
+    #[arg(long = "for", global = true, value_name = "SECS")]
+    for_secs: Option<f64>,
 
     #[command(subcommand)]
     cmd: Cmd,
@@ -40,8 +64,9 @@ enum Cmd {
         #[arg(long, default_value_t = 1)]
         schema_v: u64,
     },
-    /// Watch everything; print per-hop latency, and end-to-end latency
-    /// when a speech.say answers a tracked input utterance.
+    /// Watch everything; with --latency print per-hop latency, the end-to-end
+    /// time to first word for each tracked utterance, and a percentile summary
+    /// when the stream stops.
     Tap {
         #[arg(long)]
         latency: bool,
@@ -80,43 +105,76 @@ fn act_audit_path() -> std::path::PathBuf {
     }
 }
 
-fn get<'a>(frame: &'a rmpv::Value, key: &str) -> Option<&'a rmpv::Value> {
-    frame.as_map()?.iter().find(|(k, _)| k.as_str() == Some(key)).map(|(_, v)| v)
+/// How a stream stopped, and how many frames it delivered.
+struct Run {
+    outcome: Outcome,
+    seen: usize,
 }
 
-fn get_str(frame: &rmpv::Value, key: &str) -> Option<String> {
-    get(frame, key)?.as_str().map(|s| s.to_string())
-}
-
-fn get_f64(frame: &rmpv::Value, key: &str) -> Option<f64> {
-    match get(frame, key)? {
-        rmpv::Value::Integer(i) => i.as_f64(),
-        rmpv::Value::F32(f) => Some(*f as f64),
-        rmpv::Value::F64(f) => Some(*f),
-        _ => None,
+/// A deadline as a future. `None` never fires.
+async fn at(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(t) => tokio::time::sleep_until(t).await,
+        None => std::future::pending().await,
     }
 }
 
-fn to_json(v: &rmpv::Value) -> String {
-    serde_json::to_string(v).unwrap_or_else(|e| format!("<unprintable: {e}>"))
+/// Drive a subscription until `--count` frames, `--for` seconds, Ctrl-C, or the
+/// broker closing — whichever comes first.
+async fn drive(
+    c: &mut BusClient,
+    count: Option<usize>,
+    for_secs: Option<f64>,
+    mut on_frame: impl FnMut(rmpv::Value),
+) -> anyhow::Result<Run> {
+    if count == Some(0) {
+        return Ok(Run { outcome: Outcome::Count, seen: 0 });
+    }
+    let deadline = for_secs.map(|s| tokio::time::Instant::now() + Duration::from_secs_f64(s.max(0.0)));
+    // Registered ONCE and polled across every iteration: a fresh ctrl_c()
+    // future per iteration can drop a signal that lands while we are printing,
+    // and Ctrl-C is how an interactive tap asks for its summary.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+    let mut seen = 0usize;
+    loop {
+        // biased: an elapsed deadline or a pending Ctrl-C wins over a frame
+        // that happens to be ready, so --for is a real bound under load.
+        let frame = tokio::select! {
+            biased;
+            _ = &mut ctrl_c => return Ok(Run { outcome: Outcome::Interrupted, seen }),
+            _ = at(deadline) => return Ok(Run { outcome: Outcome::Deadline, seen }),
+            f = c.next_frame() => f?,
+        };
+        let Some(frame) = frame else {
+            return Ok(Run { outcome: Outcome::BusClosed, seen });
+        };
+        seen += 1;
+        on_frame(frame);
+        if count.is_some_and(|n| seen >= n) {
+            return Ok(Run { outcome: Outcome::Count, seen });
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-    let addr = match &args.bus {
+    let Args { bus, count, for_secs, cmd } = Args::parse();
+    let addr = match &bus {
         Some(s) => BusAddr::parse(s)?,
         None => BusAddr::from_env()?,
     };
 
-    match args.cmd {
+    let code = match cmd {
         Cmd::Sub { patterns } => {
             let mut c = BusClient::connect(&addr, "jv-cli").await?;
             let pats: Vec<&str> = patterns.iter().map(|s| s.as_str()).collect();
             c.subscribe(&pats).await?;
-            while let Some(frame) = c.next_frame().await? {
-                println!("{}", to_json(&frame));
-            }
+            let run = drive(&mut c, count, for_secs, |frame| {
+                println!("{}", cli::to_json(&frame));
+            })
+            .await?;
+            cli::exit_code(run.outcome, count, run.seen)
         }
 
         Cmd::Pub { topic, body, src, conf, schema_v } => {
@@ -125,52 +183,57 @@ async fn main() -> anyhow::Result<()> {
             let mut c = BusClient::connect(&addr, &src).await?;
             let seq = c.publish(&topic, conf, schema_v, body).await?;
             // Give the broker a beat to reject an invalid envelope.
-            match tokio::time::timeout(std::time::Duration::from_millis(150), c.next_event()).await
-            {
+            match tokio::time::timeout(Duration::from_millis(150), c.next_event()).await {
                 Ok(Ok(Some(ServerMsg::Err { msg }))) => anyhow::bail!("rejected: {msg}"),
                 _ => println!("published {topic} seq={seq}"),
             }
+            0
         }
 
         Cmd::Tap { latency } => {
             let mut c = BusClient::connect(&addr, "jv-tap").await?;
             c.subscribe(&["*"]).await?;
-            // input utterance_id -> ts first seen (audio.vad speech_start
-            // or first transcript frame)
-            let mut utt_start: HashMap<String, f64> = HashMap::new();
-            while let Some(frame) = c.next_frame().await? {
-                let topic = get_str(&frame, "topic").unwrap_or_default();
-                let src = get_str(&frame, "src").unwrap_or_default();
-                let seq = get_f64(&frame, "seq").unwrap_or(-1.0) as i64;
-                let ts = get_f64(&frame, "ts").unwrap_or(0.0);
+            let mut stats = HopStats::default();
+            let mut utts = Utterances::with_capacity(UTTERANCE_MEMORY);
+            let run = drive(&mut c, count, for_secs, |frame| {
+                let topic = cli::get_str(&frame, "topic").unwrap_or_default();
+                let ts = cli::get_f64(&frame, "ts").unwrap_or(0.0);
                 let now = mono_now();
                 if latency {
+                    let src = cli::get_str(&frame, "src").unwrap_or_default();
+                    let seq = cli::get_f64(&frame, "seq").unwrap_or(-1.0) as i64;
                     let hop_ms = (now - ts) * 1e3;
                     println!("{topic:<20} {src:<12} seq={seq:<8} hop={hop_ms:8.2}ms");
+                    stats.hop(&topic, hop_ms);
                 } else {
-                    println!("{}", to_json(&frame));
+                    println!("{}", cli::to_json(&frame));
                 }
-                let body = match get(&frame, "body") {
-                    Some(b) => b.clone(),
-                    None => continue,
-                };
+                let Some(body) = cli::get(&frame, "body") else { return };
                 match topic.as_str() {
                     "audio.vad" | "audio.transcript" => {
-                        if let Some(id) = get_str(&body, "utterance_id") {
-                            utt_start.entry(id).or_insert(ts);
+                        if let Some(id) = cli::get_str(body, "utterance_id") {
+                            utts.saw(&id, ts);
                         }
                     }
                     "speech.say" => {
-                        if let Some(id) = get_str(&body, "in_reply_to_utterance") {
-                            if let Some(t0) = utt_start.get(&id) {
-                                let e2e_ms = (now - t0) * 1e3;
-                                println!(">>> end-to-end {id}: {e2e_ms:.0}ms (VAD start -> speech.say)");
+                        if let Some(id) = cli::get_str(body, "in_reply_to_utterance") {
+                            // Only the FIRST reply frame: a streamed reply is
+                            // many speech.say frames for one utterance, and
+                            // only the first is time-to-first-word.
+                            if let Some(ms) = utts.first_reply_ms(&id, now) {
+                                println!(">>> end-to-end {id}: {ms:.0}ms (VAD start -> first speech.say)");
+                                stats.e2e(ms);
                             }
                         }
                     }
                     _ => {}
                 }
+            })
+            .await?;
+            if latency {
+                print!("{}", stats.summary());
             }
+            cli::exit_code(run.outcome, count, run.seen)
         }
 
         Cmd::ActLog { tail } => {
@@ -183,27 +246,9 @@ async fn main() -> anyhow::Result<()> {
                 let Ok(e) = serde_json::from_str::<serde_json::Value>(line) else {
                     continue;
                 };
-                let confirm = e
-                    .get("confirm")
-                    .map(|c| {
-                        format!(
-                            " confirm={}/{}",
-                            c["granted"].as_bool().unwrap_or(false),
-                            c["answered_by"].as_str().unwrap_or("?")
-                        )
-                    })
-                    .unwrap_or_default();
-                println!(
-                    "{} {:<22} {:<11} {:<18} {:>7.0}ms{} args={}",
-                    e["ts"].as_str().unwrap_or("?"),
-                    e["tool"].as_str().unwrap_or("?"),
-                    e["capability"].as_str().unwrap_or("?"),
-                    e["outcome"].as_str().unwrap_or("?"),
-                    e["duration_ms"].as_f64().unwrap_or(0.0),
-                    confirm,
-                    e["args"]
-                );
+                println!("{}", cli::act_log_line(&e));
             }
+            0
         }
 
         Cmd::Confirm { request_id, answer } => {
@@ -221,21 +266,21 @@ async fn main() -> anyhow::Result<()> {
             ]);
             c.publish("action.confirm", 1.0, 1, body).await?;
             println!("answer sent: {request_id} -> {}", if granted { "yes" } else { "no" });
+            0
         }
 
         Cmd::Health => {
             let mut c = BusClient::connect(&addr, "jv-health").await?;
             c.subscribe(&["sys.health"]).await?;
-            while let Some(frame) = c.next_frame().await? {
-                let body = get(&frame, "body").cloned().unwrap_or(rmpv::Value::Nil);
-                let service = get_str(&body, "service").unwrap_or_default();
-                let state = get_str(&body, "state").unwrap_or_default();
-                let uptime = get_f64(&body, "uptime_s").unwrap_or(0.0);
-                let drops = get(&body, "drops").map(to_json).unwrap_or_else(|| "-".into());
-                let notes = get_str(&body, "notes").unwrap_or_default();
-                println!("{service:<12} {state:<9} up={uptime:9.1}s drops={drops} {notes}");
-            }
+            let run = drive(&mut c, count, for_secs, |frame| {
+                let body = cli::get(&frame, "body").cloned().unwrap_or(rmpv::Value::Nil);
+                println!("{}", cli::health_line(&body));
+            })
+            .await?;
+            cli::exit_code(run.outcome, count, run.seen)
         }
-    }
-    Ok(())
+    };
+
+    std::io::stdout().flush().ok();
+    std::process::exit(code)
 }
