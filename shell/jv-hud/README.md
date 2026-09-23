@@ -98,6 +98,12 @@ What an element uses:
 | `Bus.ageOf(env)` | seconds since capture, or `Infinity` if not yet knowable |
 | `Bus.frameReceived(topic, env)` | per-frame signal |
 
+`Bus.qml` itself is only the half that needs Quickshell: the child process,
+the respawn timer, and the monotonic clock. The state machine those JSON
+lines drive lives in `core/BusModel.qml` and imports nothing but QtQuick —
+which is what makes it testable (see below). `Bus` forwards the whole API,
+so an element still sees one `Bus`.
+
 The singleton is built lazily, on first use. Nothing references it while
 the HUD has nothing to show, so an idle machine runs no bridge process and
 holds no socket — which is why the self-test plate lives inside a `Loader`
@@ -111,9 +117,42 @@ bash ops/ralph/runtests.sh jv-hud-bridge   # unit tests + a real-jarvisd e2e
 
 Note on the build gate: qmllint type-checks *cross-file* access, so
 `Bus.linkUpp` in any element is a build failure. It does **not** catch a
-typo in a self-assignment inside `Bus.qml` itself — keep that file small.
+typo in a self-assignment inside a file — which is what the QML tests are
+for.
+
+## Headless QML tests (A9)
+
+```sh
+bash ops/ralph/qmltest.sh                          # inner loop, worktree source
+bash ops/ralph/qmltest.sh BusModel::test_received_survives_a_link_drop
+nix build .#jv-hud                                # the gate: qmllint + these tests
+```
+
+`shell/jv-hud/tests/` runs under `qmltestrunner -platform offscreen`: no
+compositor, no bus, no bridge process. That works only because of how this
+directory is split:
+
+| directory | imports | who can load it |
+|---|---|---|
+| `shell/jv-hud/` | Quickshell | the `quickshell` binary, only |
+| `shell/jv-hud/core/` | QtQuick | any QML engine — so, the tests |
+
+Quickshell links its QML plugin **into its own binary**, so no other QML
+engine can `import Quickshell` at all. And importing a directory resolves
+every type its `qmldir` lists — so a single Quickshell import inside `core/`
+would make the whole directory unloadable and silently take the HUD's only
+tests with it. A test in `tools/` fails if that ever happens.
+
+The rule that follows: **logic that deserves a test goes in `core/`.**
+Anything left in a Quickshell file is beyond the reach of any test, so keep
+those files to wiring. Components in `core/` are registered in `CORE` in
+`tools/gen_theme_qml.py` (which writes `core/qmldir`), exactly like
+singletons are registered in `SINGLETONS`.
+
+The tests are a build gate, not shipped QML — `installPhase` drops them.
 
 ## Next
 
 `A3` — the first data-backed element: Jarvis's state from real
-`speech.state` / `audio.wake` frames, now that `Bus` can deliver them.
+`speech.state` / `audio.wake` frames, now that `Bus` can deliver them, and
+now that its state machine is born tested.

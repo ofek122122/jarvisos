@@ -4,8 +4,10 @@
 # The package is a thin, pinned launcher: the QML is copied into the store
 # (so the running HUD is exactly what the flake declares — nothing reads
 # out of the working tree) and `quickshell` is wrapped to load it. The
-# build gate is qmllint: a HUD that does not parse can never reach a
-# `nixos-rebuild build`, let alone a screen.
+# build gate is qmllint plus the headless QML tests in shell/jv-hud/tests:
+# a HUD that does not parse — or whose bus state machine got the meaning of
+# a dropped link wrong — can never reach a `nixos-rebuild build`, let alone
+# a screen.
 #
 # The wrapper also pins JV_HUD_BRIDGE to the read-only bus bridge the HUD
 # spawns as a child (see Bus.qml). Pinning it means the HUD's only window
@@ -57,6 +59,13 @@ stdenvNoCC.mkDerivation {
       -I ${quickshell}/lib/qt-6/qml \
       -I ${qt6.qtdeclarative}/lib/qt-6/qml \
       $(find . -name '*.qml' | sort)
+    # The headless QML tests (shell/jv-hud/tests). They can run at all only
+    # because everything they exercise lives in core/, which imports nothing
+    # but QtQuick: quickshell links its own QML plugin into its binary, so no
+    # other QML engine — this one included — can ever import Quickshell.
+    export QT_QPA_PLATFORM=offscreen
+    export HOME=$TMPDIR
+    qmltestrunner -input ./tests -import ${qt6.qtdeclarative}/lib/qt-6/qml
     runHook postCheck
   '';
 
@@ -64,6 +73,8 @@ stdenvNoCC.mkDerivation {
     runHook preInstall
     mkdir -p $out/share/jv-hud
     cp -r ./* $out/share/jv-hud/
+    # The tests are a build gate, not part of the shell quickshell loads.
+    rm -rf $out/share/jv-hud/tests
     makeWrapper ${lib.getExe quickshell} $out/bin/jv-hud \
       --add-flags "-p $out/share/jv-hud/shell.qml" \
       --set JV_HUD_BRIDGE ${hudBridge}/bin/jv-hud-bridge

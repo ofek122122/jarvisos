@@ -94,6 +94,47 @@ def test_every_qml_singleton_on_disk_is_registered_and_vice_versa():
         assert name == file[: -len(".qml")], "the type name is the file name"
 
 
+def test_core_qmldir_registers_every_component_and_no_module_name():
+    qmldir = gen.render_core_qmldir()
+    assert "BusModel 1.0 BusModel.qml" in qmldir
+    assert not any(l.startswith("singleton ") for l in qmldir.splitlines())
+    assert not any(l.startswith("module ") for l in qmldir.splitlines())
+    assert "core/qmldir" in gen.outputs(ROOT / "personality" / "theme.toml")
+
+
+def test_every_core_component_on_disk_is_registered_and_vice_versa():
+    core = ROOT / "shell" / "jv-hud" / "core"
+    on_disk = {q.name for q in core.glob("*.qml")}
+    assert on_disk == {file for _, file in gen.CORE}
+    for name, file in gen.CORE:
+        text = (core / file).read_text("utf-8")
+        assert text.startswith("//"), f"{file} should open with a comment saying what it is"
+        assert "pragma Singleton" not in text, f"{file} is a component, not a singleton"
+        assert name == file[: -len(".qml")], "the type name is the file name"
+
+
+def test_core_imports_nothing_but_qtquick():
+    """shell/jv-hud/core is the half that headless QML tests can load.
+
+    Importing a directory resolves every type its qmldir lists, so ONE
+    Quickshell import anywhere in core/ makes the whole directory
+    unimportable to qmltestrunner — quickshell links its QML plugin into its
+    own binary. That would silently take the HUD's only QML tests with it,
+    so it fails here instead, loudly.
+    """
+    allowed = {"QtQuick"}
+    offenders = []
+    for qml in sorted((ROOT / "shell" / "jv-hud" / "core").rglob("*.qml")):
+        for n, line in enumerate(qml.read_text("utf-8").splitlines(), 1):
+            m = re.match(r"\s*import\s+(\S+)", line)
+            if m and m.group(1) not in allowed:
+                offenders.append(f"{qml.relative_to(ROOT)}:{n}: {line.strip()}")
+    assert not offenders, (
+        "core/ may import only QtQuick, or the headless tests stop running:\n"
+        + "\n".join(offenders)
+    )
+
+
 # --- validation: a bad token must never reach a screen ---------------------
 
 

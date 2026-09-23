@@ -59,6 +59,18 @@ SINGLETONS = (
     ("Bus", "Bus.qml"),      # hand-written: the read-only bus bridge
 )
 
+# shell/jv-hud/core — the Quickshell-free half of the HUD. Importing a
+# directory resolves every type its qmldir lists, so one file that needs the
+# quickshell binary makes the WHOLE directory unimportable to any other QML
+# engine. Logic that deserves a headless test therefore lives down here, with
+# nothing but QtQuick above it, and the Quickshell singletons next door wrap
+# it. A directory that ships a qmldir exposes only what the file lists, so an
+# unregistered component is "not a type" — to the engine, to qmllint and to
+# the tests alike. Add the line, or it does not exist.
+CORE = (
+    ("BusModel", "BusModel.qml"),  # the bus state machine, minus Quickshell
+)
+
 HEX = re.compile(r"^#[0-9A-F]{6}$")
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -170,9 +182,29 @@ def render_qmldir() -> str:
     )
 
 
+def render_core_qmldir() -> str:
+    return "\n".join(
+        [
+            f"# {HEADER}",
+            "#",
+            "# shell/jv-hud/core holds the HUD logic that imports nothing but",
+            "# QtQuick, so `qmltestrunner` can load it without the quickshell",
+            "# binary (which links its QML plugin into itself). Keep it that way:",
+            "# one Quickshell import here would take the headless tests with it.",
+            "# New components go in CORE in tools/gen_theme_qml.py.",
+        ]
+        + [f"{name} 1.0 {file}" for name, file in CORE]
+        + [""]
+    )
+
+
 def outputs(theme_toml: Path) -> dict[str, str]:
     tokens = load_tokens(theme_toml.read_text(encoding="utf-8"))
-    return {"Theme.qml": render_theme_qml(tokens), "qmldir": render_qmldir()}
+    return {
+        "Theme.qml": render_theme_qml(tokens),
+        "qmldir": render_qmldir(),
+        "core/qmldir": render_core_qmldir(),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -197,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.check:
             stale.append(path)
         else:
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
             print(f"wrote {path}")
     if stale:

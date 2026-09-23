@@ -3,43 +3,38 @@
 // QML cannot open a Unix socket or unpack MessagePack, and the HUD is
 // forbidden from importing another service (invariant 1). So this
 // singleton runs ONE child process — `jv-hud-bridge`, pinned into the
-// wrapper by pkgs/jv-hud — and reads the JSON lines it writes. Frames
-// come in; nothing ever goes out. There is no publish here and no way to
-// add one: the bridge is handed a read-only bus object on its side too.
+// wrapper by pkgs/jv-hud — and feeds the JSON lines it writes to a
+// BusModel. Frames come in; nothing ever goes out. There is no publish
+// here and no way to add one: the bridge is handed a read-only bus object
+// on its side too.
 //
-// Truthfulness is the whole design (invariant 10):
-//   · `linkUp` is false until the bridge says it is subscribed. Until
-//     then the honest answer about every topic is "I don't know".
-//   · when the link drops, `frames` is emptied. A HUD still drawing
-//     "listening" from a bus that died three minutes ago is lying, and a
-//     stale indicator is worse than no indicator.
-//   · `latest()` returns null for anything unheard, so an element that
-//     forgets to handle "no signal" fails loudly instead of inventing one.
+// The state machine those lines drive lives next door in core/BusModel.qml,
+// which imports nothing but QtQuick so it can be tested headlessly (A9).
+// What is left here is exactly the part that CANNOT be: the child process,
+// the respawn timer, and the monotonic clock. Keep it that way — logic that
+// lands in this file is logic no test can reach.
 //
-// This singleton is constructed lazily, on first use. Nothing references
-// it while the HUD has nothing to show, so an idle machine runs no bridge
-// process and holds no socket — earned emptiness costs nothing (§06).
+// Everything an element uses — `linkUp`, `frames`, `latest()`, `ageOf()`,
+// `frameReceived` — is forwarded below, so consumers still see one `Bus`.
 pragma Singleton
 
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "core"
 
 Singleton {
   id: root
 
   // True only while the bridge holds a live, subscribed bus connection.
   // Every element must gate its content on this.
-  property bool linkUp: false
+  readonly property alias linkUp: model.linkUp
   // Why the link is down, for the log and for a future diagnostics panel.
   // Never rendered as a sensor state — it describes the pipe, not the room.
-  property string linkError: "starting"
-  // topic -> the last envelope seen on it. Replaced wholesale (never
-  // mutated in place) so bindings actually re-evaluate.
-  property var frames: ({})
-  // Frames that arrived while nothing was listening still count as heard:
-  // this is how an element added later knows the HUD has been awake.
-  property int received: 0
+  readonly property alias linkError: model.linkError
+  // topic -> the last envelope seen on it, emptied whenever the link drops.
+  readonly property alias frames: model.frames
+  readonly property alias received: model.received
 
   // Emitted for every well-formed frame, after `frames` is updated.
   signal frameReceived(string topic, var envelope)
@@ -47,79 +42,28 @@ Singleton {
   // The last envelope on `topic`, or null if the bus has never said
   // anything about it (or the link is down and the cache was cleared).
   function latest(topic: string): var {
-    const env = root.frames[topic];
-    return env === undefined ? null : env;
+    return model.latest(topic);
   }
 
   // Seconds since a frame was captured, or Infinity when that is not
-  // knowable yet. An element uses this to stop showing input that went
-  // stale instead of pretending it is current (invariant 4).
-  //
-  // Envelope `ts` and Qt's ElapsedTimer both read CLOCK_MONOTONIC, so they
-  // differ by exactly one constant: when this process started. Every frame
-  // gives an estimate of it (ts minus the reading taken as the frame
-  // lands), biased low by however long the frame spent in flight — so we
-  // keep the LARGEST estimate seen, which converges on the truth from
-  // below as soon as one frame arrives promptly. Before the first frame
-  // there is no estimate and therefore no age, which is the honest answer.
+  // knowable yet — before the first frame, or for a frame with no `ts`.
   function ageOf(envelope: var): real {
-    if (!envelope || typeof envelope.ts !== "number" || !root.clockPinned)
-      return Infinity;
-    return sinceStart.elapsed() + root.clockOffset - envelope.ts;
+    return model.ageOf(envelope);
   }
 
-  property bool clockPinned: false
-  property real clockOffset: 0
+  BusModel {
+    id: model
+
+    // Quickshell's ElapsedTimer reads CLOCK_MONOTONIC in seconds, which is
+    // the clock the bus stamps `ts` with. This is the only reason the model
+    // needs an injected one: the tests have no ElapsedTimer to give it.
+    monotonic: () => sinceStart.elapsed()
+
+    onFrameReceived: (topic, envelope) => root.frameReceived(topic, envelope)
+  }
 
   ElapsedTimer {
     id: sinceStart
-  }
-
-  // ---------------------------------------------------------------- wire
-
-  function ingest(line: string): void {
-    if (line.length === 0)
-      return;
-    let msg = null;
-    try {
-      msg = JSON.parse(line);
-    } catch (e) {
-      // A line the HUD cannot parse is a line the HUD does not act on.
-      console.warn("jv-hud: unparseable bridge line dropped");
-      return;
-    }
-    if (!msg || typeof msg !== "object")
-      return;
-
-    if (msg.t === "link") {
-      root.applyLink(msg.up === true, typeof msg.err === "string" ? msg.err : "");
-      return;
-    }
-    if (msg.t !== "frame" || !msg.frame || typeof msg.frame.topic !== "string")
-      return;
-
-    const env = msg.frame;
-    if (typeof env.ts === "number") {
-      const estimate = env.ts - sinceStart.elapsed();
-      if (!root.clockPinned || estimate > root.clockOffset) {
-        root.clockOffset = estimate;
-        root.clockPinned = true;
-      }
-    }
-    let next = {};
-    for (const key in root.frames)
-      next[key] = root.frames[key];
-    next[env.topic] = env;
-    root.frames = next;
-    root.received += 1;
-    root.frameReceived(env.topic, env);
-  }
-
-  function applyLink(up: bool, err: string): void {
-    if (!up && Object.keys(root.frames).length > 0)
-      root.frames = ({}); // nothing observed means nothing shown
-    root.linkUp = up;
-    root.linkError = up ? "" : err;
   }
 
   Process {
@@ -132,7 +76,7 @@ Singleton {
 
     stdout: SplitParser {
       splitMarker: "\n"
-      onRead: data => root.ingest(data)
+      onRead: data => model.ingest(data)
     }
 
     // The bridge reconnects to the bus by itself; it only stops if it
@@ -144,7 +88,7 @@ Singleton {
     // linter is a build gate here. The bool is all we act on anyway.
     onRunningChanged: {
       if (!bridge.running) {
-        root.applyLink(false, "bridge stopped");
+        model.applyLink(false, "bridge stopped");
         respawn.start();
       }
     }
