@@ -22,18 +22,32 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       compiles it to `shell/jv-hud/Theme.qml` + `qmldir`; `--check` runs inside
       the jv-hud build, so a drifted theme cannot be built. Tests:
       `bash ops/ralph/runtests.sh tools`.)
-- [ ] A3. "Jarvis state" HUD element driven by REAL `speech.state` + `audio.wake`
+- [x] A3. "Jarvis state" HUD element driven by REAL `speech.state` + `audio.wake`
       from the bus: idle / listening / speaking / interrupted. Ember accent only
-      when genuinely active. This is the first real, data-backed UI.
+      when genuinely active. This is the first real, data-backed UI. — 769dcdd
+      (`core/SpeechState.qml` decides — 34 tests, 17 mutations run through them;
+      `StatePlate.qml` draws a dot and one word and nothing else. `idle` and
+      `unknown` both draw NOTHING, so the surface is unmapped unless a frame
+      earned it. `listening` is inferred, since jv-ears publishes a window
+      opening and never its close: Jarvis answering or an `audio.vad`
+      speech_end closes it, `interrupted` does not, and `wakeWindowS` (8 s,
+      mirroring ears' `wake_timeout_s`) is only the fallback. Frames are
+      refused rather than guessed at — wrong schema `v`, a wake under its own
+      threshold, a hedged `conf`, no numeric `ts`. Teal for listening (the open
+      mic is yours), ember for speaking. Tests: `bash ops/ralph/qmltest.sh`.)
 - [ ] A4. Live mic indicator from `audio.vad`/`audio.wake` — truthful, not fakeable;
       off when no signal. (Camera indicator waits for a vision-phase signal.)
+      A3 already reads both topics in `core/SpeechState.qml`; the mic
+      indicator is a DIFFERENT claim (is the mic capturing?) and must not be
+      derived from `listening` — jv-ears' VAD runs continuously whether or
+      not a wake window is open.
 - [x] A5. A tiny bus client for QML so HUD elements subscribe to the Unix-socket
       bus without violating invariant 1 (consumer only). — bae8e03
       (`services/jv-hud-bridge` writes one JSON line per envelope; `Bus.qml`
       reads it with `Process` + `SplitParser`. Consumer-only is structural: the
       pump holds a `ReadOnlyBus` with no publish method. `Bus.frames` is cleared
-      whenever the link drops. The singleton is lazy, so an idle HUD runs no
-      bridge. Tests: `bash ops/ralph/runtests.sh jv-hud-bridge` — 25, three of
+      whenever the link drops. (The singleton was lazy; since A3 an element
+      watches the bus at load, so a running HUD always runs its bridge.) Tests: `bash ops/ralph/runtests.sh jv-hud-bridge` — 25, three of
       them against a real jarvisd; smoked against the live bus on ares.)
 - [x] A7. Motion primitives on top of A2: an `Ease` Behavior and one
       reduced-motion switch every animated element honours. — 245926e
@@ -108,6 +122,17 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 - [ ] C1. Propose and add genuinely new, on-brand capabilities here before building
       them — one line each, so a human can veto in the next `updates` read.
 
+- [ ] A12. A "thinking" state: between `audio.vad` speech_end and jv-voice's
+      `speaking` frame, Jarvis is working and the HUD says `idle`. That
+      under-claims (the safe direction), but the real signal exists —
+      `brain.request`/`brain.response` are frozen schemas the bridge does not
+      subscribe to. One line in `DEFAULT_TOPICS` plus one branch in
+      `core/SpeechState.qml`. No schema change needed. Discovered in A3.
+- [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
+      builds one. Three copies of "LISTENING" across three screens may be
+      right (you see it wherever you look) or noise. Needs a human eye on
+      ares before it is worth changing. Discovered in A3.
+
 ## Done
 - A1 — jv-hud Quickshell layer-shell skeleton (49046db, 2026-09-23)
 - A2 — theme tokens in personality/theme.toml -> generated Theme singleton
@@ -118,3 +143,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   (4c7c048, 2026-09-24)
 - A7 — one motion switch: MotionPolicy/Motion/Ease, and a build gate that
   stops an element from animating around it (245926e, 2026-09-24)
+- A3 — the first data-backed element: SpeechState + StatePlate, the HUD's
+  first pixels that mean something (769dcdd, 2026-09-24)

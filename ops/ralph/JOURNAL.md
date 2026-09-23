@@ -428,3 +428,100 @@ everything here (and every commit) since the last time you asked. Format per ent
   unchanged and still worth a grep-shaped gate — note that this iteration's
   animation-gate test is exactly that shape, so the pattern now has a
   precedent to copy.
+
+## 2026-09-24 — iteration 7 — A3: Jarvis's state, on screen, from real frames
+
+- picked A3 off the top of the ladder: UI/UX, and the journal's own `next:`.
+  Everything it needed had landed — `Bus` delivers frames (A5), `Motion`/`Ease`
+  mean the first animated element obeys the reduced-motion switch for free (A7),
+  and A9's `core/` split is where the logic had to go.
+- built two files. `core/SpeechState.qml` is the decision (pure QtQuick, so it
+  is tested); `StatePlate.qml` is a dot and one word. The plate draws NOTHING
+  for `idle` and nothing for `unknown`, so the layer-shell surface is unmapped
+  unless a frame earned it. A badge permanently reading "idle" is chrome that
+  never earned its place, and one reading it while the bus is down is a lie.
+- the hard part, and the only interesting design decision: **`listening` has no
+  closing signal.** jv-ears publishes `audio.wake` when a window opens and
+  publishes nothing at all when it disarms (read `services/jv-ears/jv_ears/
+  pipeline.py`: `_armed_at` is cleared silently on both the timeout path and at
+  a gated `speech_end`). So the close has to be inferred, and since this is a
+  claim about the MICROPHONE, every rule is chosen to stop claiming it early
+  rather than late:
+    · Jarvis answering (`speech.state` -> speaking, newer than the wake) means
+      it already heard you. A `speaking` frame OLDER than the wake is barge-in,
+      not an answer — wake detection stays live while jv-voice talks — so that
+      still reads as listening, which is the responsive AND the true thing.
+    · `audio.vad` `speech_end` newer than the wake closes it. If that segment
+      was not actually wake-gated, ears stays armed and we stop saying
+      "listening" a little early. Early is the safe direction.
+    · `interrupted` deliberately does NOT close it: jv-voice publishes that
+      BECAUSE of the wake, so treating it as an end would blank the plate at
+      the exact moment the user is mid-sentence.
+    · the fallback is `wakeWindowS` = 8 s, mirroring ears' `wake_timeout_s`
+      default. This is the one number in the element that is a HUD-side
+      constant, because **nothing on the bus publishes ears' configuration.**
+      Written down in the file and the README: keep it AT OR BELOW whatever
+      ears is tuned to, or the HUD over-claims. A candidate for a future
+      `sys.health`-shaped signal, not worth a schema change today.
+- the timer is armed with whatever is LEFT of the window (`wakeWindowS` minus
+  `Bus.ageOf(wake)`), not the whole of it: a frame that spent 0.45 s queued
+  behind a slow consumer is already 0.45 s into its own window. Armed only
+  while a window is open, so an idle HUD runs no timer at all.
+- frames are refused rather than guessed at — wrong schema `v` (invariant 2: a
+  v2 body is not a v1 body), a wake scoring below the threshold it declares or
+  whose envelope `conf` contradicts that score (invariant 4: a frame that
+  disagrees with itself), a state topic hedging its `conf`, and any frame with
+  no numeric `ts`. That last one is not pedantry: ordering a wake against a
+  speech transition IS the listening rule, and an unorderable frame would have
+  to be guessed at. With no clock pinned, `ageOf` is Infinity and there is
+  therefore no `listening` at all — the A9 NaN fix pays for itself here.
+- colour: teal for listening, ember for speaking. theme.toml already said why —
+  ember means Jarvis is doing something, teal is "your own state, not Jarvis's"
+  — and an open microphone is yours. `interrupted` is quiet: a fact worth
+  reading, not an alarm worth colouring. The dot carries the accent and the
+  word carries the meaning; ember never touches the text.
+- proving the tests bite: 17 mutations, 17 caught. Among them — no-frame
+  reading as `idle`, an unrecognised state word falling back to `idle`,
+  `wakeFresh` ignoring the timer, ignoring the age, `answered`/`utteranceEnded`
+  dropping their ts comparison, `answered` counting `interrupted`,
+  `utteranceEnded` accepting any VAD boundary, the wake ignoring its own
+  threshold or its conf, `wellFormed` dropping the `v` or the `ts` check,
+  `frameOn` ignoring `linkUp`, and the expiry arming a whole window instead of
+  the remainder. Two tests were written specifically because the first sweep
+  showed the remainder-arming and the window-change re-arm would have survived.
+- qmllint footgun, new one: `Component.createObject()` is typed `QObject`, so
+  every member READ on the result is `missing-property` and `-W 0` fails the
+  build. (Writes are not flagged, which is why tst_busmodel never hit it.)
+  Fix is the same shape as that file's: route instantiation through an untyped
+  helper, and the linter stops guessing. Worth knowing before the next test file.
+- consequence worth naming: the HUD is a live bus consumer now, so `Bus` is
+  built at load and its bridge child runs for as long as the shell does. The
+  A5 claim "an idle HUD runs no bridge process" is no longer true and the
+  README and PLAN now say so. What stays lazy is the screen.
+- tests: 86 QML green (34 new), also green INSIDE the nix sandbox; 22 tools
+  green. jv-hud-bridge and jarvisd untouched.
+- build: `nix build .#jv-hud` ok (qmllint clean at `-W 0`, tests ran in the
+  checkPhase); `nixos-rebuild build --flake .#ares` ok. Never test/switch.
+  No schema, no jv-act, no boot path.
+- files: shell/jv-hud/core/SpeechState.qml (new), shell/jv-hud/StatePlate.qml
+  (new), shell/jv-hud/tests/tst_speechstate.qml (new), shell/jv-hud/shell.qml,
+  shell/jv-hud/README.md, shell/jv-hud/qmldir + core/qmldir (generated),
+  tools/gen_theme_qml.py
+- commit: 769dcdd
+- next: **A8** is now the highest-value small thing — theme.toml names Archivo
+  and JetBrains Mono, nothing declares them, and A3 just put mono type on
+  screen for the first time, so the missing font is no longer theoretical.
+  Ten-minute commit, `fonts.packages` in its own change.
+  Then **A4** (the live mic indicator). Note the trap found while building A3:
+  it is a DIFFERENT claim from `listening` and must not be derived from it —
+  jv-ears runs VAD continuously whether or not a wake window is open, so the
+  mic indicator answers "is audio being captured?" while `listening` answers
+  "is Jarvis attending to me?". Two signals, two elements.
+  New follow-ups filed: **A12** (a `thinking` state — between `speech_end` and
+  jv-voice's `speaking` frame the HUD says `idle`, which under-claims; the real
+  signal is `brain.request`/`brain.response`, frozen schemas the bridge simply
+  does not subscribe to — one line in `DEFAULT_TOPICS`, no schema change) and
+  **A13** (StatePlate is drawn on every monitor; needs a human eye on ares to
+  say whether that is right). A10 is unchanged and still wants a grep-shaped
+  gate. And the HUD has now earned a human eyeball on ares: A1's "it maps" is
+  still verified by construction, and A3 is the first thing worth looking at.
