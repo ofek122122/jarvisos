@@ -25,7 +25,11 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     finally:
         await svc.close()
         await bus.close()
-    return 0
+    # run() only returns when the bus frame loop ends — i.e. the peer
+    # closed (jarvisd restarted/died). That is a failure, not a clean
+    # shutdown, so exit non-zero and let systemd Restart=on-failure
+    # reconnect us. A real stop arrives as SIGTERM and never reaches here.
+    return 1
 
 
 def cli() -> None:
