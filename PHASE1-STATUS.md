@@ -66,6 +66,26 @@ install day; anything needing real hardware is mocked and tagged
   jv-voice while the rest generates; decide the measurement anchor
   (VAD end vs start) and re-state the budget accordingly.
 
+  **UPDATE 2026-09-23 (308e12b): streaming reply — the perceived-latency
+  fix.** jv-brain now streams the llama completion and speaks each sentence
+  as it closes (SentenceChunker → one speech.say per sentence, shared
+  reply_group; schema f461a09); jv-voice drops a reply_group's queued tail
+  on barge-in. Measured live: request → first sentence **580 ms** vs
+  request → full reply 1457 ms (877 ms head start on 4 sentences, grows
+  with length). Also fixed same evening: clipped speech tails (voice
+  player waited on a wall-clock guess, not the device) and Jarvis hearing
+  itself (half-duplex gate in jv-ears) — see 7f39196.
+
+  STILL OPEN — the two remaining latency chunks are in the EARS, both
+  bigger changes for their own session:
+  1. **ASR is ~2.2 s fixed** (faster-whisper distil-small, CPU, runs after
+     speech_end). Real fix = streaming ASR. Strong candidate found:
+     NVIDIA Nemotron streaming ASR 0.6B (June 2026, ~24 ms to final,
+     40-locale, configurable chunk) — evaluate as a whisper replacement.
+  2. **Endpoint wait 1.5 s** — deliberately tuned to bridge a 1.2 s
+     mid-sentence pause; needs semantic/smarter endpointing to cut safely,
+     not a flat reduction.
+
   **UPDATE 2026-09-16 (d94807a): the re-prefill cliff is fixed** —
   pinned slot + cache_prompt, --parallel 1 + --cache-reuse 256, batched
   prefix-stable trims, and a startup warmup. Measured: first exchange
