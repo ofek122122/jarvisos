@@ -77,17 +77,44 @@ class ScriptedLLM:
                     if self.script
                     else {"role": "assistant", "content": "script exhausted"}
                 )
-            body = json.dumps(
-                {"choices": [{"message": message, "finish_reason": "stop"}]}
-            ).encode()
-            writer.write(
-                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                + f"Content-Length: {len(body)}\r\n\r\n".encode()
-                + body
-            )
+            if payload.get("stream"):
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+                    + self._sse(message)
+                )
+            else:
+                body = json.dumps(
+                    {"choices": [{"message": message, "finish_reason": "stop"}]}
+                ).encode()
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                    + f"Content-Length: {len(body)}\r\n\r\n".encode()
+                    + body
+                )
             await writer.drain()
         finally:
             writer.close()
+
+    @staticmethod
+    def _sse(message: dict) -> bytes:
+        """Serialize a scripted assistant message as OpenAI SSE deltas."""
+        chunks = [{"choices": [{"delta": {"role": "assistant"}}]}]
+        if message.get("tool_calls"):
+            tcs = [
+                {"index": i, "id": tc["id"], "type": "function",
+                 "function": tc["function"]}
+                for i, tc in enumerate(message["tool_calls"])
+            ]
+            chunks.append({"choices": [{"delta": {"tool_calls": tcs}}]})
+            chunks.append({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]})
+        else:
+            for tok in (message.get("content") or "").split(" "):
+                chunks.append({"choices": [{"delta": {"content": tok + " "}}]})
+            chunks.append({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+        out = b""
+        for c in chunks:
+            out += b"data: " + json.dumps(c).encode() + b"\r\n\r\n"
+        return out + b"data: [DONE]\r\n\r\n"
 
 
 @pytest.fixture
@@ -168,10 +195,12 @@ async def test_tool_roundtrip_and_spoken_summary(bus_addr, tmp_path):
          "duration_ms": 5.0, "output": "launched firefox"},
     )
 
-    resp = await next_topic(watcher, "brain.response")
-    assert resp["body"]["text"] == "Firefox is open."
+    # streaming: the spoken sentence precedes the brain.response record
     say = await next_topic(watcher, "speech.say")
     assert say["body"]["in_reply_to_utterance"] == "u1"
+    assert say["body"]["text"] == "Firefox is open."
+    resp = await next_topic(watcher, "brain.response")
+    assert resp["body"]["text"] == "Firefox is open."
 
     # the tool result reached the second LLM call as a tool message
     # (requests[0] is the startup warmup, then the two scripted calls)

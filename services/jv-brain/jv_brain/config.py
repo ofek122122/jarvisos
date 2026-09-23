@@ -88,6 +88,11 @@ class BrainConfig:
     temperature: float = 0.6
     max_tokens: int = 320  # spoken replies are short by charter
 
+    # Streamed replies are chopped into sentences for piper; a sentence
+    # shorter than this is held and merged with the next so we never voice
+    # a lone "OK." A first real sentence still goes out as soon as it closes.
+    tts_min_sentence_chars: int = 0
+
     max_turns: int = 16  # rolling window, user+assistant pairs counted singly
     max_context_chars: int = 12_000  # crude token cap (≈3k tokens)
     # Batched-trim target: when max_context_chars is crossed, drop the

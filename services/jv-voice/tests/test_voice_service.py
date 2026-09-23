@@ -141,6 +141,43 @@ async def test_wake_interrupts_mid_playback(bus_addr, synth):
     await svc_bus.close()
 
 
+async def test_wake_drops_the_rest_of_the_streamed_group(bus_addr, synth):
+    """A streamed reply arrives as several speech.say with one reply_group.
+    A wake mid-sentence must drop the WHOLE group's queued sentences, not
+    just the one playing — otherwise Jarvis talks over the user who just
+    interrupted (the point of barge-in)."""
+    watcher = await BusClient.connect(bus_addr, src="t-watch")
+    await watcher.subscribe(["speech.state"])
+    player = FakePlayer(clip_seconds=5.0)
+    svc_bus, task = await start_service(bus_addr, synth, player)
+    await asyncio.sleep(0.2)
+
+    grp = str(uuid.uuid4())
+    s1 = await say(watcher, "First sentence playing now.", reply_group=grp)
+    await say(watcher, "Second sentence queued.", reply_group=grp)
+    await say(watcher, "Third sentence queued.", reply_group=grp)
+
+    states = await collect_states(watcher, 2)  # idle, speaking(s1)
+    assert states[-1] == {"state": "speaking", "say_id": s1}
+    await asyncio.wait_for(player.started.wait(), timeout=20)
+
+    await watcher.publish(
+        "audio.wake", {"model": "hey_jarvis", "score": 0.9, "threshold": 0.5}, conf=0.9
+    )
+    states = await collect_states(watcher, 2)
+    assert states[0] == {"state": "interrupted", "say_id": s1, "reason": "wake"}
+    assert states[1]["state"] == "idle"
+
+    # sentences 2 and 3 must NOT play — no further 'speaking' state
+    with pytest.raises(asyncio.TimeoutError):
+        await collect_states(watcher, 1, timeout=1.5)
+    assert player.played == [player.played[0]]  # only sentence 1 ever synthed to play
+
+    task.cancel()
+    await watcher.close()
+    await svc_bus.close()
+
+
 async def test_urgent_preempts_and_low_is_dropped(bus_addr, synth):
     watcher = await BusClient.connect(bus_addr, src="t-watch")
     await watcher.subscribe(["speech.state"])

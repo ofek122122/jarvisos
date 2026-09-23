@@ -36,9 +36,19 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+def sse(chunks: list[dict]) -> bytes:
+    """OpenAI streaming wire format: one `data: {json}` per line, [DONE] last."""
+    body = b""
+    for ch in chunks:
+        body += b"data: " + json.dumps(ch).encode() + b"\r\n\r\n"
+    body += b"data: [DONE]\r\n\r\n"
+    return body
+
+
 class StubLLM:
-    """Minimal OpenAI-compatible /v1/chat/completions responder.
-    Replies 'You said: <last user message>' and records every request."""
+    """Minimal OpenAI-compatible /v1/chat/completions responder. Supports
+    both non-streaming and stream=true. Reply text is
+    'You said: <last user message>'; every request is recorded."""
 
     def __init__(self) -> None:
         self.requests: list[dict] = []
@@ -49,6 +59,10 @@ class StubLLM:
         self.server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
         self.port = self.server.sockets[0].getsockname()[1]
 
+    def _reply_for(self, payload: dict) -> str:
+        users = [m for m in payload["messages"] if m["role"] == "user"]
+        return f"You said: {users[-1]['content']}" if users else ""
+
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:
             head = await reader.readuntil(b"\r\n\r\n")
@@ -58,28 +72,39 @@ class StubLLM:
                     length = int(line.split(":", 1)[1])
             payload = json.loads(await reader.readexactly(length))
             self.requests.append(payload)
-            last_user = [m for m in payload["messages"] if m["role"] == "user"][-1]
-            body = json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": f"You said: {last_user['content']}",
-                            },
-                            "finish_reason": "stop",
-                        }
-                    ]
-                }
-            ).encode()
-            writer.write(
-                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                + f"Content-Length: {len(body)}\r\n\r\n".encode()
-                + body
-            )
+            text = self._reply_for(payload)
+            if payload.get("stream"):
+                # deltas word-by-word so a multi-sentence reply arrives in pieces
+                deltas = [{"choices": [{"delta": {"role": "assistant"}}]}]
+                for tok in _tokenize(text):
+                    deltas.append({"choices": [{"delta": {"content": tok}}]})
+                deltas.append({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+                body = sse(deltas)
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+                    + f"Content-Length: {len(body)}\r\n\r\n".encode()
+                    + body
+                )
+            else:
+                body = json.dumps(
+                    {"choices": [{"message": {"role": "assistant", "content": text},
+                                  "finish_reason": "stop"}]}
+                ).encode()
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                    + f"Content-Length: {len(body)}\r\n\r\n".encode()
+                    + body
+                )
             await writer.drain()
         finally:
             writer.close()
+
+
+def _tokenize(text: str) -> list[str]:
+    """Split into whitespace-preserving tokens so reassembly is exact."""
+    import re as _re
+
+    return _re.findall(r"\S+\s*", text) or ([text] if text else [])
 
 
 @pytest.fixture
@@ -156,15 +181,17 @@ async def test_voice_final_gets_response_and_speech(stack):
         },
         conf=0.9,
     )
+    # streaming: speech.say now arrives BEFORE brain.response (piper starts
+    # while the reply is still being finalized). Single-sentence reply here.
+    say = await next_topic(watcher, "speech.say")
+    assert say["body"]["in_reply_to_utterance"] == "utt-1"  # the E2E thread
+    assert say["body"]["text"] == "You said: what time is it?"
+
     resp = await next_topic(watcher, "brain.response")
     assert resp["body"]["text"] == "You said: what time is it?"  # wake prefix stripped
     assert resp["body"]["utterance_id"] == "utt-1"
     assert resp["body"]["backend"] == "gpu"
     assert resp["body"]["in_reply_to"]["src"] == "t-watch"
-
-    say = await next_topic(watcher, "speech.say")
-    assert say["body"]["in_reply_to_utterance"] == "utt-1"  # the E2E thread
-    assert say["body"]["text"] == resp["body"]["text"]
 
     # system prompt reached the LLM (requests[0] is the startup warmup)
     req = user_requests(stub)[0]
@@ -191,6 +218,38 @@ async def test_warmup_prefills_system_prompt_at_startup(stack):
     # identical prefix contract: warmup must carry the same tool defs
     # the real requests carry, or the rendered prompt won't match
     assert ("tools" in warm) == bool(load_tools())
+
+
+async def test_reply_is_spoken_sentence_by_sentence(stack):
+    """The latency win: a multi-sentence reply must produce one speech.say
+    PER sentence (so piper starts on sentence 1 while the LLM finishes),
+    all threaded to the utterance, and one brain.response with the full
+    text. Stub reply 'You said: <text>' — feed a 2-sentence user line."""
+    addr, stub, watcher = stack
+    await watcher.subscribe(["brain.response", "speech.say"])
+    await asyncio.sleep(0.1)
+
+    await watcher.publish(
+        "audio.transcript",
+        {"kind": "final", "utterance_id": "utt-s",
+         "text": "First thing. Second thing.", "lang": "en"},
+        conf=0.9,
+    )
+    # reply echoes: "You said: First thing. Second thing." -> 2 sentences
+    say1 = await next_topic(watcher, "speech.say")
+    say2 = await next_topic(watcher, "speech.say")
+    assert say1["body"]["text"] == "You said: First thing."
+    assert say2["body"]["text"] == "Second thing."
+    assert say1["body"]["in_reply_to_utterance"] == "utt-s"
+    assert say2["body"]["in_reply_to_utterance"] == "utt-s"
+    # distinct say_ids, shared chunk group so voice keeps them in one turn
+    assert say1["body"]["say_id"] != say2["body"]["say_id"]
+    assert say1["body"]["reply_group"] == say2["body"]["reply_group"]
+
+    resp = await next_topic(watcher, "brain.response")
+    assert resp["body"]["text"] == "You said: First thing. Second thing."
+    # streaming was actually requested
+    assert user_requests(stub)[0]["stream"] is True
 
 
 async def test_partials_are_ignored(stack):

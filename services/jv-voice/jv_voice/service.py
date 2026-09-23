@@ -56,13 +56,25 @@ class VoiceService:
             self._queue.appendleft(body)
             if self._speaking and self._speaking.get("interruptible", True):
                 self._interrupt_reason = "preempted"
+                self._drop_group(self._speaking.get("reply_group"))
                 self._abort.set()
         else:
             self._queue.append(body)
 
+    def _drop_group(self, reply_group: Optional[str]) -> None:
+        """Purge queued sentences belonging to a streamed reply — when its
+        current sentence is interrupted, the rest of the turn must go too,
+        or Jarvis talks over the user who just barged in."""
+        if not reply_group:
+            return
+        self._queue = deque(
+            item for item in self._queue if item.get("reply_group") != reply_group
+        )
+
     def _on_wake(self) -> None:
         if self._speaking and self._speaking.get("interruptible", True):
             self._interrupt_reason = "wake"
+            self._drop_group(self._speaking.get("reply_group"))
             self._abort.set()
 
     # ------------------------------------------------------------- speak

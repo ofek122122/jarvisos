@@ -41,6 +41,50 @@ def strip_wake_prefix(text: str) -> str:
     return stripped if stripped else text.strip()
 
 
+# A sentence closes on . ! ? or … (with optional closing quote/bracket)
+# followed by whitespace, or on a newline.
+_SENTENCE_BREAK = re.compile(r'(.*?[.!?…][")\]]?)(\s)|(.*?)(\n)', re.DOTALL)
+
+
+class SentenceChunker:
+    """Feed it streamed LLM text; it hands back complete sentences the
+    moment each one closes, so jv-voice can start speaking sentence 1
+    while the LLM still writes sentence 2. `flush()` returns the trailing
+    partial at end of stream. `min_chars` holds back tiny fragments so
+    piper never voices a lone 'K.'."""
+
+    def __init__(self, min_chars: int = 0) -> None:
+        self.min_chars = min_chars
+        self._buf = ""
+        self._pending = ""  # a too-small fragment, held to lead the next sentence
+
+    def push(self, text: str) -> list[str]:
+        self._buf += text
+        out: list[str] = []
+        while True:
+            m = _SENTENCE_BREAK.match(self._buf)
+            if not m:
+                break
+            sentence = (m.group(1) or m.group(3) or "").strip()
+            self._buf = self._buf[m.end():]
+            if not sentence:
+                continue
+            if self._pending:
+                sentence = f"{self._pending} {sentence}"
+                self._pending = ""
+            if len(sentence) < self.min_chars:
+                self._pending = sentence  # too small to speak alone; lead-in
+                continue
+            out.append(sentence)
+        return out
+
+    def flush(self) -> Optional[str]:
+        rest = " ".join(p for p in (self._pending, self._buf.strip()) if p).strip()
+        self._pending = ""
+        self._buf = ""
+        return rest or None
+
+
 _YES = {"yes", "yeah", "yep", "yup", "correct", "right", "that's right", "perfect"}
 _NO = {"no", "nope", "wrong", "not quite", "not right", "incorrect"}
 
@@ -167,18 +211,65 @@ class BrainService:
             payload["tool_choice"] = "auto"
         return payload
 
-    async def _complete(self, conv: Conversation) -> tuple[dict, str]:
-        """-> (message, finish_reason). message may carry tool_calls."""
+    async def _stream_turn(self, conv: Conversation, on_sentence) -> tuple[str, list, str]:
+        """Stream one completion. Assemble content + any tool_calls from the
+        SSE deltas; call `await on_sentence(str)` for each sentence as it
+        closes (so piper starts on sentence 1 while the LLM writes the
+        rest). Returns (full_text, tool_calls, finish_reason). Sentences
+        are spoken ONLY for a plain-text answer — a tool-call turn carries
+        no content, so nothing is voiced before the tools run."""
         payload = self._payload(
             [{"role": "system", "content": self.system_prompt}] + list(conv.messages)
         )
-        resp = await self._http.post(
-            f"{self.cfg.llm_url}/v1/chat/completions", json=payload
-        )
-        resp.raise_for_status()
-        choice = resp.json()["choices"][0]
-        finish = choice.get("finish_reason") or "stop"
-        return choice["message"], ("length" if finish == "length" else "stop")
+        payload["stream"] = True
+        chunker = SentenceChunker(min_chars=self.cfg.tts_min_sentence_chars)
+        parts: list[str] = []
+        tool_frags: dict[int, dict] = {}
+        finish = "stop"
+        async with self._http.stream(
+            "POST", f"{self.cfg.llm_url}/v1/chat/completions", json=payload
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                choice = json.loads(data)["choices"][0]
+                if choice.get("finish_reason"):
+                    finish = choice["finish_reason"]
+                delta = choice.get("delta") or {}
+                for tc in delta.get("tool_calls") or []:
+                    slot = tool_frags.setdefault(
+                        tc.get("index", 0), {"id": "", "name": "", "args": ""}
+                    )
+                    if tc.get("id"):
+                        slot["id"] = tc["id"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        slot["name"] = fn["name"]
+                    if fn.get("arguments"):
+                        slot["args"] += fn["arguments"]
+                content = delta.get("content")
+                if content:
+                    parts.append(content)
+                    if on_sentence and not tool_frags:
+                        for sentence in chunker.push(content):
+                            await on_sentence(sentence)
+        if on_sentence and not tool_frags:
+            tail = chunker.flush()
+            if tail:
+                await on_sentence(tail)
+        tool_calls = [
+            {"id": v["id"], "type": "function",
+             "function": {"name": v["name"], "arguments": v["args"]}}
+            for _, v in sorted(tool_frags.items())
+        ]
+        text = _THINK_BLOCK.sub("", "".join(parts)).strip()
+        reason = "length" if finish == "length" else ("tool_calls" if tool_calls else "stop")
+        return text, tool_calls, reason
 
     WARMUP_TRIES = 24
     WARMUP_RETRY_S = 5.0
@@ -230,21 +321,27 @@ class BrainService:
         keep = {k: result[k] for k in ("ok", "output", "error", "detail") if k in result}
         return json.dumps(keep)
 
-    async def _tool_loop(
-        self, conv: Conversation, utterance_id: Optional[str]
+    async def _respond(
+        self, conv: Conversation, utterance_id: Optional[str], speak: bool
     ) -> tuple[str, str]:
-        """The v1 loop: complete -> execute tool calls -> feed results ->
-        repeat, under the hard rules (max 5 calls/turn, hallucinated
-        names rejected without ever reaching jv-act)."""
+        """Streaming v1 loop: stream a completion (speaking each sentence as
+        it closes, for a plain-text answer) -> if it wanted tools, execute
+        them and loop; the final text answer then streams+speaks. Hard
+        rules unchanged (max 5 calls/turn, hallucinated names rejected
+        without ever reaching jv-act). Returns (full_text, finish)."""
         calls_used = 0
+        reply_group = str(uuid.uuid4())
+
+        async def on_sentence(sentence: str) -> None:
+            if speak:
+                await self._say_chunk(sentence, utterance_id, reply_group)
+
         while True:
-            msg, finish = await self._complete(conv)
-            tool_calls = msg.get("tool_calls") or []
+            text, tool_calls, finish = await self._stream_turn(conv, on_sentence)
             if not tool_calls:
-                text = _THINK_BLOCK.sub("", msg.get("content") or "").strip()
                 return text, finish
             conv.add_raw(
-                {"role": "assistant", "content": msg.get("content"), "tool_calls": tool_calls}
+                {"role": "assistant", "content": text or None, "tool_calls": tool_calls}
             )
             for tc in tool_calls:
                 tc_id = tc.get("id", "")
@@ -276,6 +373,22 @@ class BrainService:
         await self.bus.publish(
             "speech.say",
             {"text": text, "say_id": str(uuid.uuid4()), "in_reply_to_utterance": reply_to},
+        )
+
+    async def _say_chunk(
+        self, text: str, utterance_id: Optional[str], reply_group: str
+    ) -> None:
+        """One sentence of a streamed reply — carries reply_group so
+        jv-voice keeps the turn's sentences together (barge-in drops them
+        as a unit)."""
+        await self.bus.publish(
+            "speech.say",
+            {
+                "text": text,
+                "say_id": str(uuid.uuid4()),
+                "in_reply_to_utterance": utterance_id,
+                "reply_group": reply_group,
+            },
         )
 
     async def _request_listen(self, reason: str, window_s: float = 12.0) -> None:
@@ -407,7 +520,8 @@ class BrainService:
         t0 = time.monotonic()
         rung, backend = self._rung()
         try:
-            reply, finish = await self._tool_loop(conv, utterance_id)
+            # streams the reply, speaking each sentence as it closes
+            reply, finish = await self._respond(conv, utterance_id, speak)
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             await self.bus.publish(
                 "brain.response",
@@ -435,16 +549,8 @@ class BrainService:
         if utterance_id:
             body["utterance_id"] = utterance_id
         await self.bus.publish("brain.response", body)
-
-        if speak and reply:
-            await self.bus.publish(
-                "speech.say",
-                {
-                    "text": reply,
-                    "say_id": str(uuid.uuid4()),
-                    "in_reply_to_utterance": utterance_id,
-                },
-            )
+        # The reply was already spoken sentence-by-sentence during _respond
+        # (streaming); brain.response carries the full text for the record.
 
         # Follow-up trickle (v0 heuristic): at most one pending question
         # per session, only via voice, only after a completed exchange —
