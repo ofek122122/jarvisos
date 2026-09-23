@@ -17,7 +17,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       compositor, so "it maps" is verified by construction, not by sight.)
 - [x] A2. Theme singleton: a QML `Theme` object holding the blueprint §06 tokens
       (ground #090D12/#0C1116, ember #F0714A, teal #4FB8BF, text tiers) sourced
-      from `personality/`. Everything else consumes it. — <HASH>
+      from `personality/`. Everything else consumes it. — 6c0eafb
       (`personality/theme.toml` is the source of truth; `tools/gen_theme_qml.py`
       compiles it to `shell/jv-hud/Theme.qml` + `qmldir`; `--check` runs inside
       the jv-hud build, so a drifted theme cannot be built. Tests:
@@ -54,4 +54,4 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 ## Done
 - A1 — jv-hud Quickshell layer-shell skeleton (49046db, 2026-09-23)
 - A2 — theme tokens in personality/theme.toml -> generated Theme singleton
-  (<HASH>, 2026-09-24)
+  (6c0eafb, 2026-09-24)

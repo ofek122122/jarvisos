@@ -88,7 +88,7 @@ everything here (and every commit) since the last time you asked. Format per ent
   tools/tests/test_gen_theme_qml.py, shell/jv-hud/Theme.qml, shell/jv-hud/qmldir,
   shell/jv-hud/shell.qml, shell/jv-hud/README.md, pkgs/jv-hud/default.nix,
   modules/jarvis-services.nix, ops/ralph/PLAN.md
-- commit: <HASH>
+- commit: 6c0eafb
 - next: A5 — the consumer-only bus bridge for QML (a small client that subscribes
   to the Unix socket and exposes frames as QML properties, never importing another
   service), because A3 has nothing truthful to display until real frames exist.
