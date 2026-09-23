@@ -405,6 +405,8 @@ pub struct SpeechSay {
     pub interruptible: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_group: Option<String>,
 }
 
 pub const TOPIC_SPEECH_STATE: &str = "speech.state";

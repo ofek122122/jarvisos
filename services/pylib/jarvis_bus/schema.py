@@ -213,9 +213,10 @@ class SpeechSay:
     priority: Optional[Literal["low", "normal", "urgent"]] = None
     interruptible: Optional[bool] = None
     voice: Optional[str] = None
+    reply_group: Optional[str] = None
     TOPIC: ClassVar[str] = "speech.say"
     V: ClassVar[int] = 1
-    _optional: ClassVar[FrozenSet[str]] = frozenset(['interruptible', 'priority', 'voice'])
+    _optional: ClassVar[FrozenSet[str]] = frozenset(['interruptible', 'priority', 'reply_group', 'voice'])
 
 
 @dataclasses.dataclass

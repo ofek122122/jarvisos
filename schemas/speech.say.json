@@ -34,6 +34,10 @@
     "voice": {
       "type": "string",
       "description": "Override of the personality/ default voice. Omit in normal operation — consistency is identity (blueprint §06)."
+    },
+    "reply_group": {
+      "type": "string",
+      "description": "Groups the sentences of ONE streamed reply. jv-brain now streams the LLM and emits a speech.say per sentence so piper starts on sentence 1 while later sentences generate; all carry the same reply_group. jv-voice uses it to keep a turn together — a barge-in or preempt drops the whole group's still-queued sentences, not just the one playing. Omit for single-shot utterances (greetings, confirmations)."
     }
   }
 }
