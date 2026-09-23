@@ -49,3 +49,19 @@ def test_ringmod_only_above_half():
     p2 = dataclasses.replace(p, ringmod_hz=7.0)  # would be very audible
     y_lo2 = apply_chain(x, 22050, p2)
     assert np.allclose(y_lo, y_lo2), "ring mod leaked below intensity 0.5"
+
+
+def test_plate_ir_is_cached_and_deterministic():
+    """The impulse response is deterministic (fixed seed) and was being
+    regenerated every utterance — it must now come back as the SAME cached
+    array for identical args, and stay bit-identical across calls."""
+    import numpy as np
+
+    from jv_voice.chain import _plate_ir
+
+    a = _plate_ir(22050, 0.35)
+    b = _plate_ir(22050, 0.35)
+    assert a is b  # memoized: no recompute on the hot path
+    c = _plate_ir(16000, 0.35)
+    assert c is not a  # a different rate is a genuinely different IR
+    assert np.array_equal(_plate_ir(22050, 0.35), a)

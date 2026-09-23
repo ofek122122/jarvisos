@@ -14,6 +14,8 @@ Ofek auditions all three from harness/fixtures/voice-samples/.
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 from scipy.signal import butter, fftconvolve, sosfilt
 
@@ -33,7 +35,11 @@ def _octave_shimmer(audio: np.ndarray, rate: int) -> np.ndarray:
     return sosfilt(sos, rect)
 
 
+@functools.lru_cache(maxsize=8)
 def _plate_ir(rate: int, seconds: float, seed: int = 42) -> np.ndarray:
+    # Deterministic (fixed seed) — so cache it: it was regenerated on every
+    # utterance, an FFT-sized array of pure waste on the voice hot path.
+    # fftconvolve reads it without mutating, so sharing the cached array is safe.
     rng = np.random.default_rng(seed)  # fixed seed: the room never changes
     n = max(1, int(seconds * rate))
     t = np.arange(n) / rate

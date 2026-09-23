@@ -111,8 +111,11 @@ class Installer:
         """Run the pipeline; returns the terminal event name."""
         await self.bus.subscribe(["guard.verdict"])
         app = app_slug(path)
-        sha = sha256_file(path)
-        fp = fingerprint(path)
+        # hashing + header read are blocking file I/O — keep them off the
+        # event loop so the bus/other coroutines aren't stalled on a big installer.
+        loop = asyncio.get_running_loop()
+        sha = await loop.run_in_executor(None, sha256_file, path)
+        fp = await loop.run_in_executor(None, fingerprint, path)
         await self._event(
             "fingerprinted", app, sha,
             path=str(path), installer=fp.installer, arch=fp.arch,

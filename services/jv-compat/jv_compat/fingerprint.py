@@ -25,7 +25,8 @@ class Fingerprint:
 
 
 def fingerprint(path: Path) -> Fingerprint:
-    head = path.read_bytes()[:HEAD_BYTES]
+    with path.open("rb") as f:
+        head = f.read(HEAD_BYTES)  # bounded: never slurp a whole installer to read 1 MiB
 
     if head.startswith(MSI_MAGIC):
         return Fingerprint(is_pe=False, arch="unknown", installer="msi")

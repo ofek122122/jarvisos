@@ -44,9 +44,13 @@ class GuardService:
                 },
             )
             return
-        reports = [
-            await loop.run_in_executor(None, s.scan, path) for s in self.scanners
-        ]
+        # scanners are independent + CPU-bound — run them concurrently
+        # (order preserved for decide(); a no-op with a single engine).
+        reports = list(
+            await asyncio.gather(
+                *(loop.run_in_executor(None, s.scan, path) for s in self.scanners)
+            )
+        )
         verdict = decide(actual_sha, reports)
         if verdict is None:
             # No engine ran: publish NOTHING (compat fails closed), but
