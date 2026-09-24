@@ -130,6 +130,25 @@ The printed line stays one line and now says which run it came from: it is a
 progress indicator, and B53 is the record of what happens when one chosen line
 is mistaken for the evidence.
 
+B55 is the relation this harness could not grade at all. Invariant 1 forbids
+one service importing another, so every claim this repo makes about a relation
+BETWEEN two of them is made by READING the other's source and matching a line
+in it — jv-compat's copy of jv-guard's scan budget, the HUD's fallback budgets
+against the jv-ears that enforces them, LinkPlate's grace against the two
+reconnect cadences. Five such relations, and the harness declined to grade
+every one: the canary above makes the file impossible to LOAD, a suite that
+only greps it never notices, the canary lives and the run aborts. The refusal
+was right and the gap was real. So a file is now offered its controls in
+order, strongest first — unloadable, then ERASED — and whichever kills the
+suite is the relation, which the report then carries: "1 of 1 caught" against
+a file the suite greps is a claim about a regex, and a survivor there means
+"no test matches this text" rather than "the tests never load this file". A
+file that survives every control it was offered still aborts the run, and now
+names both suite logs. The suffix that used to REFUSE a file (`--runner tests`
+on a `.qml`) chooses the controls instead: the tools suite really does match a
+line in `shell/jv-hud/Bus.qml`, so the relation the old rule called impossible
+is the one this exists to grade.
+
 `@ label` opens a block, the next bare line is the repo-relative file, and
 the `-`/`+` lines are the hunk (joined in order, indentation kept verbatim).
 `old` must appear EXACTLY once in the file: a hunk that matches twice is an
@@ -156,6 +175,22 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
 CANARY_MARK = "jv-mutate canary: this file must be executed by the suite"
+
+# How a suite can depend on a file, and therefore which canary proves it does
+# (B55). These are not two grades of the same claim — they are two different
+# claims, and the harness says which one it made.
+#
+#   EXECUTED  the suite loads and runs this file. Proved by making it
+#             impossible to LOAD and watching the suite go red. A survivor
+#             then means "no test asserts this line".
+#   READ      the suite never loads it; it matches text in the source, which
+#             is the ONLY way one service may make a claim about another
+#             (invariant 1 forbids the import). Proved by making the file
+#             unMATCHABLE — erasing it — and watching the suite go red. A
+#             survivor then means "no test matches this text", which is a
+#             different and weaker sentence, so the report carries it.
+EXECUTED = "executed"
+READ = "read"
 
 # What a suite run leaves behind in its own scratch directory (B56). `WHAT` is
 # written BEFORE the suite starts and `INDEX` (at the top of the run tree) is
@@ -198,6 +233,10 @@ class Report:
     # The run tree, when it was KEPT — which is only when a survivor makes it
     # worth opening. `None` means the grading was clean and the tree is gone.
     logs: Path | None = None
+    # Per FILE: how the suite turned out to depend on it, EXECUTED or READ
+    # (B55). Measured, not declared — it is whichever canary killed the suite.
+    # Empty only on a Report nobody graded (the CLI's own test doubles).
+    relations: Mapping[str, str] = dataclasses.field(default_factory=dict)
 
     @property
     def caught(self) -> int:
@@ -212,8 +251,19 @@ class Report:
         for o in self.outcomes:
             if o.status == "survived":
                 lines.append(f"  survived: {o.label}  ({o.path})")
+                if self.relations.get(o.path) == READ:
+                    lines.append(
+                        "            no test matches that text — this is not "
+                        "a file the suite runs"
+                    )
                 if o.logs:
                     lines.append(f"            {o.logs}")
+        # Said whether or not anything survived, because it qualifies the
+        # COUNT and not just the misses: "11 of 11 caught" against a file the
+        # suite only greps is a claim about regexes, and only the harness
+        # knows which kind of claim it just made (B55).
+        for rel in sorted(p for p, kind in self.relations.items() if kind == READ):
+            lines.append(f"  the suite reads {rel} — it never runs it")
         return "\n".join(lines)
 
 
@@ -273,6 +323,31 @@ def rust_canary(text: str) -> str:
     never load this file".
     """
     return _appended(text, f'compile_error!("{CANARY_MARK}");')
+
+
+def erased(text: str) -> str:
+    """The same file, made impossible for ANY suite to match a line in.
+
+    The load canaries above each speak one language, because making a file
+    impossible to load means something different in each. Erasure does not:
+    a suite that greps another file's source is insensitive to whether that
+    source would parse, and the relations this control exists for cross the
+    language line in the only direction they can — `tools`' pytest suite
+    matches a line in `shell/jv-hud/Bus.qml`, because invariant 1 forbids the
+    HUD importing the bridge's constants or the other way round.
+
+    Empty, and not a marker: anything left in the file is something a regex
+    somewhere might still find, and a canary that can be matched is not a
+    canary. `text` is taken and ignored so this reads like the others at the
+    call site.
+
+    The honest limit, and it is the mirror of the Rust canary's: a suite whose
+    claim about this file is NEGATIVE — "this source contains nothing that
+    looks like X" — is green on an empty file too, so the harness will refuse
+    to grade it. That is the refusing direction, which is the safe one: it
+    declines to claim rather than claiming wrongly.
+    """
+    return ""
 
 
 def python_env(cache_dir: Path) -> dict[str, str]:
@@ -546,17 +621,24 @@ def resolve(mut: Mutation, *, root: Path) -> Path:
     return target
 
 
-def check_language(mut: Mutation, lang: Language) -> None:
-    """Refuse a file this runner's suite could not be grading.
+def controls_for(mut: Mutation, lang: Language) -> tuple[str, ...]:
+    """Which relations this runner could possibly have with this file, in the
+    order the harness will try to prove them — strongest first.
 
-    Not pedantry: `--runner tests` on a `.qml` file would append a Python
-    `raise` to QML, which parses as nothing, so the canary would LIVE and the
-    harness would abort with a confusing message about the wrong thing."""
-    if Path(mut.path).suffix not in lang.suffixes:
-        raise HarnessError(
-            f"{mut.path} is not a {'/'.join(lang.suffixes)} file, so --runner "
-            f"{lang.runner} is the wrong grader for it"
-        )
+    The suffix used to be a refusal (`--runner tests` on a `.qml` file was an
+    error). It is a CHOICE OF CONTROL now, because the refusal was wrong about
+    a real case: `tools`' Python suite does match lines in `Bus.qml`, and the
+    relation the old rule called impossible is the one B55 exists to grade.
+
+    What the suffix still decides is which canaries can mean anything. A
+    Python `raise` appended to QML parses as nothing, so on an off-language
+    file the load canary would live for a reason that says nothing about the
+    suite — noise, and a whole suite run spent on it. So an off-language file
+    is offered the one control it could ever fail.
+    """
+    if Path(mut.path).suffix in lang.suffixes:
+        return (EXECUTED, READ)
+    return (READ,)
 
 
 # ------------------------------------------------------------------- edits
@@ -577,6 +659,12 @@ def apply_once(text: str, old: str, new: str) -> str:
 def with_canary(text: str, lang: Language = PYTHON) -> str:
     """The same file, made impossible for `lang`'s suite to load."""
     return lang.canary(text)
+
+
+def canary_for(relation: str, text: str, lang: Language) -> str:
+    """The file as the control for `relation` needs it: unloadable, or
+    unmatchable."""
+    return with_canary(text, lang) if relation == EXECUTED else erased(text)
 
 
 class Stamps:
@@ -619,6 +707,43 @@ class Stamps:
 Runner = Callable[[Mapping[str, str], Path], bool]
 
 
+def canary_abort(rel: str, tried: Sequence[tuple[str, Path]], lang: Language) -> str:
+    """What to say when a file survived every control it was offered.
+
+    Two different sentences, because two different things went wrong. A file
+    in this runner's own language was offered both controls and failed both,
+    so the suite has no relation with it at all. An off-language file was only
+    ever offered one, and naming the other would send the reader looking for
+    an execution that was never on the table.
+
+    Every run that went wrong is named, not just the last one (B56's rule):
+    two live canaries are two suite logs, and which of them the reader opens
+    depends on which relation they thought they had.
+    """
+    if EXECUTED in [relation for relation, _ in tried]:
+        why = (
+            f"both canaries lived: the suite stayed GREEN with {rel} made "
+            f"impossible to load AND with {rel} erased, so it neither executes "
+            f"that file nor reads its source. Nothing this harness could report "
+            f"about it would mean anything — check the runner, the target, and "
+            f"that the tests read the worktree and not an installed copy."
+        )
+    else:
+        why = (
+            f"the erasure canary lived: {rel} is not a "
+            f"{'/'.join(lang.suffixes)} file, so the only relation --runner "
+            f"{lang.runner} could have with it is reading its source — and the "
+            f"suite stayed GREEN with {rel} erased, so it does not read it "
+            f"either."
+        )
+    kept = ", ".join(f"{cache} ({relation})" for relation, cache in tried)
+    return (
+        why
+        + (f" {lang.canary_hint}" if lang.canary_hint else "")
+        + f" Those runs were kept in {kept}."
+    )
+
+
 def run(
     mutations: Iterable[Mutation],
     runner: Runner,
@@ -646,8 +771,9 @@ def run(
         raise HarnessError("no mutations in the spec; a perfect score of zero is not a claim")
 
     targets: dict[str, Path] = {}
+    controls: dict[str, tuple[str, ...]] = {}
     for m in mutations:
-        check_language(m, lang)
+        controls[m.path] = controls_for(m, lang)
         targets[m.path] = resolve(m, root=root)
     for rel, path in targets.items():
         if not path.is_file():
@@ -694,18 +820,26 @@ def run(
                 + f" That run was kept in {cache}."
             )
 
+        relations: dict[str, str] = {}
         for rel in targets:
-            lived, cache = swapped(rel, with_canary(originals[rel], lang), f"canary {rel}")
-            if lived:
-                raise HarnessError(
-                    f"the canary lived: the suite stayed GREEN with {rel} made "
-                    f"impossible to load, so the suite does not execute that "
-                    f"file. Nothing this harness could report about it would "
-                    f"mean anything — check the runner, the target, and that "
-                    f"the tests read the worktree and not an installed copy."
-                    + (f" {lang.canary_hint}" if lang.canary_hint else "")
-                    + f" That run was kept in {cache}."
+            # Strongest control first. Each one that LIVES rules out a
+            # relation; the first that dies is the relation, and it is the
+            # sentence the report will carry. A file that survives every
+            # control it was offered is one this harness cannot say anything
+            # about (B55).
+            tried: list[tuple[str, Path]] = []
+            for relation in controls[rel]:
+                lived, cache = swapped(
+                    rel,
+                    canary_for(relation, originals[rel], lang),
+                    f"canary {rel} ({relation})",
                 )
+                if not lived:
+                    relations[rel] = relation
+                    break
+                tried.append((relation, cache))
+            else:
+                raise HarnessError(canary_abort(rel, tried, lang))
 
         outcomes: list[Outcome] = []
         for mut in mutations:
@@ -725,7 +859,11 @@ def run(
                 "as it was. Something outside these mutations is broken — do "
                 f"not commit until it is green. That run was kept in {cache}."
             )
-        report = Report(outcomes, logs=base if any(o.status == "survived" for o in outcomes) else None)
+        report = Report(
+            outcomes,
+            logs=base if any(o.status == "survived" for o in outcomes) else None,
+            relations=relations,
+        )
         keep = report.logs is not None
         return report
     finally:
@@ -737,9 +875,13 @@ def run(
 
 
 def suite_runs(mutations: Sequence[Mutation]) -> int:
-    """How many times `run` will invoke the suite for this spec: the opening
-    baseline, one canary per distinct FILE, one per mutation, and the closing
-    baseline."""
+    """The FLOOR: the opening baseline, one canary per distinct FILE, one per
+    mutation, and the closing baseline.
+
+    A floor and not a count since B55, and only ever by one run per file: a
+    file the suite READS rather than imports costs a second canary, because
+    the first one — the unloadable file — is the control that has to be seen
+    to live before erasure is the honest thing to try."""
     return 2 + len({m.path for m in mutations}) + len(mutations)
 
 
@@ -825,7 +967,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # grading is a baseline, a canary per file, the mutations, and a baseline
     # again, and a loop that knows the count before it starts can decide to
     # send fewer mutations rather than abandon a run half way through.
-    print(f"  {suite_runs(muts)} suite runs", flush=True)
+    print(f"  at least {suite_runs(muts)} suite runs", flush=True)
     try:
         report = run(muts, script_runner(root, lang, args.target), root=root, lang=lang)
     except HarnessError as exc:

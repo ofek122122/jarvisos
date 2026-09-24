@@ -33,6 +33,16 @@ reproduces it in QML with the real `qmltestrunner` — Qt caches compiled QML
 in the user's HOME and validates it against (mtime, size) exactly like a
 `.pyc` — which is why every language now gets a private cache and every
 write this harness makes gets a whole second strictly newer than the last.
+
+B55 adds the second control. The canary above proves EXECUTION, and the five
+claims this repo makes about a relation between two services are not made by
+executing anything — invariant 1 forbids the import, so they are made by
+matching a line in the other file's source. The unloadable canary lives on
+every one of them. `test_a_file_the_suite_reads_instead_of_importing_is_
+graded_after_it_is_erased` is the new one, and the pair of sentences it
+protects is the point: the report says which control killed the suite, so a
+score against a file the suite only greps cannot be read as a score against
+one it runs.
 """
 
 from __future__ import annotations
@@ -653,23 +663,32 @@ def test_the_restore_leaves_the_bytes_identical_and_the_mtime_newer(tree):
 # ----------------------------------------------- the right grader per file
 
 
-def test_a_file_this_runner_could_not_be_grading_is_refused():
+def test_a_file_in_this_runners_language_is_offered_the_execution_control_first():
+    """This used to be a REFUSAL — a `.qml` path under `--runner tests` was an
+    error before any suite ran. B55 took that away, because the refusal was
+    wrong about a real case (`tools`' pytest suite matches lines in
+    `Bus.qml`). What the suffix decides now is which canaries can mean
+    anything, which is still the whole of the old rule's reasoning."""
     (m,) = mutate.parse_spec("@ qml via pytest\nshell/jv-hud/core/X.qml\n- a: 1\n+ a: 2\n")
-    with pytest.raises(mutate.HarnessError, match="wrong grader"):
-        mutate.check_language(m, mutate.PYTHON)
-    mutate.check_language(m, mutate.QML)  # and the right one is fine
+    assert mutate.controls_for(m, mutate.QML) == (mutate.EXECUTED, mutate.READ)
+    assert mutate.controls_for(m, mutate.PYTHON) == (mutate.READ,)
 
 
-def test_the_wrong_grader_is_refused_before_any_suite_runs(tmp_path):
+def test_an_off_language_file_is_never_handed_the_wrong_languages_canary(tmp_path):
     """Not pedantry: a Python `raise` appended to QML parses as nothing, so
     the canary would LIVE and the abort would blame the tests."""
     (tmp_path / "shell").mkdir()
     (tmp_path / "shell" / "X.qml").write_text("import QtQuick\nQtObject { property int a: 1 }\n")
     spec = mutate.parse_spec("@ x\nshell/X.qml\n- a: 1\n+ a: 2\n")
-    calls: list[str] = []
-    with pytest.raises(mutate.HarnessError, match="wrong grader"):
-        mutate.run(spec, lambda env, scratch: calls.append("ran") or True, root=tmp_path, lang=mutate.PYTHON)
-    assert calls == []
+    seen: list[str] = []
+
+    def green(env, scratch):
+        seen.append((tmp_path / "shell" / "X.qml").read_text(encoding="utf-8"))
+        return True
+
+    with pytest.raises(mutate.HarnessError, match="not a .py file"):
+        mutate.run(spec, green, root=tmp_path, lang=mutate.PYTHON)
+    assert not any(mutate.CANARY_MARK in t for t in seen)
 
 
 # ------------------------------------------------------ the language table
@@ -739,12 +758,11 @@ def test_shots_env_disables_the_disk_cache_the_script_does_not(tmp_path):
     assert "QML_DISABLE_DISK_CACHE" not in script
 
 
-def test_the_shots_runner_grades_qml_and_nothing_else():
+def test_the_shots_runner_can_execute_qml_and_could_only_ever_read_python():
     (py,) = mutate.parse_spec("@ x\nsvc/thing.py\n- A = 1\n+ A = 2\n")
-    with pytest.raises(mutate.HarnessError, match="wrong grader"):
-        mutate.check_language(py, mutate.SHOTS)
+    assert mutate.controls_for(py, mutate.SHOTS) == (mutate.READ,)
     (qml,) = mutate.parse_spec("@ x\nshell/jv-hud/StatePlate.qml\n- a: 1\n+ a: 2\n")
-    mutate.check_language(qml, mutate.SHOTS)
+    assert mutate.controls_for(qml, mutate.SHOTS) == (mutate.EXECUTED, mutate.READ)
 
 
 def test_a_canary_that_lived_under_the_core_runner_names_the_one_that_would_run_it(tmp_path):
@@ -1077,8 +1095,10 @@ def test_a_canary_that_lived_names_its_own_run_and_not_the_baselines(tree):
     with pytest.raises(mutate.HarnessError) as exc:
         mutate.run(mutate.parse_spec(SPEC), green, root=root)
     msg = str(exc.value)
-    assert "canary lived" in msg
-    assert str(seen[1]) in msg and str(seen[0]) not in msg
+    assert "canaries lived" in msg
+    # Both canary runs are named — two live canaries are two suite logs — and
+    # the baseline, which was fine, is not.
+    assert str(seen[1]) in msg and str(seen[2]) in msg and str(seen[0]) not in msg
 
 
 def test_a_tree_still_red_after_the_last_restore_names_that_run_too(tree):
@@ -1137,3 +1157,143 @@ def test_an_abort_before_the_first_suite_run_leaves_no_tree_at_all(tree, tmp_pat
             root=root,
         )
     assert list(parent.iterdir()) == before
+
+
+# ------------------------------------ the file the suite READS, never runs (B55)
+#
+# Invariant 1 forbids one service importing another, so every claim this repo
+# makes about a relation BETWEEN two services is made by reading the other's
+# source and matching a line in it. There are four such relations today
+# (BUDGET_MIRRORS x2 and RECONNECT_CADENCES x2 in test_gen_theme_qml.py, plus
+# jv-compat's copy of jv-guard's scan budget, B50) and the harness declined to
+# grade every one of them: the load canary makes the file impossible to
+# IMPORT, a suite that only greps it never notices, the canary lives and the
+# run aborts. The refusal was right and the gap was real. A canary for a
+# source-read relation has to make the file unMATCHABLE instead.
+
+
+class ReadingSuite:
+    """A suite that never imports its target — it reads the source and matches
+    a line, the way `test_gen_theme_qml.py` reads jv-ears' `config.py` and
+    jv-compat's suite reads jv-guard's scanner budget. Red when the needle is
+    gone; nothing appended to the file can make it red."""
+
+    def __init__(self, path: Path, needle: str = "OTHER = 2") -> None:
+        self.path = path
+        self.needle = needle
+        self.seen: list[str] = []
+
+    def __call__(self, env: dict[str, str], scratch: Path) -> bool:
+        text = self.path.read_text(encoding="utf-8")
+        self.seen.append(text)
+        return self.needle in text
+
+
+READ_SPEC = "@ the mirrored constant moved\nsvc/thing.py\n- OTHER = 2\n+ OTHER = 3\n"
+
+
+def test_the_erasure_canary_leaves_nothing_at_all_to_match():
+    """unMATCHABLE, not unloadable. Anything kept in the file is something a
+    regex somewhere might still find, so the only honest erasure is the empty
+    one — and it is the same control in every language, which is the point:
+    the suite that reads `shell/jv-hud/Bus.qml` is written in Python."""
+    assert mutate.erased("VALUE = 1\nOTHER = 2\n") == ""
+
+
+def test_a_file_the_suite_reads_instead_of_importing_is_graded_after_it_is_erased(tree):
+    root, src = tree
+    suite = ReadingSuite(src)
+    report = mutate.run(mutate.parse_spec(READ_SPEC), suite, root=root)
+    assert report.caught == 1 and report.survived == 0
+    # Both controls were tried, in this order: the load canary lived (the file
+    # is never imported), the erasure killed the suite.
+    assert any(mutate.CANARY_MARK in t for t in suite.seen), "no load canary was tried"
+    assert "" in suite.seen, "the file was never erased"
+    assert suite.seen.index(next(t for t in suite.seen if mutate.CANARY_MARK in t)) < suite.seen.index("")
+    assert src.read_bytes() == b"VALUE = 1\nOTHER = 2\n"
+
+
+def test_the_report_says_the_suite_only_READ_the_file_so_a_score_is_not_overclaimed(tree):
+    """"one mutation, one caught" means something weaker here than it does on
+    an imported file, and the harness is the only thing that knows which. It
+    says so in the summary whether or not anything survived."""
+    root, src = tree
+    report = mutate.run(mutate.parse_spec(READ_SPEC), ReadingSuite(src), root=root)
+    assert report.relations == {"svc/thing.py": mutate.READ}
+    summary = report.summary()
+    assert "svc/thing.py" in summary
+    assert "reads" in summary
+
+
+def test_a_file_the_suite_imports_costs_one_canary_and_keeps_the_stronger_claim(tree):
+    root, src = tree
+    suite = FakeSuite(src)
+    report = mutate.run(mutate.parse_spec(SPEC), suite, root=root)
+    assert report.relations == {"svc/thing.py": mutate.EXECUTED}
+    assert "" not in suite.seen, "an imported file was erased for nothing"
+    assert "reads" not in report.summary()
+
+
+def test_a_survivor_on_a_read_relation_is_not_reported_as_a_file_that_never_ran(tree):
+    """The sentence a survivor means here is "no test MATCHES this text", and
+    it is not the sentence the harness's other survivors mean."""
+    root, src = tree
+    # Reads the file, matches a line the mutation does not touch.
+    report = mutate.run(mutate.parse_spec(READ_SPEC), ReadingSuite(src, needle="VALUE = 1"), root=root)
+    assert report.survived == 1
+    assert "no test matches" in report.summary()
+
+
+def test_a_file_the_suite_neither_runs_nor_reads_aborts_naming_both_controls(tree):
+    root, src = tree
+    runs: list[str] = []
+
+    def blind(env: dict[str, str], scratch: Path) -> bool:
+        runs.append(src.read_text(encoding="utf-8"))
+        return True
+
+    with pytest.raises(mutate.HarnessError, match="neither executes .* nor reads"):
+        mutate.run(mutate.parse_spec(SPEC), blind, root=root)
+    assert any(mutate.CANARY_MARK in t for t in runs) and "" in runs
+    assert not any("MUTANT" in t for t in runs), "a mutation ran after two live canaries"
+    assert src.read_bytes() == b"VALUE = 1\nOTHER = 2\n"
+
+
+def test_an_off_language_file_is_only_ever_erased_never_given_the_wrong_canary(tmp_path):
+    """A Python `raise` appended to QML parses as nothing, so the load canary
+    would be noise there — it would live for a reason that says nothing about
+    the suite. But the relation is real: `tools`' suite matches a line in
+    `shell/jv-hud/Bus.qml` (RECONNECT_CADENCES). So an off-language file is
+    not refused any more; it is offered the ONE control it could ever fail."""
+    (tmp_path / "shell").mkdir()
+    qml = tmp_path / "shell" / "Bus.qml"
+    qml.write_text("import QtQuick\nQtObject { interval: 2000 }\n", encoding="utf-8")
+    suite = ReadingSuite(qml, needle="interval: 2000")
+    spec = mutate.parse_spec("@ the respawn cadence moved\nshell/Bus.qml\n- interval: 2000\n+ interval: 9000\n")
+    report = mutate.run(spec, suite, root=tmp_path, lang=mutate.PYTHON)
+    assert report.caught == 1
+    assert report.relations == {"shell/Bus.qml": mutate.READ}
+    assert not any(mutate.CANARY_MARK in t for t in suite.seen), "a Python canary was appended to QML"
+    assert suite.seen.count("") == 1
+    assert qml.read_text(encoding="utf-8") == "import QtQuick\nQtObject { interval: 2000 }\n"
+
+
+def test_an_off_language_file_the_suite_does_not_read_either_says_which_it_is(tmp_path):
+    (tmp_path / "shell").mkdir()
+    (tmp_path / "shell" / "Bus.qml").write_text("import QtQuick\nQtObject { interval: 2000 }\n")
+    spec = mutate.parse_spec("@ x\nshell/Bus.qml\n- interval: 2000\n+ interval: 9000\n")
+    calls: list[str] = []
+    with pytest.raises(mutate.HarnessError, match="not a .py file"):
+        mutate.run(spec, lambda env, scratch: calls.append("ran") or True, root=tmp_path, lang=mutate.PYTHON)
+    # The baseline and ONE canary. There is no load canary to try on a file
+    # this runner could never execute, so the abort costs one run, not two.
+    assert calls == ["ran", "ran"]
+
+
+def test_the_controls_a_file_is_offered_follow_from_its_suffix():
+    (py,) = mutate.parse_spec("@ x\nsvc/thing.py\n- A = 1\n+ A = 2\n")
+    (qml,) = mutate.parse_spec("@ x\nshell/jv-hud/core/X.qml\n- a: 1\n+ a: 2\n")
+    assert mutate.controls_for(py, mutate.PYTHON) == (mutate.EXECUTED, mutate.READ)
+    assert mutate.controls_for(qml, mutate.PYTHON) == (mutate.READ,)
+    assert mutate.controls_for(qml, mutate.SHOTS) == (mutate.EXECUTED, mutate.READ)
+    assert mutate.controls_for(py, mutate.SHOTS) == (mutate.READ,)

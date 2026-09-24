@@ -20,6 +20,22 @@
 #   --runner cargo  <crate>    cargotest.sh  · .rs
 #   --runner shots  hud        hudshots.sh   · .qml  · the PLATES (~53 s a run)
 #
+# THE FILE THE SUITE READS AND NEVER RUNS (B55). Invariant 1 forbids one
+# service importing another, so every claim this repo makes about a relation
+# BETWEEN two of them is made by matching a line in the other's source —
+# jv-compat's copy of jv-guard's scan budget, the HUD's fallback budgets
+# against jv-ears', LinkPlate's grace against the two reconnect cadences. The
+# canary that proves EXECUTION lives on all of them, and the harness used to
+# abort. Each file is now offered its controls strongest first — unloadable,
+# then ERASED — and whichever kills the suite is the relation the summary
+# reports: "the suite reads <file> — it never runs it", under which a survivor
+# means "no test matches that text", NOT "the tests never load this file".
+# That also means the runner and the file need not share a language: the tools
+# suite really does match a line in shell/jv-hud/Bus.qml, so an off-language
+# file is graded (with the erasure canary only) rather than refused. Cost: one
+# extra suite run per file the suite merely reads, which is why the printed
+# count says "at least".
+#
 # WHICH QML RUNNER (B49 measured it, B51 fixed it). `qmltest.sh` imports
 # "../core" and never a top-level plate, so a canary on StatePlate.qml LIVES
 # and `--runner qml` refuses it rather than grading it immune. The plates are
@@ -31,8 +47,9 @@
 # count is printed before the first run starts.
 #
 # Exit: 0 every mutation caught · 1 a mutation survived · 2 the harness
-# cannot make an honest claim (red baseline, a canary that lived, a bad spec,
-# the wrong grader for the file, a tree still red after the last restore).
+# cannot make an honest claim (red baseline, a file that survived every canary
+# it was offered — so the suite neither runs nor reads it — a bad spec, a tree
+# still red after the last restore).
 #
 # WHERE THE OUTPUT WENT (B56). One line of each suite run is printed, prefixed
 # with the run it came from (run003). The WHOLE of it is in that run's own
