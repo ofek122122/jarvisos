@@ -6584,3 +6584,117 @@ nobody observed.
   A38/A39 (a human at ares), B27/B28 share one decision, B30/B33 share
   another, and B10/A28 — one live recording of one spoken turn — is still
   the biggest thing a human can hand this loop.
+
+---
+
+## 2026-09-24 — iteration 65 — B41: the rung in words, and the fall called a fall
+
+**What.** Since the VRAM guard was written, the only thing the bus has
+ever said about which rung the brain launched on is `llm_rung=4.0` and
+`llm_gpu=0.0` — two numbers in a free-form gauge map. Turning `4.0` into
+"CPU fallback, replies will be slow" requires having Ofek's ladder
+memorised, and `jv health` doesn't even print metrics, so in the readout
+a human actually looks at, the rung said nothing at all. Meanwhile the
+launcher writes `label=` to the rung file on every launch — the one
+human-readable string in the whole mechanism — and nobody had ever read
+it. B39 put it in `RungRecord`'s reach at zero cost.
+
+`describe_rung` reads it: `rung 4 (CPU fallback)`. It falls back to the
+backend word when the file carried no label (never guesses the label
+back from the index — that would be quoting THIS process's ladder about
+a choice a different process made), and it says nothing whatsoever about
+a rung it never read. An empty string, not `rung ?`: a caller cannot
+splice a placeholder into a sentence and have it read as a fact. `-1` is
+one of those — it is the parser's sentinel for a file with no `rung=`
+line, never a number the launcher wrote.
+
+**The half that matters.** Words are only worth adding where somebody
+should read them, and chasing that question turned up the real finding:
+jv-brain published **`ok`** while running on the CPU rung with a
+perfectly healthy card. `schemas/sys.health.json` names that exact case
+as its worked example of `degraded` — *"'degraded' = alive but impaired
+(e.g. brain fell back to CPU, ears lost the mic)"* — and it is not a
+hypothetical: ares measured 943 MiB free of 6144 again today, because
+the desktop and a browser own the card, so the 8B Q4 brain is on the CPU
+right now and the heartbeat called that fine.
+
+So `rung_finding` answers the whole health question in one place:
+
+- **the CPU rung on a machine that HAS a card** (measured or unreadable)
+  is a finding — invariant 6 exists to keep the 8B Q4 resident, and an
+  8B on this i5 answers in the time a GPU rung takes to finish;
+- **a rung chosen blind** is a finding, unchanged from B39;
+- **everything else is quiet.** A machine with no card is still simply a
+  machine with no card (B39's call, kept). Rungs 1-3 gave something up
+  deliberately and are still on the GPU — a note every 5 s for a ladder
+  working as designed teaches a reader to skip the field the real fault
+  will one day appear in, which is why this does NOT narrate the happy
+  path. A worse note keeps its place at the front of `notes` and keeps
+  its state; the finding only ever appends.
+
+**What a human will notice.** `jv health --check` exits 1 while the
+brain is on CPU, so ares will read `1 not well` on an ordinary day until
+VRAM is free when jv-llm starts. That is the truth and it is actionable
+(free VRAM, restart jv-llm) and it clears itself — but it IS a verdict
+change made by the loop, so **B43** is logged for a human who would
+rather have `ok` back: disagreeing means disagreeing with the schema's
+own example, not with a heuristic.
+
+Hardening that came along: rung-file values are stripped on the way in,
+because `backend` now decides a STATE and `backend = cpu` from a
+hand-edited file equals neither `"cpu"` nor `"gpu"` and would quietly
+answer "no" to both questions. (Line endings needed no such care —
+`read_text()` translates CRLF. I wrote the opposite in a comment first;
+the mutation battery is what caught it, by refusing to die.) The label
+is flattened the way `vram_note` already is: `jv health` renders notes
+as one line of a table.
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` — **98 (was 85)**.
+  **Sixteen mutations, all sixteen caught**: a negative index read as a
+  rung, the label never parsed, the label not flattened, values not
+  stripped, the backend fallback dropped, the fall not counted as a
+  finding (the bug itself), a card-less machine counted as one, blind no
+  longer a finding, a GPU rung counted as a fall, the finding
+  overwriting a worse note, the state not escalating, a worse state
+  overwritten by degraded, the blind branch quoting `-1 MiB` as a
+  reading, the reason left out, the consequence left out, and `rung ?`
+  spliced in for an unread rung. (Fifteen on the first run — the escapee
+  is the one that corrected the comment above, and its test now pins the
+  real reason the strip is there.)
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change — `notes` is already "human-readable
+  detail for degraded/error states", and this is the first thing to fill
+  it that a human can act on. No jv-act, no boot path, no pins.
+- **verified through the BUILT closure**, under the jv-llm unit's own
+  `Environment="PATH="`: the shipped launcher read **943 MiB free of
+  6144** off the real GTX 1660 SUPER, wrote `rung=4 / label=CPU
+  fallback / vram=measured`, and the shipped `rung_finding` turned that
+  file into `llm on rung 4 (CPU fallback) — no GPU layers, replies will
+  be slow; 943 MiB VRAM free at launch`. No llama-server was exec'd; the
+  rung file went to a tmp dir.
+- files: services/jv-brain/jv_brain/launcher.py,
+  services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_vram_guard.py
+- commit: 6f6119b
+- next: **B43 first if a human is reading** — it is the only item this
+  iteration created that somebody might want to reverse, and it is one
+  sentence of judgement, not work. Otherwise **B40 is now much riper**:
+  the note says "943 MiB VRAM free at launch" but `at launch` is the
+  whole limit of it — nothing still reads the live
+  `context.system.gpu_vram_free_mb`, so nothing can see the number move
+  when a game starts, which is the moment invariant 6 exists for. The
+  HUD plate B40 describes now has a sentence to borrow for why 943 MiB
+  is not a fault. **B42** (atomic rung-file write) is one rename and
+  matters slightly more than it did this morning: that file now decides
+  a published STATE, not just a gauge — a torn read still fails safe
+  (`index=None`, `vram=absent`, quiet) but "fails safe" now means
+  "silently reports ok while the brain crawls". **B38** is unchanged and
+  still small: jv-ears, jv-guard and jv-brain beat on a timer alone, and
+  B35 wrote the `_set_fault` + `asyncio.Event` shape to copy — and this
+  iteration sharpened it too, since jv-brain's new degraded state waits
+  up to a full period to be heard. **B36 is a human's** (proposal R8).
+  Otherwise unchanged: A is blocked on A62/A65/A68/A47/A56/A50/A60
+  (decisions) and A13/A21/A22/A25/A27/A31/A38/A39 (a human at ares),
+  B27/B28 share one decision, B30/B33 share another, and B10/A28 — one
+  live recording of one spoken turn — is still the biggest thing a human
+  can hand this loop.

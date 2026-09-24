@@ -854,15 +854,41 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       would be showing, and it is not a fault, so the plate has to say
       *why* (desktop + browser own the card) or it reads as one.
 
-- [ ] B41. Nothing on the bus ever says WHICH rung the brain is on in
+- [x] B41. Nothing on the bus ever says WHICH rung the brain is on in
       words. `sys.health.metrics.llm_rung` is a float and `llm_gpu` a
       0/1, so a reader has to know the ladder by heart to turn `4.0`
       into "CPU fallback, replies will be slow" — and the rung file's
       own `label=` (the one human-readable string the launcher writes)
-      is read by nobody. B39 put the label in `RungRecord`'s reach at
-      zero cost. The consumer question is the same one B40 has: `jv
-      health` is the cheap honest reader, the HUD is the visible one.
-      Discovered in B39.
+      is read by nobody. — 6f6119b
+      (`describe_rung` reads the label into `rung 4 (CPU fallback)`;
+      `rung_finding` decides when those words are a FINDING and puts
+      them in `notes`, which `jv health` already prints. The half that
+      mattered: jv-brain published `ok` while on the CPU rung with a
+      healthy card, which is `sys.health`'s own worked example of
+      `degraded`. Quiet on a card-less machine and on GPU rungs 1-3.
+      Verified through the built closure: 943 MiB free off the real
+      card → "llm on rung 4 (CPU fallback) — no GPU layers, replies
+      will be slow; 943 MiB VRAM free at launch". Tests:
+      `runtests.sh jv-brain` 98, was 85; sixteen mutations, sixteen
+      caught. **Raised B43 — a human may want to overrule the verdict
+      change.**)
+
+- [ ] B43. **A human's call, not the loop's.** B41 made jv-brain report
+      `degraded` while it runs on the CPU rung on a machine that has a
+      working GPU, so `jv health --check` exits 1 on ares any day the
+      desktop and a browser hold the 6 GB — which is most days, as
+      measured (943 MiB free, twice this week). The argument for it:
+      `schemas/sys.health.json` names this case verbatim as what
+      `degraded` means, invariant 6 exists to keep the 8B Q4 resident,
+      and a green check over a brain answering in minutes is exactly the
+      lie the health CLI was written against. The argument against: a
+      check that is red on an ordinary day is a check people stop
+      reading, and the condition is not a fault — it is the ladder doing
+      its job. If the answer is "back to ok", the one-line change is in
+      `jv_brain.service.rung_finding` (drop `fell` from the state
+      escalation, keep the words in `notes`); a middle answer is to keep
+      `degraded` but teach `jv health --check` that jv-brain-on-CPU is
+      an expected finding. Discovered in B41.
 
 - [ ] B42. jv-brain's heartbeat re-reads the rung file on every beat
       (`_rung()` in `_health`, once per 5 s, plus once per turn for
@@ -879,6 +905,11 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       next reader of this file may not be as forgiving. Worth one look
       at write-temp-then-rename before anything else depends on it.
       Discovered in B39.
+      **Sharpened by B41**: something less forgiving now exists, and it
+      is jv-brain itself — this file decides a published STATE, not just
+      a gauge. A torn read still fails safe (`index=None`,
+      `vram=absent`, no finding), but "fails safe" now means "reports
+      `ok` while the brain crawls on the CPU". One rename.
 
 - [ ] B38. jv-context is now the only service that beats immediately on
       a state change; `schemas/sys.health.json` asks EVERY service for it
