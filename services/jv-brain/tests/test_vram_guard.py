@@ -206,6 +206,128 @@ def test_old_rung_file_without_the_field_is_never_read_as_a_fault(tmp_path: Path
     assert read_rung_file(p).vram.source == ABSENT
 
 
+# --- the rung file, written in one move -------------------------------
+#
+# The launcher writes this file once and then execs away, so nobody is
+# left to fix a bad write. jv-brain re-reads it on every heartbeat, and
+# since B39/B41 what it reads decides a published STATE, not just a
+# gauge: a half-written file reads as "no rung" and the heartbeat then
+# says `ok` about a brain that may be crawling on the CPU. A rename is
+# the whole fix — the reader either sees the old record or the new one,
+# never the seam between them.
+
+
+def _rung_text(p: Path) -> str:
+    return p.read_text(encoding="utf-8")
+
+
+def test_the_previous_record_stays_whole_until_the_new_one_lands(
+    tmp_path: Path, monkeypatch
+):
+    """What a reader would get at the last instant before the switch: the
+    ENTIRE old record, never a prefix of the new one."""
+    import os as _os
+
+    from jv_brain import launcher
+
+    p = tmp_path / "llm-rung"
+    write_rung_file(p, LADDER[1], VramReading(5800 * MB, MEASURED))
+    before = _rung_text(p)
+
+    seen: list[str] = []
+    real_replace = _os.replace
+
+    def watched(src, dst):
+        # Everything the new record contains is already written somewhere
+        # else by now; the target must still hold the last whole one.
+        seen.append(_rung_text(p))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(launcher.os, "replace", watched)
+    write_rung_file(p, LADDER[-1], VramReading(943 * MB, MEASURED))
+
+    assert seen == [before]
+    assert read_rung_file(p).index == LADDER[-1].index
+
+
+def test_a_write_that_fails_leaves_the_old_record_and_no_litter(
+    tmp_path: Path, monkeypatch
+):
+    """The launcher is about to exec away. A failed write must not leave
+    a truncated rung file, and must not leave a temp file behind for the
+    next reader (or the next `ls`) to puzzle over."""
+    from jv_brain import launcher
+
+    p = tmp_path / "llm-rung"
+    write_rung_file(p, LADDER[1], VramReading(5800 * MB, MEASURED))
+    before = _rung_text(p)
+
+    def refuse(src, dst):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(launcher.os, "replace", refuse)
+    with pytest.raises(OSError):
+        write_rung_file(p, LADDER[-1], VramReading(943 * MB, MEASURED))
+
+    assert _rung_text(p) == before
+    assert read_rung_file(p).index == 1
+    assert [f.name for f in tmp_path.iterdir()] == ["llm-rung"]
+
+
+def test_a_finished_write_leaves_exactly_one_file(tmp_path: Path):
+    write_rung_file(tmp_path / "llm-rung", LADDER[0], VramReading(6000 * MB, MEASURED))
+    assert [f.name for f in tmp_path.iterdir()] == ["llm-rung"]
+
+
+def test_a_second_writer_does_not_break_the_first(tmp_path: Path, monkeypatch):
+    """`O_EXCL` is what makes the temp file this process's own, so the
+    name has to be too: a hand-run `jv-llm-launch` beside the unit's own
+    must not turn into a launch that dies on a leftover name. Both land
+    whole; the last one home wins; neither leaves anything behind."""
+    from jv_brain import launcher
+
+    p = tmp_path / "llm-rung"
+    real_replace = launcher.os.replace
+    real_getpid = launcher.os.getpid
+    nested: list[int] = []
+
+    def interleaved(src, dst):
+        # The other launcher runs its entire write inside the instant
+        # before this one's rename.
+        if not nested:
+            nested.append(1)
+            monkeypatch.setattr(launcher.os, "getpid", lambda: real_getpid() + 1)
+            write_rung_file(p, LADDER[0], VramReading(6000 * MB, MEASURED))
+            monkeypatch.setattr(launcher.os, "getpid", real_getpid)
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(launcher.os, "replace", interleaved)
+    write_rung_file(p, LADDER[-1], VramReading(943 * MB, MEASURED))
+
+    assert read_rung_file(p).index == LADDER[-1].index
+    assert [f.name for f in tmp_path.iterdir()] == ["llm-rung"]
+
+
+def test_the_rung_file_is_readable_by_the_service_that_reads_it(tmp_path: Path):
+    """jv-llm writes it; jv-brain reads it. Two users, one group
+    (`jarvis`), and /run/jarvis-llm is 0750 — so the group bit is the
+    whole of jv-brain's access to this file, and it must not depend on
+    whatever umask the launcher happened to inherit."""
+    import os as _os
+    import stat
+
+    p = tmp_path / "llm-rung"
+    old = _os.umask(0o077)
+    try:
+        write_rung_file(p, LADDER[0], VramReading(6000 * MB, MEASURED))
+    finally:
+        _os.umask(old)
+
+    mode = stat.S_IMODE(p.stat().st_mode)
+    assert mode & stat.S_IRGRP, oct(mode)
+    assert not mode & 0o022, oct(mode)  # nobody but jv-llm writes it
+
+
 # --- what the bus finally hears --------------------------------------
 
 

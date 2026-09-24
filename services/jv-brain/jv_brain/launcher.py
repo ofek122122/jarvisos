@@ -252,7 +252,34 @@ def describe_rung(rec: RungRecord) -> str:
     return f"rung {rec.index} ({rec.label or rec.backend})"
 
 
+#: The rung file's mode, set explicitly rather than left to the umask.
+#: jv-llm writes this file and jv-brain reads it — two users, one group
+#: (`jarvis`), inside a 0750 runtime directory — so the group read bit is
+#: the whole of the reader's access, and a launcher that inherited a
+#: tighter umask would hand jv-brain a file it cannot open. That failure
+#: is silent by construction: an unreadable file reads as "no rung", and
+#: since B41 "no rung" is a heartbeat that says `ok` about a brain on the
+#: CPU. Nobody but jv-llm ever writes it, and the directory is already
+#: closed to everyone outside the group, so the other bits buy nothing.
+RUNG_FILE_MODE = 0o640
+
+
 def write_rung_file(path: Path, rung: Rung, vram: VramReading) -> None:
+    """Write the rung file in one move: a temp file beside it, then a
+    rename.
+
+    The launcher writes this file once and execs into llama-server, so
+    there is no process left to repair a bad write — and jv-brain
+    re-reads it on every heartbeat, where since B39/B41 it decides a
+    published STATE and not just a gauge. A torn `write_text` reads as
+    "llama-server has told me nothing", which is a heartbeat saying `ok`
+    about a brain that may be crawling on the CPU. `os.replace` leaves a
+    reader the last whole record or this one, never the seam between.
+
+    No fsync: /run is tmpfs, and a record that outlived the reboot which
+    emptied it would be a claim about an llama-server that no longer
+    exists. Durability is not the property this file wants.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"rung={rung.index}",
@@ -264,7 +291,23 @@ def write_rung_file(path: Path, rung: Rung, vram: VramReading) -> None:
     if vram.detail:
         # nvidia-smi's own words, flattened: the reader is line-oriented.
         lines.append(f"vram_note={' '.join(vram.detail.split())}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    body = ("\n".join(lines) + "\n").encode("utf-8")
+
+    # Beside the target, so the rename stays inside one filesystem, and
+    # pid-stamped, so a restart overlapping the process it replaces
+    # cannot have two launchers writing one temp file.
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, RUNG_FILE_MODE)
+        with os.fdopen(fd, "wb") as fh:
+            os.fchmod(fh.fileno(), RUNG_FILE_MODE)  # O_CREAT's mode is umask'd
+            fh.write(body)
+        os.replace(tmp, path)
+    except BaseException:
+        # An exec into llama-server is the next thing that happens here;
+        # nobody comes back to sweep up.
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def read_rung_file(path: Path) -> RungRecord:
