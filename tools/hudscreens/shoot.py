@@ -29,6 +29,11 @@ asked things no QML engine knows:
     empty input mask was the one invariant-10 claim left resting on a
     reading of shell.qml, because it cannot be measured without a second
     client to pass through to. `probe_click_through` puts one there.
+  · the HUD renders NOTHING while nothing changes (A34). "0 fps when
+    idle" was an argument about how Qt Quick works, and the thing that
+    breaks it is one ordinary edit — a pulse, a counter, an animation
+    left looping. `probe_idle_frames` counts commits on the HUD's own
+    side of the Wayland socket, quiet and lit, with a control for each.
 
 Nothing here asserts a pixel COLOUR: a font ships a new version, Qt
 changes its rasteriser, and a byte comparison fails in a way nobody can
@@ -186,6 +191,18 @@ class Proc:
                 self.p.wait(timeout=8)
         self._fh.close()
 
+    def mark(self) -> int:
+        """Where this process's log has got to. `since()` reads on from
+        here, so a measurement can be taken over a stretch of a log that
+        is still being written."""
+        return self.logpath.stat().st_size
+
+    def since(self, mark: int) -> str:
+        """Everything the process logged after `mark`."""
+        with self.logpath.open("rb") as fh:
+            fh.seek(mark)
+            return fh.read().decode("utf-8", "replace")
+
     def wait_for(self, needle: str, timeout: float = READY_TIMEOUT_S) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -310,6 +327,20 @@ def drawn_box(region: np.ndarray, background: np.ndarray):
     return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
 
 
+def check_desk_is_bare(ppm: Path, background: np.ndarray, why: str) -> None:
+    """Photograph all three monitors and insist every one of them is the
+    flat backdrop and nothing else. Used for two different claims — the
+    desktop before the HUD exists, and the desktop a running HUD has
+    decided to leave alone — so the caller says which it is asking."""
+    capture("desk", ppm)
+    img = read_ppm(ppm)
+    for out in sheet.OUTPUTS:
+        region = img[0 : out["height"], out["x"] : out["x"] + out["width"]]
+        box = drawn_box(region, background)
+        if box is not None:
+            raise Fail(f"{out['name']}: something is drawn at {box} — {why}")
+
+
 def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: bool) -> None:
     """Whatever the HUD drew on this monitor has to be inside the box
     shell.qml declares, inset from the TOP-RIGHT corner. Everything else
@@ -373,6 +404,200 @@ def click_at(x: int, y: int) -> None:
     swaymsg("seat", "-", "cursor", "release", "button1")
 
 
+def wait_for_blind_plate(ppm: Path, background: np.ndarray, label: str):
+    """Wait until the HUD, given no bus at all, draws its blind plate.
+
+    The one lit state a probe can hold indefinitely. Every OTHER thing
+    this HUD says is a frame ageing out — a heartbeat speaks for two of
+    its own periods, a confirmation for the window jv-act declared — and
+    a plate that blanked part-way through a measurement would make that
+    measurement a reading of an unmapped surface. LinkState's grace runs
+    out, LinkPlate appears, and it stays until a bus comes back.
+
+    Returns the capture it first saw the plate in and the box it drew in.
+    """
+    deadline = time.monotonic() + BLIND_TIMEOUT_S
+    while time.monotonic() < deadline:
+        capture("primary", ppm)
+        img = read_ppm(ppm)
+        box = drawn_box(img, background)
+        if box is not None:
+            check_corner(f"{label} {sheet.output_by_role('primary')['name']}", img, background, True)
+            return img, box
+        time.sleep(0.5)
+    raise Fail(
+        f"the HUD never drew anything on the primary monitor in "
+        f"{BLIND_TIMEOUT_S:.0f}s with no bus at all — LinkPlate is the one lit "
+        f"state {label} can rely on, and it never arrived"
+    )
+
+
+# The idle probe's two windows. The settle is past §06's longest ease with
+# room to spare, so a fade that is still finishing is never counted as the
+# HUD failing to stop; the window is long enough that a 60 fps scene would
+# put hundreds of commits in it and a once-a-second blink would put several.
+IDLE_SETTLE_S = 4.0
+IDLE_WINDOW_S = 6.0
+
+def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
+    """The HUD renders NOTHING while nothing changes (invariant 10, §06).
+
+    "ambient GPU cost < 2 ms/frame, 0 fps when idle" is the one invariant-10
+    claim that is about cost rather than about behaviour, and it was the
+    last one resting on an argument: Qt Quick renders on change, the shell
+    unmaps when it has nothing to say, therefore zero. Both halves are true
+    and neither is a measurement — and the thing that would break them is
+    not a bad argument but one ordinary edit. A plate that pulses, a
+    duration that counts up, a `NumberAnimation` left on
+    `loops: Animation.Infinite`: each of those looks completely correct in
+    a diff and in a photograph, and each one costs a composite of three
+    monitors, forever, on a desktop where nothing is happening.
+
+    So the frames are counted, from the HUD's own side of the Wayland
+    socket. Two windows, because §06 claims this of two different states:
+
+      · QUIET — a live bus with nothing on it. The surface is unmapped
+        (earned emptiness is the ordinary state) and must produce nothing.
+      · LIT — a plate on screen, saying something true, with no further
+        input. This is the interesting one: stillness here is a property
+        of what the elements DO, not of the surface being absent.
+
+    Each window has a control, because a probe that reads an empty log
+    cannot tell "the HUD drew nothing" from "nobody was listening". The
+    quiet window is followed by a real frame that lights the mic plate,
+    and the lit window is preceded by the blind plate arriving; both
+    stretches MUST contain commits, measured by the same regex, through
+    the same log. If the instrument breaks, it fails there rather than
+    reporting a perfect idle.
+
+    WHAT THIS IS NOT. Not milliseconds of GPU: this compositor is pixman
+    on a headless backend and its timings say nothing about a 1660 SUPER.
+    It answers the other half — "0 fps when idle" — which is the half that
+    an edit can silently take away.
+    """
+    log("idle probe: 0 fps when nothing changes (invariant 10 / §06)")
+
+    # --- QUIET: a live bus, nothing published, every plate with nothing
+    # true to say. The surface is not mapped and there is nothing to draw.
+    bus_addr = str(stage / "idle-quiet.sock")
+    broker = Proc(
+        "jarvisd",
+        [os.environ["JARVISD_BIN"]],
+        stage / "idle-quiet-jarvisd.log",
+        dict(os.environ, JARVIS_BUS=bus_addr),
+    )
+    hud = None
+    try:
+        broker.wait_for("jarvisd listening on")
+        hud = Proc(
+            "jv-hud",
+            [os.environ["JV_HUD_BIN"]],
+            stage / "idle-quiet-hud.log",
+            dict(os.environ, JARVIS_BUS=bus_addr, WAYLAND_DEBUG="1"),
+        )
+        hud.wait_for("Configuration Loaded")
+        time.sleep(IDLE_SETTLE_S)
+
+        quiet = stage / "idle-quiet.ppm"
+        check_desk_is_bare(quiet, background, "before the quiet window")
+        mark = hud.mark()
+        time.sleep(IDLE_WINDOW_S)
+        commits, frames = sheet.surface_traffic(hud.since(mark))
+        if commits:
+            raise Fail(
+                f"the HUD committed {commits} surface updates ({frames} frame "
+                f"callbacks) in {IDLE_WINDOW_S:.0f}s on a bus with nothing on "
+                "it, with every plate dark and the surface unmapped — §06 says "
+                "an idle desktop renders at 0 fps"
+            )
+        # Only now: the emptiness is what makes that zero mean something.
+        check_desk_is_bare(quiet, background, "after the quiet window")
+        log(f"  quiet: {commits} commits in {IDLE_WINDOW_S:.0f}s, desktop untouched")
+
+        # The control for that zero. One real frame, and the mic plate has
+        # something true to say: whatever the HUD does next goes through
+        # the same log and the same regex that just read nothing.
+        mark = hud.mark()
+        publish_shot({"frames": [sheet.MIC_OPEN]}, bus_addr)
+        lit = stage / "idle-woken.ppm"
+        deadline = time.monotonic() + BLIND_TIMEOUT_S
+        box = None
+        while time.monotonic() < deadline:
+            capture("primary", lit)
+            box = drawn_box(read_ppm(lit), background)
+            if box is not None:
+                break
+            time.sleep(0.5)
+        woke, _ = sheet.surface_traffic(hud.since(mark))
+        if box is None:
+            raise Fail(
+                "the mic plate never appeared after jv-ears said the device was "
+                "open, so the quiet window above proves nothing: a HUD that had "
+                "stopped listening would have read exactly the same"
+            )
+        if not woke:
+            raise Fail(
+                "the HUD lit up without committing a single surface update, so "
+                "this probe is not reading the HUD's Wayland traffic at all and "
+                "its zero above means nothing"
+            )
+        log(f"  control: waking the HUD cost {woke} commits, through the same log")
+    finally:
+        if hud is not None:
+            hud.stop()
+        broker.stop()
+
+    # --- LIT: a plate on screen and no further input. No broker at all,
+    # because this window needs a lit state that cannot expire under it —
+    # the same reason the click probe runs without one.
+    hud = Proc(
+        "jv-hud",
+        [os.environ["JV_HUD_BIN"]],
+        stage / "idle-lit-hud.log",
+        dict(os.environ, JARVIS_BUS=str(stage / "idle-no-broker.sock"), WAYLAND_DEBUG="1"),
+    )
+    try:
+        start = hud.mark()
+        hud.wait_for("Configuration Loaded")
+        ppm = stage / "idle-lit.ppm"
+        _, box = wait_for_blind_plate(ppm, background, "idle probe")
+        arriving, _ = sheet.surface_traffic(hud.since(start))
+        if not arriving:
+            raise Fail(
+                "the blind plate reached the screen without a single surface "
+                "commit in the HUD's Wayland log — the log is not the HUD's, "
+                "and the window below would read zero no matter what it drew"
+            )
+        log(f"  the blind plate arrived at {box}, costing {arriving} commits")
+
+        time.sleep(IDLE_SETTLE_S)
+        mark = hud.mark()
+        time.sleep(IDLE_WINDOW_S)
+        commits, frames = sheet.surface_traffic(hud.since(mark))
+        if commits:
+            raise Fail(
+                f"a HUD with a plate on screen and nothing new to say committed "
+                f"{commits} surface updates ({frames} frame callbacks) in "
+                f"{IDLE_WINDOW_S:.0f}s. Something in the shell is animating on "
+                "its own: §06 allows motion that encodes a signal and forbids a "
+                "scene that keeps rendering when nothing changed"
+            )
+        # The zero above is only worth something if the plate was still
+        # there for all of it — a surface that unmapped mid-window would
+        # have gone quiet for the least interesting reason there is.
+        capture("primary", ppm)
+        after = drawn_box(read_ppm(ppm), background)
+        if after != box:
+            raise Fail(
+                f"the HUD drew at {box} before the window and {after} after it, "
+                "so the plate changed under the measurement and its zero says "
+                "nothing about stillness"
+            )
+        log(f"  lit and still: {commits} commits in {IDLE_WINDOW_S:.0f}s")
+    finally:
+        hud.stop()
+
+
 def probe_click_through(stage: Path, background: np.ndarray) -> None:
     """A click over the HUD reaches the window underneath it (A32).
 
@@ -431,22 +656,7 @@ def probe_click_through(stage: Path, background: np.ndarray) -> None:
         # unmapped, and an unmapped surface passes every click through
         # whatever its mask says.
         lit = stage / "click-lit.ppm"
-        deadline = time.monotonic() + BLIND_TIMEOUT_S
-        box = None
-        while time.monotonic() < deadline:
-            capture("primary", lit)
-            lit_img = read_ppm(lit)
-            box = drawn_box(lit_img, background)
-            if box is not None:
-                break
-            time.sleep(0.5)
-        if box is None:
-            raise Fail(
-                f"the HUD never drew anything on {primary['name']} in "
-                f"{BLIND_TIMEOUT_S:.0f}s with no bus at all — LinkPlate is the "
-                "one lit state this probe can rely on, and it never arrived"
-            )
-        check_corner(f"click probe {primary['name']}", lit_img, background, True)
+        lit_img, box = wait_for_blind_plate(lit, background, "click probe")
         painted = (lit_img != background).any(axis=2)
         log(f"  the blind HUD is drawing at {box}")
 
@@ -619,17 +829,12 @@ def main() -> int:
 
     # The desktop with no HUD on it at all. The quiet shot is compared
     # against THIS, not against an idea of what dark looks like.
-    bare = stage / "bare.ppm"
-    capture("desk", bare)
-    bare_img = read_ppm(bare)
-    for out in sheet.OUTPUTS:
-        region = bare_img[0 : out["height"], out["x"] : out["x"] + out["width"]]
-        if drawn_box(region, background) is not None:
-            raise Fail(
-                f"{out['name']}: the bare desktop is not a flat {sheet.BACKDROP} — "
-                "the backdrop never came up, so 'the HUD drew nothing' would be "
-                "unprovable"
-            )
+    check_desk_is_bare(
+        stage / "bare.ppm",
+        background,
+        f"the bare desktop is not a flat {sheet.BACKDROP} — the backdrop never "
+        "came up, so 'the HUD drew nothing' would be unprovable",
+    )
 
     written: list[str] = []
     for shot in sheet.SHOTS:
@@ -675,6 +880,7 @@ def main() -> int:
                 hud.stop()
             broker.stop()
 
+    probe_idle_frames(stage, background)
     probe_click_through(stage, background)
 
     expected = sheet.all_files()

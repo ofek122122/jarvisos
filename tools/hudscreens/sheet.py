@@ -1,8 +1,10 @@
 """What the screen sheet photographs, and on which monitors (PLAN A30).
 
-Data only, stdlib only. `tools/hudscreens/shoot.py` executes it and
-`tools/tests/test_hudscreens.py` reads it, so the shot list, the monitor
-sizes and the frames behind each picture are stated once.
+Data and pure helpers, stdlib only. `tools/hudscreens/shoot.py` executes
+it and `tools/tests/test_hudscreens.py` reads it, so the shot list, the
+monitor sizes, the compositor's config and the frames behind each picture
+are stated once — and anything the harness MEASURES with lives here too,
+where a test with no compositor can still run it.
 
 The difference between this sheet and the contact sheet in `docs/hud`
 (A29) is the whole point of it: A29 renders the plates into a 300x560
@@ -14,6 +16,8 @@ what this exists to show: the surface on every monitor at once, the edge
 it docks to, and the emptiness it leaves behind when it has nothing to
 say.
 """
+
+import re
 
 # ares' monitors, as CLAUDE.md declares them: one 2560x1440 primary and
 # two 1920x1080 at its side. The refresh rates are real on ares and
@@ -54,6 +58,43 @@ BACKDROP = "#31353B"
 SURFACE_W = 300
 SURFACE_H = 560
 INSET = 16
+
+
+# --------------------------------------------------- counting frames (A34)
+#
+# `probe_idle_frames` in shoot.py asks whether the HUD renders anything
+# while nothing changes (invariant 10: "0 fps when idle"). It counts the
+# HUD's own Wayland traffic — libwayland's WAYLAND_DEBUG log, from the
+# client side of the socket — because that is what actually costs a
+# composite, and because it needs no cooperation from Qt.
+#
+# The counter lives here, next to `sway_config()`, for the same reason
+# that does: it is the harness's instrument, and an instrument nothing can
+# execute is one nobody can check. shoot.py needs numpy and a compositor;
+# this file is stdlib-only, so tools/tests/test_hudscreens.py can run the
+# counter over real log lines and prove it counts what it claims to.
+#
+# Both separators on purpose. libwayland has printed the object id as
+# `wl_surface@41`, and the build this harness runs against today prints
+# `wl_surface#41`. A debug log is not a stable interface — which is why
+# the probe insists on SEEING commits in its control stretches. A pattern
+# that silently stopped matching would otherwise report a flawless,
+# permanent zero, which is the most convincing way for this measurement
+# to be wrong.
+COMMIT_RE = re.compile(r"wl_surface[@#]\d+\.commit\(\)")
+FRAME_RE = re.compile(r"wl_surface[@#]\d+\.frame\(")
+
+
+def surface_traffic(text):
+    """(commits, frame callbacks requested) in a stretch of WAYLAND_DEBUG.
+
+    A `commit` is the client handing the compositor new surface state —
+    one frame reaching the screen. A `frame` request is the client asking
+    to be woken for the next one, which is how a continuous animation
+    keeps itself alive; it is reported alongside so a failure can say
+    whether the HUD is merely redrawing or is driving itself.
+    """
+    return len(COMMIT_RE.findall(text)), len(FRAME_RE.findall(text))
 
 
 def sway_config():

@@ -86,6 +86,33 @@ QML engine can answer:
   never arrives fails the probe rather than passing it — an unmapped
   surface passes every click whatever its mask says.*
 
+- **The HUD renders nothing while nothing changes.** Commits are counted
+  on the HUD's own side of the Wayland socket (libwayland's
+  `WAYLAND_DEBUG` log) over two six-second windows: a live bus with
+  nothing on it, where the surface is unmapped, and a plate on screen with
+  no further input. Both must be **zero**. Measured: 0 and 0; the fade-in
+  that put the plate there cost 42 commits across the three surfaces and
+  then stopped. *Verified that this cannot go vacuous: each window is
+  paired with a stretch that must contain commits — the HUD being woken by
+  a real jv-ears heartbeat, and the blind plate arriving — counted by the
+  same code through the same log. That control is not decoration: it is
+  what caught the first version of this probe, whose pattern expected
+  `wl_surface@41` where this libwayland writes `wl_surface#41`, and which
+  would otherwise have reported a flawless zero forever.*
+
+  This is invariant 10's cost claim — §06 budgets the ambient scene at
+  "under 2 ms of GPU per frame and near-zero when nothing changed", and
+  asks that an idle desktop render at 0 fps rather than 60. It is worth
+  being exact about which half of that was measured. Only the second. This compositor renders with **pixman**, in software,
+  on a headless backend: no frame here took any time on a 1660 SUPER, and
+  nothing in this harness can tell you what the ambient scene costs on
+  one. What it can tell you is whether the HUD asks to be drawn at all
+  when the machine is quiet — which is the half an ordinary edit can take
+  away without looking wrong. A plate that pulses, a duration that counts
+  up, a `NumberAnimation` left on `loops: Animation.Infinite`: each reads
+  as correct in a diff, is invisible in a photograph, and costs a
+  composite of three monitors forever.
+
 No pixel colour is asserted anywhere. A font ships a new version, Qt
 changes its rasteriser, and a byte comparison fails in a way nobody can
 read.

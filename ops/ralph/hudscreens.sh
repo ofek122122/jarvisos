@@ -16,18 +16,21 @@
 # worth measuring: tools/hudscreens/shoot.py checks that no space was
 # reserved, that the keyboard never moved, that the HUD drew in the corner
 # it claims on EVERY monitor, that a quiet HUD leaves the desktop
-# pixel-identical, and — since A32 — that a click over a painted plate
-# reaches an ordinary window underneath it. Those were all "verified by
-# construction" for thirty iterations, which is a polite way of saying
-# nobody had tried them.
+# pixel-identical, that a click over a painted plate reaches an ordinary
+# window underneath it (A32), and that the HUD commits no Wayland frames
+# at all while nothing changes — quiet OR with a plate on screen (A34).
+# Those were all "verified by construction" for thirty iterations, which
+# is a polite way of saying nobody had tried them.
 #
 # WHAT THIS STILL IS NOT. Not ares: the compositor is sway rather than
 # Niri, the outputs are headless (no scanout, no real panel, no NVIDIA),
 # and nothing here can tell you whether an 11 px label is comfortable to
-# read from where you actually sit. It answers "is the HUD on all three
-# screens, in the right corner, costing nothing" — which is exactly what
-# A13/A27 are blocked on, and not the same question as "does it look
-# right".
+# read from where you actually sit. Nor does the frame count price a
+# frame: this renders with pixman, in software, so "0 fps when idle" is
+# measured here and "< 2 ms of GPU per frame" is not. It answers "is the
+# HUD on all three screens, in the right corner, asking to be drawn when
+# it has nothing to say" — which is exactly what A13/A27 are blocked on,
+# and not the same question as "does it look right".
 #
 # Run it after any change to shell/jv-hud or personality/theme.toml and
 # commit docs/hud/screens/.

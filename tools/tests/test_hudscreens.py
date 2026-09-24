@@ -301,3 +301,128 @@ def test_the_readme_says_what_the_click_probe_proved_and_what_it_did_not():
         "without saying that no client ever received a pointer event — the "
         "witness is sway's routing, and the difference matters"
     )
+
+
+# ------------------------------------------------------------- the idle probe
+#
+# "0 fps when idle" (invariant 10, §06) is the only invariant-10 claim that
+# is about COST rather than behaviour, and until A34 it was the last one
+# resting on an argument rather than a number. `probe_idle_frames` counts
+# the HUD's own Wayland commits over two windows — a quiet bus with the
+# surface unmapped, and a plate on screen with nothing new to say — and
+# both must come back zero.
+#
+# The danger in a probe that passes on zero is that EVERY way of breaking
+# it also returns zero: a regex that stops matching a new libwayland
+# format, an env var that stops being set, a log that is no longer the
+# HUD's. So the probe carries a control in each window, and these tests
+# hold the two things a control cannot: that the counter counts real log
+# lines, and that the probe is still called at all.
+
+# Verbatim from a real run of this harness: the fade-in of one plate, on
+# one of the three surfaces. Kept as text on purpose — it is the thing the
+# counter has to survive, and a hand-idealised line would not be.
+REAL_WAYLAND_LOG = """\
+[06:36:34.125153]  -> wl_surface#41.frame(new id wl_callback#58)
+[06:36:34.125166] {mesa egl surface queue}  -> wl_surface#41.attach(wl_buffer#49, 0, 0)
+[06:36:34.125171] {mesa egl surface queue}  -> wl_surface#41.damage_buffer(0, 0, 2147483647, 2147483647)
+[06:36:34.125383] {mesa egl surface queue}  -> wl_surface#41.commit()
+[06:36:34.126367]  -> wl_surface#45.frame(new id wl_callback#59)
+[06:36:34.126602] {mesa egl surface queue}  -> wl_surface#45.commit()
+[06:36:34.140288]  -> wl_surface#35.frame(new id wl_callback#56)
+[06:36:34.140457] {mesa egl surface queue}  -> wl_surface#35.commit()
+"""
+
+# The same traffic as older libwayland printed it. The build under this
+# harness can change without anyone choosing to change it.
+OLD_WAYLAND_LOG = """\
+[3282897.348]  -> wl_surface@41.frame(new id wl_callback@58)
+[3282897.349]  -> wl_surface@41.commit()
+"""
+
+
+def test_the_frame_counter_counts_a_real_wayland_log():
+    """The instrument, over the lines it will actually be given. If this
+    drifts, the probe reports a perfect zero for a HUD rendering at 60 fps
+    — which is worse than not measuring at all.
+    """
+    assert sheet.surface_traffic(REAL_WAYLAND_LOG) == (3, 3)
+    assert sheet.surface_traffic(OLD_WAYLAND_LOG) == (1, 1)
+
+
+def test_the_frame_counter_counts_surfaces_and_not_everything_else():
+    """A commit is a frame reaching the screen. The other objects on that
+    socket commit too — a subsurface's parent, a cursor, an output's
+    configuration round trip — and counting those would make the idle
+    windows fail for reasons that are not rendering.
+    """
+    assert sheet.surface_traffic("[1]  -> xdg_surface#12.commit()\n") == (0, 0)
+    assert sheet.surface_traffic("[1]  -> wl_surface#12.destroy()\n") == (0, 0)
+    assert sheet.surface_traffic("[1] wl_callback#58.done(1234)\n") == (0, 0)
+
+
+def test_the_idle_probe_actually_runs():
+    """A measurement that is defined and never called is the most
+    convincing kind of missing check: it reads as covered in every diff.
+    """
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    body = shoot.split("\ndef main(")[-1]
+    assert "probe_idle_frames(" in body, (
+        "tools/hudscreens/shoot.py defines the idle probe but main() never "
+        "runs it, so '0 fps when idle' is unmeasured again"
+    )
+
+
+def test_the_idle_probe_reads_the_huds_own_wayland_log():
+    """WAYLAND_DEBUG is how the HUD is made to say what it committed. With
+    it unset the log is empty, every window reads zero, and the probe
+    passes for a HUD animating on all three monitors.
+    """
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
+    assert probe.count('WAYLAND_DEBUG="1"') == 2, (
+        "every jv-hud the idle probe starts must be started with "
+        "WAYLAND_DEBUG=1, or the frames it is counting are not being logged"
+    )
+    assert "WAYLAND_DEBUG" not in shoot.replace(probe, ""), (
+        "WAYLAND_DEBUG is set outside the idle probe — the photographs "
+        "should be of a HUD doing its job, not one writing a protocol log"
+    )
+
+
+def test_each_idle_window_has_a_control():
+    """Both windows pass on zero, and so does a probe that is reading
+    nothing at all. Each one is therefore paired with a stretch that MUST
+    contain commits, counted the same way through the same log: the HUD
+    being woken by a real frame after the quiet window, and the blind
+    plate arriving before the lit one.
+    """
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
+    assert "if not woke:" in probe and "if not arriving:" in probe, (
+        "the idle probe no longer insists on SEEING commits somewhere, so a "
+        "broken instrument — an unset WAYLAND_DEBUG, a libwayland that "
+        "renamed its objects — would report a flawless permanent zero"
+    )
+    assert probe.count("sheet.surface_traffic(") == 4, (
+        "the controls have to be measured by the same counter as the windows "
+        "they vouch for, or they vouch for nothing"
+    )
+
+
+def test_the_readme_says_what_the_idle_probe_proved_and_what_it_did_not():
+    """§06 budgets the ambient scene at "< 2 ms of GPU per frame AND 0 fps
+    when idle". This harness is pixman on a headless backend and can only
+    answer the second half; a reader who took it for the first would think
+    the GPU budget had been measured on a 1660 SUPER.
+    """
+    readme = (SCREENS / "README.md").read_text("utf-8")
+    assert "0 fps" in readme, (
+        "docs/hud/screens/README.md no longer says the idle frame count is "
+        "measured here"
+    )
+    assert "pixman" in readme, (
+        "docs/hud/screens/README.md claims the HUD costs nothing when idle "
+        "without saying that no GPU millisecond was measured — this "
+        "compositor renders in software and its timings are about no machine"
+    )
