@@ -40,7 +40,7 @@ Item {
   // empty two-thirds is the point — §06's earned emptiness is a thing you
   // have to SEE to have an opinion about.
   width: 300
-  height: 560
+  height: 624
 
   // NOT the HUD. The real surface is `color: "transparent"` and floats
   // over whatever Niri has on screen; a PNG has to put something behind
@@ -91,6 +91,10 @@ Item {
     }
 
     ActionPlate {
+      anchors.right: parent.right
+    }
+
+    GuardPlate {
       anchors.right: parent.right
     }
 
@@ -307,6 +311,29 @@ Item {
       });
     }
 
+    // COMPOSED. jv-guard refusing a Windows binary (A51). One frame, from
+    // a service that only ever speaks when somebody runs `jv-compat
+    // install` — so unlike every other shot here there is no second topic
+    // to join and nothing to time it against. The `reasons` are in the
+    // frame and deliberately not on the plate: the schema says they are
+    // spoken on request, and this picture is what a glance gets you.
+    // The name is ordinary on purpose. The interesting names — the one
+    // with a newline in it, the one with a bidirectional override — are
+    // exercised in shell/jv-hud/tests/tst_guardstate.qml, where the result
+    // can be compared rather than looked at; a sheet is for judging what
+    // the ordinary case reads like.
+    function shot_guard() {
+      Bus.ingest('{"t":"link","up":true}');
+      suite.micOpen();
+      suite.send("guard.verdict", "jv-guard", {
+        "sha256": "9f2c4b7a1e08d3c65a4fbe2170d9c8815b3e6a04f7d2c9b81e5a30f64c7b92d1",
+        "verdict": "blocked",
+        "reasons": ["matched ClamAV signature Win.Trojan.Agent-9823041"],
+        "scanned_by": ["clamav"],
+        "path": "/home/ofek/Downloads/rct3-setup.exe"
+      });
+    }
+
     // The HUD admitting it cannot see the machine at all (A23). Every
     // plate below refuses to guess, and a refusal draws the same nothing a
     // calm machine draws — so without this line a dark recording light
@@ -333,7 +360,8 @@ Item {
       // past that rather than photographing the silence in between.
       { "file": "07-no-bus.png", "build": suite.shot_nobus, "lit": true, "settleMs": 6500 },
       { "file": "08-action.png", "build": suite.shot_action, "lit": true },
-      { "file": "09-muted.png", "build": suite.shot_muted, "lit": true }
+      { "file": "09-muted.png", "build": suite.shot_muted, "lit": true },
+      { "file": "10-guard.png", "build": suite.shot_guard, "lit": true }
     ]
 
     function test_the_sheet() {

@@ -12,7 +12,7 @@ something to look at without sitting at the machine.
 
 ## What you are looking at
 
-Each PNG is **one HUD surface, at its real size** — 300 × 560 px, the box
+Each PNG is **one HUD surface, at its real size** — 300 × 624 px, the box
 `shell.qml` asks the compositor for, anchored top-right. The empty two thirds
 is not a crop artifact; it is §06's earned emptiness, and it is most of what
 this HUD looks like most of the time.
@@ -183,6 +183,45 @@ the HUD subscribes to, and the element reads exactly two of its fields:
 `audio_muted` and `audio_volume`. The rest of that body — load, memory, net,
 free VRAM — rides the pipe because envelopes are forwarded whole and is read
 by nothing.
+
+### 10 — a binary refused
+
+![10-guard.png](10-guard.png)
+
+`composed`. `jv-compat install rct3-setup.exe`, and jv-guard says no.
+Invariant 8 — Windows binaries are untrusted by default — is the rule that
+makes this the one moment JarvisOS refuses something its user asked for, and
+until this plate existed the refusal happened entirely off screen: a verdict
+on the bus, a terminal error, and a HUD showing the same empty corner it
+shows for a machine nobody has asked to install anything.
+
+`BLOCKED` is jv-guard's own word out of a frozen enum, in `risk` because the
+verdict is final; a `suspicious` one draws the same plate in `warn`, because
+the confirmation flow may still override it. The file's own name is the
+brightest line, and nothing else of the path is drawn — it is the identity
+you need at a glance, and the rest is more of your filesystem than the
+question requires on a panel above every window. When a frame carries no
+path at all the plate shows the first twelve hex of the sha256, labelled as
+a hash, which is what jv-guard's log uses and the only thing about a file
+that ever leaves this machine.
+
+**What is deliberately not here: why.** `guard.verdict.reasons` carries
+"matched ClamAV signature Win.Trojan.Agent-9823041" in this very frame, and
+the schema says those reasons are *spoken on request*. They are also the one
+string on this topic written by a scanner rather than fixed by a schema —
+the same call `ActionPlate` makes when it draws `execution_failed` and never
+jv-act's free-text detail.
+
+**And one thing that is not visible in this picture at all:** the file name
+is the only text in this HUD chosen by somebody hostile. A Linux file name
+may contain newlines, control characters, or a bidirectional override that
+makes `setup<U+202E>exe.bat` render as `setup.bat`. `core/GuardState.qml`
+collapses whitespace, strips control and format characters and caps the
+length before any of it reaches a `Text`, and a name with nothing left after
+that is reported as no name at all — which falls back to the hash. Those
+cases are asserted in `shell/jv-hud/tests/tst_guardstate.qml`, where a
+result can be compared; this shot is the ordinary one, which is what a sheet
+is for.
 
 ## Regenerating
 

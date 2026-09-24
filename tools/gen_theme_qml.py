@@ -75,6 +75,7 @@ COMPONENTS = (
     ("HeardPlate", "HeardPlate.qml"),  # the words Jarvis took down (A26)
     ("ActionPlate", "ActionPlate.qml"),  # the action that did not work (A37)
     ("OutputPlate", "OutputPlate.qml"),  # speaking into a silent output (A40)
+    ("GuardPlate", "GuardPlate.qml"),  # the binary this machine refused (A51)
 )
 
 # shell/jv-hud/core — the Quickshell-free half of the HUD. Importing a
@@ -96,6 +97,7 @@ CORE = (
     ("HeardState", "HeardState.qml"),  # what did Jarvis hear you say? (A26)
     ("ActionState", "ActionState.qml"),  # did what Jarvis tried to do fail? (A37)
     ("OutputState", "OutputState.qml"),  # can you hear what Jarvis is saying? (A40)
+    ("GuardState", "GuardState.qml"),  # was a binary refused, and which? (A51)
     ("PlateStack", "PlateStack.qml"),  # is ANYTHING on screen? (A15)
     ("EarsBudgets", "EarsBudgets.qml"),  # how is jv-ears tuned? (A14)
 )

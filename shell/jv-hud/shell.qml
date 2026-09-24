@@ -38,8 +38,11 @@
 // interrupted; `OutputPlate` (A40) — that the sink Jarvis is speaking into
 // is muted, which is the one way every service can report `ok` while you
 // hear nothing; `HeardPlate` (A26) — the words jv-ears took down, for as
-// long as Jarvis has not started answering them; `MicPlate` (A4) —
-// whether the microphone is open, from
+// long as Jarvis has not started answering them; `ActionPlate` (A37) —
+// what jv-act tried to do to this machine and could not; `GuardPlate`
+// (A51) — the Windows binary jv-guard refused to let onto it, which is
+// the one time JarvisOS says no to something you asked for; `MicPlate`
+// (A4) — whether the microphone is open, from
 // jv-ears' own capture counters; and `HealthPlate` (A6) — the services
 // that are not well, and the llm rung when the brain is on the CPU floor.
 // Each one's mapping lives in a tested file under core/, and each draws
@@ -115,8 +118,17 @@ ShellRoot {
       // three 13 px lines the confirmation does, and which DOES share the
       // surface routinely: the words are up for exactly the stretch
       // `StatePlate` is saying THINKING.
+      // And again for GuardPlate (A51) — two lines, 11 px over 13 px —
+      // which CAN genuinely share the surface with everything under it: a
+      // refused install says nothing about whether a service is unwell or
+      // the microphone is open, so this growth is about co-occurrence
+      // rather than about margin. Three other files carry this number —
+      // both shot harnesses and the sheet's README — and
+      // tools/tests/test_hudscreens.py pins the measuring one to this
+      // binding, so a box that grows here and nowhere else fails a test
+      // rather than quietly cropping a photograph.
       implicitWidth: 300
-      implicitHeight: 560
+      implicitHeight: 624
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
@@ -198,6 +210,16 @@ ShellRoot {
         // this is what you asked for, and this is why nothing happened.
         // On a machine whose actions all worked it is never here at all.
         ActionPlate {
+          anchors.right: parent.right
+        }
+
+        // The Windows binary this machine refused to run, from jv-guard's
+        // own verdict — and only when it was refused. Directly under the
+        // failed action because the two are the same kind of news said by
+        // different processes: that one is Jarvis trying to change your
+        // machine and failing, this one is Jarvis declining to change it at
+        // all. On a machine nobody hands .exe files to it is never here.
+        GuardPlate {
           anchors.right: parent.right
         }
 
