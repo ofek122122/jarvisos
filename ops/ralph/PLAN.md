@@ -191,17 +191,27 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       exit-1 when a filter matches nothing so it is scriptable. `ts_mono` and
       the ISO `ts` are both already in every entry. Small, pure, and it lands
       entirely in `cli::act_log_render`. Discovered building B4.
-- [ ] B6. jv-brain has NO barge-in path: it does not subscribe to
-      `audio.wake`, so when the user interrupts, it keeps streaming the
-      rest of an answer nobody is listening to — holding the GPU, adding
-      the abandoned reply to the conversation as if it had been heard, and
-      publishing speech.say frames that jv-voice now has to refuse (A16's
-      dropped-group memory is the downstream patch for this). Cancelling
-      the in-flight `_respond` on a wake that lands while its reply_group
-      is still streaming is the real fix. jv-brain is not jv-act and needs
-      no schema change, but it wants care: the turn must still be recorded
-      as interrupted rather than silently lost, and a wake with no reply in
-      flight must do nothing. Discovered in A16.
+- [x] B6. jv-brain subscribes to `audio.wake`: a barge-in stops the answer,
+      not just the speaking of it. — 4d05900
+      (A spoken turn runs as a CHILD task of the input worker, so the wake
+      cancels THAT answer and not the worker that must handle the utterance
+      the wake belongs to; `_respond` catches its own cancellation and
+      returns what it said, while a cancellation this service did not ask
+      for — shutdown — still propagates. An interrupted turn publishes NO
+      `brain.response`: `finish_reason` is frozen at stop|length|error, and
+      "stop" would claim the answer finished while "error" would blame the
+      LLM for obeying the user (proposal **R3** asks a human for the word;
+      until then the count rides in sys.health's free-form `metrics` as
+      `barge_ins`). The turn is still RECORDED, with a marker, and it
+      records what was SENT — jv-voice drops the tail it never played.
+      `Conversation.repair_open_tool_calls` answers the tool calls a turn
+      cancelled mid-tool left open, which a chat template refuses: one
+      interruption would otherwise poison the conversation for the whole
+      session. A SILENT turn is not cancellable (a wake does not say the
+      CLI stopped wanting its answer), and a wake is acted on unless the
+      frame refutes itself. 50 tests green (was 37), 13 mutations, 2 missed
+      and both real. Tests: `bash ops/ralph/runtests.sh jv-brain`,
+      `bash ops/ralph/runtests.sh jv-voice`.)
 - [ ] B7. jv-ears now has a place to state its tuning (sys.health `metrics`,
       A14), and two more constants could one day be mirrored by another
       service the way `wake_timeout_s` was: `wake_refractory_s` and
@@ -300,6 +310,20 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       again. 11 new QML tests, 9 mutations run through them, 5 more through the
       gates. Tests: `bash ops/ralph/qmltest.sh`,
       `bash ops/ralph/runtests.sh tools`.)
+- [ ] A17. After a barge-in followed by SILENCE, the HUD can read
+      `thinking` for up to 30 s. A12 ends thinking on `brain.response`,
+      the first `speaking` after it, or a 30 s floor — and since B6 an
+      interrupted turn publishes no `brain.response` at all (the frozen
+      enum has no word for it). Normally the user's next utterance starts
+      an honest new thinking period, so this only shows when they wake
+      Jarvis and then say nothing. The honest rule: a wake NEWER than the
+      thinking latch ENDS it — the user abandoned that prompt. Must be a
+      latch comparison, not a binding, for the same reason A12's
+      "already speaking" fact is: a wake PRECEDES the prompt in the normal
+      flow, so a wake older than the latch must not clear it. Lands in
+      `core/SpeechState.qml` + tests; no schema change, no new topic (the
+      HUD already reads `audio.wake`). Discovered in B6.
+
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
       right (you see it wherever you look) or noise. Needs a human eye on
@@ -333,3 +357,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   pinned, and tools/tests finally run in CI (fe43c88, 2026-09-24)
 - A14 — jv-ears states its own budgets and the HUD stops mirroring them
   (042438a, 2026-09-24)
+- B6 — the brain stops generating when the user barges in, and the turn it
+  lost is recorded as interrupted (4d05900, 2026-09-24)

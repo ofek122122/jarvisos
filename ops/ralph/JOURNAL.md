@@ -1302,3 +1302,102 @@ All three re-run and caught afterwards.
   when something actually needs them, not before. The standing one, unchanged:
   nobody has ever LOOKED at this HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then
   a real wake word.
+
+---
+
+## 2026-09-24 — iteration 16 — B6: jv-brain barge-in
+
+Track A is human-blocked (A8 identity, A11 schemas, A13 an eye on ares), so
+this is the Track B item the last three journals kept naming: **jv-brain did
+not subscribe to `audio.wake`.** The barge-in path existed everywhere except
+the one service that generates. jv-voice stopped playing, jv-ears reopened its
+gate, the HUD went to listening — and the brain kept streaming: the GPU held
+for an answer nobody was listening to, `speech.say` frames jv-voice had to
+refuse one group at a time (that is what A16's `DROPPED_GROUPS` is for), and
+the abandoned reply added to the conversation as if it had been heard.
+
+**the shape of the fix.** A spoken turn now runs as a CHILD task of the input
+worker (`_stream_reply`), so a wake cancels that answer without touching the
+worker that must go on to handle the utterance the wake belongs to — the
+worker is why this is not simply `task.cancel()` on whatever is running.
+`_respond` catches its own `CancelledError` and returns `(what it said,
+INTERRUPTED)`; the guard is `asyncio.current_task() is not self._barged`, so a
+cancellation this service did not ask for (shutdown cancels the worker) still
+propagates untouched instead of being swallowed as an interruption. The wake
+is handled on the frame loop, not in the worker — the worker is busy with the
+very turn being cancelled.
+
+**what could not be said on the bus.** `brain.response.finish_reason` is
+frozen at `stop|length|error`. "stop" claims the answer ran to its end;
+"error" blames the LLM for obeying the user; an extra boolean field would be
+two fields that can disagree about one fact. So an interrupted turn publishes
+NO `brain.response`, the barge-in is counted in `sys.health`'s free-form
+`metrics` as `barge_ins` (where `hallucinated_tool_calls` already lives, so no
+schema change), and **proposal R3** asks a human for the word. Writing
+`interrupted` into a frozen enum would also have broken every Rust consumer —
+the binding is `deny_unknown_fields`.
+
+**the turn is recorded, not lost.** `interrupted_record()` keeps the text with
+an explicit marker. Dropping the turn would leave two user messages in a row
+(some chat templates refuse that) and let the model believe its half-answer
+was the whole one. It records what was SENT, not what was HEARD: jv-voice
+drops the tail of the group it never played, so this is the upper bound of
+what reached the user, and the comment says so rather than pretending the
+brain knows.
+
+**the bug inside the fix.** A turn cancelled while awaiting an `action.result`
+leaves an assistant `tool_calls` message whose result never comes — which a
+chat template refuses, so ONE interruption would poison that conversation for
+the rest of the session. `Conversation.repair_open_tool_calls` answers the
+open calls with `{"ok": false, "error": "interrupted"}`. It does NOT pretend
+the action was recalled: jv-act already has it, and only its audit log knows
+how it ended.
+
+**two deliberate refusals.** A SILENT turn is not cancellable: a wake says the
+user is talking to Jarvis, not that the CLI or HUD stopped wanting the answer
+it asked for, and nothing is being spoken over. And a wake is acted on unless
+the frame REFUTES ITSELF (a numeric score below the numeric threshold the same
+frame reports) — narrow on purpose, because the frame's existence is jv-ears
+asserting a detection and `score`/`threshold` are there so tuning is
+auditable. Losing an answer to a spurious wake would be worse than the bug
+being fixed; refusing an unreadable-but-real wake would restore it.
+
+**proving it bites — 13 mutations, 2 missed, both real.** Caught: wake not
+subscribed, acting on a contradicting wake, never cancelling, propagating the
+cancellation, swallowing ANY cancellation, the turn not recorded, the turn
+published as if normal, silent turns made cancellable, the metric dropped,
+tool calls left open, the record forgetting it was cut. Missed:
+  · `_is_number`'s bool guard was pinned only in the direction that cannot
+    bite. `score: true` is 1.0 and never refuses; `score: false` is 0.0 and
+    would — a field we cannot read at all turning into a refusal. Test and
+    comment now name the case that matters (plus `threshold: true`, which
+    would refuse nearly every wake).
+  · a `task.done()` check in `_barge_in` that no test could distinguish,
+    because cancelling a finished task is already a no-op and it is the
+    INTERRUPTED return that counts a barge-in. Deleted — dead defensiveness
+    reads like protection (the A14 lesson, again).
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` — 50 green (was 37: 11 new
+  barge-in/predicate tests, 3 new Conversation tests);
+  `bash ops/ralph/runtests.sh jv-voice` — 17, unchanged (comment-only edits).
+  The new suite streams the stub LLM one token per 0.25 s so a wake can
+  genuinely land mid-reply, and asserts the stub SAW the client hang up —
+  the generation is dropped, not just the speaking of it.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act, no boot path, no pins.
+- files: services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_barge_in.py (new),
+  services/jv-brain/tests/test_conversation.py,
+  services/jv-voice/jv_voice/service.py (comments),
+  services/jv-voice/tests/test_voice_service.py (docstring),
+  docs/optimization-backlog.md (R3)
+- commit: 4d05900
+- next: this fix created one small downstream untruth, logged as **A17**: the
+  HUD's `thinking` used to end on `brain.response`, and an interrupted turn no
+  longer publishes one, so after a barge-in followed by SILENCE the plate can
+  read `thinking` until A12's 30 s floor. The honest rule is that a wake NEWER
+  than the thinking latch ends it — a few tests in `core/SpeechState.qml`, and
+  a HUD-side item while Track A's other items wait on a human. Otherwise
+  **B5** (`jv act-log --since/--failed`) is the small pure one. The standing
+  item, unchanged: nobody has ever LOOKED at this HUD on ares.
+  `JV_HUD_SELFTEST=1 jv-hud`, then a real wake word.
