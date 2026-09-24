@@ -523,17 +523,38 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       124+8+39 tests (was 119+8+39), twelve mutations, twelve caught.
       Tests: `bash ops/ralph/cargotest.sh jarvisd`.)
 
-- [ ] B23. The per-frame `jv tap --latency` hop line
-      (`{topic:<20} {src:<12} seq={seq:<8} hop={ms:8.2}ms`) is formatted
-      in `jv.rs` and is the one line the tap writes as a REPORT that B22's
-      width test cannot reach — the test lives in `cli.rs` and walks what
-      `cli.rs` renders. It is 61 columns for a 20-character topic and
-      widens with the topic, which `{:<20}` pads and does not truncate;
-      `context.window.changed` is already 22. Either move the `format!`
-      into `cli.rs` beside the tables it belongs with (where the existing
-      test picks it up for free) or give it its own assertion. Small, and
-      it closes the last hole in "every report line fits". Discovered in
-      B22.
+- [x] B23. The per-frame `jv tap --latency` hop line was the one line the
+      tap writes as a REPORT that B22's width test could not reach. — d932b42
+      (`cli::hop_line`, beside the `HopStats` that accumulates it. The hole
+      was not cosmetic: `{topic:<20} {src:<12}` PAD and do not truncate and
+      `validate_envelope` bounds a topic's alphabet and a src's emptiness and
+      NEITHER one's length, so a remote process chose how wide that line came
+      out — `jv-hud-bridge` at 13 was already one past its column. Both are
+      clipped now at named columns with `short_id`'s own `...`, which is why
+      `short_id` collapsed into the `clip(s, columns)` it always was.
+      `TOPIC_COLUMNS` = 22 serves BOTH views of a topic, the stream and the
+      table under it — the value of either is that its columns line up, and
+      one cap answers both; the stream grew 20 -> 22 to meet the table, so
+      they agree for the first time. Assumed rather than enforced, and said
+      so: `seq` eight digits and the hop eight columns, 16 of the 80 spare.
+      Tests: 125 lib (was 124) + 39 e2e; nine mutations split across the two
+      files, because a width assertion ALONE cannot catch `bin/jv.rs` keeping
+      its own `format!` — every real topic fits either column — so the e2e
+      pins WHERE the columns fall. Verified on the built binary against a
+      real broker at 64 columns.)
+
+- [ ] B24. Clipping the hop TABLE's topic buys alignment and sells
+      something the stream does not have to sell: two topics sharing their
+      first 19 characters become two rows with the SAME label, and a
+      measurement table whose rows cannot be told apart is worse than a
+      wide one. Nothing on this bus can do it today — `audio.transcript`
+      is the longest topic any schema declares, at 16 of the 22 — so this
+      is a consequence written down before it can bite, not a bug. The
+      cheap answer when it does: the table has room to about 41 columns
+      before it wraps (a row is `topic_w + 39`), so it could clip LATER
+      than the stream and keep them aligned only up to 22, which is the
+      part a reader traces. What must not happen is a silent collapse of
+      two topics into one row of numbers. Discovered in B23.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above

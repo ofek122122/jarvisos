@@ -5775,3 +5775,79 @@ the real thing, and no reviewed source in this repo fixes them.
   **B10/A28 — one live recording of one spoken turn on ares — remains the
   biggest thing a human can hand this loop**, and it would retire the
   composed half of four shots at once. B7/B12/B15/B17/B20/B23 unchanged.
+
+## 2026-09-24 — iteration 57 — B23: the one report line whose width a publisher got to choose
+
+B22 (iteration 51) made "every line `jv tap` writes as a REPORT fits 80
+columns" a test, and B23 wrote down the line it could not reach: the
+per-frame hop line, formatted in `bin/jv.rs` while the test walks what
+`cli.rs` renders. Closed it, and the hole under it turned out to be real
+rather than cosmetic. `{topic:<20} {src:<12}` PADS and does not truncate,
+and `validate_envelope` bounds a topic's alphabet and a src's emptiness
+and NEITHER one's length — so the width of that line was chosen by a
+remote process. Not hypothetically either: `jv-hud-bridge` is 13
+characters and was already one past its column.
+
+The line is `cli::hop_line` now, beside the `HopStats` that accumulates
+it, and both strings are CLIPPED at named columns rather than assumed.
+The marker is `short_id`'s own `...`, which is why `short_id` collapsed
+into the `clip(s, columns)` it always was — one tested behaviour instead
+of two.
+
+`TOPIC_COLUMNS` = 22 serves BOTH views of a topic, the per-frame stream
+and the summary table under it, and that is the decision worth recording:
+the value of either view is that its columns line up, and a label wider
+than its column breaks the table's alignment in exactly the way it breaks
+the stream's budget, so one cap answers both. The stream grew from 20 to
+22 to meet the table, so the two agree for the first time. The cost is
+`short_id`'s cost, stated in the same place: two topics sharing their
+first 19 characters print alike, and the whole topic is one `jv sub '*'`
+away — that view prints frames, which are raw data and are as wide as
+they are. `SRC_COLUMNS` = 13 is `jv-hud-bridge`.
+
+**What is assumed rather than enforced**, said out loud the way
+`every_line_a_turn_prints_fits_eighty_columns` says its own: `seq` is
+eight digits and the hop is eight columns, which leaves this line 16 of
+the 80 spare. A ten-digit seq (4.2e9 frames) and a 99-second hop both
+still fit. A hop wide enough to break it is a publisher stamping
+wall-clock `ts` on a monotonic bus, and printing that number WHOLE is the
+report — clamping it or hiding it behind a `?` would suppress the one
+signal it carries.
+
+- tests: `cargo test` — 125 lib (was 124) and 39 e2e, green. **Nine
+  mutations, all caught, and deliberately split across the two files**,
+  because the two halves of this claim are not provable in the same
+  place. Against the new unit gate: dropping the topic clip, dropping the
+  src clip, the table ROW keeping its own 20-wide column, the table
+  HEADER keeping its own, `clip` taking `columns` characters without
+  saying it cut anything, and `hop_line` reverting to 20/12 — six, each
+  failing it. Against the e2e: `bin/jv.rs` keeping its own `format!`,
+  deleting the streamed line entirely, and swapping topic and src into
+  each other's columns — three, each failing
+  `a_turn_is_reported_split_at_the_boundaries_jv_ears_published`.
+  **The honest finding from doing it this way**: a width assertion ALONE
+  does not catch the call-site revert, because every topic a real bus
+  carries fits either column, so the old `format!` passes at 61 columns.
+  That is why the e2e pins WHERE the columns fall and not just how many
+  there are — and it is the same reason the first version of the
+  alignment assertion survived M3: the table's next field is right
+  aligned, so a narrower column and a wider pad are the same string, and
+  only the character past them tells the two apart.
+- verified on the BUILT binary against a real broker, not only in tests:
+  `sys.health             jarvisd       seq=1        hop=    0.19ms` at
+  64 columns, over a 61-column table, the topic flush in the same column
+  in both.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs
+- next: "every report line fits" is now closed for every line the tap
+  writes, so **B17/B20 are what is left of the B-track width work and
+  both are a human at a terminal** — does four lines per tool turn read
+  as a decomposition or as noise. They share their trigger with B10/A28,
+  **one live recording of one spoken turn on ares, still the biggest
+  thing a human can hand this loop**. B15 wants the decision B13 left
+  open; B7/B12 wait on a consumer and on `sys.roster`. On the A track
+  A62 still gates A63; A65/A60/A50/A55/A47/A56/A59 want a decision and
+  A21/A22/A25/A27/A31/A38/A39/A68 want a human at ares.
