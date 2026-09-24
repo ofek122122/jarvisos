@@ -43,10 +43,21 @@ graded_after_it_is_erased` is the new one, and the pair of sentences it
 protects is the point: the report says which control killed the suite, so a
 score against a file the suite only greps cannot be read as a score against
 one it runs.
+
+B58 turns the canary on the gate that runs it. A canary lives when no test
+touches the file — and also when the tests touch ANOTHER COPY of it, which is
+what every jv-* suite was doing to `jarvis_bus` until d55348b. Nothing inside
+a suite run can tell those apart, so the harness asks the suite's own
+interpreter where the module came from and says which case it is.
+`test_the_gate_imports_the_worktrees_shared_library_and_not_the_nix_store` is
+that question asked of this repo rather than of a fixture, and it is the first
+test here that would have FAILED at any point in this loop's history before
+that commit.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 import sys
 import tempfile
@@ -1297,3 +1308,225 @@ def test_the_controls_a_file_is_offered_follow_from_its_suffix():
     assert mutate.controls_for(qml, mutate.PYTHON) == (mutate.READ,)
     assert mutate.controls_for(qml, mutate.SHOTS) == (mutate.EXECUTED, mutate.READ)
     assert mutate.controls_for(py, mutate.SHOTS) == (mutate.READ,)
+
+
+# ----------------------------- the copy the suite actually imports (B58)
+#
+# The gate had never been testing the tree it is run on. `runtests.sh` ran
+# `python -m pytest` from the service's own directory, which puts that
+# directory first on `sys.path`, so `jv_guard` came from the worktree and
+# `jarvis_bus` came from the NIX STORE: every suite but pylib's own had been
+# asserting against the shared library AS LAST BUILT, for as long as this loop
+# has existed. One `export PYTHONPATH` line fixed it (d55348b).
+#
+# What that line did not fix is this harness's blindness to the same thing
+# happening again. A canary that lives because the suite imported a DIFFERENT
+# COPY of the file is indistinguishable, today, from one that lives because no
+# test touches it — and the abort says the second sentence with no way of
+# knowing it is the true one. So when every control lives on a Python file,
+# the harness asks the SUITE'S OWN interpreter where that module comes from,
+# through the same script that runs the suite, and the abort carries the
+# answer instead of a guess.
+
+
+def test_a_python_files_module_name_is_the_package_walk_up_from_it(tmp_path):
+    pkg = tmp_path / "services" / "pylib" / "jarvis_bus"
+    (pkg / "sub").mkdir(parents=True)
+    for d in (pkg, pkg / "sub"):
+        (d / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "client.py").write_text("", encoding="utf-8")
+    (pkg / "sub" / "deep.py").write_text("", encoding="utf-8")
+
+    assert mutate.module_of(tmp_path, "services/pylib/jarvis_bus/client.py") == "jarvis_bus.client"
+    assert mutate.module_of(tmp_path, "services/pylib/jarvis_bus/sub/deep.py") == "jarvis_bus.sub.deep"
+    # The package itself, not `jarvis_bus.__init__` — that is not the name any
+    # importer uses, and the probe has to ask the question the suite asks.
+    assert mutate.module_of(tmp_path, "services/pylib/jarvis_bus/__init__.py") == "jarvis_bus"
+
+
+def test_a_module_in_no_package_is_its_stem_and_an_off_language_file_has_no_name(tmp_path):
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "mutate.py").write_text("", encoding="utf-8")
+    assert mutate.module_of(tmp_path, "tools/mutate.py") == "mutate"
+    # Not a module in any language this harness can ask about.
+    assert mutate.module_of(tmp_path, "shell/jv-hud/Bus.qml") is None
+
+
+def test_a_canary_that_lived_because_the_suite_imports_another_copy_says_which(tree):
+    """The sentence B58 exists for. Both controls living used to mean exactly
+    one thing — "no test touches this file" — and this is the other thing it
+    can mean."""
+    root, src = tree
+    asked: list[str] = []
+
+    def elsewhere(module: str) -> str:
+        asked.append(module)
+        return "/nix/store/abc-python3-env/lib/python3.12/site-packages/thing.py"
+
+    with pytest.raises(mutate.HarnessError, match="SHADOWED") as exc:
+        mutate.run(
+            mutate.parse_spec(SPEC),
+            lambda env, scratch: True,
+            root=root,
+            origin=elsewhere,
+        )
+    assert asked == ["thing"], "the probe was asked about the wrong module"
+    assert "/nix/store/abc-python3-env" in str(exc.value), "the other copy is not named"
+    assert src.read_bytes() == b"VALUE = 1\nOTHER = 2\n"
+
+
+def test_a_canary_that_lived_on_the_very_file_the_suite_imports_is_not_shadowed(tree):
+    """The probe answering "this is the file" does not excuse the canary — it
+    STRENGTHENS the original abort, which is why that sentence still stands."""
+    root, src = tree
+    with pytest.raises(mutate.HarnessError) as exc:
+        mutate.run(
+            mutate.parse_spec(SPEC),
+            lambda env, scratch: True,
+            root=root,
+            origin=lambda module: str(src),
+        )
+    said = str(exc.value)
+    assert "SHADOWED" not in said
+    assert "this very file" in said
+    assert "neither executes" in said
+
+
+def test_a_probe_that_cannot_answer_adds_nothing_at_all(tree):
+    """`None` and a path are different answers, exactly as they are for the
+    stale-sheet hint (B53): a harness that guessed at the reason would be the
+    one thing this harness never does."""
+    root, src = tree
+    with pytest.raises(mutate.HarnessError) as exc:
+        mutate.run(
+            mutate.parse_spec(SPEC),
+            lambda env, scratch: True,
+            root=root,
+            origin=lambda module: None,
+        )
+    said = str(exc.value)
+    assert "SHADOWED" not in said and "very file" not in said
+    assert "neither executes" in said
+
+
+def test_the_probe_is_never_asked_when_the_canary_did_its_job(tree):
+    """It costs a subprocess, and it is only ever an answer to a question the
+    harness asks on its way out."""
+    root, src = tree
+    asked: list[str] = []
+    report = mutate.run(
+        mutate.parse_spec(SPEC),
+        FakeSuite(src),
+        root=root,
+        origin=lambda module: asked.append(module),
+    )
+    assert report.caught == 1 and asked == []
+
+
+def test_only_the_runner_that_can_ask_an_interpreter_has_a_probe():
+    """"Where did this come from" is a question with an answer in exactly one
+    of the four runners. A qmltestrunner import path and a cargo module tree
+    are different questions, and inventing an answer for them here would be
+    the overclaim this whole file exists to prevent."""
+    assert mutate.PYTHON.origin is mutate.python_origin
+    assert sorted(l.runner for l in mutate.LANGUAGES.values() if l.origin is None) == [
+        "cargo",
+        "qml",
+        "shots",
+    ]
+
+
+def test_the_probe_asks_the_suites_own_interpreter_through_the_same_script(tmp_path):
+    """Not THIS interpreter's `find_spec`. The question is what the SUITE
+    imports, and only `runtests.sh` knows the venv, the cwd and the PYTHONPATH
+    it does that with — so the probe goes through the same script, and an
+    answer from anywhere else would be about a different program."""
+    ops = tmp_path / "ops" / "ralph"
+    ops.mkdir(parents=True)
+    (ops / "runtests.sh").write_text(
+        '#!/usr/bin/env bash\n'
+        'printf "%s\\n" "$@" > "$(dirname "$0")/argv"\n'
+        'echo /somewhere/else/client.py\n',
+        encoding="utf-8",
+    )
+    assert mutate.python_origin(tmp_path, "jv-guard", "jarvis_bus.client") == "/somewhere/else/client.py"
+    assert (ops / "argv").read_text(encoding="utf-8").split() == [
+        "--origin",
+        "jarvis_bus.client",
+        "jv-guard",
+    ]
+
+
+def test_a_probe_whose_script_failed_or_said_nothing_answers_nothing(tmp_path):
+    ops = tmp_path / "ops" / "ralph"
+    ops.mkdir(parents=True)
+    script = ops / "runtests.sh"
+
+    # It printed a path AND failed. A script that could not resolve the env it
+    # was going to resolve the module with has not answered the question, and
+    # whatever it managed to print on the way out is not the answer.
+    script.write_text(
+        '#!/usr/bin/env bash\necho /a/path/it/printed/anyway.py\n'
+        'echo "no python env for jv-guard" >&2\nexit 2\n',
+        encoding="utf-8",
+    )
+    assert mutate.python_origin(tmp_path, "jv-guard", "jarvis_bus.client") is None
+
+    # A built-in or a namespace package has no file, and the script says so by
+    # printing nothing. That is "no answer", not an answer of "".
+    script.write_text("#!/usr/bin/env bash\necho\n", encoding="utf-8")
+    assert mutate.python_origin(tmp_path, "jv-guard", "jarvis_bus.client") is None
+
+
+def test_the_cli_hands_the_run_a_probe_only_for_the_runner_that_has_one(spec_file, monkeypatch):
+    """The wiring, which is the half that runs in production. A probe built
+    here has to be bound to THIS run's repo and target, and the three runners
+    without one must be handed nothing at all rather than something that
+    answers wrongly."""
+    seen: list[object] = []
+    monkeypatch.setattr(
+        mutate, "run", lambda *a, **k: seen.append(k.get("origin")) or _report("caught")
+    )
+    asked: list[tuple[str, str, str]] = []
+    monkeypatch.setitem(
+        mutate.LANGUAGES,
+        "tests",
+        dataclasses.replace(
+            mutate.PYTHON,
+            origin=lambda root, target, module: asked.append((str(root), target, module)),
+        ),
+    )
+
+    assert mutate.main(["jv-guard", spec_file]) == 0
+    assert mutate.main(["--runner", "cargo", "jarvisd", spec_file]) == 0
+    probe, none = seen
+    assert none is None, "a runner with no probe was handed one anyway"
+    assert probe is not None
+    probe("jarvis_bus.client")
+    assert asked == [(str(ROOT), "jv-guard", "jarvis_bus.client")]
+
+
+def test_the_gate_imports_the_worktrees_shared_library_and_not_the_nix_store():
+    """B58's control, and the only test here that asks about the real repo.
+
+    Every jv-* service imports `jarvis_bus`, and until d55348b every one of
+    their suites imported it FROM THE NIX STORE while importing its own
+    package from the worktree. The loop's verify gate was grading a shared
+    library as last built. This is that claim, asked of the gate itself rather
+    than reasoned about: run the probe the way the harness does, against a
+    service that is not pylib, and the answer must be in this tree.
+    """
+    origin = mutate.python_origin(ROOT, "jv-guard", "jarvis_bus.client")
+    if origin is None:
+        pytest.skip("no python env for jv-guard on this machine; the gate cannot be asked")
+    assert Path(origin).resolve() == (ROOT / "services" / "pylib" / "jarvis_bus" / "client.py").resolve()
+
+
+def test_a_module_the_suite_has_never_heard_of_is_no_answer_and_not_a_crash():
+    """Found by running the abort path for real: `jv-guard`'s interpreter has
+    never heard of `jv_brain`, and `find_spec` RAISES on the missing parent
+    package rather than returning None. A suite that cannot import the module
+    at all is an ordinary thing to ask about — it is the usual shape of a file
+    nothing touches — so the probe answers "no answer" and the abort says
+    nothing extra, which is the right amount to say."""
+    assert mutate.python_origin(ROOT, "jv-guard", "jv_brain.service") is None

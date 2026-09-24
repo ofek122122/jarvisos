@@ -9,7 +9,21 @@
 #         bash ops/ralph/runtests.sh jv-voice
 # Services: jv-brain jv-ears jv-voice jv-context jv-guard jv-compat
 #           jv-hud-bridge pylib tools harness
+#
+# `--origin <module> <service>` runs no tests: it prints the FILE this
+# service's suite would import `<module>` from, resolved by the same
+# interpreter, cwd and PYTHONPATH the suite gets (nothing, if there is no such
+# file). It exists because "which copy of this module do the tests read" is a
+# question about this script and nothing else can answer it honestly —
+# tools/mutate.py asks it when a canary lives, to tell a file no test touches
+# apart from a file the tests import from somewhere else (PLAN B58).
 set -euo pipefail
+
+origin_mod=""
+if [ "${1:-}" = "--origin" ]; then
+  origin_mod="${2:?usage: runtests.sh --origin <module> <service>}"
+  shift 2
+fi
 
 svc="${1:?usage: runtests.sh <service>}"
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
@@ -33,9 +47,6 @@ if [ ! -x "$venv/bin/pytest" ]; then
   "$venv/bin/pip" install -q pytest pytest-asyncio
 fi
 
-# jarvisd binary for tests that spawn the real broker
-export JARVISD_BIN="${JARVISD_BIN:-$(nix build "$root#jarvisd" --no-link --print-out-paths 2>/dev/null)/bin/jarvisd}"
-
 # Every jv-* service imports jarvis_bus, and until now it imported the one in
 # the nix store: `python -m pytest` puts the CWD first, which is the service's
 # own dir, so a worktree change to services/pylib was invisible to every suite
@@ -43,4 +54,26 @@ export JARVISD_BIN="${JARVISD_BIN:-$(nix build "$root#jarvisd" --no-link --print
 export PYTHONPATH="$root/services/pylib${PYTHONPATH:+:$PYTHONPATH}"
 
 cd "$testdir"
+
+# Asking where a module comes from must resolve it EXACTLY as the suite does,
+# so it runs from the same directory with the same path — `-c` seeds sys.path
+# with the cwd just as `-m pytest` does — and it stops here: a probe that
+# built jarvisd would be paying the suite's setup cost to answer a question
+# about imports.
+if [ -n "$origin_mod" ]; then
+  # Prints the file or prints nothing — never a traceback. `find_spec` RAISES
+  # (on a missing parent package, or a name that is not a module at all)
+  # rather than returning None, and a suite that has never heard of the module
+  # is an ordinary answer here, not a failure to ask.
+  exec "$venv/bin/python" -c 'import importlib.util, sys
+try:
+    spec = importlib.util.find_spec(sys.argv[1])
+except (ImportError, AttributeError, ValueError):
+    spec = None
+print(spec.origin if spec and spec.origin else "")' "$origin_mod"
+fi
+
+# jarvisd binary for tests that spawn the real broker
+export JARVISD_BIN="${JARVISD_BIN:-$(nix build "$root#jarvisd" --no-link --print-out-paths 2>/dev/null)/bin/jarvisd}"
+
 exec "$venv/bin/python" -m pytest tests -q

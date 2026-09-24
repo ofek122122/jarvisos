@@ -149,6 +149,21 @@ on a `.qml`) chooses the controls instead: the tools suite really does match a
 line in `shell/jv-hud/Bus.qml`, so the relation the old rule called impossible
 is the one this exists to grade.
 
+B58 is the harness grading its own reach, and it starts from a hole in the
+canary above. `runtests.sh` ran pytest from the service's own directory, so
+`jv_guard` came from the worktree and `jarvis_bus` came from the NIX STORE:
+every suite but pylib's own had been asserting against the shared library AS
+LAST BUILT. A canary planted on such a file LIVES — the suite imports the
+other copy and never notices — and the abort that followed said "the suite
+neither executes that file nor reads its source", which was the wrong sentence
+about the right observation. The two cases are indistinguishable from inside a
+suite run, so the harness now asks OUTSIDE it: when every control has lived on
+a Python file, it asks the suite's own interpreter, through the same script,
+which file it imports that module from, and the abort carries the answer.
+Three outcomes and three sentences — another copy (SHADOWED, and the mutations
+would have meant nothing), this copy (the original abort, now measured), or no
+answer at all, which says nothing.
+
 `@ label` opens a block, the next bare line is the repo-relative file, and
 the `-`/`+` lines are the hunk (joined in order, indentation kept verbatim).
 `old` must appear EXACTLY once in the file: a hunk that matches twice is an
@@ -350,6 +365,104 @@ def erased(text: str) -> str:
     return ""
 
 
+# "Where does the suite import this module from?", already bound to the repo
+# and the target, because the only caller has both and neither is its business.
+Origin = Callable[[str], "str | None"]
+
+
+def module_of(root: Path, rel: str) -> str | None:
+    """The dotted name the suite would import a repo-relative `.py` path
+    under, or `None` for a file that is not a module at all.
+
+    Walking up while there is an `__init__.py` is exactly how the import
+    system decides where a package starts, so this is the name the suite uses
+    — `services/pylib/jarvis_bus/client.py` is `jarvis_bus.client`, and
+    `.../jarvis_bus/__init__.py` is `jarvis_bus` and never
+    `jarvis_bus.__init__`, because the second is not a name any importer says.
+    """
+    path = Path(rel)
+    if path.suffix != ".py":
+        return None
+    parts: list[str] = []
+    here = (root / path).parent
+    while here != root and (here / "__init__.py").is_file():
+        parts.append(here.name)
+        here = here.parent
+    parts.reverse()
+    if path.stem != "__init__":
+        parts.append(path.stem)
+    return ".".join(parts) or None
+
+
+def python_origin(root: Path, target: str, module: str) -> str | None:
+    """The file `target`'s suite would import `module` from — asked of the
+    SUITE'S OWN interpreter, through the same script that runs it.
+
+    This exists because of what `runtests.sh` was doing until d55348b: it ran
+    pytest from the service's own directory, so `jv_guard` came from the
+    worktree and `jarvis_bus` came from the NIX STORE, and every suite but
+    pylib's own had been asserting against the shared library as last BUILT.
+    A canary planted on such a file lives — the suite imports the other copy
+    and never notices — and the abort that followed said "no test touches
+    this file", which was the wrong sentence and had no way of knowing.
+
+    So the question is put to the only thing that can answer it. Not this
+    interpreter's `find_spec`: the venv, the cwd and the PYTHONPATH belong to
+    the script, and an answer from anywhere else would be about a different
+    program. `None` means the question could not be asked (no env for that
+    service, no such module, a script that failed) and is deliberately not
+    the same as an answer — see `_modified` for the same discipline.
+    """
+    try:
+        proc = subprocess.run(
+            ["bash", str(root / "ops" / "ralph" / "runtests.sh"), "--origin", module, target],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    found = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    return found[-1] if found else None
+
+
+def shadow_note(path: Path, rel: str, module: str | None, origin: Origin | None) -> str:
+    """What the probe adds to a canary that lived, and nothing when it has
+    nothing to add.
+
+    Three answers, and they are three different sentences. Another copy: the
+    canary lived for a reason that says nothing about the tests, and the file
+    that has to change is the one the suite imports. This copy: the abort's
+    own sentence was right all along and is now measured rather than assumed.
+    No answer: silence, because a hint that guessed would be worse than none.
+    """
+    if module is None or origin is None:
+        return ""
+    try:
+        found = origin(module)
+    except OSError:
+        return ""
+    if not found:
+        return ""
+    here, there = os.path.realpath(path), os.path.realpath(found)
+    if here == there:
+        return (
+            f"The suite's own interpreter imports {module} from this very "
+            f"file, so it is grading the right copy and the sentence above is "
+            f"the whole story."
+        )
+    return (
+        f"SHADOWED (B58): the suite imports {module} from {there}, which is "
+        f"NOT the file that was mutated ({rel}). A canary on a copy nothing "
+        f"imports lives for a reason that says nothing about the tests, and "
+        f"every mutation graded against that copy would have meant nothing "
+        f"either. Fix what the suite imports before reading anything into "
+        f"this run."
+    )
+
+
 def python_env(cache_dir: Path) -> dict[str, str]:
     """A private, empty bytecode cache (so nothing compiled by another run
     can be read) and no writing beside the source (so a harness run leaves
@@ -485,6 +598,14 @@ class Language:
     # that is not the suite's fault — and the useful version of that sentence
     # is a measurement of the tree, not a slogan (B53).
     baseline_hint: Callable[[Path], str] | None = None
+    # (root, target, module) -> the file this runner's suite imports that
+    # module from. Asked only when every canary has LIVED, to tell a file no
+    # test touches from a file the tests import from ANOTHER COPY (B58).
+    # `None` on three of the four runners on purpose: "where did this come
+    # from" has an answer for an interpreter, and inventing one for a
+    # qmltestrunner import path or a cargo module tree would be the overclaim
+    # this harness exists to prevent.
+    origin: Callable[[Path, str, str], str | None] | None = None
 
     def command(self, root: Path, target: str, scratch: Path) -> list[str]:
         cmd = ["bash", str(root / "ops" / "ralph" / self.script)]
@@ -503,6 +624,7 @@ PYTHON = Language(
     env=python_env,
     targets=None,
     pass_target=True,
+    origin=python_origin,
 )
 
 QML = Language(
@@ -707,7 +829,9 @@ class Stamps:
 Runner = Callable[[Mapping[str, str], Path], bool]
 
 
-def canary_abort(rel: str, tried: Sequence[tuple[str, Path]], lang: Language) -> str:
+def canary_abort(
+    rel: str, tried: Sequence[tuple[str, Path]], lang: Language, note: str = ""
+) -> str:
     """What to say when a file survived every control it was offered.
 
     Two different sentences, because two different things went wrong. A file
@@ -715,6 +839,11 @@ def canary_abort(rel: str, tried: Sequence[tuple[str, Path]], lang: Language) ->
     so the suite has no relation with it at all. An off-language file was only
     ever offered one, and naming the other would send the reader looking for
     an execution that was never on the table.
+
+    `note` is the third thing it can be, and the only one this harness cannot
+    work out from its own runs: the suite has a relation with a DIFFERENT COPY
+    of the file (B58). It goes first among the appendices because it is the
+    one that changes what the reader should do next.
 
     Every run that went wrong is named, not just the last one (B56's rule):
     two live canaries are two suite logs, and which of them the reader opens
@@ -739,6 +868,7 @@ def canary_abort(rel: str, tried: Sequence[tuple[str, Path]], lang: Language) ->
     kept = ", ".join(f"{cache} ({relation})" for relation, cache in tried)
     return (
         why
+        + (f" {note}" if note else "")
         + (f" {lang.canary_hint}" if lang.canary_hint else "")
         + f" Those runs were kept in {kept}."
     )
@@ -750,11 +880,17 @@ def run(
     *,
     root: Path,
     lang: Language = PYTHON,
+    origin: Origin | None = None,
 ) -> Report:
     """Grade `mutations`. `runner(env, scratch)` runs the suite and returns
     True if it passed; `env` carries this run's private cache settings and
     `scratch` is a private empty directory the suite may write into (which is
     how `hudshots.sh` is kept off the committed contact sheet).
+
+    `origin(module)` answers where the suite imports a module from, and is
+    asked ONLY on the way out of a file that survived every canary — that is
+    the one place where "no test touches this" and "the tests read another
+    copy of this" are the same observation (B58).
 
     Order: baseline (must be green) -> one canary per file (each must be red)
     -> the mutations -> baseline again (must be green).
@@ -839,7 +975,8 @@ def run(
                     break
                 tried.append((relation, cache))
             else:
-                raise HarnessError(canary_abort(rel, tried, lang))
+                note = shadow_note(targets[rel], rel, module_of(root, rel), origin)
+                raise HarnessError(canary_abort(rel, tried, lang, note))
 
         outcomes: list[Outcome] = []
         for mut in mutations:
@@ -968,8 +1105,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     # again, and a loop that knows the count before it starts can decide to
     # send fewer mutations rather than abandon a run half way through.
     print(f"  at least {suite_runs(muts)} suite runs", flush=True)
+    probe: Origin | None = None
+    if lang.origin is not None:
+        probe = lambda module: lang.origin(root, args.target, module)  # noqa: E731
     try:
-        report = run(muts, script_runner(root, lang, args.target), root=root, lang=lang)
+        report = run(
+            muts,
+            script_runner(root, lang, args.target),
+            root=root,
+            lang=lang,
+            origin=probe,
+        )
     except HarnessError as exc:
         print(f"\nHARNESS: {exc}", file=sys.stderr)
         return 2

@@ -46,6 +46,15 @@
 # one baseline + one canary per file + one per mutation + one baseline: the
 # count is printed before the first run starts.
 #
+# WHEN A CANARY LIVES, IT MAY BE THE GATE AND NOT THE TESTS (B58). A file the
+# suite never touches and a file the suite imports from ANOTHER COPY look
+# identical from inside a suite run — and until d55348b every jv-* suite
+# imported `jarvis_bus` from the nix store while importing its own package
+# from the worktree. So a Python file that survives every control is not just
+# refused: the harness asks `runtests.sh --origin <module> <service>` where
+# that suite really imports it from, and the abort says SHADOWED and names the
+# other copy, or says the copy is right, or (no answer) says nothing.
+#
 # Exit: 0 every mutation caught · 1 a mutation survived · 2 the harness
 # cannot make an honest claim (red baseline, a file that survived every canary
 # it was offered — so the suite neither runs nor reads it — a bad spec, a tree
