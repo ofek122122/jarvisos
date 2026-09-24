@@ -1150,20 +1150,47 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `bash ops/ralph/runtests.sh tools` (117), `bash ops/ralph/qmltest.sh`
       (435, unchanged — no QML edited), `bash ops/ralph/hudscreens.sh`.)
 
-- [ ] A49. `ActionPlate` is now the ONLY plate in the stack that has
-      never been watched standing still. Five windows hold seven plates
-      between them — LinkPlate blind, StatePlate+OutputPlate, MicPlate+
-      HealthPlate, HeardPlate+ConfirmPlate — and `action.result` is the
-      one topic left. It should be the cheapest of the lot: `ActionState`
-      is a latch with a 30 s hold, exactly like `HeardState`, and A48 has
-      just proved a re-published latch holds still and costs nothing. The
-      catch is that it needs a SIXTH window for one plate, and a window
-      per plate is how this probe stops being a measurement and starts
-      being a fixture — the honest alternative is to light it inside
-      window 5, where the story is already right (jv-act asked, the
-      answer was no, the tool failed) and the growth check has a third
-      step to make. Worth thinking about before building. Discovered in
-      A48.
+- [x] A49. `ActionPlate` was the only plate in the stack that had never
+      been watched standing still. — 4b62514
+      (The decision the item asked for was made and it was NO SIXTH PAIR
+      OF PROCESSES: the same broker, the same shell and the same TURN as
+      A48's window, carried to its end — the user answers, jv-act runs
+      `fs.trash`, it fails. The probe still starts exactly five shells
+      and the WAYLAND_DEBUG count pins that. Running the story forward
+      earned a step nothing in this harness had ever taken: an outcome
+      landing while `ConfirmPlate` still stood would be jv-act reporting
+      a tool it was still asking permission for, so the answer goes on
+      the bus first and the region has to SHRINK — `grew_downwards` read
+      with its arguments swapped — back to (2284, 16, 2543, 84), the box
+      the heard line held before it was asked, to the pixel. The failure
+      then arrives 78 px taller for 36 commits. Window: 0 commits in 6 s
+      under 5 re-publishes, and the re-publish does more here than in
+      A48 — re-taking `ActionState.failure` also re-runs `toolFor()`,
+      which re-reads `intent.action` and re-resolves the tool name from
+      scratch, a binding that reads a SECOND topic every time the first
+      arrives. Mutation: the ACTION FAILED dot's opacity bound to the age
+      of the failure — qmllint-clean, builds, windows 1-5 read 0, the
+      sixth read 18, box unmoved. Also paid A20's honesty debt: `fs.trash`
+      is not in jv-act's registry and the sheet now says so, pinned by a
+      test. Tests: `bash ops/ralph/runtests.sh tools` (125),
+      `bash ops/ralph/qmltest.sh` (435, unchanged),
+      `bash ops/ralph/hudscreens.sh`.)
+
+- [ ] A50. **Human review.** The entire confirmation path has never once
+      been driven by the registry this machine deploys.
+      `services/jv-act/tools.toml` is v0 — "observe + benign only" — and
+      the confirmation rule is structural: ONLY destructive and
+      privileged tools are ever confirmed. So there is no tool on ares
+      today that can produce an `action.confirm` at all, and everything
+      downstream of one — `ConfirmPlate`, `ConfirmState`, jv-act's 15 s
+      window, its yes/no classifier, the `03-confirm` shot and two idle
+      windows — is exercised by composed frames only. The machinery is
+      built and reviewed and the composition is fair (registry v0 says
+      the destructive tools "arrive in later phases with their own
+      review"); what is missing is the first real one. Adding it is a
+      `services/jv-act/**` change, which GUARDRAILS forbids this loop
+      from touching, so it goes to `docs/optimization-backlog.md` as a
+      proposal for a human. Discovered in A49.
 
 - [x] A44. The live-lit window held a state nobody had photographed.
       — 3052b8f
@@ -1203,6 +1230,9 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       A48 makes it three: `grew_downwards` is now asked by three idle
       windows and the shot loop, and all four of them prove only that
       SOMETHING arrived under the thing above it.
+      A49 makes it four, and adds a mirror image: its shrink check proves
+      something LEFT the screen and is equally unable to say what. The
+      answer is the same for both, and so is the cost of getting one.
 
 - [x] A45. `docs/hud/screens/*.png` are not byte-reproducible, and the
       README now says so with numbers. — 3052b8f
@@ -1234,6 +1264,10 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       plugs in a dedicated speaker. Discovered in A41.
 
 ## Done
+- A49 — the last plate in the stack gets watched standing still, and the
+  turn gets an ending: a sixth measured window on the fifth's own broker
+  and shell, the first check of a plate LEAVING, 0 commits, and a
+  mutation the other five windows are blind to (4b62514, 2026-09-24)
 - A48 — the two plates whose words come off a latch get watched standing
   still: a fifth idle window, a re-published frame re-taking a latch once
   a second, 0 commits, and a mutation the other four windows are blind to

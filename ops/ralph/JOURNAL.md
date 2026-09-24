@@ -4271,3 +4271,116 @@ the copies.
   is still the smallest untouched item on the board. B20 and B17 are still
   both waiting on the same two minutes of a human's attention at a
   terminal.
+
+## 2026-09-24 — iteration 42 — A49: the last plate gets watched standing
+still, and the turn gets an ending
+
+`ActionPlate` was the only plate in this HUD that had never been held
+still and measured. Five idle windows hold seven plates between them and
+not one of them publishes an `action.result` at all, so the last one was
+out of reach of the whole probe.
+
+**The decision A49 was opened to make was about cost, and the answer was
+no sixth pair of processes.** A window per plate is how a probe stops
+being a measurement and starts being a fixture, and a sixth jarvisd plus
+a sixth jv-hud would have bought nothing but a longer run. So this is the
+same broker, the same shell and the same TURN as A48's window, carried to
+its end: the user asked for the downloads folder to be emptied, jv-act
+stopped in front of the tool, and now the user answers and the tool
+fails. The probe still starts exactly five shells, and the test that
+counts `WAYLAND_DEBUG` pins that — the two gates hold each other up.
+
+**Running the story forward is what earned the new step.** An
+`action.result` landing while `ConfirmPlate` still stood would be jv-act
+reporting a tool it was still asking permission to run, and
+`ConfirmState` would hold that question up perfectly happily — it lets go
+for an answer naming its own `request_id`, or for its 15 s, and for
+nothing else. So the answer goes on the bus first and the drawn region
+has to SHRINK: `sheet.grew_downwards` read with its arguments swapped,
+which says the stack with the question on it was taller at the same
+top-right corner. Nothing in this harness had ever measured a plate
+LEAVING. It lands on (2284, 16, 2543, 84) — the box the heard line held
+before it was asked, to the pixel — and the failure then arrives 78 px
+taller at (2284, 16, 2543, 162) for 36 commits.
+
+**The re-publish does one thing more here than it does in A48's window.**
+Re-taking `HeardState.transcript` replaces an envelope, moves a key and
+re-arms a one-shot timer. Re-taking `ActionState.failure` does all of
+that AND re-runs `toolFor()`, which reaches back to the `intent.action`
+still on the bus, compares its `request_id` and re-resolves the tool name
+from scratch — once a second, forever, arriving at the same string. No
+window above has a binding that reads a SECOND topic every time the first
+one arrives. Measured: 0 commits in 6 s under 5 re-publishes.
+
+**Mutated, because a window that passes on zero is a window every broken
+instrument also passes.** The considerate edit, moved to the one plate
+only this window has ever held: the ACTION FAILED dot's opacity bound to
+the age of the failure. No animation and no timer — the binding re-runs
+only when the latch is re-taken — and it passes qmllint and builds
+cleanly, which is the point of choosing it. Windows 1-5 all read 0 and
+the sixth read 18, with the drawn box unmoved. The mutation was applied
+to `ActionPlate.qml`, measured, and restored from a copy;
+`shell/jv-hud` is byte-identical to its parent commit.
+
+**An honesty debt got paid on the way, and it is the more interesting
+half of this iteration.** `fs.trash` is not in jv-act's registry.
+`services/jv-act/tools.toml` is v0 — "observe + benign only" — the
+confirmation rule is structural (only destructive and privileged tools
+are ever confirmed), and so there is no tool on this machine today that
+could produce an `action.confirm` at all. Asked for `fs.trash`, the real
+jv-act answers `unknown_tool` before it asks anybody anything. That has
+been true since A20 composed the frame, and the sheet's own comment
+claimed "every number in it is jv-act's own" without mentioning that the
+tool is not. The composition is still worth making — the thing under test
+is the confirmation MACHINERY, which is built, reviewed and structural,
+and registry v0 says the destructive tools "arrive in later phases with
+their own review" — but leaving it unsaid is what made it dishonest. It
+is now written under `CONFIRM_REQUEST`, and a test fails if the
+disclaimer leaves OR if the registry gains the tool and makes the
+disclaimer wrong (its message tells the reader to delete the paragraph).
+
+**Four frames of one turn, one id.** `TURN_REQUEST_ID` replaces four
+copies of `req-4f21`, because `schemas/intent.action.json` says in as many
+words what the id is for — it threads intent → confirm → result — and a
+drifted one is a question that never closes and a failure with no name. A
+test asserts the four carry it and that the intent's `utterance_id` is
+the transcript's own, so the window cannot quietly photograph two
+unrelated turns stacked on each other.
+
+`intent.action.args` carries `{"path": "~/Downloads"}` deliberately. It
+is the most sensitive body the bridge forwards, no element reads it, and a
+tools gate fails the build if one starts to — a frame with a real-looking
+path in it is the only way this harness exercises that claim at all. Same
+for `detail` on the result.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 125 (was 117; nine new, and
+  several existing counts updated for the sixth window),
+  `bash ops/ralph/qmltest.sh` — 435 (unchanged; no QML was edited),
+  `bash ops/ralph/hudscreens.sh` — all six idle windows 0, seven screens
+  written. Run twice end to end: once with the change, once with the
+  mutation (exit 1 on the sixth window), then the mutation reverted.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin. `shell/jv-hud` is byte-identical to its parent commit.
+  `docs/hud/screens/*.png` deliberately NOT regenerated: the HUD did not
+  change, and A45 measured that re-running the harness moves a handful of
+  pixels for no reason a reader could use.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  tools/tests/test_hudscreens.py, docs/hud/screens/README.md,
+  ops/ralph/hudscreens.sh
+- next: **A50** is the question A49 just exposed and could not answer
+  inside its own scope: jv-act's registry has NO destructive tool, so the
+  entire confirmation path — `ConfirmPlate`, `ConfirmState`, jv-act's
+  window, the yes/no classifier, `03-confirm`, two idle windows — is
+  exercised only by composed frames, and has never once been driven by
+  the registry this machine actually deploys. That is a human-review item
+  (adding a destructive tool is a `services/jv-act/**` change and
+  GUARDRAILS forbids touching it), so it belongs in
+  `docs/optimization-backlog.md` as a proposal rather than in Track A.
+  A47 is now four instances rather than three: four windows and the shot
+  loop all prove a plate ARRIVED and none can say which — and A49 adds
+  the mirror, a check that proves something LEFT and cannot say what.
+  A46 (declaring `JARVIS_VOICE_OUTPUT_DEVICE` in
+  `modules/jarvis-services.nix`) is still the smallest untouched item on
+  the board. B20 and B17 are still both waiting on the same two minutes
+  of a human's attention at a terminal.
