@@ -39,6 +39,10 @@ import Quickshell.Wayland
 // door (invariant 9: the look is identity, and identity is versioned). No
 // QML file in this directory may carry a hex code of its own.
 import "."
+// The Quickshell-free half (A9): logic and layout that a headless QML test
+// can build. `PlateStack` is the corner stack, and the only thing that knows
+// whether this surface has anything to show.
+import "core"
 
 ShellRoot {
   // One surface per connected monitor. Quickshell.screens is live, so a
@@ -87,13 +91,22 @@ ShellRoot {
       // Mapped only while something is genuinely on screen — including
       // while a plate is fading out, or the exit would be a surface
       // vanishing out from under it rather than an element evaporating.
-      visible: surface.selfTest || statePlate.shown || statePlate.lit || micPlate.shown || micPlate.lit || healthPlate.shown || healthPlate.lit
+      //
+      // The stack answers that question, because a list kept up here does
+      // not survive contact with a fourth element (A15): this used to be a
+      // hand-written OR with two terms per plate, and the plate that forgot
+      // to add itself would simply never have appeared — on a surface that
+      // is unmapped on purpose, so nothing would have failed and nothing
+      // would have noticed.
+      visible: surface.selfTest || stack.anyLit
 
       // The corner stack. Every plate in it draws nothing until it has
-      // something true to say, and a Column skips children that are not
-      // visible — so an empty plate costs no gap, and the survivors close
+      // something true to say, and makes itself invisible while it has
+      // nothing — so an empty plate costs no gap, and the survivors close
       // up rather than leaving a hole where a signal used to be.
-      Column {
+      PlateStack {
+        id: stack
+
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.topMargin: Theme.insetPx
@@ -103,10 +116,7 @@ ShellRoot {
         // What Jarvis is doing, from speech.state + audio.wake + audio.vad.
         // Draws nothing while idle or while the bus cannot be seen.
         StatePlate {
-          id: statePlate
-
           anchors.right: parent.right
-          visible: statePlate.lit
         }
 
         // Whether the microphone is open, from jv-ears' own capture
@@ -114,10 +124,7 @@ ShellRoot {
         // changes minute to minute, while the recording light is a
         // standing fact about the room and belongs where it can sit still.
         MicPlate {
-          id: micPlate
-
           anchors.right: parent.right
-          visible: micPlate.lit
         }
 
         // What is wrong with the machine, when anything is. Last in the
@@ -126,10 +133,7 @@ ShellRoot {
         // moment, and this one is about the state of things. On a well
         // machine it is never here at all.
         HealthPlate {
-          id: healthPlate
-
           anchors.right: parent.right
-          visible: healthPlate.lit
         }
       }
 

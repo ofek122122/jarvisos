@@ -161,6 +161,93 @@ def test_nothing_animates_without_going_through_motion():
     )
 
 
+# --- A15: the surface is mapped by the stack, not by a list --------------
+
+# One QML token: an identifier, a brace, or a comment to be ignored.
+QML_TOKEN = re.compile(r"(//[^\n]*)|([A-Za-z_]\w*)|(\{)|(\})")
+
+
+def shell_text() -> str:
+    return (ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8")
+
+
+def surface_visible_expr(text: str) -> str:
+    """The PanelWindow's own `visible:` binding — the one that decides whether
+    the HUD reaches the screen at all."""
+    exprs = re.findall(r"^      visible:(.+)$", text, re.M)
+    assert len(exprs) == 1, f"expected exactly one surface-level visible:, got {exprs}"
+    return exprs[0].strip()
+
+
+def plate_stack_children(text: str) -> list[str]:
+    """Type names declared DIRECTLY inside shell.qml's PlateStack block."""
+    body = text[text.index("PlateStack {") + len("PlateStack {"):]
+    depth, last, kids = 0, None, []
+    for comment, ident, opening, closing in QML_TOKEN.findall(body):
+        if comment:
+            continue
+        if ident:
+            last = ident
+        elif opening:
+            depth += 1
+            if depth == 1 and last and last[0].isupper():
+                kids.append(last)
+        elif closing:
+            depth -= 1
+            if depth < 0:
+                break
+    assert kids, "found no children in shell.qml's PlateStack"
+    return kids
+
+
+def test_the_shell_does_not_hand_enumerate_its_plates():
+    """A15: `visible` on the surface used to be an OR with two terms per
+    element, and it grew one every time the HUD did. The plate that forgot to
+    add itself would never have appeared — on a surface that is unmapped by
+    design, so nothing would fail and nothing would notice. The stack answers
+    now (core/PlateStack.qml, tested headlessly); this keeps the list from
+    growing back, because a list that is WRONG here is invisible.
+    """
+    expr = surface_visible_expr(shell_text())
+    assert "anyLit" in expr, (
+        "the surface must ask the stack whether anything is on screen: " + expr
+    )
+    assert not re.search(r"plate", expr, re.I), (
+        "the surface names individual plates again, so the next element can be "
+        "forgotten silently: " + expr
+    )
+
+
+def test_every_plate_in_the_stack_answers_for_itself():
+    """core/PlateStack.qml counts a child that answers NEITHER `shown` nor
+    `lit` as drawing — fail-safe, because a lost plate is worse than an empty
+    mapped surface. This is what keeps that branch unreachable in the real
+    shell, and what keeps a plate from taking up a gap in the stack it never
+    fills.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    for child in plate_stack_children(shell_text()):
+        assert child.endswith("Plate"), (
+            f"{child} sits in the corner stack but is not a plate; PlateStack "
+            "can only ask plates whether they are on screen"
+        )
+        qml = hud / f"{child}.qml"
+        assert qml.exists(), f"{child} in the stack has no {qml.name}"
+        text = qml.read_text("utf-8")
+        for prop in ("shown", "lit"):
+            assert f"readonly property bool {prop}:" in text, (
+                f"{qml.name} never declares `{prop}`, so the stack cannot ask it "
+                "whether it is on screen"
+            )
+        own = re.findall(r"^  visible:(.+)$", text, re.M)
+        assert len(own) == 1, f"{qml.name} must declare its own root visible:, got {own}"
+        assert "shown" in own[0] and "lit" in own[0], (
+            f"{qml.name}'s visible must be `shown || lit`: shown so it is in the "
+            f"layout from the first frame of its fade, lit so it keeps its place "
+            f"until the fade ends. Got:{own[0]}"
+        )
+
+
 def test_core_qmldir_registers_every_component_and_no_module_name():
     qmldir = gen.render_core_qmldir()
     assert "BusModel 1.0 BusModel.qml" in qmldir

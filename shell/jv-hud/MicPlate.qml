@@ -56,6 +56,14 @@ Item {
   implicitWidth: plate.implicitWidth
   implicitHeight: plate.implicitHeight
 
+  // A plate answers for itself: it takes room in the stack exactly while it
+  // is on screen, so a silenced plate leaves no gap and the ones below it
+  // close up. `shown || lit` and not just `lit`, so the plate is in the
+  // layout from the first frame of its fade rather than appearing into it.
+  // PlateStack reads the same two properties to decide whether the surface
+  // is mapped at all (A15) — nothing upstream keeps a list of us.
+  visible: root.shown || root.lit
+
   Rectangle {
     id: plate
 

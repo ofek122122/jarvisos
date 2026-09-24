@@ -86,6 +86,7 @@ CORE = (
     ("SpeechState", "SpeechState.qml"),  # what is Jarvis doing? (A3)
     ("MicState", "MicState.qml"),  # is the microphone open? (A4)
     ("HealthState", "HealthState.qml"),  # is anything wrong with Jarvis? (A6)
+    ("PlateStack", "PlateStack.qml"),  # is ANYTHING on screen? (A15)
 )
 
 HEX = re.compile(r"^#[0-9A-F]{6}$")
