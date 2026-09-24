@@ -3035,3 +3035,123 @@ find it again.
   spoken turn recorded at ares — and it is worth more now than it was
   this morning, because a recording with `sys.health` in it would be the
   first thing that could replay this whole measurement.
+
+## 2026-09-24 — iteration 31 — B14: `respond` stops being one number
+## over two services
+
+Track A was picked over first, as the ladder says, and every open item
+on it is gated on something this loop cannot supply: A11 waits on
+proposal R1, A13/A27 and A21/A22/A25 on two minutes of a human's
+opinion, A28/B10 on one spoken turn recorded at ares, A31 on whether
+the A29 stills were enough, A33 on the input mask ever being edited,
+A18 on a topic that does not exist yet. So: B14, which PHASE1-STATUS
+has been asking for since the 2026-09-15 latency FAIL.
+
+**The measurement had two services in one span.** B13 split a turn into
+`spoke` (the user), `hold` (ears' endpoint wait) and `respond`, and
+`respond` is jv-ears' ASR *and* jv-brain. PHASE1-STATUS carries those
+two as SEPARATE open latency items — "ASR is ~2.2 s fixed" and "prefill
+is fixed but generation is not" — and one number over both cannot say
+which of them a change moved. The figures it quotes for each came from
+llama-server's own timings and a stopwatch, not from the bus.
+
+**The frame that divides them was already there.** `jv-ears`'
+`_on_speech_end` publishes `audio.vad` speech_end, THEN runs whisper,
+THEN publishes the `audio.transcript` final. So the final is the seam,
+on the bus, in the right order, for free. `respond` now splits into
+`hear` (speech_end -> final: jv-ears' ASR) and `think` (final -> first
+`speech.say`: jv-brain to its first word, plus a bus hop each way),
+which partition it exactly. No new publisher, no schema change — B7's
+rule ("publish a gauge when something reads it") did not even need
+invoking, because nothing new is published.
+
+What the seam is NOT:
+
+  · **not a boundary.** B13's whole bug was a partial transcript being
+    allowed to say where an utterance began. A final says where ASR
+    ENDED, which is a moment inside a turn, not a turn. So `heard()`
+    annotates an utterance `audio.vad` already bounded and never
+    creates one — otherwise a bus with finals and no vad would print
+    `>>> turn` lines for things no service ever called a turn.
+  · **not any transcript.** Only `kind: final`. A partial is
+    provisional output that may be rewritten.
+  · **not an anchor that lands outside the span it divides.** A final
+    before its own speech_end, or after the first word answering it,
+    means two frames disagree about the order the pipeline ran in.
+    Both halves are refused, not one of them published as a negative —
+    and not just the half that would go negative, because an anchor
+    that is not trusted for one side is not trusted for the other.
+  · **not mandatory.** jv-ears publishes NO final for an utterance its
+    ASR read as empty (`_emit_transcript` returns early on empty text),
+    and a tap can simply have missed the frame. Then both print `?`,
+    `respond` stays whole, and the table says which frame was missing.
+
+`hear` and `think` are pushed to the stats on their own terms, unlike
+`spoke`/`hold`: they are two subtractions sharing a middle anchor, not
+two halves of one, and `hear` needs a speech_end where `think` does
+not. A tap that joined mid-utterance can therefore time the brain and
+not the ASR, and the `n` column is what says so.
+
+**The flake from iteration 30 was not a flake.** Adding one more
+integration test made `health_check_puts_the_worst_finding_first_and_fails`
+fail 5 runs out of 5 — and on the pre-change tree it passed 3 out of 3,
+so this was load, not chance. The cause: `silent_broker()` sets
+`health_period: 3600s` and a tokio interval's FIRST tick fires
+immediately, so jarvisd published a heartbeat at t=0 regardless. At
+that moment its accept loop has taken no connection, so the beat
+reaches nobody — unless the machine is busy enough that a client got
+accepted and subscribed before the health task was first polled, and
+then it reaches them. Which clients see a heartbeat was being decided
+by the scheduler. Both readers of `sys.health` are built on "a
+heartbeat speaks for two of its own periods"; a beat with an
+unpredictable audience is the one thing that rule cannot absorb. The
+broker's first beat is now due one whole period in, which is what
+`period_s` claims it is. Nothing in production loses a beat it could
+have read: `jv health --check` defaults to a period plus a margin, and
+the t=0 beat was unreachable by construction anyway.
+
+Mutations — 11 run, 11 caught, TWO REAL SURVIVORS fixed:
+
+  · SURVIVED, then fixed: dropping the `kind == "final"` check entirely
+    changed nothing. Every jv-ears partial is published BEFORE its
+    speech_end, so the out-of-order guard refused them anyway and the
+    `kind` check was doing no work the test could see — accidental
+    immunity, exactly the shape A18 warns about. The test now puts a
+    partial where a seam belongs, between speech_end and the first
+    word, where nothing but its `kind` can disqualify it.
+  · SURVIVED, then fixed: the earliest-ts test fed `14.0` then `13.5`,
+    and "keep whichever came last" gives the same answer as "keep the
+    earliest" for that order. It now runs both orders.
+  · Caught: a final conjuring an utterance; no ordering filter; a bad
+    seam killing `hear` but not `think`; keeping the latest ts; the
+    missing-seam footer removed; hear/think printed after respond;
+    `think` measured from speech_end (so it would equal `respond` and
+    double-count `hear`); `?` printed as `0ms`; the broker's immediate
+    tick restored; the broker's first beat at a quarter period.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 71 unit + 8 bus + 32
+  integration (was 63 + 7 + 31), green five consecutive times.
+  `bash ops/ralph/runtests.sh pylib` — 4, including
+  `test_health_heartbeat_arrives` against the REAL broker with the new
+  timing. `bash ops/ralph/runtests.sh jv-hud-bridge` — 25, three
+  against a real jarvisd.
+- build: `nix build .#jarvisd` ok (it runs the same tests in its
+  checkPhase), `nixos-rebuild build --flake .#ares` ok. Never
+  test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin touched.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/src/broker.rs, services/jarvisd/tests/cli.rs,
+  services/jarvisd/tests/bus.rs, PHASE1-STATUS.md
+- commit: f7f1572
+- next: **B15 plus B13's open question are still one conversation** —
+  which span the 2.5 s budget names, and whether the measurement should
+  end at `speech.say` (brain hands words to voice) or at
+  `speech.state` `speaking` (the user hears something). Ask them
+  together. **B16** (jv-brain publishing its own `first_token_ms`, so
+  `think` can say how much was the model) is the same move this made
+  for `hear`, and is worth doing the day someone optimises generation.
+  **B17** is new and cheap to ask for: nobody has ever LOOKED at
+  `jv tap --latency` output on a real turn, and the live line is now
+  six numbers wide — fold it into the same visit as B10/A28's recording
+  and A13/A27's two minutes at the screen. Track A unblocks the moment
+  a human spends ten minutes at ares; until then this loop has Track B.

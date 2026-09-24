@@ -373,16 +373,46 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       fixed. Tests: `bash ops/ralph/cargotest.sh jarvisd`,
       `bash ops/ralph/runtests.sh jv-ears`.)
 
-- [ ] B14. `respond` is one span and it is two services: ears' ASR and the
-      brain. Both are named in PHASE1-STATUS as separate open items (ASR is
-      ~2.2 s fixed; prefill is fixed but generation is not), and the split
-      between them is on the bus already — the `audio.transcript` final for
-      an utterance lands between its `speech_end` and its `speech.say`. One
-      more anchor would turn `respond` into `hear` + `think` with no new
-      publisher and no schema change. Not done here because B13 was about
-      the boundary that separates the user from the machine, and a span
-      that is entirely the machine's can wait until someone is optimising
-      it. Discovered in B13.
+- [x] B14. `respond` stops being one number over two services. — f7f1572
+      (`jv tap --latency` splits `respond` at the `audio.transcript` final
+      into `hear` — jv-ears' ASR — and `think` — jv-brain to its first word,
+      plus a bus hop each way. No new publisher, no schema change: jv-ears
+      runs whisper AFTER publishing `speech_end` and publishes the final
+      when it is done, so that frame IS the seam. The final is an anchor
+      INSIDE a turn and not a boundary, and is treated as one: it annotates
+      an utterance `audio.vad` already bounded and never conjures one, only
+      `kind: final` counts, and a seam that does not sit inside the span it
+      would divide refuses BOTH halves rather than publishing a negative.
+      An utterance with no final — jv-ears publishes none for one its ASR
+      read as empty — prints `?` for both and keeps `respond` whole.
+      Fixed on the way: `silent_broker()` in the tests was not silent. A
+      tokio interval's first tick fires IMMEDIATELY, so jarvisd published a
+      heartbeat at t=0, before its accept loop had taken a connection —
+      reaching nobody on an idle machine and whoever was already accepted
+      on a busy one. The new tests' load made that deterministic; the first
+      beat is now due one whole period in. 71 unit + 8 bus + 32 integration
+      (was 63 + 7 + 31), green five consecutive times; 11 mutations, 11
+      caught after two real survivors were fixed. Tests:
+      `bash ops/ralph/cargotest.sh jarvisd`.)
+
+- [ ] B16. `think` is jv-brain's prefill+generation AND two bus hops AND
+      whatever jv-brain's input worker was doing when the transcript
+      landed. On a busy turn those are not the same thing, and the span
+      that PHASE1-STATUS wants to optimise is the LLM's. jv-brain already
+      knows its own `first_token_ms` — publishing it in sys.health
+      `metrics` would let the tap say how much of `think` was the model
+      and how much was everything around it, the same way `hold` is read
+      off jv-ears. B7's rule applies: publish it when the tap reads it,
+      which is the day someone is optimising generation. Discovered in
+      B14.
+
+- [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
+      table six rows deep, and `jv tap --latency` prints a hop table above
+      both. Nothing has ever looked at that output on a real turn — the
+      only eyes on it are tests with 20 ms holds. Worth one read-through
+      by a human the first time B10's live recording is made, together
+      with A13/A27: if the live line wraps in a terminal it is worse than
+      the one number it replaced. Discovered in B14.
 
 - [ ] B15. Nothing measures the last hop. `jv tap` stops at `speech.say`,
       which is jv-brain handing words to jv-voice — the user hears nothing
@@ -821,6 +851,9 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       it the day the mask is ever edited; not before. Discovered in A32.
 
 ## Done
+- B14 — `respond` stops being one number over two services: split at the
+  final transcript into `hear` (ASR) and `think` (the brain), and the
+  broker's first heartbeat stops being a scheduling race
 - B13 — `jv tap --latency` stops reporting one number: a turn split into
   spoke / hold / respond, and the gauge jv-ears had to publish for it
   (ee96c43, 2026-09-24)
