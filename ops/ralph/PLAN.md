@@ -935,7 +935,10 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the mic and health plates; the other three need a frame clock the
       harness can hold. Worth building the day a second element is allowed
       to move, which is exactly what A21/A25 are asking for. Discovered in
-      A34. **A42 is the cheaper half of this, and A40 made it possible.**
+      A34. **A42 DID the cheaper half (4c63122): the lit-and-still
+      measurement now exists on a live bus, with `OutputPlate` as the
+      plate. What is left of A35 is the other four plates — tracked as
+      A43, which inherits A42's `feed_snapshots`.**
 
 - [ ] A36. The probe counts frames and never milliseconds. §06 budgets the
       ambient scene at "< 2 ms of GPU per frame AND 0 fps when idle", and
@@ -1053,22 +1056,57 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `context.system` schema change (FROZEN) and therefore a proposal,
       not a build. Discovered in A40.
 
-- [ ] A42. A40 hands A35 the lit-and-still measurement it said was worth
-      building. A35's complaint was that the only lit state a harness can
-      hold still is `LinkPlate` with no bus — every other plate is a frame
-      ageing out — so "0 fps with a plate on screen" has only ever been
-      measured on a HUD that could see NOTHING. `OutputPlate` is the first
-      plate that stays lit on a LIVE bus for as long as the harness keeps
-      feeding it: one `speaking` frame plus a `context.system` snapshot
-      re-published every second, indefinitely. That window would measure
-      something genuinely new — a mapped surface, a real bus, a plate
-      drawn, a property changing once a second (the snapshot's `seq`
-      moves, the expiry timer re-arms) and NOTHING on screen changing. If
-      Qt commits a frame for that, §06's budget is being spent on
-      bookkeeping. One more window in `probe_idle_frames`, which already
-      has both halves of the machinery. Discovered in A40.
+- [x] A42. "0 fps when idle" stops being measured only on a HUD with no
+      bus. — 4c63122
+      (A third window in `probe_idle_frames`: a real broker, jv-voice
+      `speaking`, and a MUTED `context.system` snapshot re-published at
+      1 Hz, so SPEAKING + OUTPUT MUTED sit on screen for the whole six
+      seconds while the `seq` moves, OutputState's expiry timer re-arms
+      and every binding downstream of the snapshot re-evaluates to the
+      same value. 0 commits under 6 snapshots. Lit in TWO steps — audible
+      sink first, then the mute — and the region must grow DOWNWARDS with
+      its top and right edges unmoved, so the thing held still provably
+      includes A40's plate and not just StatePlate; the first check of
+      A40's decision through a compositor. The box is re-measured BEFORE
+      the count is judged, because a plate that expired mid-window commits
+      the traffic of leaving. Three mutations: the feed replaced by a
+      sleep is caught on the box (shrunk back to SPEAKING alone, 28
+      commits of OutputPlate leaving); an infinite animation is caught by
+      A34's window too, so it proves nothing here; and a "freshness" fade
+      bound to `ageOf(snapshot)` — no animation, no timer, invisible to
+      every photograph — reads 0 / 0 / **18**, which is the whole
+      justification for the window. Two premises were wrong first time:
+      the top-LEFT corner does move (OUTPUT MUTED is a longer line than
+      SPEAKING), and `feed_snapshots` has to run inside the WAIT loops too
+      or a slow capture outlasts `snapshotS`. Tests:
+      `bash ops/ralph/runtests.sh tools` (96), `bash ops/ralph/qmltest.sh`
+      (423), `bash ops/ralph/hudscreens.sh`.)
+
+- [ ] A43. What is left of A35 after A42: `ConfirmPlate`, `HeardPlate`,
+      `MicPlate` and `HealthPlate` have still never been watched standing
+      still. A42 built the machinery — `feed_snapshots` publishes any
+      frame list at 1 Hz for a given duration — and A35 already named the
+      cheap half: a `sys.health` heartbeat with a long `period_s` keeps
+      MicState and HealthState believing one frame for as long as the
+      harness likes, which buys two of the four with no new mechanism.
+      The other two need a frame clock the harness can hold, which is
+      genuinely more work and should wait for a reason. Discovered in A42.
+
+- [ ] A44. The live-lit window holds a state nobody has photographed.
+      A40 shipped `OutputPlate` with a contact-sheet tile and no SCREEN:
+      SPEAKING with OUTPUT MUTED under it, at ares' real monitor sizes, is
+      the one shot `docs/hud/screens/` is missing — and the harness now
+      composes exactly those frames and holds them steady for ten seconds
+      as a side effect of measuring something else. It would be a new
+      `SHOTS` entry (`04-unheard`) reusing `sheet.VOICE_SPEAKING` and
+      `sheet.SINK_MUTED`, plus one `captures` list and one README section.
+      Small, and the only picture in the sheet that would show two plates
+      disagreeing about whether Jarvis is working. Discovered in A42.
 
 ## Done
+- A42 — "0 fps when idle" stops being measured only on a HUD with no bus:
+  a plate held lit on a LIVE bus, 0 commits under 6 snapshots, and a
+  mutation the other two windows cannot see (4c63122, 2026-09-24)
 - B16 — `think` stops being one number over the model and the queue: the
   model's share of it, stated by the only service that can see it
   (ceca526, 2026-09-24)

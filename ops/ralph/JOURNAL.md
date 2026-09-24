@@ -3664,3 +3664,112 @@ lands, and the table (rows, not columns) carries the distributions.
   confidently wrong, and the schema-legal half of its fix is the same
   shape as this one — except that a device NAME cannot ride `metrics`,
   which is numbers-only, so that half is smaller than it looks.
+
+## 2026-09-24 — iteration 36 — A42: the idle probe gets a window on a live bus
+
+**What.** A third window in `probe_idle_frames` (tools/hudscreens/shoot.py):
+a plate on screen, a real broker, and a `context.system` snapshot arriving
+every second for the whole six seconds. It reads **0 commits under 6
+snapshots**.
+
+**Why it was worth a whole iteration.** A34 measured invariant 10's one
+cost claim — "0 fps when idle" — over two windows, and stated its own
+limit in the plan the same day (A35): the only lit state a harness could
+hold still was `LinkPlate` with **no bus at all**, because every other
+thing this HUD says is a frame ageing out (a heartbeat speaks for two of
+its own periods, a confirmation for the window jv-act declared). A HUD
+that can see nothing has nothing arriving to make it re-render, so half
+of that zero was a fact about the silence rather than about the shell.
+The quiet window has the traffic and no plate; A34's lit window has the
+plate and no traffic. Neither is the state the HUD is in on a running
+machine.
+
+A40's `OutputState` is the first element that can be both: a LIVE READING
+of two topics rather than a latch, so it stays true for exactly as long as
+the frames keep coming. One `speaking` from jv-voice (which does not
+expire on its own) plus a muted snapshot at jv-context's own 1 Hz, and
+SPEAKING + OUTPUT MUTED sit on screen indefinitely while the `seq` moves,
+the expiry timer re-arms, and every binding downstream of the snapshot
+re-evaluates — to the same values. A commit there is a re-render on
+**bookkeeping**, and that is a way of spending §06's budget that neither
+window above can see.
+
+**Three decisions.**
+
+1. *Lit in TWO steps.* "Something is drawn" was not the claim.
+   `StatePlate` has said SPEAKING since A3 and lights on the jv-voice
+   frame alone — so a window that only checked for pixels could be holding
+   StatePlate still with OutputPlate never having appeared, and it would
+   report the identical zero. So: an AUDIBLE sink first, then the mute, and
+   the drawn region has to grow downwards. That is also the first time
+   A40's decision (this line exists only while the sink is silent) has been
+   checked through a compositor rather than in a QML test.
+2. *The box before the count.* A plate that expired mid-window would have
+   committed the traffic of LEAVING, and reporting that as "something in
+   the shell is animating" would send the next reader hunting an animation
+   that does not exist. So the region is re-measured first and the commit
+   count is quoted inside that failure.
+3. *Both boxes read after a settle.* §06's fade is a real animation and a
+   region measured half way through one is smaller than the plate.
+   Comparing two mid-fade boxes would make the growth check a coin flip.
+
+**Two premises found wrong by running it.**
+
+- The growth check first insisted the **top-left** corner stay put. It
+  fails: the stack is docked to the top-right and `OUTPUT MUTED` is a
+  longer line than `SPEAKING`, so the region widens leftwards by 32 px.
+  The real invariant is top edge + RIGHT edge unmoved, bottom grown, left
+  edge free to travel outwards.
+- `feed_snapshots` was written as politeness and is load-bearing. A capture
+  of a 2560x1440 screen plus a numpy compare is slow enough to outlast
+  `OutputState.snapshotS` (3 s), so the *wait* loops have to keep feeding
+  too or they watch the plate they are waiting for expire and then blame
+  the element.
+
+**Mutations — three, all three informative.**
+
+- *Feed replaced with a plain `sleep`* → caught, on the BOX: it had shrunk
+  back to `(2444,16,2543,48)`, SPEAKING alone. 28 commits, every one of
+  them OutputPlate leaving. This is decision 2 earning itself.
+- *Infinite `SequentialAnimation` on the dot's opacity inside OutputPlate*
+  → caught, but by **A34's** lit window (143 commits arriving, 1113 in the
+  window), not by the new one. An animation runs whether or not anyone can
+  see it, so this is the failure the first two windows were already built
+  for. Recorded because it is the obvious mutation to reach for and it
+  proves nothing about A42.
+- *A "freshness" fade* — the dot's opacity bound to `ageOf(snapshot)`.
+  No animation, no timer, no loop: the binding re-runs only when a frame
+  lands, which is once a second, forever, on any running machine. The
+  drawn box never moves and every photograph is identical. **Quiet read 0.
+  A34's lit window read 0. This one read 18** (three surfaces x six
+  seconds). That is the whole justification for the window, and it is the
+  kind of edit a reviewer would call considerate.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 96 (was 91); five new, and
+  two of them are about the frames rather than the probe (both hand-written
+  bodies are validated against `schemas/speech.state.json` and
+  `schemas/context.system.json` for required/unknown keys and the state
+  enum — a harness publishing an illegal body measures a machine that
+  cannot exist). `bash ops/ralph/qmltest.sh` — 423, unchanged; no QML was
+  edited, only mutated and reverted (md5 verified both ways).
+  `bash ops/ralph/hudscreens.sh` — all three idle windows 0, the click
+  probe and every photograph unchanged.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin. `shell/` is untouched in the commit.
+- files: tools/hudscreens/sheet.py (SINK_MUTED, VOICE_SPEAKING),
+  tools/hudscreens/shoot.py (feed_snapshots, wait_for_drawing, the third
+  window; the quiet window now uses the shared feeder),
+  tools/tests/test_hudscreens.py, ops/ralph/hudscreens.sh,
+  docs/hud/screens/README.md
+- next: A35 asked for a lit-and-still measurement on a live bus and now has
+  one, so what is left of it is the *other* plates — ConfirmPlate,
+  HeardPlate, MicPlate and HealthPlate have still never been watched
+  standing still, and `feed_snapshots` is most of the machinery for the two
+  that a long `period_s` heartbeat would buy (**A43**). The second thing
+  this iteration created is smaller and sharper: the live-lit window now
+  holds a state nobody has photographed, and a 300x560 crop of SPEAKING
+  with OUTPUT MUTED under it would be the one shot the screen sheet is
+  missing for A40 (**A44**). A13/A27/A38 remain the oldest open question
+  and are still one two-minute human opinion, answerable from
+  `docs/hud/screens/02-heard-desk.png` without sitting at ares.
