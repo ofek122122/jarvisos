@@ -238,6 +238,13 @@ in
     systemd.user.services.jv-hud = {
       description = "Jarvis HUD (Quickshell layer-shell overlay)";
       unitConfig.ConditionUser = "ofek";
+      # Part of the graphical session: starts once niri is up (which exports
+      # WAYLAND_DISPLAY into the user manager) and stops with it. The HUD is
+      # 0 fps when idle and empty until a real signal, so running it always is
+      # correct (blueprint §06 / invariant 10).
+      wantedBy = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" ];
       environment = commonEnv;
       serviceConfig = {
         ExecStart = "${jv-hud}/bin/jv-hud";
