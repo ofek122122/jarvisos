@@ -1,0 +1,184 @@
+"""What the screen sheet photographs, and on which monitors (PLAN A30).
+
+Data only, stdlib only. `tools/hudscreens/shoot.py` executes it and
+`tools/tests/test_hudscreens.py` reads it, so the shot list, the monitor
+sizes and the frames behind each picture are stated once.
+
+The difference between this sheet and the contact sheet in `docs/hud`
+(A29) is the whole point of it: A29 renders the plates into a 300x560
+rectangle with a plain QML engine, which is the HUD's CONTENT and nothing
+else. This one runs the REAL `jv-hud` — quickshell, layer-shell, the real
+bridge, the real jarvisd — on a real wlroots compositor with ares' three
+monitors, and photographs the screens. Everything A29 had to disclaim is
+what this exists to show: the surface on every monitor at once, the edge
+it docks to, and the emptiness it leaves behind when it has nothing to
+say.
+"""
+
+# ares' monitors, as CLAUDE.md declares them: one 2560x1440 primary and
+# two 1920x1080 at its side. The refresh rates are real on ares and
+# meaningless here (a headless backend has no scanout), so they are not
+# claimed anywhere; what the sheet is asking is a question about SIZE —
+# whether an 11 px label docked to the corner of a 1440p panel reads the
+# same as on a 1080p one beside it.
+#
+# The names are the headless backend's, not ares'. ares has HDMI-A-1 and
+# DP-1/DP-2, and nothing here should pretend otherwise: the compositor is
+# real, the monitors are not.
+OUTPUTS = [
+    {"name": "HEADLESS-1", "role": "primary", "width": 2560, "height": 1440, "x": 0},
+    {"name": "HEADLESS-2", "role": "side", "width": 1920, "height": 1080, "x": 2560},
+    {"name": "HEADLESS-3", "role": "side2", "width": 1920, "height": 1080, "x": 4480},
+]
+
+DESK_WIDTH = sum(o["width"] for o in OUTPUTS)
+DESK_HEIGHT = max(o["height"] for o in OUTPUTS)
+
+# The desktop behind the HUD. The real surface is `color: "transparent"`
+# and floats over whatever Niri has on screen, so a photograph has to put
+# SOMETHING behind it or `plate_opacity = 0.86` is invisible and the shot
+# is a picture of the HUD over a void.
+#
+# Same flat grey A29's scene uses, and for the same reason: a colour that
+# appeared in personality/theme.toml would be a colour a reader could
+# mistake for Jarvis's own. tools/tests/test_hudscreens.py holds both
+# halves of that — the two harnesses agree, and neither names a palette
+# entry.
+BACKDROP = "#31353B"
+
+# The surface box shell.qml declares, and the inset it docks by. The shots
+# are checked against these: a plate that drew somewhere other than the
+# top-right corner of every monitor would be a layer-shell anchor that
+# silently stopped working, and it would look perfectly fine in a picture
+# nobody measured.
+SURFACE_W = 300
+SURFACE_H = 560
+INSET = 16
+
+
+def _beat(service, state="ok", metrics=None, notes=None, uptime_s=1847.0, period_s=5.0):
+    """A sys.health heartbeat, from the service's own src.
+
+    `src` matters and is not decoration: core/HealthState.qml refuses a
+    body that names a service other than the envelope's sender, so a
+    heartbeat published under the harness's own name reads as `unknown`
+    and the sheet would be a picture of a machine in trouble.
+    """
+    body = {
+        "service": service,
+        "state": state,
+        "uptime_s": uptime_s,
+        "period_s": period_s,
+    }
+    if metrics is not None:
+        body["metrics"] = metrics
+    if notes is not None:
+        body["notes"] = notes
+    return {"publish": {"topic": "sys.health", "src": service, "body": body}}
+
+
+# jv-ears with a real device open: the counters core/MicState.qml reads to
+# decide the recording light. Without it the mic plate says nothing, which
+# is correct and also means the sheet would never photograph the one
+# indicator invariant 10 says must not be fakeable.
+MIC_OPEN = _beat(
+    "jv-ears",
+    metrics={
+        "mic_open": 1,
+        "capture_age_s": 0.02,
+        "captured_s": 1846.4,
+        "capture_stall_s": 2.0,
+    },
+)
+
+
+SHOTS = [
+    {
+        "file": "01-quiet",
+        "lit": False,
+        "captures": ["desk"],
+        # Nothing at all. jarvisd is up, the bridge is subscribed, every
+        # plate has looked at the bus and decided it has nothing true to
+        # say — so the shell leaves all three surfaces unmapped and the
+        # screens are the desktop. This is the HUD's ordinary state and
+        # the one picture that has to be boring.
+        "source": "recorded from a live bus with nothing published on it",
+        "frames": [],
+    },
+    {
+        "file": "02-heard",
+        "lit": True,
+        "captures": ["desk", "primary", "side"],
+        # The real recording, whole (B3/B9): wake, partials, the final.
+        # The heartbeat and the brain.request under it are composed —
+        # nothing committed has ever recorded sys.health or a turn
+        # reaching jv-brain (B10/A28).
+        "source": (
+            "recorded (harness/fixtures/sessions/hey-jarvis-clean.jsonl, "
+            "replayed whole onto the live bus) + composed heartbeat and "
+            "brain.request"
+        ),
+        "frames": [
+            {"replay": "hey-jarvis-clean"},
+            MIC_OPEN,
+            {
+                "publish": {
+                    "topic": "brain.request",
+                    "src": "jv-brain",
+                    "body": {
+                        "text": "Hey Jarvis, what time is it?",
+                        "source": "voice",
+                        "utterance_id": "5ab8fecf-13d0-4f86-aa5d-0b2cc23b4d5d",
+                    },
+                }
+            },
+        ],
+    },
+    {
+        "file": "03-confirm",
+        "lit": True,
+        "captures": ["desk", "primary"],
+        # COMPOSED. jv-act stopping in front of a destructive tool, in its
+        # own words, with the window running. The one thing this HUD ever
+        # shows that is waiting on YOU — and the reason its size on a real
+        # 1440p panel is worth measuring rather than guessing.
+        "source": "composed (nothing committed has recorded jv-act asking)",
+        "frames": [
+            MIC_OPEN,
+            {
+                "publish": {
+                    "topic": "action.confirm",
+                    "src": "jv-act",
+                    "body": {
+                        "kind": "request",
+                        "request_id": "req-4f21",
+                        "tool": "fs.trash",
+                        "summary": (
+                            "move 14 files in ~/Downloads to the trash — yes or no?"
+                        ),
+                        "window_s": 15.0,
+                    },
+                }
+            },
+        ],
+    },
+]
+
+
+def capture_files(shot):
+    """The PNG names one shot writes, in reading order."""
+    return [f"{shot['file']}-{c}.png" for c in shot["captures"]]
+
+
+def all_files():
+    out = []
+    for shot in SHOTS:
+        out.extend(capture_files(shot))
+    return out
+
+
+def output_by_role(role):
+    for o in OUTPUTS:
+        if o["role"] == role:
+            return o
+    raise KeyError(role)
