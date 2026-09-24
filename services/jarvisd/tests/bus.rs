@@ -227,3 +227,35 @@ async fn invalid_envelope_rejected_broker_survives() {
         .unwrap();
     assert!(recv_frame(&mut c, 1000).await.is_some());
 }
+
+/// The wire convention goes both ways. `to_value_named` is how every service
+/// puts a generated binding on the bus; `from_value_named` is how a consumer
+/// reads one back, and it has to survive the part the obvious route does not:
+/// the bus spells an enum as its snake_case STRING.
+#[test]
+fn a_schema_binding_round_trips_through_the_wire_convention() {
+    use jarvisd::broker::{from_value_named, to_value_named};
+    use jarvisd::schema::{ActionConfirm, ActionConfirmAnsweredBy, ActionConfirmKind};
+
+    let answer = ActionConfirm {
+        kind: ActionConfirmKind::Answer,
+        request_id: "req-1".into(),
+        tool: None,
+        summary: None,
+        window_s: None,
+        granted: Some(true),
+        answered_by: Some(ActionConfirmAnsweredBy::Cli),
+    };
+    let wire = to_value_named(&answer).unwrap();
+    // The enums really are strings on the wire — that is the thing the rmpv
+    // deserializer chokes on, so assert it rather than trusting it.
+    assert_eq!(jarvisd::cli::get_str(&wire, "kind").as_deref(), Some("answer"));
+    assert_eq!(jarvisd::cli::get_str(&wire, "answered_by").as_deref(), Some("cli"));
+    assert_eq!(from_value_named::<ActionConfirm>(&wire).unwrap(), answer);
+
+    // A body with a field the schema does not have is refused, not ignored:
+    // the bindings are generated with deny_unknown_fields for exactly that.
+    let mut extra = wire.as_map().unwrap().clone();
+    extra.push(("granted_maybe".into(), true.into()));
+    assert!(from_value_named::<ActionConfirm>(&rmpv::Value::Map(extra)).is_err());
+}

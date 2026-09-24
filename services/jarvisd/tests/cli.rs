@@ -16,9 +16,10 @@
 
 mod common;
 
-use common::{body, start, TestBus};
+use common::{body, next_frame_of, start, subscribe_live, TestBus};
 use jarvisd::broker::{BusAddr, Config};
 use jarvisd::client::BusClient;
+use jarvisd::schema::{ActionConfirm, ActionConfirmAnsweredBy, ActionConfirmKind};
 use std::io::Read;
 use std::time::Duration;
 
@@ -35,11 +36,16 @@ impl Out {
 }
 
 fn spawn_jv(bus: &str, args: &[&str]) -> std::process::Child {
-    std::process::Command::new(env!("CARGO_BIN_EXE_jv"))
-        .arg("--bus")
-        .arg(bus)
-        .args(args)
-        .stdout(std::process::Stdio::piped())
+    spawn_jv_env(bus, args, &[])
+}
+
+fn spawn_jv_env(bus: &str, args: &[&str], env: &[(&str, &str)]) -> std::process::Child {
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_jv"));
+    cmd.arg("--bus").arg(bus).args(args);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("spawn jv")
@@ -225,4 +231,213 @@ async fn ctrl_c_stops_cleanly_and_still_prints_the_summary() {
     assert_eq!(out.code, 0, "an interrupted open-ended tap is a success; stderr: {}", out.stderr);
     assert!(out.stdout.contains("--- hop latency:"), "summary missing:\n{}", out.stdout);
     assert!(out.stdout.contains("jv.test"), "{}", out.stdout);
+}
+
+
+// ---------------------------------------------------------------- act-log
+//
+// `jv act-log` is the only way a human reads back what jv-act — the one service
+// allowed to change the machine — actually did. It had no test at all: not that
+// it can read the file jv-act writes, not that `--tail` shows the newest
+// entries, not that a missing log is distinguishable from an empty one.
+
+/// One audit line in the shape jv-act writes it. The field set mirrors
+/// `AuditEntry` in `services/jv-act/src/audit.rs` (human-review-only, so it
+/// cannot be imported from here — and jv-act depends on this crate, so the
+/// dependency could not go the other way either).
+fn audit_entry(tool: &str, outcome: &str, confirm: Option<(bool, &str)>) -> String {
+    let mut e = serde_json::json!({
+        "ts": "2026-09-24T10:00:00Z",
+        "ts_mono": 12.5,
+        "request_id": "req-1",
+        "tool": tool,
+        "args": {"path": "/tmp/x"},
+        "capability": "destructive",
+        "outcome": outcome,
+        "duration_ms": 7.0,
+    });
+    if let Some((granted, by)) = confirm {
+        e["confirm"] = serde_json::json!({"granted": granted, "answered_by": by});
+    }
+    e.to_string()
+}
+
+/// An audit file, and the `--bus` argument for a command that needs no bus.
+fn audit_file(lines: &[String]) -> (tempfile::TempDir, std::path::PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("audit.jsonl");
+    let mut text = String::new();
+    for l in lines {
+        text.push_str(l);
+        text.push('\n');
+    }
+    std::fs::write(&path, text).unwrap();
+    (tmp, path)
+}
+
+#[tokio::test]
+async fn act_log_renders_every_field_of_a_real_entry_oldest_first() {
+    let (_tmp, path) = audit_file(&[
+        audit_entry("window.focus", "ok", None),
+        audit_entry("fs.trash", "ok", Some((true, "voice"))),
+    ]);
+    let out = wait_out(
+        spawn_jv_env("/nonexistent/no-bus-needed.sock", &["act-log"], &[("JARVIS_ACT_AUDIT", path.to_str().unwrap())]),
+        8.0,
+    )
+    .await;
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].contains("window.focus"), "{:?}", lines[0]);
+    assert!(lines[1].contains("fs.trash"), "newest last: {:?}", lines[1]);
+    assert!(lines[1].contains("confirm=true/voice"), "{:?}", lines[1]);
+    assert!(lines[1].contains("destructive"), "{:?}", lines[1]);
+    assert!(lines[1].contains(r#"args={"path":"/tmp/x"}"#), "{:?}", lines[1]);
+    // A complete entry must render with nothing unknown in it: a '?' here means
+    // jv-act writes a field under a name this reader does not look for.
+    assert!(!lines[1].contains('?'), "a full jv-act entry rendered as unknown: {:?}", lines[1]);
+    assert!(out.stderr.is_empty(), "a clean log must not warn: {}", out.stderr);
+}
+
+#[tokio::test]
+async fn act_log_tail_shows_the_newest_entries() {
+    let (_tmp, path) = audit_file(&[
+        audit_entry("a.one", "ok", None),
+        audit_entry("a.two", "denied", None),
+        audit_entry("a.three", "ok", None),
+    ]);
+    let out = wait_out(
+        spawn_jv_env(
+            "/nonexistent/no-bus-needed.sock",
+            &["act-log", "--tail", "2"],
+            &[("JARVIS_ACT_AUDIT", path.to_str().unwrap())],
+        ),
+        8.0,
+    )
+    .await;
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].contains("a.two") && lines[0].contains("denied"), "{:?}", lines[0]);
+    assert!(lines[1].contains("a.three"), "{:?}", lines[1]);
+}
+
+/// "jv-act has never acted" and "I cannot find the record" must not look the
+/// same. An empty exit-0 listing for a missing file would be a lie about the
+/// most safety-relevant file on the machine.
+#[tokio::test]
+async fn a_missing_audit_log_is_an_error_not_an_empty_history() {
+    let tmp = tempfile::tempdir().unwrap();
+    let missing = tmp.path().join("nope").join("audit.jsonl");
+    let out = wait_out(
+        spawn_jv_env(
+            "/nonexistent/no-bus-needed.sock",
+            &["act-log"],
+            &[("JARVIS_ACT_AUDIT", missing.to_str().unwrap())],
+        ),
+        8.0,
+    )
+    .await;
+
+    assert_ne!(out.code, 0, "stdout: {}", out.stdout);
+    assert!(out.stdout.is_empty(), "{}", out.stdout);
+    assert!(out.stderr.contains("no audit log at"), "{}", out.stderr);
+    assert!(out.stderr.contains("audit.jsonl"), "say WHICH file: {}", out.stderr);
+}
+
+/// The entry most likely to be half-written is the last one — the action that
+/// was running when the machine went down. Dropping it silently turns a torn
+/// record into a clean one.
+#[tokio::test]
+async fn a_torn_audit_line_is_reported_and_fails_the_command() {
+    let (_tmp, path) = audit_file(&[
+        audit_entry("a.one", "ok", None),
+        r#"{"ts":"2026-09-24T10:00:01Z","tool":"fs.tr"#.to_string(),
+    ]);
+    let out = wait_out(
+        spawn_jv_env("/nonexistent/no-bus-needed.sock", &["act-log"], &[("JARVIS_ACT_AUDIT", path.to_str().unwrap())]),
+        8.0,
+    )
+    .await;
+
+    assert_eq!(out.code, 1, "a hole in the audit trail must be scriptable: {}", out.stdout);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 2, "the readable entry is still printed: {lines:?}");
+    assert!(lines[0].contains("a.one"), "{:?}", lines[0]);
+    assert!(lines[1].starts_with("!! unreadable audit line 2"), "{:?}", lines[1]);
+    assert!(out.stderr.contains("could not be read"), "{}", out.stderr);
+}
+
+// ---------------------------------------------------------------- confirm
+//
+// `jv confirm` is the one CLI path that can cause a real action to happen —
+// answering a destructive tool's confirmation. Nothing asserted the frame it
+// publishes is the frame jv-act resolves on, and every field of it matters:
+// jv-act ignores an answer whose kind is not "answer", whose granted is not a
+// bool, or whose answered_by is not exactly "cli" (it echoes its own
+// voice/timeout answers on this same topic, and must not re-resolve them).
+
+#[tokio::test]
+async fn confirm_publishes_the_answer_jv_act_resolves() {
+    let bus = start(Config::default()).await;
+    let mut watch = BusClient::connect(&bus.addr, "watch").await.unwrap();
+    subscribe_live(&bus, &mut watch, &["action.confirm"]).await;
+
+    for (spelling, granted) in [("yes", true), ("y", true), ("no", false), ("n", false)] {
+        let rid = format!("req-{spelling}");
+        let out = wait_out(spawn_jv(&bus.bus_arg(), &["confirm", &rid, spelling]), 8.0).await;
+        assert_eq!(out.code, 0, "'{spelling}' stderr: {}", out.stderr);
+        assert!(
+            out.stdout.contains(&format!("answer sent: {rid} -> {}", if granted { "yes" } else { "no" })),
+            "{}",
+            out.stdout
+        );
+
+        let frame = next_frame_of(&mut watch, "action.confirm", 5.0)
+            .await
+            .unwrap_or_else(|| panic!("'{spelling}' published no action.confirm frame"));
+
+        // Envelope: invariant 4 — ts, seq, src, conf on every frame. The schema
+        // pins conf = 1.0 for this topic: a confirmation is not a guess.
+        assert_eq!(jarvisd::cli::get_str(&frame, "src").as_deref(), Some("jv-cli"));
+        assert_eq!(jarvisd::cli::get_f64(&frame, "conf"), Some(1.0));
+        assert_eq!(jarvisd::cli::get_f64(&frame, "v"), Some(1.0), "body schema v");
+        assert!(jarvisd::cli::get_f64(&frame, "ts").is_some_and(|t| t > 0.0));
+
+        // Body, through the FROZEN schema binding (deny_unknown_fields), so a
+        // field the CLI invents or misspells fails here rather than being
+        // ignored in silence by jv-act.
+        let body = jarvisd::cli::get(&frame, "body").cloned().expect("body");
+        let ac: ActionConfirm =
+            jarvisd::broker::from_value_named(&body).expect("action.confirm v1 must accept it");
+        assert_eq!(ac.kind, ActionConfirmKind::Answer);
+        assert_eq!(ac.request_id, rid);
+        assert_eq!(ac.granted, Some(granted));
+        assert_eq!(ac.answered_by, Some(ActionConfirmAnsweredBy::Cli), "jv-act acts only on answered_by=cli");
+        // request-only fields stay absent on an answer.
+        assert_eq!(ac.tool, None);
+        assert_eq!(ac.summary, None);
+        assert_eq!(ac.window_s, None);
+    }
+}
+
+/// An answer nobody can read must not become a grant — and must not become a
+/// denial either. It must not reach the bus at all.
+#[tokio::test]
+async fn confirm_refuses_an_unreadable_answer_and_publishes_nothing() {
+    let bus = start(Config::default()).await;
+    let mut watch = BusClient::connect(&bus.addr, "watch").await.unwrap();
+    subscribe_live(&bus, &mut watch, &["action.confirm"]).await;
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["confirm", "req-9", "maybe"]), 8.0).await;
+    assert_ne!(out.code, 0, "stdout: {}", out.stdout);
+    assert!(out.stderr.contains("yes or no"), "{}", out.stderr);
+    assert!(out.stdout.is_empty(), "{}", out.stdout);
+    assert!(
+        next_frame_of(&mut watch, "action.confirm", 0.5).await.is_none(),
+        "an unparsed answer must never reach the bus"
+    );
 }

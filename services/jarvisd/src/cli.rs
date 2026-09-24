@@ -267,9 +267,226 @@ pub fn act_log_line(e: &serde_json::Value) -> String {
     )
 }
 
+// ---------------------------------------------------------------- act-log
+
+/// How long a raw byte-for-byte echo of an unreadable audit line may be. Long
+/// enough to recognise the entry, short enough that one junk line (or a file
+/// that is not an audit log at all) cannot flood a terminal.
+const RAW_ECHO_CHARS: usize = 100;
+
+/// Where the jv-act audit log lives: `$JARVIS_ACT_AUDIT`, else the platform
+/// default.
+///
+/// This MUST stay in step with jv-act's own `default_audit_path()`
+/// (`services/jv-act/src/audit.rs`), which computes the same two paths. jv-act
+/// is human-review-only under the Ralph guardrails, so the duplication cannot
+/// be deleted here — see proposal **R2** in `docs/optimization-backlog.md` for
+/// the one-line change that would make jv-act call this.
+pub fn act_audit_path() -> std::path::PathBuf {
+    act_audit_path_from(std::env::var("JARVIS_ACT_AUDIT").ok().as_deref())
+}
+
+/// `act_audit_path` with the environment injected, so the policy is testable.
+/// A blank `JARVIS_ACT_AUDIT` is an UNSET one: an empty or whitespace value is
+/// almost always a shell expansion that came out empty, and reading the file
+/// named "" would report "no audit log at " — which reads as "jv-act has never
+/// acted", the most misleading thing this command could say.
+pub fn act_audit_path_from(env: Option<&str>) -> std::path::PathBuf {
+    if let Some(p) = env.filter(|p| !p.trim().is_empty()) {
+        return p.into();
+    }
+    if cfg!(unix) {
+        "/var/lib/jarvis/act/audit.jsonl".into()
+    } else {
+        // Windows dev: repo-local state dir (gitignored).
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(".state")
+            .join("act-audit.jsonl")
+    }
+}
+
+/// A rendered `jv act-log` view: the lines to print, oldest first, and how
+/// many of them are admissions rather than entries.
+pub struct ActLog {
+    pub lines: Vec<String>,
+    /// Lines in the rendered range that could not be read as audit entries.
+    pub unreadable: usize,
+}
+
+/// Render an audit file for `jv act-log` — newest last, optionally only the
+/// last `tail` lines.
+///
+/// **A line that will not parse is rendered, not skipped.** This is the record
+/// of the one service allowed to change the machine, so a hole in it is news:
+/// a reader that quietly drops what it cannot read shows a torn log as a clean
+/// one, and the entry most likely to be torn is the last one written — the
+/// action that was running when something went wrong. The marker carries the
+/// file's own line number and a bounded echo of the raw bytes, and
+/// `act_log_exit_code` makes the hole visible to a script too.
+///
+/// Blank lines are not entries and are not holes; they are skipped in silence.
+pub fn act_log_render(text: &str, tail: Option<usize>) -> ActLog {
+    let all: Vec<&str> = text.lines().collect();
+    let start = tail.map(|n| all.len().saturating_sub(n)).unwrap_or(0);
+    let mut out = ActLog { lines: Vec::new(), unreadable: 0 };
+    for (i, raw) in all.iter().enumerate().skip(start) {
+        if raw.trim().is_empty() {
+            continue;
+        }
+        // An object is the only thing `act_log_line` can honestly render: fed a
+        // JSON string or array it prints a plausible row of "?" that looks like
+        // a real action with missing fields.
+        match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(e) if e.is_object() => out.lines.push(act_log_line(&e)),
+            _ => {
+                out.unreadable += 1;
+                out.lines.push(format!("!! unreadable audit line {}: {}", i + 1, echo_raw(raw)));
+            }
+        }
+    }
+    out
+}
+
+/// A bounded, char-boundary-safe echo of a raw line. A torn write can cut
+/// mid-UTF-8, and slicing bytes there would panic and take the reader with it.
+fn echo_raw(raw: &str) -> String {
+    let mut s: String = raw.chars().take(RAW_ECHO_CHARS).collect();
+    if s.chars().count() < raw.chars().count() {
+        s.push_str("...");
+    }
+    s
+}
+
+/// Process exit status for `jv act-log`: non-zero if any line in the rendered
+/// range could not be read. `jv act-log --tail 1 && ...` should not proceed on
+/// the strength of a line nobody could parse.
+pub fn act_log_exit_code(unreadable: usize) -> i32 {
+    if unreadable > 0 {
+        1
+    } else {
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
     use super::*;
+
+    // ------------------------------------------------------------ act-log
+
+    fn entry(tool: &str) -> String {
+        serde_json::json!({
+            "ts": "2026-09-24T10:00:00Z", "ts_mono": 1.0, "request_id": "r1",
+            "tool": tool, "args": {}, "capability": "observe",
+            "outcome": "ok", "duration_ms": 1.0
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn act_log_renders_oldest_first_one_line_per_entry() {
+        let text = format!("{}\n{}\n{}\n", entry("a.one"), entry("a.two"), entry("a.three"));
+        let r = act_log_render(&text, None);
+        assert_eq!(r.unreadable, 0);
+        assert_eq!(r.lines.len(), 3);
+        assert!(r.lines[0].contains("a.one"), "{:?}", r.lines);
+        assert!(r.lines[2].contains("a.three"), "newest last: {:?}", r.lines);
+    }
+
+    #[test]
+    fn act_log_tail_takes_the_newest_n_and_tolerates_a_big_n() {
+        let text = format!("{}\n{}\n{}\n", entry("a.one"), entry("a.two"), entry("a.three"));
+        let r = act_log_render(&text, Some(2));
+        assert_eq!(r.lines.len(), 2);
+        assert!(r.lines[0].contains("a.two"), "{:?}", r.lines);
+        assert!(r.lines[1].contains("a.three"), "{:?}", r.lines);
+        // More than there are is the whole log, not an error and not a panic.
+        assert_eq!(act_log_render(&text, Some(99)).lines.len(), 3);
+        // Zero is zero — a caller that asks for nothing gets nothing.
+        assert!(act_log_render(&text, Some(0)).lines.is_empty());
+    }
+
+    #[test]
+    fn act_log_of_an_empty_file_is_empty_and_clean() {
+        for text in ["", "\n", "   \n\n"] {
+            let r = act_log_render(text, None);
+            assert!(r.lines.is_empty(), "{text:?} -> {:?}", r.lines);
+            assert_eq!(r.unreadable, 0, "blank lines are whitespace, not a lost entry");
+        }
+    }
+
+    /// The audit trail is the record of the only service allowed to change the
+    /// machine. A line we cannot read is a HOLE in that record, and a reader
+    /// that skips it silently reports a torn log as a clean one.
+    #[test]
+    fn act_log_shows_a_line_it_cannot_read_instead_of_dropping_it() {
+        let text = format!("{}\n{{\"tool\":\"a.torn\"\n{}\n", entry("a.one"), entry("a.two"));
+        let r = act_log_render(&text, None);
+        assert_eq!(r.unreadable, 1);
+        assert_eq!(r.lines.len(), 3, "the unreadable line still occupies its place: {:?}", r.lines);
+        assert!(r.lines[1].starts_with("!! unreadable audit line 2"), "{:?}", r.lines[1]);
+        assert!(r.lines[1].contains("a.torn"), "show the raw bytes: {:?}", r.lines[1]);
+        assert_eq!(act_log_exit_code(r.unreadable), 1, "a torn log must be scriptable as a failure");
+        assert_eq!(act_log_exit_code(0), 0);
+    }
+
+    #[test]
+    fn act_log_treats_valid_json_that_is_not_an_entry_as_unreadable() {
+        // `act_log_line` would happily render this as "? ? ?" — a plausible
+        // looking row invented out of a JSON string is worse than an admission.
+        let r = act_log_render("\"just a string\"\n[1,2,3]\n42\n", None);
+        assert_eq!(r.unreadable, 3, "{:?}", r.lines);
+        assert!(r.lines.iter().all(|l| l.starts_with("!! unreadable")), "{:?}", r.lines);
+    }
+
+    #[test]
+    fn act_log_line_numbers_are_the_files_own_even_under_tail() {
+        let text = format!("{}\nnot json\n{}\n", entry("a.one"), entry("a.two"));
+        let r = act_log_render(&text, Some(2));
+        assert_eq!(r.lines.len(), 2);
+        assert!(r.lines[0].contains("line 2"), "tail must not renumber: {:?}", r.lines[0]);
+        assert_eq!(r.unreadable, 1, "only the lines shown are counted: {:?}", r.lines);
+    }
+
+    #[test]
+    fn act_log_marker_is_bounded_so_one_junk_line_cannot_flood_a_terminal() {
+        let text = format!("{}\n", "x".repeat(10_000));
+        let r = act_log_render(&text, None);
+        assert_eq!(r.lines.len(), 1);
+        assert!(r.lines[0].len() < 200, "marker was {} chars", r.lines[0].len());
+        assert!(r.lines[0].ends_with("..."), "{:?}", r.lines[0]);
+    }
+
+    #[test]
+    fn act_log_marker_never_splits_a_character() {
+        // A torn write can cut mid-UTF-8; slicing bytes would panic and take
+        // the whole reader with it. The odd leading byte puts the byte-index
+        // cut INSIDE a two-byte char, which is what makes this bite.
+        let text = format!("x{}\n", "é".repeat(300));
+        let r = act_log_render(&text, None);
+        assert_eq!(r.lines.len(), 1);
+        assert!(r.lines[0].contains('é'));
+        // Exactly RAW_ECHO_CHARS characters of payload, counted in chars and
+        // not in bytes.
+        let echo = r.lines[0].rsplit(": ").next().unwrap();
+        assert_eq!(echo.chars().count(), RAW_ECHO_CHARS + 3, "{echo:?}");
+    }
+
+    #[test]
+    fn audit_path_prefers_the_env_var_and_ignores_an_empty_one() {
+        assert_eq!(act_audit_path_from(Some("/tmp/x.jsonl")), std::path::PathBuf::from("/tmp/x.jsonl"));
+        // An empty JARVIS_ACT_AUDIT is an unset one, not the file "".
+        assert_eq!(act_audit_path_from(Some("")), act_audit_path_from(None));
+        assert_eq!(act_audit_path_from(Some("  ")), act_audit_path_from(None));
+        let d = act_audit_path_from(None);
+        assert!(d.is_absolute(), "{d:?}");
+        assert!(d.to_string_lossy().ends_with(".jsonl"), "{d:?}");
+    }
 
     fn map(pairs: &[(&str, rmpv::Value)]) -> rmpv::Value {
         rmpv::Value::Map(pairs.iter().map(|(k, v)| ((*k).into(), v.clone())).collect())

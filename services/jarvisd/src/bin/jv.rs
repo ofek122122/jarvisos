@@ -74,7 +74,8 @@ enum Cmd {
     /// Follow sys.health heartbeats.
     Health,
     /// Read the jv-act audit log (newest last). Path: $JARVIS_ACT_AUDIT
-    /// or the platform default.
+    /// or the platform default. Exits non-zero if the log is missing, or if
+    /// any line in it could not be read as an audit entry.
     ActLog {
         /// Only show the last N entries.
         #[arg(long)]
@@ -86,23 +87,6 @@ enum Cmd {
         /// 'yes' or 'no'
         answer: String,
     },
-}
-
-fn act_audit_path() -> std::path::PathBuf {
-    if let Ok(p) = std::env::var("JARVIS_ACT_AUDIT") {
-        return p.into();
-    }
-    if cfg!(unix) {
-        "/var/lib/jarvis/act/audit.jsonl".into()
-    } else {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join(".state")
-            .join("act-audit.jsonl")
-    }
 }
 
 /// How a stream stopped, and how many frames it delivered.
@@ -237,18 +221,21 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Cmd::ActLog { tail } => {
-            let path = act_audit_path();
+            let path = cli::act_audit_path();
             let text = std::fs::read_to_string(&path)
                 .map_err(|e| anyhow::anyhow!("no audit log at {}: {e}", path.display()))?;
-            let lines: Vec<&str> = text.lines().collect();
-            let start = tail.map(|n| lines.len().saturating_sub(n)).unwrap_or(0);
-            for line in &lines[start..] {
-                let Ok(e) = serde_json::from_str::<serde_json::Value>(line) else {
-                    continue;
-                };
-                println!("{}", cli::act_log_line(&e));
+            let log = cli::act_log_render(&text, tail);
+            for line in &log.lines {
+                println!("{line}");
             }
-            0
+            if log.unreadable > 0 {
+                eprintln!(
+                    "warning: {} line(s) of {} could not be read as audit entries",
+                    log.unreadable,
+                    path.display()
+                );
+            }
+            cli::act_log_exit_code(log.unreadable)
         }
 
         Cmd::Confirm { request_id, answer } => {
@@ -258,6 +245,11 @@ async fn main() -> anyhow::Result<()> {
                 other => anyhow::bail!("answer must be yes or no, got '{other}'"),
             };
             let mut c = BusClient::connect(&addr, "jv-cli").await?;
+            // The shape jv-act acts on: kind=answer + request_id + granted +
+            // answered_by="cli" (services/jv-act/src/service.rs ignores an
+            // answer that is not the CLI's own, since it echoes its own
+            // voice/timeout answers on this same topic). Pinned by
+            // `confirm_publishes_the_answer_jv_act_resolves` in tests/cli.rs.
             let body = rmpv::Value::Map(vec![
                 ("kind".into(), "answer".into()),
                 ("request_id".into(), request_id.as_str().into()),

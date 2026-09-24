@@ -139,6 +139,18 @@ pub fn to_value_named<T: serde::Serialize>(v: &T) -> anyhow::Result<rmpv::Value>
     Ok(rmpv::decode::read_value(&mut &bytes[..])?)
 }
 
+/// The inverse of `to_value_named`: read a wire Value back into a schema
+/// binding. Goes through the msgpack bytes rather than `rmpv::ext::from_value`
+/// because the bus convention encodes an enum as its snake_case STRING, and
+/// rmpv's own deserializer only accepts serde's tagged forms — so the direct
+/// route rejects every generated body with an enum in it (`kind`, `state`,
+/// `answered_by`, ...).
+pub fn from_value_named<T: serde::de::DeserializeOwned>(v: &rmpv::Value) -> anyhow::Result<T> {
+    let mut bytes = Vec::new();
+    rmpv::encode::write_value(&mut bytes, v)?;
+    Ok(rmp_serde::from_slice(&bytes)?)
+}
+
 pub struct Broker {
     cfg: Config,
     tx: broadcast::Sender<Arc<Delivery>>,
