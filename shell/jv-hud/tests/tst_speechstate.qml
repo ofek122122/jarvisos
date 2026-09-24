@@ -13,6 +13,11 @@
 //   · a frame we cannot trust — wrong schema version, a wake that missed
 //     its own threshold, a state topic hedging its confidence — changes
 //     nothing. Under-claiming is the safe error; over-claiming is a lie.
+//   · "thinking" (A12) is the gap between Jarvis hearing you and you
+//     hearing anything back. It may only be shown while a prompt the
+//     brain is actually going to answer is outstanding, it must yield to
+//     whatever jv-voice says is audible right now, and it must end — on
+//     the reply, on the first spoken word, or on its own.
 //
 // Everything runs headless (see tst_busmodel.qml): SpeechState is pure
 // QtQuick and reads the bus through core/BusModel, which the test drives
@@ -53,7 +58,8 @@ TestCase {
 
   // opts: { clock: false } to withhold the monotonic clock,
   //       { down: true } to leave the bridge link down,
-  //       { windowS: n } for a shorter wake window.
+  //       { windowS: n } for a shorter wake window,
+  //       { thinkS: n } for a shorter thinking window.
   function makeVoice(opts) {
     const o = opts || {};
     suite.fakeNow = 0;
@@ -63,6 +69,8 @@ TestCase {
     const voice = spawn(speechState);
     if (o.windowS !== undefined)
       voice.wakeWindowS = o.windowS;
+    if (o.thinkS !== undefined)
+      voice.thinkWindowS = o.thinkS;
     voice.bus = bus;
     if (o.down !== true)
       bus.ingest('{"t":"link","up":true}');
@@ -111,6 +119,49 @@ TestCase {
       "event": event,
       "utterance_id": "u1"
     }, over);
+  }
+
+  function ask(voice, body, over) {
+    let b = {
+      "text": "what is the time",
+      "source": "cli"
+    };
+    for (const k in body || {})
+      b[k] = body[k];
+    send(voice, "brain.request", b, over);
+  }
+
+  function reply(voice, body, over) {
+    let b = {
+      "text": "Nine o'clock.",
+      "finish_reason": "stop"
+    };
+    for (const k in body || {})
+      b[k] = body[k];
+    send(voice, "brain.response", b, over);
+  }
+
+  // One complete thing said to Jarvis through the voice path: the wake
+  // word, then two seconds of speech, then the boundary jv-ears disarms
+  // on. Nothing publishes "the brain accepted this" — the gated utterance
+  // ending IS the evidence, which is what makes it worth a helper.
+  function utterance(voice) {
+    wake(voice);
+    suite.fakeNow += 2;
+    vad(voice, "speech_end");
+  }
+
+  // The same thing, but it finished `agoS` seconds ago: BOTH frames are
+  // backdated, the wake a hair earlier so the boundary still closes a
+  // window that was genuinely open. Backdating only the vad would leave
+  // the wake fresh, and "listening" outranks everything.
+  function utteranceEndedAgo(voice, agoS) {
+    wake(voice, {}, {
+      "ts": suite.fakeNow + 100 - agoS - 0.01
+    });
+    vad(voice, "speech_end", {
+      "ts": suite.fakeNow + 100 - agoS
+    });
   }
 
   // --- silence is not calm -------------------------------------------
@@ -332,7 +383,8 @@ TestCase {
 
   function test_the_end_of_the_utterance_ends_listening() {
     // jv-ears disarms at speech_end for a wake-gated utterance: it is
-    // transcribing now, not listening for more.
+    // transcribing now, not listening for more. The microphone claim ends
+    // there; what replaces it is A12's business, tested below.
     const voice = makeVoice();
     speech(voice, "idle");
     wake(voice);
@@ -341,7 +393,7 @@ TestCase {
     compare(voice.state, "listening", "the user talking is the window being used");
     suite.fakeNow += 2;
     vad(voice, "speech_end");
-    compare(voice.state, "idle");
+    verify(!voice.listening, "the window must close whatever is drawn next");
   }
 
   function test_an_older_utterance_end_does_not_end_a_newer_wake() {
@@ -366,6 +418,373 @@ TestCase {
       "ts": "soon"
     });
     compare(voice.state, "unknown", "a frame we cannot order is a frame we cannot use");
+  }
+
+  // --- thinking: the gap between hearing and answering (A12) ----------
+
+  function test_a_wake_gated_utterance_ending_means_thinking() {
+    // The whole point of A12: this moment used to read "idle", and idle
+    // draws nothing at all. Jarvis has the utterance and is working on it.
+    const voice = makeVoice();
+    speech(voice, "idle");
+    utterance(voice);
+    compare(voice.state, "thinking");
+    verify(voice.known);
+    verify(!voice.idle);
+  }
+
+  function test_thinking_is_not_an_accent() {
+    // §06 spends the accents on perceiving and speaking. Working is not
+    // a third thing worth colouring; it is a word.
+    const voice = makeVoice();
+    utterance(voice);
+    compare(voice.state, "thinking");
+    verify(!voice.active, "thinking must not light the ember or the teal");
+  }
+
+  function test_ungated_speech_in_the_room_is_not_thinking() {
+    // jv-ears' VAD runs continuously whether or not a wake window is open
+    // (A4). Speech Jarvis was never addressed with must not put it to work
+    // on screen.
+    const voice = makeVoice();
+    speech(voice, "idle");
+    vad(voice, "speech_start");
+    suite.fakeNow += 2;
+    vad(voice, "speech_end");
+    compare(voice.state, "idle", "nobody said its name");
+  }
+
+  function test_a_brain_request_means_thinking_with_no_voice_path_at_all() {
+    // The non-voice frontends (jv ask, the replay harness) publish
+    // brain.request instead, and jv-brain answers those the same way.
+    const voice = makeVoice();
+    ask(voice);
+    compare(voice.state, "thinking");
+  }
+
+  function test_a_silent_request_still_ends_when_the_reply_lands() {
+    // speak:false never reaches jv-voice, so the ONLY thing that can close
+    // this window is brain.response. Without it the HUD would sit on a
+    // claim about work that finished.
+    const voice = makeVoice();
+    ask(voice, {
+      "speak": false
+    });
+    compare(voice.state, "thinking");
+    suite.fakeNow += 1;
+    reply(voice);
+    compare(voice.state, "unknown", "jv-voice never spoke, so there is nothing else to say");
+  }
+
+  function test_the_first_spoken_word_ends_thinking() {
+    const voice = makeVoice();
+    speech(voice, "idle");
+    utterance(voice);
+    compare(voice.state, "thinking");
+    suite.fakeNow += 1;
+    speech(voice, "speaking");
+    compare(voice.state, "speaking");
+  }
+
+  function test_the_gaps_between_a_streamed_reply_sentences_are_not_thinking() {
+    // jv-brain speaks one speech.say per sentence, so jv-voice publishes
+    // idle between them while the brain is still generating. Technically
+    // still thinking; drawing it would flip the word once per sentence,
+    // which is churn, not information. Hearing the answer begin is what
+    // closes the window.
+    const voice = makeVoice();
+    speech(voice, "idle");
+    utterance(voice);
+    suite.fakeNow += 1;
+    speech(voice, "speaking");
+    suite.fakeNow += 1;
+    speech(voice, "idle", {
+      "reason": "completed"
+    });
+    compare(voice.state, "idle", "the answer already started; do not go back to thinking");
+  }
+
+  function test_an_error_reply_ends_thinking_even_though_nothing_was_said() {
+    // finish_reason=error with empty text: the brain gave up and jv-voice
+    // will never speak. The window has to close on the reply itself.
+    const voice = makeVoice();
+    speech(voice, "idle");
+    utterance(voice);
+    suite.fakeNow += 1;
+    reply(voice, {
+      "text": "",
+      "finish_reason": "error"
+    });
+    compare(voice.state, "idle");
+  }
+
+  function test_a_reply_older_than_the_prompt_does_not_answer_it() {
+    // The previous turn's reply says nothing about this turn.
+    const voice = makeVoice();
+    speech(voice, "idle");
+    reply(voice);
+    suite.fakeNow += 1;
+    utterance(voice);
+    compare(voice.state, "thinking");
+  }
+
+  function test_a_reply_we_cannot_read_does_not_close_the_window() {
+    const voice = makeVoice();
+    speech(voice, "idle");
+    utterance(voice);
+    suite.fakeNow += 1;
+    reply(voice, {
+      "finish_reason": 7
+    });
+    compare(voice.state, "thinking", "an unreadable reply is not a reply");
+  }
+
+  function test_jarvis_still_finishing_a_previous_reply_reads_as_speaking() {
+    // Audible output is the more concrete claim, and it is what the user is
+    // experiencing. A speaking frame OLDER than the prompt is not an answer
+    // to it, so the window stays open underneath.
+    const voice = makeVoice();
+    speech(voice, "speaking");
+    suite.fakeNow += 0.2;
+    utterance(voice);
+    compare(voice.state, "speaking");
+    suite.fakeNow += 1;
+    speech(voice, "idle", {
+      "reason": "completed"
+    });
+    compare(voice.state, "thinking", "the prompt was never answered, so it is still open");
+  }
+
+  function test_an_answer_that_arrives_before_its_own_question_still_answers_it() {
+    // Frames queue behind a slow consumer, so arrival order is not event
+    // order: the speaking frame can land before the gated boundary that
+    // opened the window it closes. By `ts` it is still the answer, and the
+    // latch has to notice that on the prompt's edge as well as its own —
+    // otherwise the idle that follows reads as "thinking" forever.
+    const voice = makeVoice();
+    speech(voice, "speaking");
+    suite.fakeNow += 1;
+    utteranceEndedAgo(voice, 1.5);
+    compare(voice.state, "speaking");
+    suite.fakeNow += 0.5;
+    speech(voice, "idle", {
+      "reason": "completed"
+    });
+    compare(voice.state, "idle", "it was answered; the arrival order does not change that");
+  }
+
+  function test_being_interrupted_outranks_thinking_and_then_gives_way() {
+    // jv-voice always follows interrupted with idle, so this is a moment,
+    // not a resting state — and the moment belongs to jv-voice.
+    const voice = makeVoice();
+    speech(voice, "speaking");
+    suite.fakeNow += 0.2;
+    utterance(voice);
+    suite.fakeNow += 0.2;
+    speech(voice, "interrupted");
+    compare(voice.state, "interrupted");
+    suite.fakeNow += 0.1;
+    speech(voice, "idle");
+    compare(voice.state, "thinking");
+  }
+
+  function test_a_wake_during_thinking_is_listening_again() {
+    // Re-asking mid-answer: the microphone claim outranks everything, as
+    // it does everywhere else in this file.
+    const voice = makeVoice();
+    speech(voice, "idle");
+    utterance(voice);
+    compare(voice.state, "thinking");
+    suite.fakeNow += 0.5;
+    wake(voice);
+    compare(voice.state, "listening");
+  }
+
+  function test_a_state_word_we_cannot_read_still_reports_thinking() {
+    // The brain working is a fact about the brain. jv-voice publishing
+    // something we were not written against does not unmake it.
+    const voice = makeVoice();
+    utterance(voice);
+    speech(voice, "humming");
+    compare(voice.state, "thinking");
+  }
+
+  function test_a_dropped_link_forgets_that_jarvis_was_thinking() {
+    const voice = makeVoice();
+    utterance(voice);
+    compare(voice.state, "thinking");
+    voice.bus.ingest('{"t":"link","up":false,"err":"bridge stopped"}');
+    compare(voice.state, "unknown");
+  }
+
+  function test_a_prompt_that_cannot_be_aged_is_never_thinking() {
+    const voice = makeVoice({
+      clock: false
+    });
+    speech(voice, "idle");
+    utterance(voice);
+    compare(voice.state, "idle", "an age we cannot compute is not an age of zero");
+  }
+
+  function test_a_prompt_that_arrives_already_stale_is_not_thinking() {
+    // Frames queued behind a slow consumer arrive late. A question that
+    // was asked and abandoned long ago is not work happening now.
+    const voice = makeVoice({
+      thinkS: 1
+    });
+    speech(voice, "idle");
+    utteranceEndedAgo(voice, 20);
+    compare(voice.state, "idle");
+  }
+
+  function test_thinking_expires_when_nothing_ever_answers() {
+    // jv-brain dying mid-turn publishes nothing. A HUD that keeps saying
+    // "thinking" is describing a process that may not exist.
+    const voice = makeVoice({
+      thinkS: 0.05
+    });
+    speech(voice, "idle");
+    utterance(voice);
+    compare(voice.state, "thinking");
+    tryCompare(voice, "state", "idle", 3000, "a thinking window must close by itself");
+  }
+
+  function test_an_expired_window_stays_expired() {
+    // The wall clock passing IS the evidence; re-deriving the age when the
+    // timer fires would let a frozen clock un-expire the claim and re-arm
+    // at the millisecond floor, which is a spin, not a HUD.
+    const voice = makeVoice({
+      thinkS: 0.05
+    });
+    speech(voice, "idle");
+    utterance(voice);
+    tryCompare(voice, "state", "idle", 3000);
+    wait(120);
+    compare(voice.state, "idle");
+  }
+
+  function test_a_prompt_delivered_late_gets_only_what_is_left_of_its_window() {
+    // 0.45 s in flight means 0.45 s into its own window, not at the start
+    // of one — same rule as the wake window, same reason.
+    const voice = makeVoice({
+      thinkS: 0.5
+    });
+    speech(voice, "idle");
+    utteranceEndedAgo(voice, 0.45);
+    compare(voice.state, "thinking");
+    tryCompare(voice, "state", "idle", 250, "the window closes when it opened, not when we heard");
+  }
+
+  function test_shortening_the_thinking_window_closes_an_open_one() {
+    const voice = makeVoice();
+    speech(voice, "idle");
+    utterance(voice);
+    compare(voice.state, "thinking");
+    voice.thinkWindowS = 0.05;
+    tryCompare(voice, "state", "idle", 3000);
+  }
+
+  function test_the_next_turn_is_thinking_again() {
+    // The ordinary case of two questions in a row: the answer that closed
+    // the last window must not still be closing this one.
+    const voice = makeVoice();
+    speech(voice, "idle");
+    utterance(voice);
+    suite.fakeNow += 1;
+    speech(voice, "speaking");
+    suite.fakeNow += 1;
+    speech(voice, "idle", {
+      "reason": "completed"
+    });
+    suite.fakeNow += 1;
+    reply(voice);
+    compare(voice.state, "idle");
+    suite.fakeNow += 1;
+    utterance(voice);
+    compare(voice.state, "thinking", "a new question has not been answered yet");
+  }
+
+  function test_a_second_prompt_reopens_a_window_that_had_closed() {
+    const voice = makeVoice({
+      thinkS: 0.05
+    });
+    speech(voice, "idle");
+    utterance(voice);
+    tryCompare(voice, "state", "idle", 3000);
+    suite.fakeNow += 1;
+    ask(voice);
+    compare(voice.state, "thinking");
+  }
+
+  function test_the_newer_of_two_prompts_owns_the_window() {
+    // A typed question during a spoken turn: the window must run from the
+    // newer prompt, or the older one's timeout would close it early.
+    const voice = makeVoice({
+      thinkS: 1
+    });
+    speech(voice, "idle");
+    utterance(voice);
+    suite.fakeNow += 0.9;
+    ask(voice);
+    compare(voice.state, "thinking");
+    wait(300);
+    compare(voice.state, "thinking", "the older prompt's clock must not close the newer one");
+  }
+
+  function test_a_request_we_refuse_to_believe_is_not_a_prompt_data() {
+    return [
+      {
+        tag: "empty text",
+        body: {
+          "text": ""
+        },
+        over: {}
+      },
+      {
+        tag: "text is not a string",
+        body: {
+          "text": 3
+        },
+        over: {}
+      },
+      {
+        tag: "no source",
+        body: {
+          "source": undefined
+        },
+        over: {}
+      },
+      {
+        tag: "v2 body",
+        body: {},
+        over: {
+          "v": 2
+        }
+      },
+      {
+        tag: "hedged conf",
+        body: {},
+        over: {
+          "conf": 0.5
+        }
+      },
+      {
+        tag: "unorderable ts",
+        body: {},
+        over: {
+          "ts": "soon"
+        }
+      }
+    ];
+  }
+
+  function test_a_request_we_refuse_to_believe_is_not_a_prompt(data) {
+    // brain.request is a command topic: conf is fixed at 1.0, and a body
+    // that does not meet its own schema is not something to render from.
+    const voice = makeVoice();
+    speech(voice, "idle");
+    ask(voice, data.body, data.over);
+    compare(voice.state, "idle");
   }
 
   // --- frames we refuse to believe ------------------------------------

@@ -8,7 +8,10 @@
 // §06, and why it looks like this:
 //   · earned emptiness — `idle` and `unknown` both draw NOTHING. A badge
 //     sitting there saying "idle" is chrome that never earned its place,
-//     and one saying it while the bus is down would be a lie.
+//     and one saying it while the bus is down would be a lie. The plate
+//     no longer vanishes while Jarvis is answering, though: that gap used
+//     to report `idle` and now reports `thinking` (A12), which is both
+//     truer and the one moment the user is actually waiting on it.
 //   · one ember accent, spent only on Jarvis genuinely doing something.
 //     Listening is teal: theme.toml reserves the cooler voice for YOUR
 //     state, and the open microphone is yours, not Jarvis's.
@@ -45,7 +48,9 @@ Item {
   readonly property bool lit: plate.opacity > 0
 
   // Ember is Jarvis; teal is you. Anything else is quiet by design —
-  // `interrupted` is a fact worth reading, not an alarm worth colouring.
+  // `interrupted` is a fact worth reading, not an alarm worth colouring,
+  // and `thinking` (A12) is Jarvis working with nothing to perceive and
+  // nothing to say yet: a word, not a third accent.
   readonly property color dotColor: root.voice.state === "speaking" ? Theme.ember : root.voice.state === "listening" ? Theme.teal : Theme.text3
 
   implicitWidth: plate.implicitWidth

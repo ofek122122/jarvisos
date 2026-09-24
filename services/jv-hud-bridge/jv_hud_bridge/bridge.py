@@ -36,13 +36,24 @@ from jarvis_bus import BusError
 
 # The topics the HUD can render truthfully today or in the next elements:
 # Jarvis's speech state, the wake word firing, voice-activity boundaries,
-# and service health. Each one has a frozen schema in schemas/ — a test
-# asserts that, so this list cannot drift into inventing topics.
+# service health, and the two ends of a brain turn — which are how the HUD
+# knows Jarvis is working rather than idle (PLAN A12). Each one has a frozen
+# schema in schemas/ — a test asserts that, so this list cannot drift into
+# inventing topics.
+#
+# brain.request/brain.response are the first topics here whose bodies carry
+# conversation TEXT. That stays on this machine like everything else
+# (invariant 7): this pipe is one process writing to another on the same
+# box, and no element reads those bodies — the HUD uses only the fact that
+# a frame exists and when. A future element that wants the words is free to,
+# but it should be a deliberate choice rather than a thing that happened.
 DEFAULT_TOPICS: Sequence[str] = (
     "speech.state",
     "audio.wake",
     "audio.vad",
     "sys.health",
+    "brain.request",
+    "brain.response",
 )
 
 # Exactly the envelope (schemas/envelope.json). Forwarding the whole thing

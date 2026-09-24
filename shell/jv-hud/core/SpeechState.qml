@@ -9,9 +9,13 @@
 //
 // Where each answer comes from:
 //
-//   speech.state  (jv-voice)  idle / speaking / interrupted, verbatim.
-//   audio.wake    (jv-ears)   the wake word fired -> "listening".
-//   audio.vad     (jv-ears)   speech_end closes a listening window.
+//   speech.state   (jv-voice)  idle / speaking / interrupted, verbatim.
+//   audio.wake     (jv-ears)   the wake word fired -> "listening".
+//   audio.vad      (jv-ears)   speech_end closes a listening window, and
+//                              opens a thinking one.
+//   brain.request  (jv CLI,    a typed/replayed question -> "thinking".
+//                   harness)
+//   brain.response (jv-brain)  the answer landed -> thinking is over.
 //
 // "listening" is the claim that costs the most if it is wrong, because it
 // is a claim about the microphone. jv-ears publishes when a window OPENS
@@ -29,9 +33,37 @@
 //     rule, and it is a HUD-side constant because nothing publishes ears'
 //     configuration — so keep it AT OR BELOW the value ears is tuned to.
 //
-// The three topics arrive on one bus with one clock (CLOCK_MONOTONIC `ts`),
-// so ordering them is just comparing `ts`. A frame without a numeric one
-// cannot be ordered and is therefore not used at all.
+// "thinking" (A12) is the other half of the same honesty problem. Between
+// the moment Jarvis has your words and the moment you hear anything back
+// it is working — prefill, generation, maybe a tool round-trip — and this
+// element used to call that `idle`, which the view draws as nothing at
+// all. So the HUD went dark at the exact moment the user was waiting and
+// wanted to know something was happening.
+//
+// Nothing on the bus says "the brain accepted this", so the prompt has to
+// be recognised, and only two things are recognisable as one:
+//
+//   · a wake-gated utterance ENDING (the `utteranceEnded` rule above).
+//     jv-ears disarms there and transcribes, and jv-brain answers every
+//     transcript final — so that boundary is a question in flight. A
+//     speech_end with no wake behind it is just speech in the room (ears'
+//     VAD runs continuously, see A4) and means nothing here.
+//   · a `brain.request`, which is how the non-voice frontends ask.
+//
+// and three things end it: `brain.response` (the only thing that can, for
+// a silent CLI query or a reply that errored and was never spoken), the
+// first `speaking` frame after it (the user is now hearing the answer —
+// the brain may still be generating, but saying so would flip the word
+// once per streamed sentence), and `thinkWindowS` as the floor under a
+// brain that died mid-turn.
+//
+// Whatever jv-voice says is audible RIGHT NOW outranks it: `speaking` and
+// `interrupted` are observations, "thinking" is an inference, and the
+// inference must never talk over the observation.
+//
+// All of these topics arrive on one bus with one clock (CLOCK_MONOTONIC
+// `ts`), so ordering them is just comparing `ts`. A frame without a
+// numeric one cannot be ordered and is therefore not used at all.
 //
 // Nothing here ever shows a state it did not observe: with no link, no
 // frame, or no trustworthy frame, the answer is "unknown" — which the view
@@ -50,18 +82,32 @@ QtObject {
   // said otherwise. jv-ears' `wake_timeout_s` default is 8 s; see above.
   property real wakeWindowS: 8.0
 
-  // The one output: "unknown" | "idle" | "listening" | "speaking" | "interrupted".
+  // How long an unanswered prompt keeps meaning "thinking". Unlike
+  // `wakeWindowS` this mirrors no service's configuration: it is a policy
+  // about how long the HUD is willing to assert work it cannot see. An
+  // answer can legitimately take this long on the CPU rung (invariant 6),
+  // and past it we no longer know whether anyone is still working — so we
+  // stop saying so and fall back to jv-voice, which under-claims. That is
+  // the direction this file always errs in, and the CPU rung that explains
+  // a slow answer is on screen anyway (HealthPlate, A6).
+  property real thinkWindowS: 30.0
+
+  // The one output: "unknown" | "idle" | "listening" | "thinking" |
+  // "speaking" | "interrupted".
   readonly property string state: {
+    // The microphone claim first: it is the one that costs the most.
     if (root.listening)
       return "listening";
-    const s = root.speech;
-    if (s === null)
-      return "unknown";
-    const named = s.body.state;
-    // A body from a schema version we know, carrying a state we do not,
-    // is still not something to draw. Later versions may add states; the
+    // A body from a schema version we know, carrying a state we do not, is
+    // still not something to draw. Later versions may add states; the
     // nearest thing we recognise would be an invention, not a reading.
-    return named === "idle" || named === "speaking" || named === "interrupted" ? named : "unknown";
+    const named = root.speech === null ? "" : root.speech.body.state;
+    // What is audible right now beats what we infer about the brain.
+    if (named === "speaking" || named === "interrupted")
+      return named;
+    if (root.promptOpen)
+      return "thinking";
+    return named === "idle" ? "idle" : "unknown";
   }
 
   // Did we observe anything at all? False means the view draws nothing.
@@ -99,6 +145,25 @@ QtObject {
     return root.wellFormed(env) && env.conf >= 1 && typeof env.body.event === "string" ? env : null;
   }
 
+  // The latest brain.request we can read, or null. A command topic, so its
+  // envelope conf is fixed at 1.0; a body that misses its own schema
+  // (empty text, no source) is not a question we can claim to have.
+  readonly property var request: {
+    const env = root.frameOn("brain.request");
+    if (!root.wellFormed(env) || env.conf < 1)
+      return null;
+    const b = env.body;
+    return typeof b.text === "string" && b.text.length > 0 && typeof b.source === "string" ? env : null;
+  }
+
+  // The latest brain.response we can read, or null. `finish_reason` is
+  // what makes it a reply rather than a fragment — including the `error`
+  // one, which is the reply nobody ever hears.
+  readonly property var response: {
+    const env = root.frameOn("brain.response");
+    return root.wellFormed(env) && env.conf >= 1 && typeof env.body.finish_reason === "string" ? env : null;
+  }
+
   // --- is the microphone open for us? ---------------------------------
 
   readonly property bool listening: root.wakeFresh && !root.wakeConsumed
@@ -123,7 +188,59 @@ QtObject {
   // the exact moment the user is talking.
   readonly property bool utteranceEnded: root.wake !== null && root.vad !== null && root.vad.body.event === "speech_end" && root.vad.ts >= root.wake.ts
 
-  // --- the fallback timeout -------------------------------------------
+  // --- is the brain working on something of ours? ----------------------
+
+  readonly property bool promptOpen: root.promptFresh && !root.answered_
+
+  // The newest thing we can recognise as a question in flight. Newest
+  // rather than first: a typed question during a spoken turn is the live
+  // one, and running the window off the older prompt would close it early.
+  readonly property var prompt: {
+    const spoken = root.utteranceEnded ? root.vad : null;
+    if (spoken === null)
+      return root.request;
+    if (root.request === null)
+      return spoken;
+    return root.request.ts >= spoken.ts ? root.request : spoken;
+  }
+
+  // Young enough to still describe now — same rule as `wakeFresh`, and
+  // the same reason: an age we cannot compute is not an age of zero.
+  readonly property bool promptFresh: root.prompt !== null && !root.thinkTimedOut && root.ageOf(root.prompt) <= root.thinkWindowS
+
+  // Trailing underscore because `answered` above is about the wake window;
+  // this one is about the prompt, and conflating them would be a bug
+  // waiting to happen.
+  readonly property bool answered_: root.heardAnswer || root.repliedOnBus
+
+  // The user has heard this answer START. Latched, not derived, and the
+  // difference matters: `bus.latest()` holds only the newest frame per
+  // topic, so the `speaking` frame is GONE the moment jv-voice publishes
+  // the idle that follows it. Derived, this would forget mid-reply — and
+  // since jv-brain speaks one speech.say per sentence, it would forget
+  // between every pair of sentences and flip the word back to "thinking"
+  // each time. What is remembered here is an observation the bus no
+  // longer carries, which is exactly what a latch is for.
+  property bool heardAnswer: false
+
+  // The reply exists on the bus. For a silent query, or one that errored
+  // before a word was synthesised, this is the ONLY thing that ever says
+  // the work is over. Safe to derive: nothing replaces a brain.response
+  // except a newer one, which answers the same prompt or a later one.
+  readonly property bool repliedOnBus: root.prompt !== null && root.response !== null && root.response.ts >= root.prompt.ts
+
+  // Checked on both edges that can make it true — a speech frame arriving,
+  // and the prompt changing under an already-speaking Jarvis — rather than
+  // on a `repliedAloud` binding, which would depend on which of the two
+  // re-evaluates first and would never fire at all in the second case.
+  onSpeechChanged: root.noteSpokenAnswer()
+
+  function noteSpokenAnswer(): void {
+    if (root.prompt !== null && root.speech !== null && root.speech.body.state === "speaking" && root.speech.ts >= root.prompt.ts)
+      root.heardAnswer = true;
+  }
+
+  // --- the fallback timeouts ------------------------------------------
 
   // Set by the timer below; cleared whenever a new wake arrives. A plain
   // property rather than a computed one because time passing is not a
@@ -156,6 +273,39 @@ QtObject {
     }
     root.expiry.interval = Math.max(1, Math.ceil(left * 1000));
     root.expiry.restart();
+  }
+
+  // The same three pieces for the thinking window. Identity includes the
+  // topic and publisher because a prompt can come from either of two
+  // topics, and `seq` only counts per publisher.
+  property bool thinkTimedOut: false
+
+  readonly property string promptKey: root.prompt === null ? "" : root.prompt.topic + "/" + root.prompt.src + "#" + root.prompt.seq + "@" + root.prompt.ts
+
+  onPromptKeyChanged: {
+    // A different question: whatever we heard was the answer to the last
+    // one. Re-checked immediately, because this prompt may already have
+    // been answered by a frame that arrived before it did.
+    root.heardAnswer = false;
+    root.noteSpokenAnswer();
+    root.armThinkExpiry();
+  }
+  onThinkWindowSChanged: root.armThinkExpiry()
+
+  readonly property Timer thinkExpiry: Timer {
+    repeat: false
+    onTriggered: root.thinkTimedOut = true
+  }
+
+  function armThinkExpiry(): void {
+    root.thinkTimedOut = false;
+    const left = root.thinkWindowS - root.ageOf(root.prompt);
+    if (root.prompt === null || !(left > 0)) {
+      root.thinkExpiry.running = false;
+      return;
+    }
+    root.thinkExpiry.interval = Math.max(1, Math.ceil(left * 1000));
+    root.thinkExpiry.restart();
   }
 
   // --- reading the bus, defensively -----------------------------------
