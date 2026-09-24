@@ -1914,3 +1914,103 @@ yet.
   ares, and now nobody has looked at its type either. `JV_HUD_SELFTEST=1
   jv-hud`, then a real wake word — and tell me whether the labels are
   JetBrains Mono.
+
+## 2026-09-24 — iteration 22 — A19: the hand-check becomes a build gate
+
+Iteration 21 ended by verifying, by hand, the thing the whole font module
+exists to promise: build the system, point fontconfig at the closure's own
+`conf.d`, and ask `fc-match` for each declared family. It resolved to the
+declared outline faces. Then that became a paragraph in a journal, which is
+exactly as durable as nothing — and the specific hole was already written
+down: widen the `-iname` filter in `checkedFace` and the WOFF2 comes back
+with every existing check still green, because the face check only asks
+whether the family is PRESENT in the package, never which file fontconfig
+hands back when something asks for the name.
+
+`jv-fonts-resolve` asks that question every build. It is in `system.checks`,
+so `nixos-rebuild build` builds it and nothing of it lands in the system
+closure — a check, not a dependency.
+
+**It resolves against the configuration this machine will really have.** The
+conf packages come from `config.fonts.fontconfig.confPackages`, the same list
+the fontconfig module links into `/etc/fonts`, and the config file is the real
+`fonts.conf` with one edit: its `<include>` of conf.d is an absolute `/etc`
+path and there is no `/etc` inside a build. A check that assembles its own
+fontconfig setup proves something about that setup and nothing about ares.
+
+Two rules, and both are stated as PROPERTIES rather than as a copy of the
+mechanism that implements them. A gate that restates its implementation passes
+the moment the implementation changes, which is the whole failure A19 was
+written about:
+
+1. **Every file in an installed face is an sfnt**, decided by the file's own
+   first four bytes. Not by the extension — that is what the find filter goes
+   by, so it cannot also be the witness. And not by `fc-scan`'s
+   `%{fontformat}`, which was the obvious thing to reach for and is wrong:
+   asked about `JetBrainsMono-Regular.woff2` it answers `TrueType`, because
+   the FreeType it was built against decompresses woff2. That is *precisely*
+   the property at issue — whether a face renders depends on the library that
+   opens it, so "some FreeType could read this" is not the question. `wOF2`
+   in the first four bytes is.
+
+2. **Asking for each family by name, and for the generic behind it, answers
+   that family in a file this module linked.** One sentence, the module's
+   whole promise, and the only check here that covers `defaultFonts` —
+   nothing else notices if `monospace` quietly lands on DejaVu Sans Mono.
+
+A generic is only a question if fontconfig has heard of it. This is the one
+thing the first version of the check got wrong, and the mutation found it:
+with the alias misspelled `sansSerif`, `fc-match sansSerif` still answered
+Archivo and the check passed. fontconfig's `49-sansserif.conf` answers ANY
+unrecognised family with the sans-serif default, so a typo'd generic looks
+exactly like a correct one. The vocabulary gate greps fontconfig's OWN shipped
+`conf.avail` for `<family>…</family>` — never the `conf.d` this module helped
+generate, or the answer would come from the same place as the question.
+
+`genericOf` now carries two names per role: the NixOS option that sets the
+alias (`sansSerif`) and the word fontconfig itself answers to (`sans-serif`).
+They are not always spelled the same and the check has to ask in fontconfig's
+spelling. Plus an assertion that `fonts.fontconfig.enable` is true — the check
+reads `confPackages`, which is only populated while it is, and with fontconfig
+off this module installs faces into a system that can resolve no name at all.
+
+Two tools gates, because **CI instantiates the ares system but never builds
+it** — `nix eval …toplevel.drvPath` proves the check exists as a derivation
+and never runs it. So: the check must still be wired into `system.checks`
+(unwiring it is the one mutation nothing else in the repo notices — the faces
+still install, the module still evaluates, every other gate stays green, and
+the proof simply never happens again), and `genericOf`'s roles must equal
+theme.toml's `family_*` roles in both directions.
+
+One thing worth recording from the mutations: with the find filter widened to
+admit WOFF2, `fc-match` still answered the `.otf`. The resolve half alone
+would NOT have caught the regression A19 was written about — the content rule
+did. The two halves are not redundant.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 56 green (was 54), 2 new. 12
+  mutations, 12 caught: the find filter widened to admit WOFF2; `defaultFonts`
+  dropped (monospace → DejaVu Sans Mono); a generic spelled the NixOS way; the
+  upstream packages installed directly instead of the checked faces (fc-match
+  answers out of `archivo-0-unstable-…` and the check names the file); the
+  check resolving against an empty fontconfig config; the check unwired from
+  `system.checks` (toplevel references: 1 → 0); a role with no generic; a
+  generic for a role nobody names; the check renamed out of the tools gate's
+  sight.
+- build: `nixos-rebuild build --flake .#ares` ok, `nix flake check --no-build`
+  ok, `nix build` of the check itself ok — it prints what each name resolved
+  to, so a passing build says so in four lines. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin touched.
+- files: modules/fonts.nix, tools/tests/test_gen_theme_qml.py
+- commit: be1b264
+- next: Track A is now down to items that need a human. **A13** and **A18**
+  are unchanged notes; **A11** is schema-blocked (proposal R1); **B8** waits
+  for a second real caller; **B7** waits for a consumer. The standing ask is
+  TWENTY-TWO iterations old and has three parts now, all answerable in one
+  sitting at ares: (1) look at the HUD — `JV_HUD_SELFTEST=1 jv-hud`, then a
+  real wake word — and say whether it is right; (2) say whether the labels are
+  JetBrains Mono, which the machine can now prove it installed but not that
+  anyone can read it; (3) **B10** — record one real spoken turn off the live
+  bus (`harness/record.py`), because every replayed trajectory in the HUD's
+  tests still ends in "thinking" and times out, and nothing in the repo has
+  ever contained a `speaking` frame or a `sys.health` one. Without (3) the
+  next UI iteration is testing against half a conversation.

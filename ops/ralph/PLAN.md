@@ -440,15 +440,33 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the rule explicit there or leave this note as the warning. Small,
       and worth doing the day that topic appears. Discovered in A17.
 
-- [ ] A19. Nothing pins the outline-only rule that keeps WOFF2 out of the
-      font path. Widen the `-iname` filter in `checkedFace` and the web
-      fonts come back with every check still green — the face check only
-      asks whether the family is PRESENT, not which file answers for it.
-      The honest gate is the one iteration 21 ran by hand: build a
-      fontconfig config from `fonts.packages`, run `fc-match "<family>"`
-      for each declared face, and assert the answer is a file this module
-      linked. That would also make "the faces resolve" a build result
-      instead of a paragraph in a journal. Small. Discovered in A8.
+- [x] A19. The hand-check from iteration 21 is a build gate. — be1b264
+      (`jv-fonts-resolve` in `system.checks`: a check, not a dependency, so
+      `nixos-rebuild build` runs it and nothing of it enters the closure. It
+      resolves against `config.fonts.fontconfig.confPackages` — the conf
+      packages the fontconfig module really links into /etc — reading the
+      real `fonts.conf` with one edit, its absolute `<include>` of conf.d,
+      because there is no /etc inside a build. Two rules, both stated as
+      PROPERTIES rather than as a copy of the mechanism that implements them:
+      every installed file is an sfnt by its own first four bytes (NOT by
+      extension, which is what the find filter goes by; NOT by fc-scan's
+      `%{fontformat}`, which calls a WOFF2 "TrueType" whenever the reading
+      FreeType has woff2 support — which is exactly the property at issue),
+      and asking for each family by name AND for the generic behind it
+      answers that family in a file this module linked (the only check that
+      covers `defaultFonts` at all). A generic is only a question if
+      fontconfig has heard of it: `49-sansserif.conf` answers any
+      unrecognised family with the sans-serif default, so a misspelled alias
+      resolved to Archivo and passed — the vocabulary gate greps fontconfig's
+      OWN `conf.avail`, never the conf.d this module helped generate.
+      `genericOf` now carries both spellings per role (the NixOS option and
+      fontconfig's word). Two tools gates because CI instantiates the system
+      but never builds it: the check must stay wired into `system.checks`
+      (unwiring it is invisible to everything else), and genericOf's roles
+      must equal theme.toml's. Worth recording: with the filter widened,
+      `fc-match` still answered the .otf — the resolve half alone would NOT
+      have caught the regression this item was about. 12 mutations, 12
+      caught. Tests: `bash ops/ralph/runtests.sh tools`.)
 
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
@@ -497,3 +515,6 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   that was silently a web font does not (5e5ef8d, 2026-09-24)
 - B5 — `jv act-log` can be asked a question: --since/--failed/--outcome, and
   a filter that never hides what it could not evaluate (da134b9, 2026-09-24)
+- A19 — the font module stops promising and starts proving: fc-match run
+  against the system's own fontconfig config, every build (be1b264,
+  2026-09-24)
