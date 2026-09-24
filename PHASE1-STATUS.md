@@ -88,6 +88,24 @@ install day; anything needing real hardware is mocked and tagged
   whose partial arrived before the vad frame was silently measured short.
   Boundaries now come only from `audio.vad`, by `event`.
 
+  **UPDATE 2026-09-24: `respond` stops being one number over two
+  services.** The two STILL-OPEN latency chunks below are ASR and the
+  brain, and until now the measurement had them in a single span — so
+  neither could be optimised against it. The frame that divides them was
+  already on the bus: jv-ears runs whisper AFTER publishing `speech_end`
+  and publishes the `audio.transcript` **final** when it is done, so that
+  frame is the seam. `jv tap --latency` now reports `hear` (speech_end ->
+  final transcript: jv-ears' ASR) and `think` (final transcript -> first
+  `speech.say`: jv-brain to its first word, plus a bus hop each way),
+  which partition `respond` exactly. No new publisher, no schema change.
+  A turn with no final (jv-ears publishes none for an utterance its ASR
+  read as empty, and a tap can simply have missed it) prints `?` for both
+  and keeps `respond` whole; a final landing outside the span it would
+  divide refuses both halves rather than publishing a negative. The
+  2.2 s ASR figure and the prefill/generation figures below came from
+  llama-server's own timings and a stopwatch; they are now readable off
+  the bus in the same table as everything else.
+
   **UPDATE 2026-09-23 (308e12b): streaming reply — the perceived-latency
   fix.** jv-brain now streams the llama completion and speaks each sentence
   as it closes (SentenceChunker → one speech.say per sentence, shared

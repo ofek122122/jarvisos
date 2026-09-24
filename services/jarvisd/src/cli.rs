@@ -178,9 +178,10 @@ pub fn ears_endpoint_hold_s(frame: &rmpv::Value) -> Option<f64> {
 /// One voice turn, split at the boundaries jv-ears itself publishes.
 ///
 /// ```text
-///   speech_start        last speech      speech_end      first speech.say
-///        |---- spoke ------|---- hold ----|---- respond ----|
-///        |-------------------- total ----------------------|
+/// speech_start    last speech  speech_end  final transcript first speech.say
+///       |--- spoke ----|--- hold ---|---- hear ----|---- think ----|
+///       |                           |---------- respond -----------|
+///       |------------------------- total --------------------------|
 /// ```
 ///
 /// Why this is not one number. The Phase 1 exit criterion is "< 2.5 s", and
@@ -198,7 +199,18 @@ pub fn ears_endpoint_hold_s(frame: &rmpv::Value) -> Option<f64> {
 ///   * **hold** — jv-ears' `vad_min_silence_ms`, deliberately spent to
 ///     bridge a mid-sentence pause. Machine time, and tunable.
 ///   * **respond** — ASR, the brain, and the bus hops between them:
-///     everything after ears decided the utterance had ended.
+///     everything after ears decided the utterance had ended. It is two
+///     services, and the frame that divides them is already on the bus:
+///     jv-ears runs whisper AFTER publishing `speech_end` and publishes the
+///     `audio.transcript` **final** when it is done, so that frame is the
+///     seam. `respond` therefore splits, with no new publisher and no
+///     schema change, into:
+///       * **hear** — `speech_end` -> the final transcript: jv-ears' ASR.
+///       * **think** — the final transcript -> the first `speech.say`:
+///         jv-brain, up to its first word, plus the bus hop each way.
+///     PHASE1-STATUS names those two as separate open items (ASR fixed at
+///     ~2.2 s; prefill fixed, generation not), and one number over both
+///     cannot say which one a change moved.
 ///
 /// So the machine's share of a turn is `hold + respond`, and THAT is the
 /// number a budget can be argued about. Which span the 2.5 s applies to is
@@ -220,6 +232,12 @@ pub struct Turn {
     pub respond_ms: Option<f64>,
     /// jv-ears' endpoint hold, as jv-ears reported it.
     pub hold_ms: Option<f64>,
+    /// speech_end -> the final `audio.transcript`: jv-ears' ASR. The first
+    /// half of `respond`.
+    pub hear_ms: Option<f64>,
+    /// The final `audio.transcript` -> first speech.say: jv-brain to its
+    /// first word. The second half of `respond`.
+    pub think_ms: Option<f64>,
 }
 
 impl Turn {
@@ -243,11 +261,13 @@ impl Turn {
             None => "?".to_string(),
         };
         format!(
-            "turn {id}: total={} spoke={} hold={} respond={}",
+            "turn {id}: total={} spoke={} hold={} respond={} (hear={} think={})",
             ms(self.total_ms),
             ms(self.spoke_ms()),
             ms(self.hold_ms),
             ms(self.respond_ms),
+            ms(self.hear_ms),
+            ms(self.think_ms),
         )
     }
 }
@@ -259,6 +279,8 @@ struct Utt {
     start: Option<f64>,
     /// `audio.vad` speech_end.
     end: Option<f64>,
+    /// The final `audio.transcript` — the seam between ASR and the brain.
+    heard: Option<f64>,
     reported: bool,
 }
 
@@ -273,6 +295,12 @@ struct Utt {
 ///    emitted PART-WAY through the utterance, so using it as the start
 ///    silently shortened the turn by however much of the sentence had
 ///    already been said. Boundaries come from the service that decides them.
+///    A FINAL transcript is different in kind: it is not a boundary either,
+///    it is an ANCHOR INSIDE one turn, marking where jv-ears stopped and
+///    jv-brain started. So it annotates an utterance `audio.vad` already
+///    bounded and never conjures one — a seam with nothing around it would
+///    otherwise print a `>>> turn` line for something no service ever said
+///    was a turn.
 /// 2. **Report once per utterance.** jv-brain streams a reply sentence by
 ///    sentence, so one utterance produces several `speech.say` frames. Only
 ///    the first is time-to-first-word; printing a bigger number for every
@@ -301,6 +329,17 @@ impl Utterances {
         Self::keep_earliest(&mut self.entry(id).end, ts);
     }
 
+    /// The FINAL `audio.transcript` for `id`, at envelope `ts`: the moment
+    /// jv-ears finished transcribing and jv-brain's share of the turn began.
+    ///
+    /// Unlike the two boundaries this does NOT create an utterance. Only
+    /// `audio.vad` says a turn happened; this only divides one that did.
+    pub fn heard(&mut self, id: &str, ts: f64) {
+        if let Some(u) = self.utts.get_mut(id) {
+            Self::keep_earliest(&mut u.heard, ts);
+        }
+    }
+
     /// The EARLIEST ts seen for a boundary, not the first one delivered: the
     /// frames carrying an `utterance_id` need not arrive in ts order, and a
     /// boundary is a moment in the audio rather than a moment in this
@@ -314,7 +353,8 @@ impl Utterances {
 
     fn entry(&mut self, id: &str) -> &mut Utt {
         if !self.utts.contains_key(id) {
-            self.utts.insert(id.to_string(), Utt { start: None, end: None, reported: false });
+            self.utts
+                .insert(id.to_string(), Utt { start: None, end: None, heard: None, reported: false });
             self.order.push_back(id.to_string());
             while self.order.len() > self.cap {
                 if let Some(old) = self.order.pop_front() {
@@ -335,6 +375,15 @@ impl Utterances {
             return None;
         }
         u.reported = true;
+        // The seam is only a seam while it sits inside the span it divides.
+        // A final before its own speech_end, or after the first word that
+        // answers it, means two frames disagree about the order the pipeline
+        // ran in — and an anchor that is not trusted for one half is not
+        // trusted for the other, so both halves go rather than one of them
+        // being published as a negative.
+        let seam = u
+            .heard
+            .filter(|h| *h <= say_ts && u.end.map_or(true, |t1| *h >= t1));
         Some(Turn {
             total_ms: u.start.map(|t0| (say_ts - t0) * 1e3),
             speech_ms: match (u.start, u.end) {
@@ -343,6 +392,11 @@ impl Utterances {
             },
             respond_ms: u.end.map(|t1| (say_ts - t1) * 1e3),
             hold_ms: hold_s.map(|h| h * 1e3),
+            hear_ms: match (u.end, seam) {
+                (Some(t1), Some(h)) => Some((h - t1) * 1e3),
+                _ => None,
+            },
+            think_ms: seam.map(|h| (say_ts - h) * 1e3),
         })
     }
 
@@ -365,11 +419,18 @@ impl Utterances {
 /// `spoke` and `hold` are pushed together or not at all: they are two halves
 /// of one subtraction, and a spoke sample whose hold was refused would be an
 /// average over turns measured two different ways.
+///
+/// `hear` and `think` are two subtractions sharing one anchor, not two halves
+/// of one, so each is pushed on its own terms — `hear` needs a `speech_end`
+/// and `think` does not, which is why a tap that joined mid-utterance can
+/// have more thinks than hears. The `n` column is what says so.
 #[derive(Default)]
 pub struct TurnStats {
     turns: usize,
     spoke: Vec<f64>,
     hold: Vec<f64>,
+    hear: Vec<f64>,
+    think: Vec<f64>,
     respond: Vec<f64>,
     total: Vec<f64>,
 }
@@ -380,6 +441,12 @@ impl TurnStats {
         if let (Some(spoke), Some(hold)) = (t.spoke_ms(), t.hold_ms) {
             self.spoke.push(spoke);
             self.hold.push(hold);
+        }
+        if let Some(v) = t.hear_ms {
+            self.hear.push(v);
+        }
+        if let Some(v) = t.think_ms {
+            self.think.push(v);
         }
         if let Some(v) = t.respond_ms {
             self.respond.push(v);
@@ -402,11 +469,13 @@ impl TurnStats {
             "--- turn latency: {} turn{plural}, split at the boundaries jv-ears publishes\n",
             self.turns
         );
-        out.push_str(&format!("{:<10} {:<28} {:>4} {:>9} {:>9} {:>9}\n", "span", "whose time it is", "n", "p50", "p95", "max"));
-        let rows: [(&str, &str, &Vec<f64>); 4] = [
+        out.push_str(&format!("{:<10} {:<31} {:>4} {:>9} {:>9} {:>9}\n", "span", "whose time it is", "n", "p50", "p95", "max"));
+        let rows: [(&str, &str, &Vec<f64>); 6] = [
             ("spoke", "you, talking", &self.spoke),
             ("hold", "jv-ears' endpoint wait", &self.hold),
-            ("respond", "ASR + brain + bus", &self.respond),
+            ("hear", "jv-ears' ASR", &self.hear),
+            ("think", "jv-brain, to its first word", &self.think),
+            ("respond", "hear + think: ASR + brain + bus", &self.respond),
             ("total", "speech start -> first word", &self.total),
         ];
         for (span, whose, v) in rows {
@@ -416,12 +485,17 @@ impl TurnStats {
             let mut s = v.clone();
             s.sort_by(f64::total_cmp);
             out.push_str(&format!(
-                "{span:<10} {whose:<28} {:>4} {:>7.0}ms {:>7.0}ms {:>7.0}ms\n",
+                "{span:<10} {whose:<31} {:>4} {:>7.0}ms {:>7.0}ms {:>7.0}ms\n",
                 s.len(),
                 percentile(&s, 50.0),
                 percentile(&s, 95.0),
                 percentile(&s, 100.0),
             ));
+        }
+        if !self.respond.is_empty() && self.hear.is_empty() && self.think.is_empty() {
+            out.push_str(
+                "--- hear/think unmeasured: no `audio.transcript` final landed between a turn's\n    speech_end and its first word, so respond stays one span over two services.\n    (jv-ears publishes no final for an utterance its ASR read as empty.)\n",
+            );
         }
         if self.spoke.is_empty() {
             out.push_str(&format!(
@@ -1561,6 +1635,109 @@ mod tests {
     }
 
     #[test]
+    fn respond_splits_into_hear_and_think_at_the_final_transcript() {
+        let mut u = Utterances::with_capacity(8);
+        u.started("utt-1", 10.0);
+        u.ended("utt-1", 13.0);
+        // jv-ears runs whisper AFTER it publishes speech_end, then publishes
+        // the final. That frame is the seam between the two services inside
+        // `respond`, and it is already on the bus.
+        u.heard("utt-1", 14.0);
+        let t = u.reply("utt-1", 14.2, Some(1.5)).expect("a reported turn");
+        about(t.respond_ms, 1200.0);
+        about(t.hear_ms, 1000.0);
+        about(t.think_ms, 200.0);
+        // The split is a partition of respond, not an extra span beside it.
+        about(Some(t.hear_ms.unwrap() + t.think_ms.unwrap()), t.respond_ms.unwrap());
+    }
+
+    #[test]
+    fn without_a_final_transcript_respond_stays_one_span() {
+        let mut u = Utterances::with_capacity(8);
+        u.started("utt-1", 10.0);
+        u.ended("utt-1", 13.0);
+        // jv-ears publishes NO final for an utterance whisper read as empty
+        // (`_emit_transcript` returns early on empty text), and a tap can
+        // simply have missed the frame. Either way the seam is unknown.
+        let t = u.reply("utt-1", 14.2, Some(1.5)).expect("a reported turn");
+        about(t.respond_ms, 1200.0);
+        assert_eq!(t.hear_ms, None);
+        assert_eq!(t.think_ms, None);
+        let line = t.line("utt-1");
+        assert!(line.contains("hear=?"), "{line}");
+        assert!(line.contains("think=?"), "{line}");
+    }
+
+    #[test]
+    fn a_seam_outside_the_span_it_is_supposed_to_divide_is_refused() {
+        // A final that lands BEFORE the speech_end it should follow: the two
+        // frames disagree about the order the pipeline ran in, and an anchor
+        // that is not inside `respond` cannot divide it. Neither half is
+        // published rather than one of them being negative.
+        let mut u = Utterances::with_capacity(8);
+        u.started("early", 10.0);
+        u.ended("early", 13.0);
+        u.heard("early", 12.5);
+        let t = u.reply("early", 14.2, None).expect("a reported turn");
+        about(t.respond_ms, 1200.0);
+        assert_eq!(t.hear_ms, None, "a negative ASR span is not a measurement");
+        assert_eq!(t.think_ms, None, "the anchor that produced it is not trusted either");
+
+        // And a final that lands AFTER the first word answering it.
+        let mut u = Utterances::with_capacity(8);
+        u.started("late", 10.0);
+        u.ended("late", 13.0);
+        u.heard("late", 14.5);
+        let t = u.reply("late", 14.2, None).expect("a reported turn");
+        assert_eq!(t.hear_ms, None);
+        assert_eq!(t.think_ms, None);
+    }
+
+    #[test]
+    fn a_tap_that_missed_speech_end_can_still_time_the_brain() {
+        let mut u = Utterances::with_capacity(8);
+        u.started("utt-1", 10.0);
+        // No speech_end heard, so nothing knows where ASR began...
+        u.heard("utt-1", 14.0);
+        let t = u.reply("utt-1", 14.2, None).expect("a reported turn");
+        assert_eq!(t.respond_ms, None);
+        assert_eq!(t.hear_ms, None);
+        // ...but the seam to the first word is two frames this tap did hear.
+        about(t.think_ms, 200.0);
+    }
+
+    #[test]
+    fn a_final_transcript_is_an_anchor_inside_a_turn_and_never_a_turn() {
+        let mut u = Utterances::with_capacity(8);
+        // Only `audio.vad` says an utterance happened. A final transcript
+        // with no boundaries around it is one span and no turn, and
+        // reporting it would put a line under a `>>> turn` that nothing
+        // bounded -- the same mistake the partial-as-a-start bug made.
+        u.heard("utt-1", 14.0);
+        assert!(u.is_empty(), "a transcript must not conjure an utterance");
+        assert!(u.reply("utt-1", 14.2, None).is_none());
+    }
+
+    #[test]
+    fn the_seam_keeps_the_earliest_ts_like_every_other_anchor() {
+        // The schema promises exactly one final per utterance_id; if two ever
+        // arrive, the anchor is a moment in the audio, not a moment in this
+        // process's inbox. BOTH arrival orders, because "keep whichever came
+        // last" gives the same answer as "keep the earliest" for one of them
+        // and this test is about telling those two rules apart.
+        for pair in [[14.0, 13.5], [13.5, 14.0]] {
+            let mut u = Utterances::with_capacity(8);
+            u.started("utt-1", 10.0);
+            u.ended("utt-1", 13.0);
+            u.heard("utt-1", pair[0]);
+            u.heard("utt-1", pair[1]);
+            let t = u.reply("utt-1", 14.2, None).expect("a reported turn");
+            about(t.hear_ms, 500.0);
+            about(t.think_ms, 700.0);
+        }
+    }
+
+    #[test]
     fn without_ears_own_budget_the_spoken_part_is_unknown_not_zero() {
         let mut u = Utterances::with_capacity(8);
         u.started("utt-1", 10.0);
@@ -1668,8 +1845,8 @@ mod tests {
     #[test]
     fn turn_summary_reads_in_the_order_the_turn_happened() {
         let mut s = TurnStats::default();
-        s.push(&turn(10.0, 13.0, 14.2, Some(1.5)));
-        s.push(&turn(20.0, 24.0, 26.0, Some(1.5)));
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5)));
+        s.push(&turn_with_seam(20.0, 24.0, 25.6, 26.0, Some(1.5)));
         let out = s.summary();
         let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("no {w} row in\n{out}"));
         assert!(at("spoke") < at("hold"), "{out}");
@@ -1682,6 +1859,47 @@ mod tests {
         // The two numbers a reader has to keep apart are named, not implied.
         assert!(out.contains("hold+respond"), "{out}");
         assert!(!out.contains("unmeasured"), "everything was measured:\n{out}");
+    }
+
+    /// Build a turn with the ASR seam in it, for the summary tests.
+    fn turn_with_seam(start: f64, end: f64, heard: f64, say: f64, hold_s: Option<f64>) -> Turn {
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", start);
+        u.ended("t", end);
+        u.heard("t", heard);
+        u.reply("t", say, hold_s).expect("a turn")
+    }
+
+    #[test]
+    fn turn_summary_shows_the_two_halves_of_respond_in_the_order_they_ran() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5)));
+        s.push(&turn_with_seam(20.0, 24.0, 26.0, 26.4, Some(1.5)));
+        let out = s.summary();
+        let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("no {w} row in\n{out}"));
+        assert!(at("hold") < at("hear"), "{out}");
+        assert!(at("hear") < at("think"), "{out}");
+        assert!(at("think") < at("respond"), "{out}");
+        assert!(at("respond") < at("total"), "{out}");
+        // Nearest-rank p50 of the two hears is the smaller, 1000 ms; the two
+        // thinks are 200 and 400.
+        assert!(out.contains("1000ms"), "{out}");
+        assert!(out.contains("400ms"), "{out}");
+        // The table must say respond is these two and not a third thing
+        // beside them, or a reader adds all three together.
+        assert!(out.contains("hear + think"), "respond must name its halves:\n{out}");
+        assert!(!out.contains("no `audio.transcript` final"), "{out}");
+    }
+
+    #[test]
+    fn turn_summary_omits_the_asr_seam_it_never_saw_and_says_why() {
+        let mut s = TurnStats::default();
+        s.push(&turn(10.0, 13.0, 14.2, Some(1.5)));
+        let out = s.summary();
+        assert!(out.contains("\nrespond   "), "{out}");
+        assert!(!out.contains("\nhear  "), "no hear row without a final to divide at:\n{out}");
+        assert!(!out.contains("\nthink "), "{out}");
+        assert!(out.contains("audio.transcript"), "the reason must name the frame:\n{out}");
     }
 
     #[test]

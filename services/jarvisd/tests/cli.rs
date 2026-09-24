@@ -318,6 +318,15 @@ fn vad(event: &str, utt: &str) -> rmpv::Value {
     body(&[("event", event.into()), ("utterance_id", utt.into())])
 }
 
+fn transcript(kind: &str, utt: &str) -> rmpv::Value {
+    body(&[
+        ("kind", kind.into()),
+        ("utterance_id", utt.into()),
+        ("text", "what time is it".into()),
+        ("lang", "en".into()),
+    ])
+}
+
 /// Publish one voice turn per cycle, forever, with a FRESH utterance id each
 /// time, as the real services publish it: `before` is what leads up to the
 /// reply — each entry naming the service whose connection publishes it —
@@ -361,12 +370,15 @@ where
     })
 }
 
-/// The whole turn as jv-ears publishes it: its budgets, then both boundaries.
+/// The whole turn as jv-ears publishes it: its budgets, both boundaries, and
+/// then — because whisper runs after the endpoint decision — the final
+/// transcript that divides ASR from the brain.
 fn whole_turn(utt: &str) -> Vec<(&'static str, &'static str, rmpv::Value)> {
     vec![
         ("jv-ears", "sys.health", ears_heartbeat(0.02)),
         ("jv-ears", "audio.vad", vad("speech_start", utt)),
         ("jv-ears", "audio.vad", vad("speech_end", utt)),
+        ("jv-ears", "audio.transcript", transcript("final", utt)),
     ]
 }
 
@@ -414,10 +426,19 @@ async fn a_turn_is_reported_split_at_the_boundaries_jv_ears_published() {
 
     let s = &out.stdout;
     assert!(s.contains("--- turn latency:"), "{s}");
-    for span in ["spoke", "hold", "respond", "total"] {
+    for span in ["spoke", "hold", "hear", "think", "respond", "total"] {
         assert!(s.contains(&format!("\n{span:<10} ")), "no {span} row:\n{s}");
     }
     assert!(s.contains("hold+respond"), "the machine's share must be named:\n{s}");
+    // hear and think are a PARTITION of respond, measured on real frames
+    // through a real broker: the two halves must add up to the whole.
+    let n = numbers_in(full[0]);
+    let (respond, hear, think) = (n[3], n[4], n[5]);
+    assert!(
+        (hear + think - respond).abs() <= 1.0,
+        "hear {hear} + think {think} != respond {respond} in {:?}",
+        full[0]
+    );
     // Cross-process CLOCK_MONOTONIC: every number is a small positive latency,
     // not a negative or a wall-clock-sized nonsense.
     for ms in numbers_in(full[0]) {
@@ -482,6 +503,41 @@ async fn a_transcript_is_not_a_boundary_and_cannot_stand_in_for_one() {
     // The transcripts themselves are still taken as frames, so this is an
     // absence of a MEASUREMENT and not an absence of traffic.
     assert!(out.stdout.contains("audio.transcript"), "{}", out.stdout);
+}
+
+#[tokio::test]
+async fn a_partial_transcript_is_not_the_seam_even_where_the_seam_would_be() {
+    let bus = start(Config::default()).await;
+    // Partials are provisional ASR output; taking one as the moment ASR
+    // finished would measure `hear` short and `think` long — a brain blamed
+    // for time whisper spent. jv-ears happens to emit every partial BEFORE
+    // its speech_end, so the out-of-order guard would refuse them anyway and
+    // the `kind` check would look unnecessary while doing all the work. So
+    // this puts a partial exactly where a seam belongs, between speech_end
+    // and the first word, where nothing but its `kind` can disqualify it.
+    let p = pump_turns(&bus, 30, |utt| {
+        vec![
+            ("jv-ears", "sys.health", ears_heartbeat(0.02)),
+            ("jv-ears", "audio.vad", vad("speech_start", utt)),
+            ("jv-ears", "audio.vad", vad("speech_end", utt)),
+            ("jv-ears", "audio.transcript", transcript("partial", utt)),
+        ]
+    });
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.2"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = turn_lines(&out);
+    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
+    assert!(lines[0].contains("hear=? think=?"), "{:?}", lines[0]);
+    assert!(!lines[0].contains("respond=?"), "the whole is still measured: {:?}", lines[0]);
+
+    let s = &out.stdout;
+    assert!(s.contains("\nrespond   "), "{s}");
+    assert!(!s.contains("\nhear      "), "a span nothing measured is not a row:\n{s}");
+    assert!(!s.contains("\nthink     "), "{s}");
+    assert!(s.contains("audio.transcript"), "the table must say what was missing:\n{s}");
 }
 
 #[tokio::test]

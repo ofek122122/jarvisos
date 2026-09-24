@@ -246,6 +246,18 @@ async fn main() -> anyhow::Result<()> {
                             _ => {}
                         }
                     }
+                    // The FINAL transcript is not a boundary either — it is
+                    // the seam INSIDE the turn where jv-ears hands over to
+                    // jv-brain, so it splits `respond` into hear + think. A
+                    // partial is provisional ASR output mid-utterance and is
+                    // not that moment.
+                    "audio.transcript" => {
+                        if cli::get_str(body, "kind").as_deref() == Some("final") {
+                            if let Some(id) = cli::get_str(body, "utterance_id") {
+                                utts.heard(&id, ts);
+                            }
+                        }
+                    }
                     "speech.say" => {
                         if let Some(id) = cli::get_str(body, "in_reply_to_utterance") {
                             // Only the FIRST reply frame: a streamed reply is

@@ -123,6 +123,30 @@ async fn broker_health_frame_is_valid_envelope() {
     assert_eq!(topic_of(&f), "sys.health");
 }
 
+/// A heartbeat's contract is its own `period_s`: the first beat is due one
+/// whole period after the broker starts, and not before.
+///
+/// A tokio interval fires its first tick IMMEDIATELY, which used to put a
+/// beat on the bus before the accept loop had taken a single connection — so
+/// it reached nobody on an idle machine, and reached whichever client had
+/// already been accepted on a loaded one. Both readers of `sys.health`
+/// (`core/HealthState.qml` and `jv health --check`) are built on "a heartbeat
+/// speaks for two of its own periods", and a beat whose audience is decided
+/// by the scheduler is the one thing that rule cannot absorb: it is how a
+/// test asking for a silent bus got a heartbeat only when the machine was
+/// busy.
+#[tokio::test]
+async fn the_brokers_first_heartbeat_waits_out_a_whole_period() {
+    let cfg = Config { health_period: Duration::from_millis(600), ..Config::default() };
+    let bus = start(cfg).await;
+    let mut c = BusClient::connect(&bus.addr, "health-watch").await.unwrap();
+    c.subscribe(&["sys.health"]).await.unwrap();
+
+    assert!(recv_frame(&mut c, 250).await.is_none(), "a beat landed before its period was up");
+    // And the beat is delayed, not cancelled.
+    assert!(recv_frame(&mut c, 1200).await.is_some(), "no heartbeat after a full period");
+}
+
 #[tokio::test]
 async fn subscriber_disconnect_leaves_others_running() {
     let bus = start(Config::default()).await;

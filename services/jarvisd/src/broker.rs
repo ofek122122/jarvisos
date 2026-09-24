@@ -242,7 +242,18 @@ impl Broker {
             let health = {
                 let b = broker.clone();
                 tokio::spawn(async move {
-                    let mut iv = tokio::time::interval(b.cfg.health_period);
+                    // The first beat is due one period in, not at t=0. A
+                    // tokio interval's first tick fires IMMEDIATELY, and at
+                    // that moment the accept loop below has taken no
+                    // connection at all — so the beat reaches nobody, unless
+                    // the machine is loaded enough that a client gets
+                    // accepted and subscribed before this task is first
+                    // polled, and then it reaches them. Which clients see a
+                    // heartbeat should not be decided by the scheduler; a
+                    // heartbeat's contract is its own `period_s`.
+                    let period = b.cfg.health_period;
+                    let mut iv =
+                        tokio::time::interval_at(tokio::time::Instant::now() + period, period);
                     iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     loop {
                         iv.tick().await;
