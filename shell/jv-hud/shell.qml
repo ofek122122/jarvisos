@@ -35,7 +35,9 @@
 // destructive action jv-act has stopped in front of, in jv-act's own
 // words, readable rather than only audible; `StatePlate` (A3) — what
 // jv-voice and jv-ears actually published, idle / listening / speaking /
-// interrupted; `HeardPlate` (A26) — the words jv-ears took down, for as
+// interrupted; `OutputPlate` (A40) — that the sink Jarvis is speaking into
+// is muted, which is the one way every service can report `ok` while you
+// hear nothing; `HeardPlate` (A26) — the words jv-ears took down, for as
 // long as Jarvis has not started answering them; `MicPlate` (A4) —
 // whether the microphone is open, from
 // jv-ears' own capture counters; and `HealthPlate` (A6) — the services
@@ -166,6 +168,16 @@ ShellRoot {
         // What Jarvis is doing, from speech.state + audio.wake + audio.vad.
         // Draws nothing while idle or while the bus cannot be seen.
         StatePlate {
+          anchors.right: parent.right
+        }
+
+        // Whether any of what Jarvis is saying is reaching the room, from
+        // jv-context's view of the default sink. Directly under the state
+        // plate because it qualifies the word immediately above it: with a
+        // muted output, SPEAKING is a true frame that adds up to a false
+        // impression, and this is the line that says so. On a machine you
+        // can hear it is never here at all.
+        OutputPlate {
           anchors.right: parent.right
         }
 

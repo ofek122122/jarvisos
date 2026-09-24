@@ -456,8 +456,13 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
     So the frames are counted, from the HUD's own side of the Wayland
     socket. Two windows, because §06 claims this of two different states:
 
-      · QUIET — a live bus with nothing on it. The surface is unmapped
-        (earned emptiness is the ordinary state) and must produce nothing.
+      · QUIET — a live bus CARRYING TRAFFIC the HUD subscribes to and has
+        nothing to say about: one context.system snapshot per second, an
+        ordinary unmuted sink (A40). The surface stays unmapped (earned
+        emptiness is the ordinary state) and must produce nothing. A bus
+        with literally nothing on it would prove less: the HUD is a live
+        subscriber, jv-context heartbeats at 1 Hz all day, and the thing
+        worth knowing is that a frame arriving is not a frame drawn.
       · LIT — a plate on screen, saying something true, with no further
         input. This is the interesting one: stillness here is a property
         of what the elements DO, not of the surface being absent.
@@ -501,18 +506,30 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         quiet = stage / "idle-quiet.ppm"
         check_desk_is_bare(quiet, background, "before the quiet window")
         mark = hud.mark()
-        time.sleep(IDLE_WINDOW_S)
+        # jv-context's own cadence, for the length of the window. Every one
+        # of these reaches the HUD — it is a subscribed topic — and not one
+        # of them is anything to draw.
+        snapshots = 0
+        deadline = time.monotonic() + IDLE_WINDOW_S
+        while time.monotonic() < deadline:
+            publish_shot({"frames": [sheet.SINK_OK]}, bus_addr)
+            snapshots += 1
+            time.sleep(max(0.0, min(1.0, deadline - time.monotonic())))
         commits, frames = sheet.surface_traffic(hud.since(mark))
         if commits:
             raise Fail(
                 f"the HUD committed {commits} surface updates ({frames} frame "
-                f"callbacks) in {IDLE_WINDOW_S:.0f}s on a bus with nothing on "
-                "it, with every plate dark and the surface unmapped — §06 says "
-                "an idle desktop renders at 0 fps"
+                f"callbacks) in {IDLE_WINDOW_S:.0f}s while receiving "
+                f"{snapshots} context.system snapshots it had nothing to say "
+                "about, with every plate dark and the surface unmapped — §06 "
+                "says an idle desktop renders at 0 fps"
             )
         # Only now: the emptiness is what makes that zero mean something.
         check_desk_is_bare(quiet, background, "after the quiet window")
-        log(f"  quiet: {commits} commits in {IDLE_WINDOW_S:.0f}s, desktop untouched")
+        log(
+            f"  quiet: {commits} commits in {IDLE_WINDOW_S:.0f}s under "
+            f"{snapshots} snapshots, desktop untouched"
+        )
 
         # The control for that zero. One real frame, and the mic plate has
         # something true to say: whatever the HUD does next goes through

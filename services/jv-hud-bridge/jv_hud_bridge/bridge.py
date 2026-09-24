@@ -77,6 +77,18 @@ from jarvis_bus import BusError
 # unless the two ids match — a tool name taken on faith is a lie about what
 # touched the machine.
 #
+# context.system is the fourth (PLAN A40), and the only one here that is
+# not an event: it is a 1 Hz snapshot, so subscribing to it means a frame
+# per second arriving forever on a HUD whose whole design is to cost
+# nothing while nothing happens. It earns that because of one field pair —
+# `audio_muted` and `audio_volume` — which answer a question no other topic
+# on this bus can: when jv-voice says it is speaking, is anything actually
+# reaching the room? Every service reports `ok` while a muted sink swallows
+# a reply, so the HUD saying SPEAKING was a true frame adding up to a false
+# impression. core/OutputState.qml reads those two fields and nothing else;
+# the rest of the body (load, memory, net, VRAM, battery) rides the pipe
+# because the envelope is forwarded whole and is read by no element.
+#
 # `intent.action.args` is the most sensitive body on this list: it is
 # whatever the tool was asked to operate on, a path or a search string or
 # a window title. It rides this pipe because the envelope is forwarded
@@ -95,6 +107,7 @@ DEFAULT_TOPICS: Sequence[str] = (
     "action.confirm",
     "intent.action",
     "action.result",
+    "context.system",
 )
 
 # Exactly the envelope (schemas/envelope.json). Forwarding the whole thing

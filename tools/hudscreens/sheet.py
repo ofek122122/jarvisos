@@ -164,6 +164,27 @@ MIC_OPEN = _beat(
 )
 
 
+# An ordinary jv-context snapshot: nothing muted, nothing at zero, so
+# core/OutputState.qml has nothing to say about it. context.system is the
+# only 1 Hz topic the HUD subscribes to (A40) — every other one is an
+# event — so this is the frame the idle probe uses to ask whether a bus
+# that never stops talking costs a HUD that has nothing to say anything at
+# all.
+SINK_OK = {
+    "publish": {
+        "topic": "context.system",
+        "src": "jv-context",
+        "body": {
+            "net_online": True,
+            "load1": 1.9,
+            "mem_used_pct": 37.5,
+            "audio_volume": 0.62,
+            "audio_muted": False,
+        },
+    }
+}
+
+
 SHOTS = [
     {
         "file": "01-quiet",

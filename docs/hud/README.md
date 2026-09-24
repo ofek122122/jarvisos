@@ -149,6 +149,34 @@ The composed frames behind it also carry `args` (`{"name": "obsidian"}`) and
 envelopes, and neither field is on screen. A tools gate fails the build if
 any element under `shell/jv-hud/core` so much as names them.
 
+### 09 — output muted
+
+![09-muted.png](09-muted.png)
+
+`composed`. Jarvis answering into a sink nobody can hear (A40). Read it top
+to bottom: SPEAKING is true — jv-voice really did accept the utterance,
+Piper really did synthesise it, PortAudio really did play it — and the room
+was silent the whole time. Every service in this picture reports `ok`,
+nothing errored, the audit log is clean, and the only thing wrong is a
+toggle somewhere else on the machine. That is what makes it the failure with
+the least evidence attached, and why the word above it needed a second line
+underneath it rather than a different colour.
+
+`warn`, not `risk`: nothing is broken. The two words are two different
+controls — OUTPUT MUTED is a toggle, OUTPUT AT ZERO is a slider — because a
+single "no sound" would send you to the wrong one half the time. There is no
+threshold on "too quiet": that would be a guess about your speakers and your
+room, and it would put a plate on screen for a machine you deliberately
+turned down.
+
+The frames are a `speech.state` `speaking` (composed, for the same reason
+shot 04 is — see B10/A28) and one `context.system` snapshot, which is
+jv-context's 1 Hz view of the default sink. It is the first non-event topic
+the HUD subscribes to, and the element reads exactly two of its fields:
+`audio_muted` and `audio_volume`. The rest of that body — load, memory, net,
+free VRAM — rides the pipe because envelopes are forwarded whole and is read
+by nothing.
+
 ## Regenerating
 
 ```

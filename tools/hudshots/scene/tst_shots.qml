@@ -82,6 +82,10 @@ Item {
       anchors.right: parent.right
     }
 
+    OutputPlate {
+      anchors.right: parent.right
+    }
+
     HeardPlate {
       anchors.right: parent.right
     }
@@ -269,6 +273,28 @@ Item {
       });
     }
 
+    // COMPOSED. Jarvis answering into a sink nobody can hear (A40). The
+    // pair is what the plate needs and what the bus really carries: jv-voice
+    // saying an utterance is in flight, and jv-context's 1 Hz snapshot of
+    // the default sink saying it is muted. Every service in this picture is
+    // `ok`, which is the whole point — this is the one failure where
+    // nothing is broken and the room is silent anyway.
+    function shot_muted() {
+      Bus.ingest('{"t":"link","up":true}');
+      suite.micOpen();
+      suite.send("speech.state", "jv-voice", {
+        "state": "speaking",
+        "utterance_id": "5ab8fecf-13d0-4f86-aa5d-0b2cc23b4d5d"
+      });
+      suite.send("context.system", "jv-context", {
+        "net_online": true,
+        "load1": 2.4,
+        "mem_used_pct": 41.8,
+        "audio_volume": 0.62,
+        "audio_muted": true
+      });
+    }
+
     // The HUD admitting it cannot see the machine at all (A23). Every
     // plate below refuses to guess, and a refusal draws the same nothing a
     // calm machine draws — so without this line a dark recording light
@@ -294,7 +320,8 @@ Item {
       // reconnecting bridge is not a lost machine — so this one settles
       // past that rather than photographing the silence in between.
       { "file": "07-no-bus.png", "build": suite.shot_nobus, "lit": true, "settleMs": 6500 },
-      { "file": "08-action.png", "build": suite.shot_action, "lit": true }
+      { "file": "08-action.png", "build": suite.shot_action, "lit": true },
+      { "file": "09-muted.png", "build": suite.shot_muted, "lit": true }
     ]
 
     function test_the_sheet() {
