@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import datetime
 import json
 import sys
 import time
@@ -24,22 +23,9 @@ from pathlib import Path
 from typing import Optional, TextIO
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "pylib"))
-from jarvis_bus import BusClient, mono_now  # noqa: E402
-
-
-def boot_id() -> str:
-    try:
-        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-    except OSError:
-        return "dev-no-boot-id"
-
-
-def session_header() -> dict:
-    return {
-        "boot_id": boot_id(),
-        "wall_time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "monotonic_now": mono_now(),
-    }
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import session  # noqa: E402
+from jarvis_bus import BusClient  # noqa: E402
 
 
 async def record(
@@ -52,7 +38,7 @@ async def record(
     """Record until duration/limit/EOF. Returns number of frames written."""
     bus = await BusClient.connect(bus_addr, src="harness-record")
     await bus.subscribe(topics)
-    out.write(json.dumps(session_header()) + "\n")
+    out.write(json.dumps(session.live_header()) + "\n")
     out.flush()
     n = 0
     deadline = time.monotonic() + duration_s if duration_s else None

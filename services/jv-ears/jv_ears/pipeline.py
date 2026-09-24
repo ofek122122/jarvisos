@@ -69,8 +69,17 @@ class EarsPipeline:
 
     # ------------------------------------------------------------ helpers
 
-    def _t(self) -> float:
-        """Sample clock in seconds (fixture-deterministic)."""
+    def clock(self) -> float:
+        """This pipeline's own clock, in seconds: samples consumed / rate.
+
+        Everything in here decides on it rather than on the wall clock, so
+        the same audio always produces the same events at the same times —
+        which is what lets a fixture WAV be replayed into a committed
+        session file (harness/fixtures/sessions) and compared byte for
+        byte. On a live mic it tracks elapsed capture; note it is not
+        CLOCK_MONOTONIC, so frames published to the bus are stamped by the
+        bus, not from here.
+        """
         return self._pos / self.cfg.sample_rate
 
     def budgets(self) -> dict:

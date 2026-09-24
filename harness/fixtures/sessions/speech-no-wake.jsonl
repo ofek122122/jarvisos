@@ -1,0 +1,3 @@
+{"boot_id": "sample-clock", "wall_time_utc": "2026-09-24T02:48:18+00:00", "monotonic_now": 0.0}
+{"topic": "audio.vad", "ts": 0.8, "seq": 0, "src": "jv-ears", "conf": 1.0, "v": 1, "body": {"event": "speech_start", "utterance_id": "2c45a229-b9c0-4423-9f90-69f61ba6dc10"}}
+{"topic": "audio.vad", "ts": 4.4, "seq": 1, "src": "jv-ears", "conf": 1.0, "v": 1, "body": {"event": "speech_end", "utterance_id": "2c45a229-b9c0-4423-9f90-69f61ba6dc10", "duration_s": 3.6}}

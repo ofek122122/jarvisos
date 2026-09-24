@@ -5,6 +5,7 @@ Requires models: ./models/fetch.sh --only ears (CI caches them).
 Skips (loudly) if models are absent rather than faking a pass.
 """
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -106,3 +107,62 @@ def test_the_pipeline_reports_the_wake_window_it_actually_enforces():
     assert reported == pipe._wake_timeout / CFG.sample_rate
     assert reported == pytest.approx(CFG.wake_timeout_s, abs=1.0 / CFG.sample_rate)
     assert reported > 0
+
+
+# ------------------------------------------------ the committed sessions
+
+# What the live pipeline does here is also committed, frame by frame, in
+# harness/fixtures/sessions — so that everything downstream of ears can be
+# tested on a machine with no model weights (PLAN B3). The recording is
+# only worth having while something re-derives it, and this is that thing:
+# without it a retuned VAD would leave four stale files asserting the old
+# behaviour, and every test built on them would keep passing.
+sys.path.insert(0, str(REPO / "harness"))
+sys.path.insert(0, str(REPO / "harness" / "fixtures" / "sessions"))
+
+import generate_sessions  # noqa: E402
+import session as session_file  # noqa: E402
+
+
+def shape(frames):
+    """What must not change: which frames, when, and in what state.
+
+    Deliberately not `conf` and not the partial texts — a model score is
+    the last digits of a float on the machine that ran it, and a fixture
+    that fails because CI has a different CPU teaches people to regenerate
+    without reading. Segmentation, gating and timing are what these files
+    are for, and all three are here.
+    """
+    out = []
+    for f in frames:
+        b = f["body"]
+        out.append((f["topic"], f["ts"], b.get("event") or b.get("kind")))
+    return out
+
+
+def normalized_final(frames) -> list:
+    """Final transcripts, case- and punctuation-insensitive.
+
+    Only the finals: a partial is whisper's opinion of half a sentence and
+    a word of it moving is not a regression. The final is the sentence
+    jv-brain is handed, so a word of THAT moving is.
+    """
+    out = []
+    for f in frames:
+        if f["topic"] == "audio.transcript" and f["body"]["kind"] == "final":
+            text = f["body"]["text"].lower()
+            keep = "".join(c for c in text if c.isalnum() or c.isspace())
+            out.append(" ".join(keep.split()))
+    return out
+
+
+@pytest.mark.parametrize("wav", generate_sessions.SOURCES)
+def test_the_committed_session_is_what_the_pipeline_still_does(wav):
+    committed = session_file.load(
+        REPO / "harness" / "fixtures" / "sessions" / f"{Path(wav).stem}.jsonl")
+    live = generate_sessions.frames_for(FIXTURES / wav)
+    assert shape(live) == shape(committed.frames), (
+        f"{wav}: perception changed. If that was the point, regenerate with "
+        f"python harness/fixtures/sessions/generate_sessions.py and read the diff."
+    )
+    assert normalized_final(live) == normalized_final(committed.frames)
