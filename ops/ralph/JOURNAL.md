@@ -4528,3 +4528,114 @@ one to shell.qml's binding. Also corrected while in there: shell.qml's
   (four windows that prove a plate ARRIVED and cannot say which) are
   unchanged. B20 and B17 are still waiting on the same two minutes of a
   human's attention at a terminal.
+
+## 2026-09-24 — iteration 45 — B19: `think` stops being one number
+
+UI was the last three iterations (A51, A49, A48), so the ladder sent this
+one to a feature. Track B is mostly drained by human-shaped blockers —
+B20/B17/B15 all want the same two minutes of a person at a terminal, B12
+wants `sys.roster`, B10 wants a live recording, B7 says explicitly not to
+publish a gauge nobody reads — and B8's premise turned out to be FALSE
+(see below). B19 was the one item whose data was already on the bus.
+
+What it is. `jv tap --latency` splits a voice turn into spoke / hold /
+hear / think, and `think` — the final transcript to the first spoken word
+— was the only span with no decomposition at all. It is also the longest
+one a user can actually hit, because a confirmation window is 15 s by
+design and sits entirely inside it. Worth being precise about why that
+matters: jv-act publishes the confirm question to `action.confirm`, which
+goes to the HUD's ConfirmPlate and is NEVER SPOKEN, and jv-brain holds its
+sentences back while a tool call is open. So the whole window lands before
+the first `speech.say` and is today indistinguishable from a slow LLM.
+
+The seam was free. jv-brain publishes `intent.action`, jv-act answers
+`action.result`, `request_id` threads the two, and the request carries the
+input `utterance_id` — no new publisher, no schema change, exactly the
+shape `hear`/`think` already had. `Utterances` grew `acted()`/`act_done()`
+and a `request_id -> utterance_id` map, which is the one structure here
+not keyed by utterance and is therefore swept when a turn is evicted.
+
+The measurement is the UNION of the round trips. Not the sum: two requests
+outstanding at once are one moment of jv-act's time, and summing could
+produce a `tool` larger than the `think` containing it. Not the bracket
+from first request to last result either: jv-brain runs a completion
+between serial calls and charging jv-act for it would be the "a number
+stops meaning its label" failure B13 was written against.
+
+Five refusals, each with a test. An unanswered request (ran for a length
+nobody can state; reporting only the answered ones would look complete
+while being short). A round trip that runs backwards, starts before the
+ASR seam, or ends after the first word — the same "two numbers that
+disagree produce no third number" rule as `spoke_ms` and `brain_split`. A
+turn whose seam is unknown, because a share of an unmeasured whole is not
+a share and the table indents `tool` under `think`. A turn past
+`ACTS_PER_TURN = 32`, which exists because the runaway tool loop is a
+filed, real failure mode (optimization backlog #5) and `jv tap` is meant
+to be left running for hours — past the cap it keeps the COUNT and loses
+the measurement, since a number we stopped taking is not a short number.
+And a frame that named nobody: `utterance_id` is optional on the schema
+(a CLI-driven action has no voice turn behind it), and an empty one is
+refused inside `acted` rather than only in the caller that unwraps the
+Option. `tool_calls` rides beside `tool_ms` throughout, because "no tool
+ran" and "a tool ran and could not be timed" both print `tool=?` and are
+not the same fact.
+
+Two things deliberately NOT done. It does not go on the `>>> turn` line,
+which is already six numbers wide and is B17's open complaint — it prints
+its own line, the same shape jv-brain's `wait`/`model` split already
+prints, so the existing line keeps its width. And there is no complementary
+"everything else" row: the remainder of a tool turn's `think` is two
+completions plus the queue plus four bus hops, and naming that one thing
+would be a label a number does not mean. Worth recording that `wait`/`model`
+and `tool` can never describe the same turn — jv-brain states the first-say
+gauge only for a first word that came straight out of the first completion.
+
+One thing found while building and fixed here: the first `tool` row label
+was 38 characters in a 31-character column, which silently shoved that
+row's three numbers out of line — a broken-looking number, not a long
+label, and exactly B17's family of complaint. The label was shortened (the
+confirm-window explanation moved to the footnote, where it has room) and
+`every_summary_row_stays_inside_the_columns_it_is_printed_in` now asserts
+every row is the header's width, which is a guard the table never had.
+
+**B8 is closed as WRONG, not done.** Its premise is that "jv-guard and
+jv-compat write their own records". They do not: nothing under
+`services/jv-guard/` or `services/jv-compat/` opens a file for writing, and
+neither has a state dir (`JARVIS_STATE_DIR` is set for one unit only).
+Both services publish and are read off the bus. There is no second caller
+for a shared record reader because there is no second record.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 106 unit + 8 bus + 38
+  integration (was 89 + 8 + 36). THIRTEEN mutations run through them, all
+  thirteen caught: the union becoming a sum, an unanswered request skipped
+  instead of refusing, the fit check dropping its bounds, the cap no longer
+  bounding the measurement, evicted turns keeping their requests (the
+  unbounded-map one), an action conjuring an utterance, `tool` computed
+  with no seam, a re-delivered request counted as a second call, the row
+  label outgrowing its column, `tool=` added to the `>>> turn` line, a
+  result joined to whatever turn is open, and the empty-id guard removed.
+  A thirteenth candidate — defaulting jv.rs's `utterance_id` Option to `""`
+  — survives and is EQUIVALENT by construction now that `acted` refuses an
+  empty id itself; that is why the guard was moved down a layer rather than
+  left in the caller.
+- build: `nix build .#jarvisd` ok (its checkPhase runs the same suite),
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin — the
+  two new topics are READ, and jv-act's own code is untouched.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs
+- next: **B21** is what this cannot do from outside jv-act: `tool` is one
+  number over a window that is mostly the human deciding, and
+  `action.confirm{kind=request}` names its own `window_s` while
+  `action.result` carries `duration_ms` — so "how much of this was waiting
+  for YOU" is another free seam, on frames already on the bus, and it is
+  the half of `tool` a faster machine could never shorten. It is `spoke`
+  one level down. **B22**: B17's complaint now has a machine-checked half.
+  `every_summary_row_stays_inside_the_columns_it_is_printed_in` proves the
+  TABLE is aligned; nothing proves the `>>> turn` line fits a terminal, and
+  it is six numbers plus an id whose length nothing bounds. A width
+  assertion against 80 columns is cheap and would turn one of B17's two
+  questions into a test.
+  B17/B20 are unchanged and still want a human at a terminal; B15 and B13
+  still want the one conversation about which span the 2.5 s budget names.
+  A52/A53/A47 and A50 are unchanged.

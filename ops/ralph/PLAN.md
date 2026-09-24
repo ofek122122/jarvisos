@@ -220,11 +220,17 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       offset rather than ignoring it. 57 tests green (was 36), 27 mutations,
       27 caught. Tests: `bash ops/ralph/cargotest.sh jarvisd`.)
 
-- [ ] B8. jv-guard and jv-compat write their own records and neither can be
-      asked a question the way `jv act-log` now can. Worth ONE shared
-      reader rather than three flag sets that drift — but only when there
-      is a second real caller, not on the strength of this one. Do B3
-      first. Discovered in B5.
+- [~] B8. WITHDRAWN — the premise is false, found while picking work in
+      iteration 45. B8 assumed "jv-guard and jv-compat write their own
+      records"; they do not. Nothing under `services/jv-guard/` or
+      `services/jv-compat/` opens a file for writing, and neither has a
+      state dir (`JARVIS_STATE_DIR` is set for one unit only) — both
+      services publish their lifecycle on the bus and are read from there
+      (`guard.verdict` by the HUD since A51, `compat.install` by nobody
+      yet, which is A52). So there is no second caller for a shared record
+      reader because there is no second record. If one is ever written,
+      the shared-reader idea is still the right one; it is not a task
+      today. Discovered in B5, withdrawn in B19's iteration.
 - [x] B6. jv-brain subscribes to `audio.wake`: a barge-in stops the answer,
       not just the speaking of it. — 4d05900
       (A spoken turn runs as a CHILD task of the input worker, so the wake
@@ -446,17 +452,49 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       it. Cheap to change afterwards — it is one `format!` and its
       tests — and not worth guessing at beforehand. Discovered in B18.
 
-- [ ] B19. A tool turn's `think` is now the only span in the table with no
-      decomposition at all, and it is the longest one a user can hit (a
-      confirm window is 15 s by design). The frames that would divide it
-      are already on the bus and already carry the utterance: jv-brain
-      publishes `intent.action` and jv-act answers `action.result`, so the
-      time that was jv-act's is bracketed without any new publisher — the
-      same free seam `hear`/`think` had. What is NOT free is the rest: two
-      completions plus the tool round trip is three sub-spans, not two,
-      and `Turn` already prints six numbers (B17). Probably belongs in the
-      summary table only, and probably wants B17 answered first.
-      Discovered in B16.
+- [x] B19. A tool turn's `think` was the only span in the table with no
+      decomposition at all, and the longest one a user can hit. — e8df1a2
+      (`tool` is the UNION of the `intent.action` -> `action.result` round
+      trips inside a turn's `think` — not their sum, since two outstanding
+      requests are one moment of jv-act's time, and not the bracket from
+      first request to last result, since jv-brain runs a completion
+      between serial calls. It is jv-act's execution AND, for a confirming
+      tool, the whole 15 s window it waited in, which is never spoken and
+      today reads as a slow LLM. Five refusals, each tested: an unanswered
+      request, a round trip outside the `think` it divides, a turn with no
+      ASR seam, a turn past `ACTS_PER_TURN = 32` (the runaway tool loop is
+      real — backlog #5 — and past the cap the COUNT survives and the
+      measurement does not), and a frame that named nobody. `tool_calls`
+      rides beside `tool_ms` because "no tool" and "a tool nobody could
+      time" both print `?`. B17's width worry is respected: it prints its
+      own line, like jv-brain's `wait`/`model` split, and `>>> turn` keeps
+      its six numbers. No new publisher, no schema change. 106+8+38 tests
+      (was 89+8+36), 13 mutations, 13 caught. Tests:
+      `bash ops/ralph/cargotest.sh jarvisd`.)
+
+- [ ] B21. `tool` is one number over a window that is mostly the human
+      deciding, and the half a faster machine could never shorten is
+      exactly the half it cannot name. Another free seam, on frames
+      already on the bus: `action.confirm{kind=request}` states its own
+      `window_s` and `action.result` carries `duration_ms`, so the time a
+      confirming tool spent WAITING FOR YOU separates from the time it
+      spent running. It is `spoke` one level down — the user's own time
+      inside the machine's span — and the same rule applies: a number
+      that mixes the two cannot be argued about against a budget.
+      Discovered in B19.
+
+- [ ] B22. B17's complaint now has a machine-checked half and an
+      unchecked one. `every_summary_row_stays_inside_the_columns_it_is
+      _printed_in` (B19) proves every summary ROW is the header's width —
+      it was written because the first `tool` label was 38 characters in a
+      31-character column, which shoves that row's numbers out of line and
+      reads as a broken number rather than a long label. Nothing proves
+      the `>>> turn` LINE fits a terminal, and it is six numbers plus an
+      utterance id whose length nothing here bounds. A width assertion
+      against 80 columns, with the id length that would break it named,
+      turns one of B17's two questions into a test and leaves the human
+      only the one that genuinely needs eyes ("does `turn_age>=` read as
+      noise?"). Discovered in B19.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
