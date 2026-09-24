@@ -518,6 +518,59 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       rather than for as long as its signal is true — a new rule, worth
       deciding deliberately rather than as a side effect. Discovered in A20.
 
+- [x] A23. The HUD says when it has stopped being able to see the machine.
+      — 34f9af8
+      (Every element in this HUD refuses rather than guesses — MicState will
+      not call a mic it cannot see "off", SpeechState will not call an
+      invisible bus "idle", BusModel empties its cache on `up:false` — and
+      every one of those refusals draws the SAME NOTHING that a calm, well
+      machine draws. So the corner meant two opposite things with the same
+      pixels, and the more dangerous one was silent: a dark recording light
+      over a microphone the HUD simply could not see. `core/LinkState.qml`
+      decides — 22 QML tests, 18 mutations run through them — and
+      `LinkPlate.qml` says NO BUS / SENSOR STATE UNKNOWN plus the bridge's
+      own explanation ("connect: ...", "bus closed the connection"),
+      clipped to a glance and stripped of line breaks it would otherwise
+      break the plate with. No dot and no accent: this is the panel talking
+      about its own pipe, never a sensor row — the rule the self-test
+      marker already stated for "bus up / bus down", now where a user can
+      see it. First in the stack, because it qualifies everything under it.
+      The judgement is the WAIT: a down link is ordinary (jv-hud-bridge
+      retries 0.5 s after jarvisd restarts, Bus.qml respawns the bridge
+      2 s after it dies), and a plate that blinked through every rebuild
+      would be ignored on the day it was true — so nothing is said for 5 s,
+      and a new tools gate fails the build if EITHER of those cadences,
+      in two files that have no reason to think about the HUD, ever grows
+      past the grace (VERIFIED it bites from both sides). The wait belongs
+      to the OUTAGE, not to the last line about it: the bridge re-announces
+      "down" on every failed retry with a backoff climbing to 8 s, so an
+      element that re-armed on each one would push the report past its own
+      grace forever. Three mutation survivors were all real and all fixed:
+      a reported outage handing its verdict to the next brief blip, the
+      outage the HUD BOOTS into (a machine where nothing is running —
+      `linked` is false from the first instant, so no change signal ever
+      fires for it) never being timed at all, and an `onBusChanged` no
+      path could reach, deleted. Tests: `bash ops/ralph/qmltest.sh`,
+      `bash ops/ralph/runtests.sh tools`.)
+
+- [ ] A24. `LinkPlate` reports the pipe; nothing reports the PROCESSES.
+      A bus that is up says only that jarvisd is up — jv-ears can be dead
+      and the HUD's roster (A6) cannot tell a service that died from one
+      that was never started, because nothing on the bus announces who is
+      supposed to be running. The obvious source is the systemd units the
+      flake already declares, which is the only place that list exists;
+      reading them from the HUD would mean a new producer and a schema, so
+      it is a proposal, not a build. Write it up before building anything.
+      Discovered in A23.
+
+- [ ] A25. The blind plate cannot say how long the HUD has been blind, for
+      the same reason A21's window cannot shorten: a duration on screen is
+      the first thing in this HUD that would animate continuously. "NO BUS
+      FOR 4 MIN" as a still, coarse line (recomputed on a slow timer, not
+      per frame) may be the version that fits §06 — a minute-resolution
+      label is not motion. Worth one human opinion alongside A21/A22 rather
+      than three separate answers to the same question. Discovered in A23.
+
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
       right (you see it wherever you look) or noise. Needs a human eye on

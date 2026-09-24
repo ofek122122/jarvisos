@@ -2148,3 +2148,130 @@ better with no HUD change at all.
   and times out, and nothing in the repo has ever contained a `speaking`
   frame, a `sys.health` one, or — as of today — an `action.confirm` one, so
   three of the HUD's four plates cannot be replayed at all.
+
+## 2026-09-24 — iteration 24 — A23: the HUD stops letting its own blindness look like calm
+
+Track A's remaining items (A11, A13, A21, A22) are all waiting on a human —
+two on a schema proposal, two on an eye that has never seen this HUD — so
+the ladder said "a feature from PLAN.md". What I found instead was a hole
+in the UI itself, which is where the ladder wanted me anyway.
+
+Every element in this HUD is built to REFUSE. MicState will not call a
+microphone it cannot see "off" (that refusal is the whole of A4 and the
+lesson of the 2026-09-15 mic outage). SpeechState will not call an
+invisible bus "idle". ConfirmState lets go of a latched question the moment
+the link drops. BusModel empties its entire cache on `up:false`, because a
+stale indicator is worse than no indicator. Every one of those refusals is
+correct, and every one of them reaches the screen the same way: the plate
+draws nothing.
+
+An empty corner is also the ordinary state of a well machine — §06's earned
+emptiness, and the reason `visible` is false most of the time. So the same
+absent pixels carried two opposite meanings, and the user had no way to
+tell "Jarvis is idle" from "this screen has been blind for a minute and the
+microphone could be open". Invariant 10 asks the HUD to show sensor state
+truthfully; a silence indistinguishable from a reading is a coin flip. The
+one thing the HUD can observe without a bus is whether it HAS one, and
+until today the only place that fact appeared was the developer self-test
+marker, behind an env var.
+
+`core/LinkState.qml` decides; `LinkPlate.qml` draws NO BUS / SENSOR STATE
+UNKNOWN and, underneath, the bridge's own explanation — "connect: [Errno 2]
+..." when jarvisd is not running, "bus closed the connection" when it went
+away. That second line is passed through rather than summarised: the
+distinction between those two is the entire diagnostic value, and this file
+has no better information than the process holding the socket. It is
+clipped to a glance and its whitespace collapsed, because a newline from
+the bridge would not wrap the sentence, it would break the plate. No dot
+and no accent colour: ember means Jarvis is doing something and teal means
+you are, and this is neither — it is the panel talking about its own pipe.
+shell.qml's self-test marker has said exactly that about "bus up / bus
+down" since A1; this is the same rule somewhere a user will see it. First
+in the stack, because it qualifies everything underneath.
+
+The real work was the WAIT. A down link is ordinary and usually brief:
+jv-hud-bridge retries 0.5 s after a link that worked drops (FIRST_BACKOFF_S)
+and Quickshell respawns the bridge 2 s after it dies (Bus.qml). A plate that
+appeared during either would blink on every `nixos-rebuild switch` of
+jarvisd, and a warning that blinks is one nobody reads on the day it is
+true. So nothing is said for 5 s — and because that number is only correct
+RELATIVE to two constants in two files that have no reason to think about
+the HUD, a tools gate now fails the build if either cadence grows past the
+grace. VERIFIED it bites from both sides (grace down to 1 s; backoff up to
+9 s).
+
+Writing the tests turned up the failure I would not have predicted: the
+bridge does not say "down" once. It says it again on EVERY failed retry,
+with a fresh explanation and a backoff climbing to 8 s. An element that
+restarted its wait whenever it heard "down" would push the report past the
+outage that caused it, and for the first several seconds past its own grace
+forever. The wait belongs to the outage, not to the last line about it, so
+it is armed by a CHANGE of link state and never by a repetition of one.
+
+Three mutation survivors, all real, all fixed:
+  · a reported outage handing its verdict to the next brief blip — the
+    cry-wolf failure arriving one outage later, which is when nobody is
+    looking for it. `waited` is now cleared when a new outage starts being
+    timed, and deliberately not when the link returns (`blind` already
+    knows there is no outage then). One fact per line.
+  · the outage the HUD BOOTS into never being timed at all. `linked` is
+    false from the first instant and stays false while a bridge fails to
+    connect, so no change signal ever fires for the machine where nothing
+    is running — the most important outage there is. Every test assigned a
+    property after construction and so armed the wait by accident; the new
+    test builds what production builds (`LinkState { bus: Bus }`) and
+    nothing else.
+  · an `onBusChanged` no path could reach, deleted. The production binding
+    is in place before `Component.onCompleted` runs, and every later change
+    of link state arrives through `linked`.
+The one survivor left standing is `restart()` → `start()`, which no
+reachable flow can distinguish (the timer is never running when the element
+re-arms it, and QML restarts a running Timer on an interval change anyway).
+Kept `restart()` for what it says, and recording the equivalence here
+rather than contorting a test around it.
+
+What this does NOT do, and should not: it says nothing about the machine.
+A live bus means jarvisd is up and nothing more — jv-ears can be dead
+behind a perfectly healthy link, and A6's roster still cannot tell a
+service that died from one that never started, because nothing on the bus
+announces who is supposed to be running. That is **A24**, and the only
+honest source for it (the systemd units the flake declares) would need a
+new producer and a schema, so it is a proposal before it is a build.
+
+- tests: `bash ops/ralph/qmltest.sh` — 306 green (was 284), 22 new. 18
+  mutations, 17 caught: no grace at all; blindness that never lifts; a bus
+  that never answered `linkUp` taken as up; a null bus read as an
+  exception rather than as blindness; the verdict inherited by the next
+  outage; a live link that keeps timing; a negative grace waited out; the
+  grace read as milliseconds; a young link explaining itself; the reason
+  refused by truthiness instead of by type (caught only by a
+  `failOnWarning(/TypeError/)`); a clipped reason that reads as whole;
+  surviving whitespace; newlines collapsed but not tabs; the boot outage
+  never timed; a dropped link never timed. `bash ops/ralph/runtests.sh
+  tools` — 58 (was 57); `... jv-hud-bridge` — 25 green (untouched, run
+  because the new gate reads bridge.py).
+- build: `nix build .#jv-hud` ok (qmllint -W 0 clean, 306 QML tests in the
+  checkPhase), `nixos-rebuild build --flake .#ares` ok, `nix flake check
+  --no-build` ok. Never test/switch. No schema change, no jv-act change,
+  no boot path, no NVIDIA/kernel/flake pin touched.
+- files: shell/jv-hud/core/LinkState.qml (new),
+  shell/jv-hud/LinkPlate.qml (new),
+  shell/jv-hud/tests/tst_linkstate.qml (new), shell/jv-hud/shell.qml,
+  shell/jv-hud/qmldir + core/qmldir (generated), tools/gen_theme_qml.py,
+  tools/tests/test_gen_theme_qml.py, ops/ralph/PLAN.md
+- commit: 34f9af8
+- next: **A24** (nothing reports which SERVICES are supposed to be running;
+  write the proposal first — it needs a producer and a schema) and **A25**
+  (how long the HUD has been blind, which is the same question A21 asks
+  about the confirm window: may a still, coarse, minute-resolution label
+  count as "not motion"?). The standing ask is now TWENTY-FOUR iterations
+  old and unchanged in shape: one sitting at ares to (1) look at the HUD —
+  `JV_HUD_SELFTEST=1 jv-hud`, a real wake word, a destructive action to
+  watch the confirm plate, and now the easiest one of all, since stopping
+  jarvisd for five seconds is enough to see today's work; (2) say whether
+  the labels are JetBrains Mono; (3) **B10** — record one real spoken turn
+  off the live bus (`harness/record.py`). Every replayed trajectory still
+  ends in "thinking" and times out, and nothing in the repo has ever
+  contained a `speaking` frame, a `sys.health` one, an `action.confirm`
+  one, or a link that dropped, so four of the HUD's five plates cannot be
+  replayed at all.
