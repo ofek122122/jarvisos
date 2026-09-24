@@ -1075,3 +1075,122 @@ pure-HUD iteration since A12.
   this iteration moved the expression that decides whether it appears at all,
   so the next human on that machine should run `JV_HUD_SELFTEST=1 jv-hud`
   once and then watch a real wake word light the corner.
+
+## 2026-09-24 — iteration 14 — A10: the surface properties get a witness
+
+**what**: the last corner of invariant 10 that nothing was watching. `shell.qml`
+declares six things that make the HUD safe — `WlrLayershell.keyboardFocus:
+WlrKeyboardFocus.None`, `focusable: false`, `exclusionMode:
+ExclusionMode.Ignore`, `WlrLayershell.layer: WlrLayer.Top`, `color:
+"transparent"` and `mask: Region {}` — and until this commit every one of them
+was asserted by nobody. Three new gates in `tools/tests/test_gen_theme_qml.py`,
+and a CI job so they run somewhere other than Ralph's good intentions.
+
+**why this and not something else**: the journal named it as next, and it is the
+sibling of A15 — same file, same class of rot. The difference between qmllint
+and a gate is the whole point: qmllint proves `WlrKeyboardFocus.None` RESOLVES,
+and it would be exactly as happy with `.Exclusive`. Every one of these is a
+property whose wrong value is invisible on a surface that is unmapped most of
+the time. Nothing in the build would fail; you would find out by having a click
+eaten, or your keyboard taken mid-sentence, on a machine where the HUD is
+supposed to be the thing that is never in the way.
+
+**the decision that shaped it — a gate, not a refactor.** The obvious move was
+to lift the safety properties into a `HudSurface.qml` component so a second
+surface could not be written unsafely, exactly as A15 lifted the visible-OR into
+`PlateStack`. I did not, and the reason is the same reason A10 was hard in the
+first place: there is no way to run Quickshell here. A new component in the
+window-creation path would have been verified by qmllint and by nothing else,
+on the one surface nobody has ever LOOKED at. A gate is pure source analysis —
+it cannot break a runtime that no test can reach. And per-window rather than
+per-file, it covers the future surface just as well as the component would
+have: the check is keyed on `PanelWindow`/`FloatingWindow`/`PopupWindow`, so a
+second window is checked the day it is written, in whatever file it lands.
+
+**what is actually asserted**:
+- each of the five properties bound exactly once, to exactly one permitted
+  value. Not "the word appears in the file" — `assigned()` returns the list, and
+  the assert compares it to `[value]`, so a duplicate binding or a missing one
+  reads the same as a wrong one.
+- `mask` matches `Region\s*\{\s*\}` — EMPTY. `mask: Region { Rectangle {} }`
+  passes any grep for "mask: Region" and is the opposite of what §06 wants.
+- `exclusiveZone`, if present at all, is 0.
+- at least one window was found. A gate that silently stops seeing its subject
+  is worse than no gate; if the regex rots, it fails loudly.
+- nothing in the HUD reaches for the keyboard: `forceActiveFocus`, `focus:
+  true`, `activeFocusOnTab: true`, `Keys.`/`Keys {`, `TextInput`/`TextEdit`/
+  `TextField`/`TextArea`/`FocusScope`, `WlrKeyboardFocus.Exclusive|OnDemand`.
+  These are INERT today — the compositor is already told not to offer the
+  keyboard — which is precisely why one would get committed without a thought,
+  and then be found sitting there the day someone loosens `keyboardFocus`.
+  Taking the keyboard is a human's decision about invariant 10 and it starts at
+  that property, not at a widget that quietly assumes it.
+- nothing waits on a pointer: `MouseArea`, `HoverHandler`, `TapHandler`,
+  `DragHandler`, `PinchHandler`, `WheelHandler`, `PointHandler`. With an empty
+  input region these can never fire — dead code that reads like a feature, and
+  the kind of thing someone later "fixes" by opening the mask.
+
+**the parsing, and why it is not a grep**: `window_bodies()` collects each
+window's OWN lines (brace depth tracked per line, nested blocks dropped) because
+`shell.qml` already contains `color: Theme.ground` three levels down, inside the
+self-test marker's Rectangle. A file-wide regex would have matched it and passed
+forever while the surface's own colour went opaque. Proven, not assumed: a
+`focusable: true` wedged into that same nested Rectangle leaves all 28 tests
+green, and the real line still governs. `strip_qml_comments()` exists for the
+same reason in reverse — the header comment of shell.qml quotes every one of
+these properties, so a naive scan would have read the documentation instead of
+the code.
+
+**proving the gates bite**: 18 mutations of shell.qml, 18 caught — each of the
+five values changed to a plausible wrong one (`focusable: true`,
+`keyboardFocus: Exclusive`, `keyboardFocus: OnDemand`, `exclusionMode: Normal`,
+`layer: Overlay`, an opaque surface colour), each of the six lines deleted
+outright, a non-empty `Region`, an `exclusiveZone: 32` added, a `MouseArea`, a
+`TextInput`, an `Item { focus: true }`, and the window type renamed away
+entirely (caught by the "found no window" assert). Plus the negative proof
+above, and a second unsafe `PanelWindow` in a new file, which the gate caught in
+a file it had never been told about. Worth recording: the first mutation run
+reported three MISSES, and all three were my harness replacing the first
+occurrence of the string — which was in shell.qml's header comment. The gate was
+right and the mutation never reached the code. That is a good argument for
+anchoring mutations on the code line and not on the token.
+
+**the other half — a gate nobody runs is not a gate.** `tools/tests` has never
+been in CI. `.github/workflows/check.yml` checks the flake, jarvisd, jv-act and
+seven Python services, but the theme-drift check (invariant 9), A7's
+"nothing animates around Motion", A15's two plate-stack gates and now these
+three ran only when the loop remembered to type `runtests.sh tools`. They are
+pure source checks — no GPU, no disks, no models, 0.11 s — so there was never a
+reason beyond nobody having done it. Added as a `tools` job; verified it runs
+green from the repo root, which is where CI runs it, not from `tools/`.
+
+**what this does NOT prove, and it matters**: that Quickshell APPLIES these
+properties. This is source analysis, and A10's other half — a `quickshell`-run
+smoke test — still needs a compositor, which the sandbox does not have and CI
+does not either. The offscreen window `qmltestrunner` uses is never exposed, so
+it has no polish cycle and cannot answer a surface question at all (established
+in A15). So: the HUD's source now cannot silently stop being safe, and whether
+the safe source produces a safe surface remains a thing a human confirms once
+on ares.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 28 green, was 25 (3 new);
+  `bash ops/ralph/qmltest.sh` — 202 green, unchanged (no runtime change).
+- build: `nix build .#jv-hud` and `nixos-rebuild build --flake .#ares` both ok.
+  Never test/switch. No schema change, no jv-act, no boot path, no pins.
+  shell.qml's only diff is a comment; the QML the HUD runs is byte-identical
+  apart from it.
+- files: tools/tests/test_gen_theme_qml.py, .github/workflows/check.yml,
+  shell/jv-hud/shell.qml (comment only), shell/jv-hud/README.md
+- commit: fe43c88
+- next: Track A's remaining items are all blocked on a human or on hardware —
+  **A8** (fonts) needs an identity call (invariant 9), **A11** needs the frozen
+  schemas of proposal R1, **A13** needs an eye on ares. **A14** is the one
+  unblocked UI item and it is good: the HUD hand-mirrors two jv-ears constants
+  (`wakeWindowS` 8 s, `stallS` 1 s) with "keep this at or below" comments that
+  are waiting to rot, and ears already publishes free-form `metrics` on
+  sys.health, so it can report its own budgets with no schema change. Otherwise
+  **B5** (`jv act-log --since/--failed`, small and pure) or **B6** (jv-brain has
+  no barge-in path — the real fix behind A16's downstream patch, and the largest
+  honest bug left in the voice loop). The standing one, unchanged: nobody has
+  ever LOOKED at this HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then a real wake
+  word.

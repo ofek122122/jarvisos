@@ -131,18 +131,26 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       when the brain is on the CPU floor, and never off a stale heartbeat.
       Also landed: `BusModel.publishersOf(topic)`, forwarded by `Bus`.
       Tests: `bash ops/ralph/qmltest.sh`, `bash ops/ralph/runtests.sh tools`.)
-- [ ] A10. `shell.qml` is still untestable by construction: the surface
-      properties that make the HUD safe (keyboardFocus None, exclusionMode
-      Ignore, the empty input mask) are asserted by nobody — qmllint only
-      checks they resolve. A `core/` component cannot hold them, since they
-      ARE Quickshell types. Probably wants a different gate: grep the file for
-      the five properties, or a quickshell-run smoke test on ares. Small, and
-      it closes the last unguarded corner of invariant 10. Discovered in A9.
-      A15 built the parsing this wants — `surface_visible_expr` and
-      `plate_stack_children` in tools/tests/test_gen_theme_qml.py — and
-      confirmed the other half is not reachable headlessly: the offscreen
-      window qmltestrunner uses is never exposed, so it has no polish cycle
-      and cannot answer a layout question at all.
+- [x] A10. The surface properties that make the HUD safe are asserted, not
+      assumed. — fe43c88
+      (Three gates in `tools/tests/test_gen_theme_qml.py`: every Quickshell
+      window in shell/jv-hud binds `keyboardFocus: None`, `focusable: false`,
+      `exclusionMode: Ignore`, `layer: Top`, `color: "transparent"` exactly
+      once to exactly that value, `mask` is an EMPTY `Region {}`, and any
+      `exclusiveZone` is 0 — qmllint only proved those names RESOLVE, and
+      would have been as happy with `.Exclusive`. Per WINDOW, not per file, so
+      a second surface is covered the day it is written; it parses each
+      window's own lines, so the self-test marker's nested `color:
+      Theme.ground` is not mistaken for the surface's. Plus: nothing in the
+      HUD may reach for the keyboard, and nothing may wait on a pointer the
+      empty mask can never deliver. A gate, deliberately NOT a `HudSurface`
+      component — no way to run Quickshell here, so a change to the
+      window-creation path would be verified by qmllint and nothing else.
+      18 mutations, 18 caught. Also landed: `tools/tests` is a CI job, so the
+      theme-drift check and the A7/A15/A10 gates stop depending on the loop
+      remembering to run them. Still NOT proven: that Quickshell applies the
+      properties — that needs a compositor, i.e. a human on ares. Tests:
+      `bash ops/ralph/runtests.sh tools`.)
 
 ## Track B — Features / hardening (when UI is blocked, or for variety)
 - [~] B1. Pull the next safe item from `docs/optimization-backlog.md` that is NOT
@@ -294,3 +302,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   pair, and the half-duplex gate stays shut across it (8944abe, 2026-09-24)
 - A15 — PlateStack: the surface asks the stack whether anything is on screen,
   so the list that could rot is gone (0dbe844, 2026-09-24)
+- A10 — invariant 10 gets a witness: every HUD surface's safety properties
+  pinned, and tools/tests finally run in CI (fe43c88, 2026-09-24)
