@@ -270,15 +270,42 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       (was 3), 36 jv-ears (was 32). Tests:
       `bash ops/ralph/runtests.sh harness`, `... jv-ears`.)
 
-- [ ] B9. The HUD's QML tests hand-type the JSON lines the bridge writes;
-      B3 means there are now REAL recordings to hand them instead. Feed a
-      committed session through `core/BusModel` + `SpeechState` in
-      `tst_speechstate.qml` and assert the state trajectory against a real
-      perception session rather than against frames written by the same
-      person who wrote the expectation. Needs the session files reachable
-      from the jv-hud build — `src` is `shell/jv-hud` only today, but
-      `themeToml`/`themeGen` are already wired in as extra inputs, so
-      there is a pattern to copy. Discovered in B3.
+- [x] B9. The HUD's QML tests hand-type the JSON lines the bridge writes;
+      B3 means there are now REAL recordings to hand them instead. — 36a486d
+      (`tests/tst_sessionreplay.qml`, a new file rather than an addition to
+      `tst_speechstate.qml`: it shares no helper with it — a replay sends
+      recorded lines, not composed ones. Each session goes through
+      `core/BusModel` + `core/SpeechState` and the trajectory is asserted in
+      the recording's own seconds — clean `unknown -> listening@1.44 ->
+      thinking@3.76`, pause `1.36 -> 6.64` across 1.2 s of real mid-sentence
+      silence with NO flicker (the trajectory is every change, so a flicker
+      is two extra transitions), no-wake `unknown` start to finish. Two
+      assertions are about the coupling and need real data: the recorded
+      wakes clear SpeechState's self-consistency bar with openWakeWord's own
+      score/conf (a 0.995 bar fails on BOTH the music bed's 0.963 and the
+      quiet room's 0.990), and the longest recorded utterance (5.28 s) fits
+      inside ears' 8 s `wake_timeout_s` — tune that below what a person says
+      and a test fails instead of the plate blanking mid-sentence. QML cannot
+      read a repo file, so `tools/gen_sessions_qml.py` compiles the
+      recordings verbatim into `tests/Sessions.qml` — A2's theme pattern,
+      with `--check` in the jv-hud build (VERIFIED: moving a wake 0.2 s fails
+      the build). The generator knows nothing about schemas and is
+      stdlib-only on purpose, so it runs under the build's plain python3 and
+      CI's bare checkout. 250 QML tests (was 238), 52 tools tests (was 30).
+      Tests: `bash ops/ralph/qmltest.sh`, `bash ops/ralph/runtests.sh tools`.)
+
+- [ ] B10. Every trajectory in the replay test ends in "thinking" and then
+      times out, because the committed sessions are jv-ears ALONE — nothing
+      in the repo records a whole turn. Record one session off the LIVE bus
+      on ares during a single real spoken turn (`harness/record.py` has
+      always been able to; `live_header()` exists for exactly this), commit
+      it, and the HUD replay gets the other half: `speaking`, the gaps
+      between streamed sentences, the return to idle. It would also be the
+      first committed session containing `sys.health`, which is why
+      `MicState` and `HealthState` cannot be replayed at all today. Needs a
+      human at the machine for one utterance — the SAME ask as the standing
+      "nobody has looked at the HUD" item, so ask for both together.
+      Discovered in B9.
 
 ## Track C — Creative (within blueprint + invariants)
 - [ ] C1. Propose and add genuinely new, on-brand capabilities here before building
@@ -428,6 +455,12 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   (7eca614, 2026-09-24)
 - A16 — jv-voice speaks turns, not sentences: one answer, one speaking/idle
   pair, and the half-duplex gate stays shut across it (8944abe, 2026-09-24)
+- B3 — perception's real output becomes a fixture anyone can test on: four
+  recorded sessions + one reader that can be asked `problems()` (d2f9634,
+  2026-09-24)
+- B9 — the HUD's tests stop typing their own frames: real sessions compiled
+  into QML and replayed, trajectories asserted in real seconds (36a486d,
+  2026-09-24)
 - A15 — PlateStack: the surface asks the stack whether anything is on screen,
   so the list that could rot is gone (0dbe844, 2026-09-24)
 - A10 — invariant 10 gets a witness: every HUD surface's safety properties

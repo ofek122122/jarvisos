@@ -1694,3 +1694,121 @@ its own loader, and the `jarvisd`-spawning fixture moved to a
   second real caller. **A18** remains a note. The standing item, unchanged
   and now NINETEEN iterations old: nobody has ever LOOKED at this HUD on
   ares. `JV_HUD_SELFTEST=1 jv-hud`, then a real wake word.
+
+## 2026-09-24 — iteration 20 — **B9: the HUD's tests stop typing their own frames**
+
+The last entry ended with the obvious next move and this is it. B3 gave the
+repo four recordings of what jv-ears REALLY publishes; the HUD's QML tests,
+meanwhile, hand-typed every bridge line they asserted on. That is the flaw
+worth naming: **the input and the expectation had the same author.** Every
+one of those 238 tests is a claim about what the HUD does with a frame *I*
+wrote, and a misunderstanding about what perception actually emits would
+have been written into both halves, where it would agree with itself
+forever. No amount of care inside the test file can find that; only a
+recording from outside it can.
+
+So `shell/jv-hud/tests/tst_sessionreplay.qml` replays each committed
+session through `core/BusModel` + `core/SpeechState` and asserts the state
+trajectory in the recording's own seconds:
+
+```
+hey-jarvis-clean   unknown -> listening@1.44 -> thinking@3.76
+hey-jarvis-music   unknown -> listening@1.44 -> thinking@4.16
+hey-jarvis-pause   unknown -> listening@1.36 -> thinking@6.64
+speech-no-wake     unknown
+```
+
+Those numbers are facts about a room, not numbers chosen to make a test
+pass, and the shape of the assertion matters as much as the values: the
+trajectory is *every change*, so a flicker cannot hide in it — it is two
+extra transitions. That is what makes `hey-jarvis-pause` worth having. It
+holds 1.2 s of real silence inside one sentence (the fixture exists because
+that pause must not split the utterance), and nothing hand-written would
+have caught a HUD that blinked there, because nobody types a 1.2 s hole into
+a test they are writing to pass. `speech-no-wake` is the other direction: a
+real room, real speech, nobody addressing Jarvis. The HUD must stay dark
+through all of it, and now a recording says so rather than an argument —
+claiming that microphone is open *for us* is precisely the invariant-10 lie.
+
+Two assertions are about the COUPLING rather than about the HUD, and both
+are only possible with real data:
+
+- The recorded wake frames have to clear SpeechState's "a frame that
+  disagrees with itself is not a detection" bar using openWakeWord's own
+  `score` and `conf`. A stricter bar (conf ≥ 0.995) fails on the music bed's
+  0.963 **and** on the quiet room's 0.990 — so the bar is now checked
+  against numbers a detector produced, not numbers a test author picked.
+- The longest recorded utterance has to fit inside `wakeWindowS`, which is
+  ears' own `wake_timeout_s` (A14). 5.28 s of real speech against an 8 s
+  window today. If anyone ever tunes that below what a person actually says,
+  the HUD would drop "listening" mid-sentence while ears was still
+  recording — and the recordings are the only evidence in the repo about how
+  long "what a person actually says" is. The failure message states the
+  margin.
+
+**Getting the files to QML is the real design question here.** A QML engine
+cannot read a file out of the repository, and the alternatives were worse
+than they look: an XHR on a relative path resolves differently in the
+worktree and in the build; a committed symlink into `harness/` is dangling
+inside `src` and has to be repaired by the build; an env var is unreadable
+from QML. So `tools/gen_sessions_qml.py` compiles the recordings into
+`tests/Sessions.qml`, which is the pattern A2 already established for the
+theme — one source of truth, a generated committed artefact, and a `--check`
+in the jv-hud build. Moving a wake 0.2 s in a `.jsonl` now fails
+`nix build .#jv-hud` (VERIFIED), so a re-recorded session and a stale
+fixture cannot pass a build together.
+
+The generator knows **nothing** about schemas, deliberately. Its entire
+knowledge of the format is "line 1 is the header, the rest are frames";
+`harness/session.py` is the format's only reader and already holds these
+files to the generated bindings, so a second validator here would be a
+second truth to keep and the wrong one would be believed by whoever read it
+last. It copies bytes and refuses anything it cannot copy honestly (a
+non-object line, a non-ASCII line, a recording with no frames, an empty
+directory — that last one because a generator that happily emits nothing
+leaves every test built on it passing while asserting nothing). Being
+stdlib-only is what lets that check run under the plain `python3` of the
+jv-hud build AND under CI's bare checkout, where `jarvis_bus` does not
+exist.
+
+Two differences from a live HUD, both stated rather than left to be noticed.
+The bridge forwards a whitelist, so the real HUD never sees the
+`audio.transcript` frames in these recordings; we replay the whole thing, so
+a test asserts the transcripts change nothing — which is the claim that
+makes a superset safe (and the privacy line holding: the words are on the
+bus and no element reads them). And `ts` is the sample clock, so the
+injected monotonic clock is driven to each frame's own `ts`: every frame
+lands zero seconds old, as on a machine keeping up, and winding past the end
+is what closes the thinking window on a brain that never answered.
+
+One mutation survived and it was real: the "frames are verbatim" test passed
+against a line `json.dumps` happened to have formatted, so a generator that
+parsed and re-dumped every line looked correct. The fixture is now a line
+`json.dumps` would never write.
+
+- tests: `bash ops/ralph/qmltest.sh` — 250 green (was 238), 12 new; 7
+  mutations run through them, 7 caught. `bash ops/ralph/runtests.sh tools` —
+  52 green (was 30), 22 new; 4 mutations, 3 caught and the survivor fixed.
+  `bash ops/ralph/runtests.sh harness` — 78 green, unchanged.
+- build: `nix build .#jv-hud` ok (the new `--check` runs before qmllint) and
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no new topic, no jv-act change, no boot path, no pins.
+- files: tools/gen_sessions_qml.py (new), tools/tests/test_gen_sessions_qml.py
+  (new), shell/jv-hud/tests/Sessions.qml (new, GENERATED),
+  shell/jv-hud/tests/tst_sessionreplay.qml (new), pkgs/jv-hud/default.nix,
+  shell/jv-hud/README.md, harness/fixtures/sessions/README.md,
+  .github/workflows/check.yml
+- commit: 36a486d
+- next: the recordings are jv-ears alone, so every trajectory here ends in
+  "thinking" and times out — nothing in the repo records a WHOLE turn.
+  **B10** (new): record a session off the live bus on ares during one real
+  spoken turn (`harness/record.py` has always been able to; `live_header()`
+  is for exactly this), commit it, and the HUD replay gets the other half —
+  speaking, the gaps between streamed sentences, back to idle. That needs a
+  human at the machine for one utterance, which makes it the SAME ask as the
+  standing item, so ask for both at once. Also worth noting: `MicState` and
+  `HealthState` cannot be replayed at all yet, because no committed session
+  contains a `sys.health` frame — a live recording would fix that too.
+  **A18** remains a note; **B8** still waits for a second real caller. The
+  standing item, now TWENTY iterations old: nobody has ever LOOKED at this
+  HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then a real wake word.
