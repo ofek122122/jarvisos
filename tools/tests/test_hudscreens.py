@@ -12,9 +12,11 @@ harness takes and nobody committed is a shot nobody can look at, and a
 committed PNG the harness no longer takes is a picture of a HUD that no
 longer exists.
 
-The pixel-level claims — the corner, the focus, the emptiness — are NOT
-here. They need a compositor, so they live in tools/hudscreens/shoot.py
-and run when the sheet is made.
+The pixel-level claims — the corner, the focus, the emptiness, and the
+click that has to reach the window underneath (A32) — are NOT here. They
+need a compositor, so they live in tools/hudscreens/shoot.py and run when
+the sheet is made. What IS here is everything that would make those checks
+run against the wrong machine, or not run at all.
 """
 
 import re
@@ -219,3 +221,83 @@ def test_the_readme_says_which_screens_are_recordings_and_which_are_written():
                 f"docs/hud/screens/README.md shows {name} without saying whether "
                 "its frames are recorded or composed"
             )
+
+
+def test_the_compositor_never_follows_the_mouse():
+    """The click probe (A32) warps the cursor and then presses a button.
+    With focus-follows-mouse on, the WARP could move focus by itself and
+    every click would look like it had been routed through the HUD — the
+    probe would pass on a surface that eats input.
+    """
+    assert "focus_follows_mouse no" in sheet.sway_config(), (
+        "the harness compositor follows the mouse, so the click probe can no "
+        "longer tell a routed button from a cursor that merely moved"
+    )
+
+
+def test_the_compositor_is_given_the_monitors_the_sheet_declares():
+    """One source for ares' monitors. A config that drifted from
+    `sheet.OUTPUTS` would leave every geometric check measuring a screen
+    the compositor does not have.
+    """
+    config = sheet.sway_config()
+    for out in sheet.OUTPUTS:
+        line = (
+            f"output {out['name']} mode {out['width']}x{out['height']} "
+            f"pos {out['x']} 0"
+        )
+        assert line in config, f"the compositor is never told about {line!r}"
+
+
+def test_the_driver_takes_its_compositor_config_from_the_sheet():
+    """...and takes it from there rather than writing a second copy, which
+    is the only way the check above means anything.
+    """
+    assert "sheet.sway_config()" in driver_text(), (
+        "ops/ralph/hudscreens.sh builds its own sway config, so the compositor "
+        "the checks describe and the one they run on can drift apart"
+    )
+
+
+def test_the_click_probe_has_a_second_client_to_pass_through_to():
+    """`mask: Region {}` is a claim about a window UNDERNEATH the HUD, so
+    it cannot be measured without one. If the driver stops realizing a
+    client, the probe has nothing to click onto.
+    """
+    driver = driver_text()
+    assert "nixpkgs wev" in driver and "WEV_BIN" in driver, (
+        "ops/ralph/hudscreens.sh no longer provides a second Wayland client, "
+        "so A32's pass-through has nothing to pass through to"
+    )
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    assert 'os.environ["WEV_BIN"]' in shoot, "shoot.py never starts that client"
+
+
+def test_the_click_probe_actually_runs():
+    """A measurement that is defined and never called is the most
+    convincing kind of missing check: it reads as covered in every diff.
+    """
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    body = shoot.split("\ndef main(")[-1]
+    assert "probe_click_through(" in body, (
+        "tools/hudscreens/shoot.py defines the click probe but main() never "
+        "runs it, so the empty input mask is unmeasured again"
+    )
+
+
+def test_the_readme_says_what_the_click_probe_proved_and_what_it_did_not():
+    """The probe's witness is sway's routing, not the client's own
+    wl_pointer — a headless seat has no pointer capability. A reader who
+    took it for the stronger claim would over-trust it, which is exactly
+    the failure every other page of this sheet is written against.
+    """
+    readme = (SCREENS / "README.md").read_text("utf-8")
+    assert "mask: Region {}" in readme, (
+        "docs/hud/screens/README.md no longer says the empty input mask is "
+        "measured here"
+    )
+    assert "wl_pointer" in readme, (
+        "docs/hud/screens/README.md claims the click reaches the window "
+        "without saying that no client ever received a pointer event — the "
+        "witness is sway's routing, and the difference matters"
+    )

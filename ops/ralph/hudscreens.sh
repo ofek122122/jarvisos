@@ -15,9 +15,11 @@
 # a `nixos-rebuild switch` would install, which is why the pictures are
 # worth measuring: tools/hudscreens/shoot.py checks that no space was
 # reserved, that the keyboard never moved, that the HUD drew in the corner
-# it claims on EVERY monitor, and that a quiet HUD leaves the desktop
-# pixel-identical. Those were all "verified by construction" for thirty
-# iterations, which is a polite way of saying nobody had tried them.
+# it claims on EVERY monitor, that a quiet HUD leaves the desktop
+# pixel-identical, and — since A32 — that a click over a painted plate
+# reaches an ordinary window underneath it. Those were all "verified by
+# construction" for thirty iterations, which is a polite way of saying
+# nobody had tried them.
 #
 # WHAT THIS STILL IS NOT. Not ares: the compositor is sway rather than
 # Niri, the outputs are headless (no scanout, no real panel, no NVIDIA),
@@ -46,6 +48,11 @@ echo "hudscreens: realizing the compositor and the shell…" >&2
 sway=$(nixpkgs sway)
 swaybg=$(nixpkgs swaybg)
 grim=$(nixpkgs grim)
+# The second client the click probe needs (A32). An empty input region is
+# a claim about a window UNDERNEATH the HUD, so it cannot be measured
+# without one; wev is the smallest real Wayland toplevel available, and
+# sway tiles it to fill the monitor the HUD docks to.
+wev=$(nixpkgs wev)
 # msgpack to speak the bus, numpy to measure 33 megapixels of screenshot.
 # Neither enters any closure: this is a development harness, not a unit.
 py=$(nixpkgs 'python3.withPackages (p: [ p.msgpack p.numpy ])')
@@ -69,27 +76,15 @@ export HOME="$stage"
 export XDG_CACHE_HOME="$stage/cache"
 export XDG_CONFIG_HOME="$stage/config"
 
-# ares' monitors, from tools/hudscreens/sheet.py — one source for the
-# sizes, read by the compositor config and by the checks.
+# ares' monitors and the compositor's input rules come from
+# tools/hudscreens/sheet.py — one source, read by the compositor here and
+# by the checks in tools/tests/test_hudscreens.py.
 "$py/bin/python" - "$root/tools/hudscreens" "$stage/sway.conf" <<'EOF'
 import sys
 sys.path.insert(0, sys.argv[1])
 import sheet
 
-lines = [
-    # No Xwayland: nothing in this harness is an X11 client, and starting
-    # one would be one more thing that can fail for reasons unrelated to
-    # the HUD.
-    "xwayland disable",
-    # No keybindings at all. There is no user here, and a stray binding is
-    # a way for this to do something nobody asked for.
-    "default_border none",
-]
-for o in sheet.OUTPUTS:
-    lines.append(
-        f"output {o['name']} mode {o['width']}x{o['height']} pos {o['x']} 0"
-    )
-open(sys.argv[2], "w").write("\n".join(lines) + "\n")
+open(sys.argv[2], "w").write(sheet.sway_config())
 EOF
 
 # Headless wlroots with software rendering: no DRM, no GPU, no seat. The
@@ -132,6 +127,7 @@ export JV_SCREENS_STAGE="$stage"
 export JARVISD_BIN="$jarvisd/bin/jarvisd"
 export JV_HUD_BIN="$hud/bin/jv-hud"
 export GRIM_BIN="$grim/bin/grim"
+export WEV_BIN="$wev/bin/wev"
 export SWAYMSG_BIN="$sway/bin/swaymsg"
 
 "$py/bin/python" "$root/tools/hudscreens/shoot.py"

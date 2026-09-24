@@ -56,6 +56,37 @@ SURFACE_H = 560
 INSET = 16
 
 
+def sway_config():
+    """The compositor the sheet runs on, as a config file.
+
+    Here rather than in the driver so the checks can read the same text the
+    compositor was given: a monitor size or an input rule that drifted
+    between the two would make every measurement below be about a machine
+    the sheet does not describe.
+    """
+    lines = [
+        # No Xwayland: nothing in this harness is an X11 client, and
+        # starting one would be one more thing that can fail for reasons
+        # unrelated to the HUD.
+        "xwayland disable",
+        # No keybindings at all. There is no user here, and a stray binding
+        # is a way for this to do something nobody asked for.
+        "default_border none",
+        # The click probe (A32) warps the cursor and then presses. With
+        # focus-follows-mouse on, the WARP could move focus on its own and
+        # the probe would report a pass-through that no button ever caused.
+        # Off, the only thing that can move focus is a click that was
+        # routed somewhere — which is the entire measurement.
+        "focus_follows_mouse no",
+    ]
+    for out in OUTPUTS:
+        lines.append(
+            f"output {out['name']} mode {out['width']}x{out['height']} "
+            f"pos {out['x']} 0"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _beat(service, state="ok", metrics=None, notes=None, uptime_s=1847.0, period_s=5.0):
     """A sys.health heartbeat, from the service's own src.
 

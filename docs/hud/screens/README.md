@@ -60,6 +60,31 @@ QML engine can answer:
   the protocol ignores an exclusive zone on a corner — and it is kept for
   the day the anchors change; `shoot.py` says so at length, with what was
   tried.
+- **A click over the HUD reaches the window underneath.** An ordinary
+  window is opened filling the primary monitor and a second one on a side
+  monitor to hold the keyboard, and three points are clicked: one clear of
+  the HUD (the control — without it a harness whose clicks went nowhere
+  would report a perfect pass-through), one on a pixel the HUD actually
+  painted, and one inside the 300x560 surface box that it painted nothing
+  on. All three must end with the keyboard on the window under the HUD.
+  *Verified: deleting `mask: Region {}` fails on the painted pixel; a mask
+  covering only the lower, unpainted half of the box passes that one and
+  fails the third.*
+
+  This is the last of invariant 10's structural promises to stop being a
+  reading of the source (A32), and it is worth being exact about what the
+  measurement is. The window's own `wl_pointer` never fires: a headless
+  seat has no input device, so it advertises no pointer capability and no
+  client binds one. The button is synthesised through sway's IPC and the
+  witness is **sway's own routing**, read back over IPC — which is the
+  hit test, since `node_at_coords` consults each layer surface's input
+  region before it ever looks at a window. The probe runs last (it puts
+  windows on screen, and every photograph above needs a bare desktop) and
+  with **no jarvisd at all**: it needs a lit HUD that does not expire, and
+  a bus the HUD cannot see is the one thing it says indefinitely. *Verified
+  that this cannot go vacuous: widening `LinkState.graceS` so the plate
+  never arrives fails the probe rather than passing it — an unmapped
+  surface passes every click whatever its mask says.*
 
 No pixel colour is asserted anywhere. A font ships a new version, Qt
 changes its rasteriser, and a byte comparison fails in a way nobody can

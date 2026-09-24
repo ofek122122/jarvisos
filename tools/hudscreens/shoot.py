@@ -25,6 +25,10 @@ asked things no QML engine knows:
   · earned emptiness is REAL emptiness. The quiet shot must come back
     pixel-identical to the bare desktop — not "looks dark", but every
     monitor untouched, which is what an unmapped surface means.
+  · a click over the HUD reaches the window UNDERNEATH it (A32). The
+    empty input mask was the one invariant-10 claim left resting on a
+    reading of shell.qml, because it cannot be measured without a second
+    client to pass through to. `probe_click_through` puts one there.
 
 Nothing here asserts a pixel COLOUR: a font ships a new version, Qt
 changes its rasteriser, and a byte comparison fails in a way nobody can
@@ -85,6 +89,33 @@ def seat_focus():
     move it, and the user would find out by having a keystroke eaten
     mid-sentence."""
     return [(s["name"], s["focus"]) for s in swaymsg("-t", "get_seats")]
+
+
+def focused_node() -> int:
+    """The id of the node the seat's keyboard is on — one number rather
+    than `seat_focus`'s list, because the click probe compares it against
+    a specific window it started."""
+    seats = swaymsg("-t", "get_seats")
+    if len(seats) != 1:
+        raise Fail(f"expected exactly one seat, got {[s['name'] for s in seats]}")
+    return seats[0]["focus"]
+
+
+def toplevels() -> list:
+    """Every ordinary window sway is managing. Layer surfaces — the HUD,
+    the backdrop — are NOT in here, which is the point: this is the list
+    of things a click can be passed through to."""
+    found: list = []
+
+    def walk(node) -> None:
+        if node.get("app_id"):
+            found.append(node)
+        for key in ("nodes", "floating_nodes"):
+            for child in node.get(key, []):
+                walk(child)
+
+    walk(swaymsg("-t", "get_tree"))
+    return found
 
 
 def usable_rects():
@@ -320,6 +351,227 @@ def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: boo
         )
 
 
+# ----------------------------------------------------------- the click probe
+
+
+# How long to wait for the HUD to light itself, and for a click to land.
+# The first is the bridge's own respawn (2 s) plus LinkState's grace (5 s)
+# with room to spare; the second is a compositor round trip.
+BLIND_TIMEOUT_S = 25.0
+CLICK_TIMEOUT_S = 3.0
+
+
+def click_at(x: int, y: int) -> None:
+    """Warp the seat's cursor to a point in LAYOUT coordinates and press.
+
+    `cursor set` is a warp, not motion, and the compositor is configured
+    `focus_follows_mouse no` — so nothing at all happens until the button,
+    and whatever the button does is a routing decision.
+    """
+    swaymsg("seat", "-", "cursor", "set", str(x), str(y))
+    swaymsg("seat", "-", "cursor", "press", "button1")
+    swaymsg("seat", "-", "cursor", "release", "button1")
+
+
+def probe_click_through(stage: Path, background: np.ndarray) -> None:
+    """A click over the HUD reaches the window underneath it (A32).
+
+    `mask: Region {}` — an empty input region — is the third of invariant
+    10's structural promises, and it was the only one this compositor
+    could not be asked about, because a pass-through has no meaning
+    without something to pass through TO. So this stage puts an ordinary
+    window under the HUD on the primary monitor, a second one on a side
+    monitor to hold the keyboard, and clicks three points:
+
+      · a CONTROL far from the surface, which proves the measurement
+        itself works — without it a harness whose clicks went nowhere
+        would report a perfect pass-through.
+      · a pixel the HUD actually PAINTED. Chosen from the capture rather
+        than guessed, so it is over a plate and not over transparency.
+      · a point inside the 300x560 surface box that the HUD painted
+        NOTHING on. A mask narrowed to the visible plates would pass the
+        previous point and fail here, and it is the likelier mistake: an
+        input region that tracks the content looks reasonable in a diff.
+
+    Every one of them must end with the keyboard on the window under the
+    HUD, which is sway saying it routed that button to the window.
+
+    WHAT THIS IS NOT. The window's own wl_pointer never fires, and the
+    assertion is not "the client logged a button". A headless seat has no
+    input device, so it advertises no pointer capability and no client
+    binds one; the button is synthesised through sway's IPC and the only
+    witness is sway's own routing, read back over IPC. That routing IS the
+    hit test — `node_at_coords` consults each layer surface's input region
+    before it ever looks at a window — so a HUD that had opened its mask
+    would keep the keyboard exactly where it was. VERIFIED both ways by
+    mutation, which is the only reason to trust the direction of it.
+
+    It runs LAST and starts no jarvisd on purpose. Last, because it puts
+    two windows on screen and every photograph above needs a bare desktop
+    behind the HUD. Without a broker, because the probe needs a lit HUD
+    that does not expire: every other lit state is a frame ageing out
+    (a heartbeat speaks for two of its own periods, a confirmation for
+    its window), and a plate that blanked mid-probe would report a
+    pass-through that was really an unmapped surface. A bus the HUD
+    cannot see is the one thing it says indefinitely — LinkPlate, after
+    LinkState's grace — and the input region is a property of the
+    surface, not of what is drawn on it.
+    """
+    log("click probe: the empty input mask, against a real window (A32)")
+    primary = sheet.output_by_role("primary")
+    side = sheet.output_by_role("side")
+    env = dict(os.environ, JARVIS_BUS=str(stage / "click-no-broker.sock"))
+
+    hud = Proc("jv-hud", [os.environ["JV_HUD_BIN"]], stage / "click-hud.log", env)
+    clients: list[Proc] = []
+    try:
+        hud.wait_for("Configuration Loaded")
+
+        # Wait for the surface to admit it is blind. Until then it is
+        # unmapped, and an unmapped surface passes every click through
+        # whatever its mask says.
+        lit = stage / "click-lit.ppm"
+        deadline = time.monotonic() + BLIND_TIMEOUT_S
+        box = None
+        while time.monotonic() < deadline:
+            capture("primary", lit)
+            lit_img = read_ppm(lit)
+            box = drawn_box(lit_img, background)
+            if box is not None:
+                break
+            time.sleep(0.5)
+        if box is None:
+            raise Fail(
+                f"the HUD never drew anything on {primary['name']} in "
+                f"{BLIND_TIMEOUT_S:.0f}s with no bus at all — LinkPlate is the "
+                "one lit state this probe can rely on, and it never arrived"
+            )
+        check_corner(f"click probe {primary['name']}", lit_img, background, True)
+        painted = (lit_img != background).any(axis=2)
+        log(f"  the blind HUD is drawing at {box}")
+
+        # The three points, in this monitor's own coordinates.
+        cy = (box[1] + box[3]) // 2
+        row = np.nonzero(painted[cy])[0]
+        on_plate = (int(row[len(row) // 2]), cy)
+
+        left = primary["width"] - sheet.SURFACE_W
+        in_box: tuple[int, int] | None = None
+        for y in range(sheet.SURFACE_H - 1, -1, -1):
+            cols = np.nonzero(~painted[y, left:])[0]
+            if len(cols):
+                in_box = (left + int(cols[len(cols) // 2]), y)
+                break
+        if in_box is None:
+            raise Fail(
+                "every pixel of the surface box is painted, so there is no "
+                "unpainted point inside it to click"
+            )
+
+        control = (primary["width"] // 2, primary["height"] // 2)
+        for name, (px, py) in (("control", control), ("unpainted", in_box)):
+            if painted[py, px]:
+                raise Fail(f"the {name} point {(px, py)} is painted after all")
+        if not painted[on_plate[1], on_plate[0]]:
+            raise Fail(f"the plate point {on_plate} is not painted after all")
+
+        # Two ordinary windows: one filling the monitor the HUD docks to,
+        # one on a side monitor with nothing over it, whose only job is to
+        # hold the keyboard between clicks so that "it moved" is a fact
+        # about the click and not about where focus already was.
+        under = start_client("under", primary, stage, clients)
+        holder = start_client("holder", side, stage, clients)
+        if (under["rect"]["width"], under["rect"]["height"]) != (
+            primary["width"],
+            primary["height"],
+        ):
+            raise Fail(
+                f"the window under the HUD is {under['rect']}, not the whole of "
+                f"{primary['name']} — the points below would not all be over it"
+            )
+
+        for label, (px, py) in (
+            ("control, clear of the surface", control),
+            ("on a painted plate", on_plate),
+            ("inside the surface box, unpainted", in_box),
+        ):
+            swaymsg(f"[con_id={holder['id']}]", "focus")
+            if focused_node() != holder["id"]:
+                raise Fail("could not park the keyboard on the holder window")
+            click_at(primary["x"] + px, py)
+            got = focused_node()
+            end = time.monotonic() + CLICK_TIMEOUT_S
+            while got != under["id"] and time.monotonic() < end:
+                time.sleep(0.1)
+                got = focused_node()
+            if got != under["id"]:
+                if label.startswith("control"):
+                    raise Fail(
+                        f"a click at {(px, py)} — nowhere near the HUD — did not "
+                        "reach the window it landed on, so this probe is broken "
+                        "rather than the HUD"
+                    )
+                raise Fail(
+                    f"a click {label} at {(px, py)} never reached the window "
+                    f"underneath (the keyboard stayed on {got}). The HUD's "
+                    "surface took the button, so `mask: Region {}` is no longer "
+                    "an empty input region — invariant 10 says every click "
+                    "passes through"
+                )
+            log(f"  {label}: the window underneath got it")
+
+        # The HUD was drawing for all of that, not just before it. The
+        # windows go first so the backdrop is flat again and the box is
+        # measured the same way it was the first time.
+        for client in clients:
+            client.stop()
+        clients = []
+        time.sleep(0.5)
+        capture("primary", lit)
+        after = drawn_box(read_ppm(lit), background)
+        if after != box:
+            raise Fail(
+                f"the HUD drew at {box} before the clicks and {after} after, so "
+                "it was not necessarily on screen for them"
+            )
+        log("  the HUD was still drawing the same box afterwards")
+    finally:
+        for client in clients:
+            client.stop()
+        hud.stop()
+
+
+def start_client(role: str, out: dict, stage: Path, clients: list) -> dict:
+    """An ordinary Wayland toplevel, tiled onto one monitor.
+
+    `wev` because it is the smallest real client available and it needs
+    nothing: this stage wants a window, not a widget. It is NOT used for
+    what it prints — see probe_click_through on why the button never
+    reaches any client's wl_pointer here.
+    """
+    swaymsg("focus", "output", out["name"])
+    before = {w["id"] for w in toplevels()}
+    clients.append(
+        Proc(f"wev-{role}", [os.environ["WEV_BIN"]], stage / f"click-{role}.log", dict(os.environ))
+    )
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        fresh = [w for w in toplevels() if w["id"] not in before]
+        if fresh:
+            if len(fresh) > 1:
+                raise Fail(f"{len(fresh)} windows appeared where one was started")
+            win = fresh[0]
+            if win["rect"]["x"] != out["x"]:
+                raise Fail(
+                    f"the {role} window opened at x={win['rect']['x']}, not on "
+                    f"{out['name']} at x={out['x']}"
+                )
+            log(f"  {role} window {win['id']} on {out['name']} at {win['rect']}")
+            return win
+        time.sleep(0.2)
+    raise Fail(f"the {role} window never appeared on {out['name']}")
+
+
 # ---------------------------------------------------------------------- main
 
 
@@ -422,6 +674,8 @@ def main() -> int:
             if hud is not None:
                 hud.stop()
             broker.stop()
+
+    probe_click_through(stage, background)
 
     expected = sheet.all_files()
     if written != expected:
