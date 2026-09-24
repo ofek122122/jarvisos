@@ -8501,3 +8501,121 @@ the rule would actually make: drop the absoluteness test, or replace it with
   between three named options, **B43/B47/B54** are one question asked three
   times, and **B10/A28** — one live recording of one spoken turn on ares —
   remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 84 — A63: the crowded corner did not fit
+
+Track A had been blocked for three iterations and the loop had been in the
+B track grading pylib. Re-reading Track A for something that was the
+loop's own rather than a human's, A63 turned out to be two questions
+wearing one number: a PICTURE of a crowded corner (which wants A62
+answered, because a photograph of eight unrelated plates stacked 8 px
+apart is the confusion A62 is asking about) and an ASSERTION that the
+corner the box is sized for fits in the box. The second one needs nobody.
+
+`shell.qml`'s surface box had grown four times — 624 → 688 in two steps —
+and every digit of it came out of an argument written in its own comment:
+"ConfirmPlate wraps to three lines", "a refused binary and a failed
+install can genuinely be up together". Four arguments, checked by nothing.
+The only fit check that existed ran inside the contact sheet's loop, and
+no shot in that sheet lights more than three plates, so it cleared 688 px
+by more than five hundred and would have passed on a HUD that crops the
+moment a fourth arrives.
+
+`tools/hudshots/scene/tst_fit.qml` builds the case those paragraphs are
+about. Every plate but `link` — which excludes all nine, since each of
+them gates on the same link `LinkPlate` reports on, and a check holds that
+split rather than assuming it — each drawing the widest thing its own cap
+allows, over a health list as long as this machine has services. One
+moment the machine can actually reach: Jarvis mid-answer into a muted
+sink, the user talking over it (the `speaking` frame is stamped BEFORE the
+transcript, which is the barge-in `HeardState` is written around), jv-act
+holding a confirmation and reporting a separate failure, a refused binary,
+a failed install, a live mic, and everybody complaining.
+
+**That corner is 713 px tall. The box was 688.** It did not fit. A
+layer-shell panel floating over every window was cutting its bottom plate
+in half — and the bottom plate is `HealthPlate`, the thing that says what
+is wrong, cropped exactly when everything is. Nothing errors and nothing
+logs; the only way anyone would ever have found out is by having it
+happen.
+
+The box is 745 px now, and the number is no longer an argument: it is
+2 × `insetPx` + the measurement. The second inset is new — §06 gives this
+corner a gap at the top and the right and the bottom edge had none, so a
+stack that exactly filled the box ended flush against the edge of a
+floating panel, which reads as a crop whether or not it is one. Both shot
+drivers use the same rule now, so the sheet's own (weak) fit check and
+this one say the same thing.
+
+Three controls, because a fit check is the easiest kind of test to make
+vacuous — every way of staging one wrong produces a stack that measures
+comfortably:
+
+  · the crowd really IS nine plates, by `litNames`, which is the plates
+    naming themselves rather than the harness assuming;
+  · every plate that declares a text cap is really AT it;
+  · no plate is wider than the surface (the half shot 13 raised).
+
+The middle one earned its place immediately: `InstallState.plainSlug`
+REFUSES a slug past `maxSlugChars` instead of truncating it, so the
+over-long probe that made every other plate draw its widest made that one
+draw an empty app name — the narrowest it can be, on a check about
+crowding. Nothing failed. The corner measured 710 px, 3 px short of the
+truth, and the fix moved the box with it.
+
+Per-plate, settled, for whoever answers A70: confirm 260x112, heard
+260x93, action 260x76, guard 260x57, install 260x57, health 180x149,
+output 131x35, state 99x35, mic 58x35 — nine plates, eight 8 px gaps,
+713 px, 260 px at the widest against a 300 px surface.
+
+Four Python gates, because everything here is a copy of something:
+each scene driver's surface box is pinned to `shell.qml`'s (three drivers
+held an unchecked copy of it), both drivers' `everyPlate` to what
+`Corner.qml` actually stacks, and the fit crowd's roster to `services/`.
+A tenth service on this machine now fails a test instead of quietly making
+the measured worst case one row short of the real one. One pre-existing
+literal went with them: `test_hudsheet.py` hard-coded 206400 pixels, which
+is 300x688, and it now reads the denominator off a committed shot.
+
+The sheet is thirteen PNGs of the same HUD with 57 rows of backdrop under
+it — checked pixel-identical above row 688 before committing, so the diff
+is the box and not the plates.
+
+Not done, on purpose, and it is the interesting half: nothing here says a
+713 px corner SHOULD exist. That is half a 1440p screen, mostly
+near-full-width plates about unrelated things, and `HealthPlate` calls
+itself "the SHORT list" in its own header while having no cap at all.
+Raised as **A70** with three named shapes and no pick — it is A62's
+question with a number attached now, which is the most useful thing this
+iteration could hand a human.
+
+- tests: `bash ops/ralph/hudshots.sh` **23 (was 16)**, `... qmltest.sh`
+  585, `... runtests.sh tools` **269 (was 265)**. All green.
+- graded with eight mutations, **eight caught**, each by exactly one check
+  and none by collateral: the box back to 688 (2 gates), a driver keeping
+  the old box, `everyPlate` forgetting a plate, the roster dropping a
+  service, the layout settle removed, `InstallState` refusing its probe,
+  `ConfirmPlate` growing a fourth line (18 px over), `GuardPlate` widening
+  past the surface (320 px). Before the tests: the two that move pixels
+  would have registered as "the sheet moved" and said nothing about the
+  surface being too small; the other six, nothing at all.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/hudshots/scene/tst_fit.qml (new), tst_shots.qml,
+  tst_sequence.qml, shell/jv-hud/shell.qml, tools/hudscreens/sheet.py,
+  shoot.py, ops/ralph/hudscreens.sh, tools/tests/test_hudshots.py,
+  test_hudsheet.py, docs/hud/README.md, docs/hud/*.png
+- commits: 06d8284
+- next: **A70** is the one to hand a human, and it is cheap to answer
+  because the numbers are above — but it is also the first Track A item in
+  a while that a human can settle in two minutes WITHOUT sitting at ares,
+  which the rest of the blocked A track cannot say. Otherwise unchanged:
+  **Track A is one human look at `docs/hud/` away from unblocking** A47,
+  A55, A62, A63's picture half and the A21/A22/A25 cluster; **A56** asks
+  whether this suite (and the sequence one) should be in the build gate at
+  all, and A63 makes that question sharper, because the strongest assertion
+  about what the HUD shows is now the one furthest from `nix build`;
+  **B27** needs one decision between three named options; **B43/B47/B54**
+  are one question asked three times; **B62** is B61's two decisions; and
+  **B10/A28** — one live recording of one spoken turn on ares — remains the
+  biggest thing a human can hand this loop.

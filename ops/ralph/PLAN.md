@@ -2379,21 +2379,52 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       shape for grouping, which is new design. Do not build (b) before
       answering (a). Discovered in A61.
 
-- [ ] A63. The new fit check passes with over 500 px to spare, because no
-      shot lights more than three plates. The box is 300x688 and the
-      tallest committed shot is now A61's own, at 165 px of corner inside
-      it — so the case the box is actually SIZED for, six or eight plates
-      up at once, is neither
-      photographed nor asserted, and the four co-occurrence arguments in
-      `shell.qml`'s height binding are still arguments. A composed shot
-      that lights six or eight plates would close it and is cheap, but it
-      is a picture of exactly the confusion A62 names, so it wants A62
-      answered first. Shot 13 adds a WIDTH half to the same question:
-      `GuardPlate` with an ordinary real file name on it is 230 px wide
-      on a 300 px surface, so a crowded corner is not only a stack that
-      might not fit vertically — it is several near-full-width plates,
-      and whether that reads as a HUD or as a wall is the part only a
-      picture answers. Discovered in A61.
+- [x] A63. The corner the box is sized for did not fit in the box. — ae4299c
+      (ASSERTED, not photographed: `tools/hudshots/scene/tst_fit.qml`
+      stacks every plate but `link` — the one that excludes all nine, and
+      a check holds that split — each drawing the widest thing its own cap
+      allows, over a health list as long as this machine has services.
+      That corner is **713 px**, in a box that was **688**. A layer-shell
+      panel floating over every window was cutting its BOTTOM plate in
+      half, and the bottom plate is `HealthPlate`: the thing that says
+      what is wrong, cropped exactly when everything is. The box is 745 px
+      now — two insets and the measurement, because §06 gave the corner an
+      `insetPx` gap at the top and the right and the bottom had none, so a
+      stack that exactly filled the box ended flush against the edge.
+      Three controls, because a fit check is the easiest test to make
+      vacuous: the crowd really is nine plates (`litNames`), every capped
+      plate really is AT its cap, no plate is wider than the surface. The
+      middle one caught the only real mistake in the file — `InstallState`
+      REFUSES an over-long slug rather than eliding it, so the probe that
+      made every other plate widest made that one narrowest and the corner
+      measured 3 px short with nothing failing. Four Python gates stop the
+      copies drifting (each driver's box to shell.qml's, both drivers'
+      `everyPlate` to Corner.qml, the crowd's roster to `services/`).
+      Eight mutations, eight caught, each by one check. Tests:
+      `bash ops/ralph/hudshots.sh` 23, `... qmltest.sh` 585,
+      `... runtests.sh tools` 269.
+      **The PICTURE half is deliberately not taken and is still A62's:**
+      a shot of eight unrelated plates 8 px apart is a photograph of
+      exactly the confusion A62 raises, and "does a 713 px corner read as
+      a HUD or as a wall" is a question only a human looking at one can
+      answer — see A70.)
+
+- [ ] A70. **A human's look, and it is A62's question with a number on
+      it.** A63 proved the crowded corner FITS; nothing says it should
+      exist. 713 px is half a 1440p screen and two thirds of a 1080p one,
+      most of it several near-full-width plates about unrelated things, and
+      the alternative was never considered because nothing had measured the
+      case: `HealthPlate` calls itself "the SHORT list" in its own header
+      and has no cap at all, so nine unwell services are nine rows. Three
+      shapes, and the loop should not pick: (a) leave it — the corner is
+      only that tall when the machine really is that broken, and cropping
+      it then is the worst possible moment; (b) cap the health list at N
+      findings with an "and 4 more" row, which is new §06 vocabulary and
+      shrinks the box; (c) cap the STACK — a corner that stops at N plates
+      and says so, which is the general answer and the largest change.
+      Whoever answers it can look at the numbers without running anything:
+      the per-plate measurements are in the A63 journal entry. Raised by
+      A63.
 
 - [x] A64. `GuardPlate`'s entire `warn` branch was unreachable on this
       machine: `decide()` returned `clean` or `blocked` and nothing else,
