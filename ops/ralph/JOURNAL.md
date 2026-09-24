@@ -8036,3 +8036,127 @@ The printed count says "at least" now for that reason.
   **B43/B47/B54** are one question asked three times, and **B10/A28** —
   one live recording of one spoken turn on ares — remains the biggest
   thing a human can hand this loop.
+
+## 2026-09-25 — iteration 79 — B38: the period an off-schedule beat lands in
+
+PLAN B38's last open half was one sentence — "jv-voice is the one service
+nobody has read for this at all." The reading was the iteration. What it
+found is not what B38 expected, and it is not B47 either.
+
+**What B38 expected.** jv-voice publishes `degraded` the instant a
+synthesis or playback failure reaches `_speak_one`'s handler, so it
+already does the thing `schemas/sys.health.json` asks for ("every fixed
+period, **and immediately on state change**"). Same as jv-guard, same as
+jv-brain. Its gap is theirs — the fault is not LATCHED, the next periodic
+beat says `ok` again while the condition is unchanged — and that is
+**B47**, a human's call about what the CLI says on an ordinary day.
+Nothing built for it here.
+
+**What the reading actually found.** The schema asks for two things and
+never says what the second does to the first. An off-schedule beat: does
+it take over the period, or does the old timer keep running underneath
+it? jv-voice, jv-guard and jv-brain all took the second answer, by
+omission — they publish and leave `health_at` alone. **jv-ears and
+jv-context took the first, and jv-ears wrote down why:**
+
+> Before the publish, not after: the period is the beat's, not the bus's,
+> and a change beat is this period's beat — leaving the timer alone would
+> double-publish a change that happened to land near a boundary.
+> — `jv_ears.main.pump_health`
+
+Five services, one contract, two answers, and the two that are right are
+right in two different shapes that share no code.
+
+**Why the wrong answer costs something.** The `ok` that follows a fault
+goes out with whatever was left of the period the fault interrupted.
+Three quarters of the way through, the report has a quarter of a period
+to live; at the boundary it has none. `bus.latest()` keeps ONE frame per
+topic per publisher, so the HUD's HealthPlate and `jv health --check`
+both read the newest: a `degraded` that was published truthfully, on
+time, can be erased before anything could show it. That is a scan with no
+signature engine, a dead sound card, an LLM that stopped answering — the
+three reports each of these services exists to make.
+
+jv-brain pays a second cost the others do not. Its `_state_model_share`
+beat fires on the FIRST WORD OF EVERY SPOKEN TURN. Leaving the timer
+alone made that an ADDED frame per turn on a topic meant to be quiet
+(invariant 5), rather than that period's beat moved earlier. The fix
+takes a frame off a busy machine; it never adds one.
+
+**What was built.** `jarvis_bus.HealthBeat` — `due`, `beat()`, an
+injected clock, a period it also declares so the body and the enforcement
+cannot drift apart, and a `ValueError` for a period the schema's
+`exclusiveMinimum: 0` forbids. The rule and its reasoning live in one
+docstring instead of being rediscovered per service. Every beat in the
+three services goes through it; jv-voice grew a `_beat()` so that there
+is exactly one way for it to publish a heartbeat, which is the property
+that makes "every beat owns a period" checkable by reading rather than by
+remembering.
+
+The stamp is taken BEFORE the publish, for jv-ears' reason. After the
+await, the period would start from when the bus ACCEPTED the frame, so
+every beat would drift later than the last — compounding, on the one
+number consumers use to decide a service is dead.
+
+**Three things deliberately not done.**
+1. **jv-ears and jv-context are untouched.** Both already obey this, in
+   shapes built around their own problems — a 4 Hz watcher with a 1 s
+   flap floor because their state is a function of a clock; an
+   event-driven pump woken by a fault setter. Rewriting either onto a
+   common clock would risk behaviour that was reasoned out once and is
+   correct, to unify code that is not duplicated.
+2. **The latch is still B47's question.** All three still say `ok` again
+   on the next beat. What changed is only WHEN that beat is.
+3. **No schema change.** `period_s` is published as it always was; the
+   only difference is that the number enforcing it and the number
+   declared in the body are now the same object.
+
+**Also: the gate was not testing the tree.** `ops/ralph/runtests.sh` runs
+`python -m pytest` from the service's own directory, which puts that
+directory first on `sys.path` — so `jv_guard` came from the worktree and
+`jarvis_bus` came from the NIX STORE. Every suite but pylib's own has
+been testing the shared library as last built, not as written. Found by
+the first import of `HealthBeat` failing in a service whose test had just
+been changed to use it. One `export PYTHONPATH` line. Nothing else moved:
+all ten suites are green on both sides of it.
+
+- tests: pylib **11 (was 4)**, jv-voice **29 (28)**, jv-guard **34 (33)**,
+  jv-brain **115 (114)**. Unchanged and green under the new PYTHONPATH:
+  jv-ears 114, jv-context 105, jv-compat 10, jv-hud-bridge 26, tools 254,
+  harness 88.
+- graded with `ops/ralph/mutate.sh`: **8 mutations, 8 caught.** Five on
+  the clock (the deadline turned into a strictly-greater gap, a fresh
+  clock that starts not-due, a `beat()` that forgets, a period of zero
+  reaching the bus, and "only the periodic beat owns the clock"), and
+  that last one again in each of the three services — the old behaviour
+  reproduced exactly, one line each. Each service test measures the GAP
+  after the fault rather than a silence, because a heartbeat that simply
+  stopped would pass a silence; each also asserts the fault landed inside
+  the period it was meant to interrupt, so a slow turn fails loudly
+  instead of measuring nothing and passing.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/pylib/jarvis_bus/health.py (new),
+  services/pylib/jarvis_bus/__init__.py, services/pylib/tests/test_health.py
+  (new), services/jv-voice/jv_voice/service.py,
+  services/jv-voice/tests/test_voice_service.py,
+  services/jv-guard/jv_guard/service.py,
+  services/jv-guard/tests/test_guard.py,
+  services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_brain_service.py, ops/ralph/runtests.sh
+- commit: d55348b
+- next: **B58** raised — the PYTHONPATH finding is bigger than the line
+  that fixed it. For as long as the loop has existed, a suite could have
+  passed against a `jarvis_bus` that no longer matched the tree, which
+  means the gate's own honesty is a property nothing tests. `mutate.sh`
+  can grade that: a canary on `services/pylib/jarvis_bus/client.py` run
+  against, say, `runtests.sh jv-guard` should kill it, and before today
+  it would have LIVED — the harness would have called the file immune and
+  said so. Otherwise unchanged: **Track A is one human look at `docs/hud/`
+  away from unblocking ten items** (A47, A55, A62, A63, A68 and the
+  A21/A22/A25 cluster are two questions asked five ways), **B27** needs
+  one decision between three named options, **B43/B47/B54** are one
+  question asked three times — and B47 just gained a third service that
+  has now been READ for it, which is the whole of what B38 had left —
+  and **B10/A28**, one live recording of one spoken turn on ares, remains
+  the biggest thing a human can hand this loop.

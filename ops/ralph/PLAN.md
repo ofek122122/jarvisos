@@ -1005,7 +1005,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       survivor on purpose — 0644 is indistinguishable from 0640 behind a
       0750 directory, so nothing asserts the other-read bit.
 
-- [ ] B38. jv-context is now the only service that beats immediately on
+- [x] B38. jv-context is now the only service that beats immediately on
       a state change; `schemas/sys.health.json` asks EVERY service for it
       ("every fixed period, and immediately on state change"). jv-ears,
       jv-guard and jv-brain publish on a timer alone, so jv-ears going
@@ -1034,6 +1034,28 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       ordinary day, which is B43's judgement call again, so it is raised
       as **B47** rather than built. jv-voice is the one service nobody
       has read for this at all.
+      **CLOSED — d55348b.** jv-voice was read, and it is jv-guard's and
+      jv-brain's case exactly: it beats `degraded` at the instant a
+      synthesis or playback failure lands, and does not latch it. So
+      every one of the five services now answers B38's question, and
+      what is left of the un-latched half is B47's, for a human.
+      The reading found a DIFFERENT defect the schema never spells out,
+      and that is what the commit fixes: an off-schedule beat did not
+      take over the period it landed in. jv-voice, jv-guard and jv-brain
+      published and left the period timer alone, so the next `ok` went
+      out with whatever was left of the period the fault interrupted —
+      at the boundary, nothing. `bus.latest()` keeps one frame per
+      publisher, so a truthful `degraded` could be erased before the HUD
+      or `jv health --check` could show it. jv-brain paid twice, because
+      its first-word gauge beat then ADDED a frame per turn to a quiet
+      topic rather than being that period's beat. jv-ears and jv-context
+      already had it right, in two shapes sharing no code, and jv-ears
+      had written the reason down. That rule is now
+      `jarvis_bus.HealthBeat` and the three services beat through it.
+      jv-ears and jv-context are deliberately NOT migrated: both obey it
+      already in shapes built around their own problems (a watcher with a
+      flap floor; an event-driven pump), and unifying correct,
+      un-duplicated code is not worth the risk.
 
 - [ ] B47. **A human's call, and it is B43's question in two more
       services.** jv-guard and jv-brain both publish `degraded` at the
@@ -1053,6 +1075,14 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       installed one. That is exactly the trade-off B43 states, in two
       more places, and it should be answered once for all three. Cheap
       either way; nothing else waits on it. Discovered in B38.
+      **THREE services now, not two** (d55348b closed B38 by reading the
+      last one): jv-voice publishes `degraded` at the instant synthesis
+      or playback fails and does not keep it either, so a sound card that
+      is gone for good is one blip per utterance. Its blip now survives a
+      full period rather than possibly none of one — the beat owns the
+      period it lands in — which makes the un-latched window WIDER and
+      the question unchanged. Still one decision, still for a human, now
+      covering jv-guard, jv-brain and jv-voice.
 
 - [x] B48. **The loop's own mutation harness can silently test
       UNMUTATED code, and it did once in this iteration.** — 3961e85
@@ -1346,6 +1376,25 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       and per-runner, since only pytest names them cheaply. Worth deciding
       the day a read relation reports a survivor nobody can explain.
       Discovered in B55.
+
+- [ ] B58. The gate has never been testing the tree it is run on. Until
+      d55348b, `ops/ralph/runtests.sh` ran `python -m pytest` from the
+      service's own directory, which puts that directory first on
+      `sys.path` — so `jv_guard` came from the worktree and `jarvis_bus`
+      came from the NIX STORE. Every suite but pylib's own has been
+      asserting against the shared library AS LAST BUILT, for as long as
+      this loop has existed. One `export PYTHONPATH` line fixed it and
+      all ten suites stayed green, which is the reassuring half. The
+      unreassuring half is that nothing tests the gate's own honesty, and
+      `mutate.sh` can: a canary on `services/pylib/jarvis_bus/client.py`
+      graded against `--runner tests jv-guard` must kill that suite, and
+      before d55348b it would have LIVED — the harness would have
+      reported the file immune and been wrong about why. That is a real
+      control to add and it generalises: a canary that lives because the
+      suite read a DIFFERENT COPY of the file is indistinguishable today
+      from one that lives because no test touches it. Small, and it is
+      the harness grading its own reach for the first time.
+      Discovered in B38.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
