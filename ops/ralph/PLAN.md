@@ -1095,33 +1095,56 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       The other two need a frame clock the harness can hold, which is
       genuinely more work and should wait for a reason. Discovered in A42.
 
-- [ ] A44. The live-lit window holds a state nobody has photographed.
-      A40 shipped `OutputPlate` with a contact-sheet tile and no SCREEN:
-      SPEAKING with OUTPUT MUTED under it, at ares' real monitor sizes, is
-      the one shot `docs/hud/screens/` is missing — and the harness now
-      composes exactly those frames and holds them steady for ten seconds
-      as a side effect of measuring something else. It would be a new
-      `SHOTS` entry (`04-unheard`) reusing `sheet.VOICE_SPEAKING`,
-      `sheet.SINK_MUTED` and now `sheet.VOICE_DEFAULT_SINK`, plus one
-      `captures` list and one README section. Small, and the only picture
-      in the sheet that would show two plates disagreeing about whether
-      Jarvis is working. Discovered in A42; got cheaper in A41, which
-      made the live-lit window compose and HOLD exactly that frame list.
+- [x] A44. The live-lit window held a state nobody had photographed.
+      — 3052b8f
+      (`docs/hud/screens/04-unheard-primary.png`: SPEAKING with OUTPUT
+      MUTED under it, on the 1440p primary, through the real shell. Two
+      mechanisms had to exist first. `hold` — a frame list the settle
+      republishes at jv-context's 1 Hz, because `OutputState` is a
+      reading of the present and not an event — and `grows_from`, a
+      thrown-away first exposure with an AUDIBLE sink that the real shot
+      must have grown DOWNWARDS from, because StatePlate says SPEAKING on
+      jv-voice's frame alone and "the HUD drew something" would be true
+      of a picture where A40's plate never appeared. Measured
+      (2444,16,2543,48) → (2412,16,2543,89), 41 px taller; verified it
+      bites by making the two exposures identical (exit 1, and no PNG
+      written, because the check runs before `write_png`). The growth
+      rule moved out of A42's window into `sheet.grew_downwards()` with
+      eight unit tests that need no compositor. Honest footnote: the
+      `hold` is margin, not necessity — publishing once writes the same
+      PNG byte for byte, because one exposure beats the 3 s expiry by
+      under a second. Every comment claiming otherwise was corrected.
+      Tests: `bash ops/ralph/runtests.sh tools` (104),
+      `bash ops/ralph/hudscreens.sh` (7 screens).)
 
-- [ ] A45. `docs/hud/screens/*.png` are not byte-reproducible, and one
-      journal entry already treated them as if they were. Three runs of
-      `ops/ralph/hudscreens.sh` in A41 produced three different files,
-      each differing from the committed ones by **2 pixels** inside a
-      plate — antialiasing jitter, in `02-heard` and `03-confirm`, shots
-      taken before anything that iteration touched. Harmless today
-      because nothing byte-compares them (unlike `docs/hud/*.png`, which
-      ARE byte-identical run to run and have a test saying so). It stops
-      being harmless the moment someone writes "the screens are
-      unchanged" as evidence, which A42's journal effectively did. Either
-      make them reproducible (the settle before each capture is the
-      suspect) or say in `docs/hud/screens/README.md` that they are not
-      and that a 2 px diff is noise — the second is ten minutes and stops
-      the wrong conclusion. Discovered in A41.
+- [ ] A47. The growth check proves a plate ARRIVED, never WHICH plate.
+      `grows_from` (A44) and A42's live-lit window both measure the same
+      thing: the drawn region got taller from the same top-right corner.
+      A `HealthPlate` saying `jv-voice lost` would do that too, in the
+      same direction, by a similar number of pixels — which is not
+      hypothetical, since it is exactly what A42 hit when a heartbeat
+      lapsed mid-window. Today the only thing that distinguishes them is
+      the picture, read by a human, which is fine for a sheet whose whole
+      purpose is to be looked at and not fine for a check that claims to
+      prove the caption. No cheap answer: reading the words needs OCR or
+      a QML-side probe, and both are new machinery in a harness whose
+      value is that it stages nothing. Worth writing down so nobody reads
+      more into the measurement than it says. Discovered in A44.
+
+- [x] A45. `docs/hud/screens/*.png` are not byte-reproducible, and the
+      README now says so with numbers. — 3052b8f
+      (Half of this was already true: that README has carried a
+      "two runs are not byte-identical" paragraph since A30, which is
+      why nobody noticed a journal entry leaning on the opposite. It now
+      states what was measured over three runs of an untouched HUD —
+      `01-quiet` (draws nothing) and `04-unheard` (two short monospace
+      labels) identical every time, `02-heard` and `03-confirm` moving by
+      2-5 px per monitor, one channel, one value, on glyph edges inside
+      the plate — and a test pins the disclaimer so it cannot quietly
+      leave. NOT made reproducible: the cause is below this harness, the
+      shots that carry a long wrapped sentence are the only ones that
+      drift, and a picture nobody byte-compares does not need to be a
+      fixture. Done as part of A44, which rewrites the directory anyway.)
 
 - [ ] A46. `JARVIS_VOICE_OUTPUT_DEVICE` (A41) is honoured by the process
       and declared nowhere. `modules/jarvis-services.nix` builds
@@ -1138,6 +1161,9 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       plugs in a dedicated speaker. Discovered in A41.
 
 ## Done
+- A44/A45 — the screen sheet photographs the state where two plates
+  disagree about whether Jarvis is working, and stops being mistaken for
+  a fixture (3052b8f, 2026-09-24)
 - A41 — the HUD stops assuming the sink it can see is the one Jarvis
   speaks into: jv-voice publishes `output_device_pinned`, OutputPlate
   goes quiet rather than confidently wrong (d504ba4, 2026-09-24)

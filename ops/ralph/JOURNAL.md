@@ -3891,3 +3891,93 @@ would be jv-context's job done twice, badly, inside the synthesiser).
   with a heartbeat, which is the entire frame list a `04-unheard` screen
   needs. A13/A27/A38 remain the oldest open question and are still one
   two-minute human opinion.
+
+## 2026-09-24 — iteration 38 — A44: the screen sheet photographs the state
+## where two plates disagree
+
+A40 put `OUTPUT MUTED` under `SPEAKING` and A41 taught it which sink it
+is allowed to say that about, and in neither iteration did anyone look
+at the result on a monitor. It had a tile on the contact sheet — 300x560
+of plain QML engine — and no SCREEN, which meant the one HUD state where
+**two plates disagree about whether Jarvis is working** existed only as
+a rendering of its own content. `docs/hud/screens/04-unheard-primary.png`
+is that state on ares' 1440p panel, through quickshell, layer-shell, a
+real bridge and a real jarvisd: SPEAKING in ember, OUTPUT MUTED under it
+in warn, and 2560x1440 of untouched desktop around them.
+
+**The shot needed a mechanism the sheet did not have.** Every other
+picture here is of an EVENT — a wake word happened, jv-act asked — and
+the plate it lights stands up on its own for longer than a camera takes.
+`OutputState` is a reading of the PRESENT: it believes a
+`context.system` snapshot for three of jv-context's periods, and the
+jv-voice heartbeat that tells it the visible sink is Jarvis' lapses
+after two of its own. So a shot may now declare `hold`, and the settle
+becomes a feed at the 1 Hz jv-context publishes at all day.
+
+**And then the hold turned out to be worth less than the argument for
+it, which is the thing worth writing down.** Publishing the pair ONCE
+and sleeping writes the same PNG, byte for byte: one exposure reaches
+grim about two seconds after the publish and the snapshot expires at
+three, so publish-once is inside the window — by under a second, on this
+machine, with this shot's single capture. The feed is not what makes the
+picture right today; it is what stops a sub-second margin from being the
+thing that makes it right, and it is what survives a second monitor (a
+33 Mpx grim and a PNG encode each), a slower run, a longer settle. Every
+comment and paragraph that said "would photograph a plate that had
+already left" was rewritten to say what was measured instead.
+
+**The check that does bite: `grows_from`.** StatePlate has said SPEAKING
+off jv-voice's frame alone since A3, so "the HUD drew something" is true
+of a picture where A40's plate never appeared — and it would be a
+perfectly sharp photograph under a caption describing a line that is not
+in it. So the shot is exposed twice, the first one thrown away: the same
+frames with an AUDIBLE sink, then the mute, and the drawn region must
+have grown DOWNWARDS with its top and right edges unmoved. Measured:
+(2444, 16, 2543, 48) → (2412, 16, 2543, 89), 41 px taller, the left edge
+travelling outwards because OUTPUT MUTED is a longer line than SPEAKING.
+**Verified it bites**: making the shorter exposure identical to the lit
+one fails the run (exit 1) and — because the check was moved to before
+`write_png` — leaves no PNG behind for the next reader to find looking
+as finished as the others.
+
+**The geometry rule is now stated once.** A42's live-lit window had it
+inline as four index comparisons, and the shot needs exactly the same
+one, so it is `sheet.grew_downwards()` — next to the frame counter, in
+the stdlib-only file, where eight unit tests run it with no compositor
+(taller, shorter, unchanged, top moved, right moved, left outwards, left
+inwards, and None). The two tests that used to grep shoot.py for
+`box[3] <= speaking_box[3]` now assert the window ASKS, and the rule
+itself is tested rather than pattern-matched.
+
+**A45, closed with numbers.** The claim it complained about — that
+`docs/hud/screens/*.png` are a fixture — was already contradicted in
+that README since A30, which is why nobody noticed it was load-bearing.
+Now it is measured across three runs of an untouched HUD: `01-quiet`
+(draws nothing) and `04-unheard` (two short monospace labels) come back
+byte for byte every time; `02-heard` and `03-confirm`, the two shots
+carrying a long wrapped sentence, move by 2-5 pixels per monitor, one
+channel, one value, on glyph edges. A test now pins the disclaimer so it
+cannot quietly leave. The five PNGs that drifted were restored to their
+committed bytes: nothing about those shots changed this iteration, and a
+diff of 2 px in each is noise in the history.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 104 (was 96; 8 new).
+  `bash ops/ralph/hudscreens.sh` — 7 screens (was 6), run twice green
+  plus two mutation runs into a temp directory.
+- build: `nixos-rebuild build --flake .#ares` ok, and `nix build .#jv-hud`
+  (qmllint + the QML suite) three times as part of the harness. Never
+  test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin. `shell/jv-hud` was not touched at all — this
+  iteration photographs it, it does not change it.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  tools/tests/test_hudscreens.py, docs/hud/screens/README.md,
+  docs/hud/screens/04-unheard-primary.png
+- next: the growth check proves a plate ARRIVED and not WHICH plate
+  (**A47**) — a HealthPlate saying `jv-voice lost` would grow the region
+  in exactly the same direction, and only the picture distinguishes them,
+  read by a human. A43 is still the other four plates standing still, and
+  `hold` is now the mechanism for two of them. A46 (declaring
+  `JARVIS_VOICE_OUTPUT_DEVICE` in `modules/jarvis-services.nix`) is
+  untouched and still small. A13/A27/A38 remain the oldest open question
+  and are still one two-minute human opinion — and `04-unheard` gives
+  that human a fourth plate to have the opinion about.
