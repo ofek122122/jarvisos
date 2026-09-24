@@ -787,6 +787,169 @@ TestCase {
     compare(voice.state, "idle");
   }
 
+  // --- the question the user gave up on (A17) -------------------------
+  //
+  // B6 made a wake cancel the answer in flight, and an interrupted turn
+  // publishes NO brain.response — the frozen `finish_reason` enum has no
+  // word for "the user stopped me". So the one thing that could close a
+  // thinking window for a prompt nobody will ever answer stopped coming,
+  // and the plate could claim work was in progress for the whole 30 s
+  // floor. The rule that replaces it: a wake NEWER than the open prompt
+  // means the user abandoned it.
+
+  function test_a_wake_abandons_the_spoken_question_it_interrupts() {
+    // Ask, then interrupt before a word comes back, then say nothing.
+    // Once the microphone claim expires there is nothing left in flight,
+    // and the plate must say so rather than keep claiming a busy brain.
+    const voice = makeVoice({
+      windowS: 0.05
+    });
+    speech(voice, "idle");
+    utterance(voice);
+    compare(voice.state, "thinking");
+    suite.fakeNow += 0.5;
+    wake(voice);
+    tryCompare(voice, "state", "idle", 3000, "the brain was cancelled; nothing is thinking");
+  }
+
+  function test_a_wake_abandons_a_request_whose_answer_would_be_spoken() {
+    // The same thing through the non-voice frontends. jv-brain speaks a
+    // brain.request reply unless the request says otherwise, and a spoken
+    // turn is exactly the turn a wake cancels.
+    const voice = makeVoice({
+      windowS: 0.05
+    });
+    speech(voice, "idle");
+    ask(voice);
+    compare(voice.state, "thinking");
+    suite.fakeNow += 0.5;
+    wake(voice);
+    tryCompare(voice, "state", "idle", 3000, "a spoken reply is cancelled by a wake");
+  }
+
+  function test_a_wake_does_not_abandon_a_silent_request() {
+    // jv-brain refuses to cancel a silent turn: a wake says the user is
+    // talking to Jarvis, not that the CLI stopped wanting the answer it
+    // asked for. That answer is still being written, and saying otherwise
+    // would be the same lie in the other direction.
+    const voice = makeVoice({
+      windowS: 0.05
+    });
+    speech(voice, "idle");
+    ask(voice, {
+      "speak": false
+    });
+    suite.fakeNow += 0.5;
+    wake(voice);
+    tryCompare(voice, "state", "thinking", 3000, "nothing cancelled this one");
+  }
+
+  function test_the_wake_that_asked_the_question_does_not_abandon_it() {
+    // The ordinary flow puts a wake BEFORE every spoken prompt. If the
+    // comparison ran the wrong way round, voice would never think at all.
+    const voice = makeVoice({
+      windowS: 0.05,
+      thinkS: 5
+    });
+    speech(voice, "idle");
+    utterance(voice);
+    compare(voice.state, "thinking");
+    wait(200);
+    compare(voice.state, "thinking", "the wake that opened this turn is not a barge-in");
+  }
+
+  function test_the_question_after_an_abandoned_one_is_thinking_again() {
+    // Giving up on one question says nothing about the next.
+    const voice = makeVoice({
+      windowS: 0.05
+    });
+    speech(voice, "idle");
+    ask(voice);
+    suite.fakeNow += 0.5;
+    wake(voice);
+    tryCompare(voice, "state", "idle", 3000);
+    suite.fakeNow += 1;
+    ask(voice, {
+      "text": "and the date"
+    });
+    compare(voice.state, "thinking");
+  }
+
+  function test_a_later_wake_we_cannot_read_does_not_bring_back_an_abandoned_question() {
+    // Why this is a latch and not a comparison evaluated every frame:
+    // `bus.latest()` holds one frame per topic, so the wake that ended the
+    // window is replaced by the next detection — and a detection we refuse
+    // to believe leaves nothing to compare against. Derived, the abandoned
+    // question would come back to life for the rest of its 30 s.
+    const voice = makeVoice({
+      windowS: 0.05
+    });
+    speech(voice, "idle");
+    ask(voice);
+    suite.fakeNow += 0.5;
+    wake(voice);
+    tryCompare(voice, "state", "idle", 3000);
+    suite.fakeNow += 1;
+    wake(voice, {
+      "score": 0.1
+    });
+    compare(voice.state, "idle", "an unreadable wake is not evidence that the brain resumed");
+  }
+
+  function test_a_wake_in_the_same_instant_as_the_question_abandons_it() {
+    // Two frames stamped identically cannot be ordered, so this is a
+    // tie-break, not a reading — and it is the same one the rest of this
+    // file makes (`answered`, `utteranceEnded`, `repliedOnBus` all treat
+    // "same instant" as "after"). Ending the window is also the
+    // under-claiming direction: "thinking" is the assertion, so dropping
+    // it says less, not more. Pinned so the comparison cannot drift.
+    const voice = makeVoice({
+      windowS: 0.05
+    });
+    speech(voice, "idle");
+    ask(voice);
+    wake(voice);
+    tryCompare(voice, "state", "idle", 3000);
+  }
+
+  function test_a_wake_that_refutes_itself_abandons_nothing() {
+    // The same bar the listening claim holds a wake to. A frame that
+    // scored below the threshold it declares is not a detection, and must
+    // not be allowed to throw away a question that is genuinely in flight.
+    const voice = makeVoice();
+    speech(voice, "idle");
+    ask(voice);
+    suite.fakeNow += 0.5;
+    wake(voice, {
+      "score": 0.1
+    });
+    compare(voice.state, "thinking");
+  }
+
+  function test_a_wake_that_stops_being_readable_reaches_through_nothing() {
+    // The one path where the wake goes from a frame to NOTHING while a
+    // question is still open and unabandoned — so it is the only place a
+    // latch that forgot its null check would reach through it. A TypeError
+    // in a signal handler is a warning, not a failure, so this test says
+    // out loud that a warning is a failure: without that line the guard
+    // could be deleted and every assertion here would still pass.
+    failOnWarning(/TypeError/);
+    const voice = makeVoice({
+      windowS: 0.05
+    });
+    speech(voice, "idle");
+    wake(voice);
+    tryCompare(voice, "state", "idle", 3000);
+    suite.fakeNow += 1;
+    ask(voice);
+    compare(voice.state, "thinking");
+    suite.fakeNow += 0.5;
+    wake(voice, {
+      "score": 0.1
+    });
+    compare(voice.state, "thinking", "an unreadable wake neither abandons a question nor throws");
+  }
+
   // --- frames we refuse to believe ------------------------------------
 
   function test_a_wake_below_its_own_threshold_is_ignored() {

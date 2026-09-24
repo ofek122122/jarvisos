@@ -10,7 +10,9 @@
 // Where each answer comes from:
 //
 //   speech.state   (jv-voice)  idle / speaking / interrupted, verbatim.
-//   audio.wake     (jv-ears)   the wake word fired -> "listening".
+//   audio.wake     (jv-ears)   the wake word fired -> "listening"; one
+//                              arriving mid-question also ends it, since
+//                              the user abandoned that question.
 //   audio.vad      (jv-ears)   speech_end closes a listening window, and
 //                              opens a thinking one.
 //   brain.request  (jv CLI,    a typed/replayed question -> "thinking".
@@ -52,11 +54,13 @@
 //     VAD runs continuously, see A4) and means nothing here.
 //   · a `brain.request`, which is how the non-voice frontends ask.
 //
-// and three things end it: `brain.response` (the only thing that can, for
+// and four things end it: `brain.response` (the only thing that can, for
 // a silent CLI query or a reply that errored and was never spoken), the
 // first `speaking` frame after it (the user is now hearing the answer —
 // the brain may still be generating, but saying so would flip the word
-// once per streamed sentence), and `thinkWindowS` as the floor under a
+// once per streamed sentence), a WAKE newer than the prompt (A17 — the
+// user gave up on that question and jv-brain has already cancelled it,
+// publishing no response at all), and `thinkWindowS` as the floor under a
 // brain that died mid-turn.
 //
 // Whatever jv-voice says is audible RIGHT NOW outranks it: `speaking` and
@@ -195,7 +199,7 @@ QtObject {
 
   // --- is the brain working on something of ours? ----------------------
 
-  readonly property bool promptOpen: root.promptFresh && !root.answered_
+  readonly property bool promptOpen: root.promptFresh && !root.answered_ && !root.abandoned
 
   // The newest thing we can recognise as a question in flight. Newest
   // rather than first: a typed question during a spoken turn is the live
@@ -245,6 +249,52 @@ QtObject {
       root.heardAnswer = true;
   }
 
+  // --- the question the user gave up on (A17) --------------------------
+
+  // A wake NEWER than the open prompt: the user started talking to Jarvis
+  // again before it answered, so that answer is not coming. jv-brain
+  // cancels the turn in flight when it sees the same frame (B6), and an
+  // interrupted turn publishes no `brain.response` — the frozen
+  // `finish_reason` enum has no word for "the user stopped me" (proposal
+  // R3). So the one thing that could have closed this window stopped
+  // arriving, and without this the plate would keep claiming a working
+  // brain until `thinkWindowS` ran out.
+  //
+  // Latched for the same reason `heardAnswer` is: `bus.latest()` holds one
+  // frame per topic, so the wake that ended the window is gone the moment
+  // the next detection lands — and a detection we refuse to believe leaves
+  // nothing to compare against at all. Derived, an abandoned question
+  // would come back to life.
+  property bool abandoned: false
+
+  // Checked on the WAKE edge only, unlike `heardAnswer`. A prompt that
+  // arrives after a wake is a NEW question, not an abandoned one: jv-brain
+  // saw the wake first, had nothing to cancel, and is now working on this.
+  // `onPromptKeyChanged` clears the latch for exactly that reason.
+  onWakeChanged: root.noteAbandonedPrompt()
+
+  function noteAbandonedPrompt(): void {
+    if (root.wake !== null && root.prompt !== null && root.spokenPrompt(root.prompt) && root.wake.ts >= root.prompt.ts)
+      root.abandoned = true;
+  }
+
+  // Would the answer to this prompt be SPOKEN? Only a spoken turn is
+  // cancellable — jv-brain's rule, and the honest one: a wake says the
+  // user is talking to Jarvis, not that the CLI or the HUD stopped wanting
+  // the reply it asked for, and a silent reply is not being talked over.
+  // Claiming that question was abandoned would be the same lie in the
+  // other direction.
+  //
+  // One field answers it for both prompt topics. `brain.request.speak`
+  // defaults to true in the schema and in jv-brain, which is exactly what
+  // `!== false` says; and the voice prompt is an audio.vad boundary, whose
+  // frozen body has no such field and whose answer is spoken by
+  // definition. A topic check in front of this would read like protection
+  // and never change an answer.
+  function spokenPrompt(envelope: var): bool {
+    return envelope.body.speak !== false;
+  }
+
   // --- the fallback timeouts ------------------------------------------
 
   // Set by the timer below; cleared whenever a new wake arrives. A plain
@@ -292,6 +342,7 @@ QtObject {
     // one. Re-checked immediately, because this prompt may already have
     // been answered by a frame that arrived before it did.
     root.heardAnswer = false;
+    root.abandoned = false;
     root.noteSpokenAnswer();
     root.armThinkExpiry();
   }
