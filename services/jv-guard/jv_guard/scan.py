@@ -9,8 +9,29 @@ Verdict policy (approved 2026-08-22):
   outage must neither grant trust (clean) nor invite an override
   (suspicious) nor permanently taint the file (blocked).
 
+Engines are of two KINDS, and the difference is what "no engine could
+run" means:
+
+- SIGNATURE engines are authoritative. Their silence is what `clean`
+  is made of: ClamAV looked at this file and recognised nothing.
+- HEURISTIC engines are advisory (`heuristics.py`). They read a binary's
+  SHAPE, which is exactly the question a signature engine cannot answer
+  about a file nobody has seen before — but a shape that reads ordinary
+  is not evidence of anything. An advisory engine can raise the verdict
+  to `suspicious` and can NEVER grant trust.
+
+That distinction is load-bearing rather than tidy. Without it, adding a
+heuristic engine would silently delete the fail-closed path: ClamAV goes
+down, the shape engine still runs, "no engine ran" stops being true, and
+a binary nothing recognised gets published as `clean`. So `decide()`
+requires an authoritative engine to have run before it will say anything
+at all — and when none did, a loud heuristic concern is still no verdict,
+because the approved policy's outage rule says an outage must not invite
+an override either.
+
 Only hashes ever leave the machine (invariant 7): the optional
 VirusTotal client sends a SHA256 lookup, never bytes. Off by default.
+The shape engine sends nothing anywhere — it reads local bytes.
 """
 
 from __future__ import annotations
@@ -30,21 +51,37 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+#: An engine whose silence means "clean". See the module docstring.
+SIGNATURE = "signature"
+#: An engine that may raise suspicion and may never grant trust.
+HEURISTIC = "heuristic"
+
+
 @dataclasses.dataclass
 class ScanHit:
     engine: str
-    signature: str
+    #: What was found, in the engine's own words — a signature name for a
+    #: signature engine, a described concern for a heuristic one. Spoken
+    #: out loud on request, so it is written for a person.
+    detail: str
 
 
 @dataclasses.dataclass
 class ScanReport:
     engine: str
     ran: bool
-    hit: Optional[ScanHit] = None
+    #: One engine can have several things to say about one file (a
+    #: packer stub is usually W+X *and* high-entropy), and each is a
+    #: separate reason the user hears.
+    hits: list[ScanHit] = dataclasses.field(default_factory=list)
+    #: Defaults to authoritative: every engine that predates the
+    #: heuristic seam is a signature engine and stays one untouched.
+    kind: str = SIGNATURE
 
 
 class Scanner(Protocol):
     name: str
+    kind: str
 
     def scan(self, path: Path) -> ScanReport: ...
 
@@ -55,6 +92,7 @@ class ClamAVScanner:
     item 6 (EICAR blocked, explained out loud)."""
 
     name = "clamav"
+    kind = SIGNATURE
 
     def scan(self, path: Path) -> ScanReport:
         try:
@@ -73,7 +111,7 @@ class ClamAVScanner:
             for line in out.stdout.splitlines():
                 if line.endswith("FOUND"):
                     sig = line.split(":", 1)[1].strip().removesuffix("FOUND").strip()
-            return ScanReport(self.name, ran=True, hit=ScanHit(self.name, sig))
+            return ScanReport(self.name, ran=True, hits=[ScanHit(self.name, sig)])
         return ScanReport(self.name, ran=False)  # engine error
 
 
@@ -81,6 +119,7 @@ class MockScanner:
     """Test scanner: flags paths by predicate."""
 
     name = "mock"
+    kind = SIGNATURE
 
     def __init__(self, infected: Optional[dict[str, str]] = None, broken: bool = False):
         self.infected = infected or {}
@@ -91,7 +130,7 @@ class MockScanner:
             return ScanReport(self.name, ran=False)
         for needle, sig in self.infected.items():
             if needle in str(path) or needle == path.name:
-                return ScanReport(self.name, ran=True, hit=ScanHit(self.name, sig))
+                return ScanReport(self.name, ran=True, hits=[ScanHit(self.name, sig)])
         return ScanReport(self.name, ran=True)
 
 
@@ -104,17 +143,30 @@ class Verdict:
 
 
 def decide(sha256: str, reports: list[ScanReport]) -> Optional[Verdict]:
-    """None = no engine ran; the caller publishes nothing (fail-closed
-    happens on the compat side)."""
+    """None = no AUTHORITATIVE engine ran; the caller publishes nothing
+    (fail-closed happens on the compat side). A heuristic engine that
+    ran, with or without concerns, cannot change that answer."""
     ran = [r for r in reports if r.ran]
-    if not ran:
+    if not any(r.kind == SIGNATURE for r in ran):
         return None
-    hits = [r.hit for r in ran if r.hit]
-    if hits:
+    scanned_by = [r.engine for r in ran]
+
+    signature_hits = [h for r in ran if r.kind == SIGNATURE for h in r.hits]
+    if signature_hits:
         return Verdict(
             sha256,
             "blocked",
-            [f"{h.engine} signature: {h.signature}" for h in hits],
-            [r.engine for r in ran],
+            [f"{h.engine} signature: {h.detail}" for h in signature_hits],
+            scanned_by,
         )
-    return Verdict(sha256, "clean", [], [r.engine for r in ran])
+
+    concerns = [h for r in ran if r.kind == HEURISTIC for h in r.hits]
+    if concerns:
+        return Verdict(
+            sha256,
+            "suspicious",
+            [f"{h.engine}: {h.detail}" for h in concerns],
+            scanned_by,
+        )
+
+    return Verdict(sha256, "clean", [], scanned_by)

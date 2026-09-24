@@ -53,9 +53,15 @@ class GuardService:
         )
         verdict = decide(actual_sha, reports)
         if verdict is None:
-            # No engine ran: publish NOTHING (compat fails closed), but
-            # say so on health — outages must be visible.
-            await self._health("degraded", "no scan engine available")
+            # No AUTHORITATIVE engine ran: publish NOTHING (compat fails
+            # closed), but say so on health — outages must be visible.
+            # An advisory engine may well have run and had opinions; it
+            # cannot clear a binary, so this is still an outage.
+            ran = [r.engine for r in reports if r.ran]
+            note = "no signature scan engine available"
+            if ran:
+                note += f" (only advisory: {', '.join(ran)})"
+            await self._health("degraded", note)
             return
         await self.bus.publish(
             "guard.verdict",
