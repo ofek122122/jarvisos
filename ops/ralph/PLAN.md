@@ -543,18 +543,48 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       pins WHERE the columns fall. Verified on the built binary against a
       real broker at 64 columns.)
 
-- [ ] B24. Clipping the hop TABLE's topic buys alignment and sells
+- [x] B24. Clipping the hop TABLE's topic buys alignment and sells
       something the stream does not have to sell: two topics sharing their
-      first 19 characters become two rows with the SAME label, and a
-      measurement table whose rows cannot be told apart is worse than a
-      wide one. Nothing on this bus can do it today — `audio.transcript`
-      is the longest topic any schema declares, at 16 of the 22 — so this
-      is a consequence written down before it can bite, not a bug. The
-      cheap answer when it does: the table has room to about 41 columns
-      before it wraps (a row is `topic_w + 39`), so it could clip LATER
-      than the stream and keep them aligned only up to 22, which is the
-      part a reader traces. What must not happen is a silent collapse of
-      two topics into one row of numbers. Discovered in B23.
+      first 19 characters become two rows with the SAME label. — b7dea79
+      (`table_topic_columns` picks the SMALLEST width from `TOPIC_COLUMNS`
+      up at which every printed label is distinct, so identity outranks
+      alignment in the table and only there. Nothing this bus carries
+      moves it — `audio.transcript` is 16 of the 22 — so the common case
+      is byte-identical and the table still lines up under the stream.
+      Three things stated rather than left to the loop: growth is minimal
+      (the test pair separates at 27, not 26, and 27+39 = 66 still fits);
+      the search always terminates, because the topics are map keys and at
+      the longest one's own length nothing is clipped; and PRINTED labels
+      are compared, never the topics — comparing topics is tautological
+      and the column would never grow. The width trade is pinned where it
+      costs something: a test builds a pair that separates only past
+      column 41 and asserts the rows go OVER `TAP_COLUMNS`, so the day
+      someone tightens the width gate they are told which rule they are
+      reversing. Corrected mid-iteration: a clipped label colliding with a
+      WHOLE one needs a topic ending in `...`, and `validate_envelope`
+      refuses an empty segment, so that case cannot reach a live tap — the
+      test is kept and says so. 128 lib tests (was 125) + 39 e2e; seven
+      mutations, all caught. Verified on the built binary against a real
+      broker. Tests: `bash ops/ralph/cargotest.sh jarvisd`.)
+
+- [ ] B25. The STREAM has the collapse B24 just closed for the table, and
+      no cheap way out. Four frames on `context.window.changed.alpha` and
+      `.beta` print four identical `context.window.chan...` lines above a
+      table that now tells the two apart — verified on the built binary,
+      not argued. The table could widen because it sees every topic it is
+      about to print; a streamed line is written as a frame ARRIVES and
+      cannot know what comes later, so the same fix does not exist here.
+      Three options and none is free: (a) leave it — the frame is one
+      `jv sub '*'` away whole, which is B23's standing answer and is why
+      this is not a bug; (b) buffer the stream, which costs the one
+      property `--latency` has (it prints as it happens); (c) clip from
+      the MIDDLE (`context.win...hanged.a`), which separates prefix-alike
+      topics with no lookahead and costs every reader the column they
+      currently trace. A second cost of (a), now measured: when the table
+      widens, the two views stop sharing a column boundary, so a reader
+      tracing a topic out of one into the other has to re-find it. Worth
+      an answer the day two topics on this bus share 19 characters —
+      nothing does today. Discovered in B24.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above

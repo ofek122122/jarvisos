@@ -5851,3 +5851,84 @@ signal it carries.
   open; B7/B12 wait on a consumer and on `sys.roster`. On the A track
   A62 still gates A63; A65/A60/A50/A55/A47/A56/A59 want a decision and
   A21/A22/A25/A27/A31/A38/A39/A68 want a human at ares.
+
+## 2026-09-24 — iteration 58 — B24: the measurement table stops being able to print one name twice
+
+B23 gave the topic ONE cap — `TOPIC_COLUMNS` = 22 — serving both views of
+a topic, the per-frame stream and the summary table under it, because the
+value of either is that its columns line up. B24 was written the same
+iteration as the consequence of that: a clip is a promise that what it
+hid is one `jv sub '*'` away, and two topics sharing their first 19
+characters print alike.
+
+That promise is good enough for the STREAM. Every line there is about one
+frame that named itself, and the frame is one `jv sub '*'` away whole.
+It is not good enough for the TABLE, where a row is about a topic and the
+label is the only thing that says which — so two topics collapse into two
+rows of numbers under one name, and there is nothing in the output that
+says it happened. The plan item made the ranking the fix had to encode:
+a measurement table whose rows cannot be told apart is worse than a wide
+one. **Identity outranks alignment here, and only here.**
+
+`table_topic_columns(&[&str])` is the whole change: the smallest width
+from `TOPIC_COLUMNS` up at which every PRINTED label is distinct. Three
+properties worth stating rather than reading out of the loop:
+
+- **It grows by the smallest amount that works**, so the 80-column budget
+  is spent only as far as identity needs. The pair in the test separates
+  at 27 and not at 26, and 27+39 = 66 still fits.
+- **The search always finds a width**, so the `expect` is not a hidden
+  panic: the topics are the keys of a map, and at the longest one's own
+  length nothing is clipped, so every label is its whole distinct topic.
+- **Printed labels are compared, never the topics.** Comparing topics is
+  tautological — map keys are distinct, so the column would never grow —
+  which is mutation M6 and it was caught. The other half of that argument
+  I had to correct mid-iteration: I first wrote that a clipped label can
+  collide with a WHOLE one "since this bus's alphabet allows `...`". It
+  does not. `validate_envelope` refuses an empty topic SEGMENT, so no
+  topic the broker accepts ends in two dots and that collision cannot
+  reach a live tap. The test for it is kept and now says so: nothing else
+  in this width code assumes the topic alphabet, and this should not be
+  the one place that does.
+
+**The trade is pinned where it costs something.** Every other report line
+this CLI writes fits `TAP_COLUMNS` at its worst input (B22/B23); this one
+deliberately does not, when a distinguishing character sits past column
+41. A test builds that case and asserts the rows are OVER the budget — so
+the day someone tightens the width gate, they are told which rule they
+are about to reverse instead of discovering it as a collapsed table.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 128 lib (was 125) and 39
+  e2e, green. **Seven mutations, all caught**: rows reverting to the fixed
+  cap while the header moves, the header keeping its own column while the
+  rows move, the column never growing, it always growing by one (caught by
+  the real-bus case, which must stay at exactly 22), it jumping straight
+  to the widest topic instead of searching, it comparing topics instead of
+  printed labels, and growth capped at the 80-column budget (which turns
+  the `expect` into the panic that proves the cap is load-bearing).
+- verified on the BUILT binary against a real broker, not only in tests:
+  four frames on `context.window.changed.alpha` / `.beta`, published with
+  `jv pub`, tapped with `jv tap --latency`. The table printed
+  `context.window.changed.a...` over `context.window.changed.beta` at 27
+  columns; before this commit both rows read `context.window.chan...`.
+- **the honest finding from looking at that output**: the four STREAM
+  lines above the table are still four identical labels, and the table's
+  column no longer starts the run of columns the stream's does — the two
+  views diverge in exactly the case where the table had to widen. That is
+  the documented trade and it is also new information, because the stream
+  cannot do what the table did: a line printed as a frame arrives cannot
+  know which topics will show up later. Written up as B25.
+- build: `nix build .#jarvisd` ok (it runs the tests too);
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin.
+- files: services/jarvisd/src/cli.rs
+- next: **B25 is the stream half of what B24 just closed for the table**,
+  and unlike B24 it has no cheap answer, so it is written down rather than
+  built. The B track's remaining items are otherwise unchanged: B17/B20
+  are a human at a terminal and share their trigger with B10/A28 — **one
+  live recording of one spoken turn on ares, still the biggest thing a
+  human can hand this loop**. B15 wants the decision B13 left open; B7/B12
+  wait on a consumer and on `sys.roster`. The A track is where the value
+  is and it is almost entirely blocked on people: A62 gates A63;
+  A65/A60/A50/A55/A47/A56/A59 want a decision and
+  A21/A22/A25/A27/A31/A38/A39/A68 want a human at ares.
