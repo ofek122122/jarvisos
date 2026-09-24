@@ -5577,3 +5577,92 @@ only door out of a verdict this machine can produce (A65).
   A27/A31/A38/A39 still want a human at ares. **B10/A28 — one live
   recording of one spoken turn on ares — remains the biggest thing a human
   can hand this loop.** B7/B12/B15/B17/B20/B23 unchanged.
+
+## 2026-09-24 — iteration 55 — A66: the colour that had no producer gets
+## its photograph
+
+- built: **`docs/hud/13-suspicious.png` — the sheet's first picture of the
+  approved policy's middle rung, plus the gate that keeps it a picture of
+  something real.** A61 stopped itself from taking this shot for a good
+  reason: `decide()` could return `clean` or `blocked` and nothing else,
+  so `GuardPlate`'s `warn` branch was a colour no frame on this machine
+  could light, and photographing it would have put an intention into the
+  one sheet whose entire value is that it is not one. A64 gave it a
+  producer. This is the picture.
+
+It is the same element as `10-guard.png`, one word and one colour apart —
+`SUSPICIOUS` in `warn` where that one says `BLOCKED` in `risk` — and the
+file in it is deliberately not malware. A decade-old widescreen patch for
+a game, which its author ran UPX over to make it one small download,
+`nfs2se-widescreen-patch.exe`. ClamAV recognises nothing in it. It is also,
+byte for byte, shaped exactly like something hiding: an executable section
+with no bytes in the file and 512 KiB of virtual space to unpack into, a
+second one that is both writable and executable, and that one's payload at
+7.98 bits of entropy. `blocked` would be a lie about this file and `clean`
+would be a promise nothing here can make, which is the whole argument for
+a middle rung, on a screen for the first time.
+
+**A66's premise was half wrong and the shot is better for it.** The item
+said the long reasons would be "a real test of the plate's wrapping".
+They are not tested by this picture at all, because they reach no pixel:
+`core/GuardState.qml` never reads `reasons` — `schemas/guard.verdict.json`
+says they are spoken on request, and they are the one string on this topic
+written by a scanner rather than fixed by a schema. What the picture
+actually tests is the thing A66 was really after: that the warn branch
+renders, and that the name of a real-world file fits the plate (27
+characters, ~211 px of a 240 px cap — not elided, and close enough to the
+cap that the next shot of a long name will be the one that finds it).
+The three sentences are quoted in `docs/hud/README.md` instead, where a
+reader can see what the machine has to say when asked.
+
+**The frame is composed and its words are not, and that is the part worth
+keeping.** Every other composed frame in this sheet is a shape somebody
+reasoned out; this one is a quotation from another service, which is a
+kind of claim a hand-typed literal has no business making. So
+`tools/tests/test_hudshots.py` builds a PE of exactly the UPX shape — with
+jv-guard's own fixture builder, not a copy of it — runs the real
+`PEHeuristicScanner` and the real `decide()` over it, and compares the
+verdict, all three reasons and `scanned_by` to the literal in the scene.
+The payload is a fixed sha256 chain rather than `os.urandom`, because the
+reason string carries the entropy to two decimals and the gate needs the
+same bytes every run; the 8 KiB zero tail is there because a real packed
+section is payload plus unpacker stub plus alignment slack, and a fixture
+measuring a flat 8.00 would have put a number in the sheet that no real
+binary produces.
+
+Note what `scanned_by` in that frame says: `clamav` **and** `pe-shape`,
+always both. The shape engine is advisory — it may raise suspicion and may
+never grant trust — so `decide()` returns nothing at all unless an
+authoritative engine ran, and a `suspicious` verdict is by construction two
+engines' work. A composed frame naming one engine would have been a frame
+describing a policy this machine does not have.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 132 (was 129). Five mutations
+  run through the new gate, in both directions: the entropy digits changed
+  in the scene (7.98 → 7.96) FAIL; `scanned_by` reduced to the advisory
+  engine alone FAIL; the verdict word changed to `blocked` FAIL; "at run
+  time" → "at runtime" in the scene FAIL; and — the one that matters most —
+  a comma added to the wording inside `jv_guard/heuristics.py` itself FAILS
+  the tools suite, which is the proof that the gate points at the real
+  producer and not at its own copy of it. `bash ops/ralph/hudshots.sh` — 13
+  shots, the other twelve byte-identical, plus tst_sequence's 11 unchanged.
+  `... runtests.sh jv-guard` — 33, untouched. `... qmltest.sh` — 536,
+  untouched.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin. jv-guard's source was not modified — the tools test imports it read
+  only, the way the other sheet gates read `shell.qml`.
+- files: docs/hud/13-suspicious.png (new), docs/hud/README.md,
+  tools/hudshots/scene/tst_shots.qml, tools/tests/test_hudshots.py
+- next: **A65 is now the item with a picture attached** — the sheet shows an
+  install stopped in front of a door with no handle, and a human choosing
+  (a) wire the override through `ConfirmPlate`, (b) leave it refusing, or
+  (c) tune which concerns reach `suspicious` is the only thing that opens
+  it. A62 (does the corner need a grammar for "these two plates are
+  unrelated") still gates A63 (the six-or-eight-plate fit shot), and A63 is
+  now slightly more interesting than it was: shot 13's plate is 230 px wide
+  on a 300 px surface, so the crowded corner is a width question as well as
+  a height one. A60/A50/A55/A47/A56/A59 still want a decision;
+  A21/A22/A25/A27/A31/A38/A39 still want a human at ares. **B10/A28 — one
+  live recording of one spoken turn on ares — remains the biggest thing a
+  human can hand this loop.** B7/B12/B15/B17/B20/B23 unchanged.

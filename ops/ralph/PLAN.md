@@ -1417,7 +1417,12 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `shell.qml`'s height binding are still arguments. A composed shot
       that lights six or eight plates would close it and is cheap, but it
       is a picture of exactly the confusion A62 names, so it wants A62
-      answered first. Discovered in A61.
+      answered first. Shot 13 adds a WIDTH half to the same question:
+      `GuardPlate` with an ordinary real file name on it is 230 px wide
+      on a 300 px surface, so a crowded corner is not only a stack that
+      might not fit vertically — it is several near-full-width plates,
+      and whether that reads as a HUD or as a wall is the part only a
+      picture answers. Discovered in A61.
 
 - [x] A64. `GuardPlate`'s entire `warn` branch was unreachable on this
       machine: `decide()` returned `clean` or `blocked` and nothing else,
@@ -1460,16 +1465,48 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       thresholds are two named constants with a calibration test).
       Discovered in A64.
 
-- [ ] A66. The thirteenth contact-sheet shot A61 refused to take is now
+- [x] A66. The thirteenth contact-sheet shot A61 refused to take is now
       honest. `GuardPlate`'s `warn` colour has a producer, so a composed
       frame of a `suspicious` verdict is a picture of something jv-guard
-      really publishes rather than of an intention — and the reasons it
-      carries ("executable section '.text' looks packed or encrypted:
-      entropy 7.96 of a possible 8.00") are longer than any blocked
-      reason yet photographed, which makes it a real test of the plate's
-      wrapping and of the fit check A61 added. Cheap, and unlike A63 it
-      lights one plate, so it does not want A62 answered first.
-      Discovered in A64.
+      really publishes rather than of an intention. — a1d3a53
+      (`docs/hud/13-suspicious.png`: the same element as `10-guard.png`,
+      one word and one colour apart, and unreachable code until A64. The
+      file is deliberately not malware — a decade-old widescreen patch
+      run through UPX, which ClamAV recognises nothing in and which is
+      shaped byte for byte like something hiding. Half of A66's premise
+      was wrong and saying so is part of the result: the reasons are NOT
+      a test of the plate's wrapping, because they reach no pixel —
+      `core/GuardState.qml` never reads `reasons`, which the schema says
+      are spoken on request. They are quoted in `docs/hud/README.md`
+      instead. What the shot does test is that the warn branch renders
+      and that a real file name fits (27 chars, ~211 px of a 240 px cap).
+      The part worth keeping is the gate: this is the sheet's only frame
+      that QUOTES another service, so `tools/tests/test_hudshots.py`
+      builds a UPX-shaped PE with jv-guard's own fixture builder, runs
+      the real `PEHeuristicScanner` and the real `decide()`, and holds
+      the scene's literal to the verdict, all three reasons and
+      `scanned_by` that come back. Five mutations, including one to the
+      wording inside `jv_guard/heuristics.py` — which fails the tools
+      suite, proving the gate points at the producer and not at a copy.
+      Tests: `bash ops/ralph/runtests.sh tools` (132, was 129),
+      `bash ops/ralph/hudshots.sh` (13 shots, the other twelve
+      byte-identical).)
+
+- [ ] A67. Shot 13 is the only composed frame in the sheet whose words
+      are pinned to the service that would say them, and it is not the
+      only one that QUOTES a service. `08-action.png` carries jv-act's
+      `execution_failed` and an exec error, `11-install.png` carries a
+      wine loader failure, `05-confirm.png` carries a tool name and a
+      window in seconds, `06-health.png` carries jv-brain's `llm_rung`.
+      Every one of those is a hand-typed sentence attributed to a real
+      producer, and nothing checks that the producer could emit it —
+      which is exactly the gap the A66 gate closed for one frame out of
+      four. The generalisation is cheap where the producer is importable
+      and pure (jv-compat's lifecycle events, jv-act's error enum) and
+      expensive where it needs a running service, so this is a per-frame
+      judgement rather than one sweep: do the cheap ones, and say in the
+      README which quotations are still only plausible. Discovered in
+      A66.
 
 
 - [x] A53. `10-guard.png` is a picture only a human can tell apart from a
