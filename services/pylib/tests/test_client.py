@@ -9,11 +9,13 @@ import os
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from jarvis_bus import BusClient, BusError
+from jarvis_bus.client import DEFAULT_UNIX, MAX_FRAME, default_addr
 from jarvis_bus.schema import AudioWake, from_body, to_body
 
 REPO = Path(__file__).resolve().parents[3]
@@ -147,3 +149,139 @@ def test_to_body_wire_rules():
     # Optional-and-absent omitted; required fields present.
     b = to_body(AudioWake(model="m", score=0.5, threshold=0.4))
     assert b == {"model": "m", "score": 0.5, "threshold": 0.4}
+
+
+# --- the rest of the envelope, and the transport under it (PLAN B59) ---------
+#
+# B58 gave the gate its first real reach into this file and the first two
+# mutations it graded survived (`seq`, `conf`). The mutations below were run
+# too, one per claim, and five of six survived: only `src` was held. This
+# file is imported by every Python service on the bus, so a silent survivor
+# here is wrong in eight places at once.
+
+
+async def test_the_envelope_ts_is_stamped_from_this_processs_monotonic_clock(bus_addr):
+    """`ts` is CLOCK_MONOTONIC seconds (schemas/README.md), and it is what
+    every latency number in this repo is subtracted from — `jv tap --latency`,
+    HeardState's anchor, HealthState's expiry. The broker validates it as a
+    NUMBER and nothing more, so `"ts": 0.0` and a wall-clock `time.time()`
+    both routed fine and passed every suite. Bracketing the publish is the
+    strongest claim available from outside: the stamp is taken during the
+    call, on this clock.
+    """
+    sub = await BusClient.connect(bus_addr, src="t-ts-sub")
+    await sub.subscribe(["audio.*"])
+    await asyncio.sleep(0.05)
+
+    pub = await BusClient.connect(bus_addr, src="t-ts-pub")
+    body = to_body(AudioWake(model="hey_jarvis", score=0.9, threshold=0.5))
+    before = time.monotonic()
+    await pub.publish("audio.wake", body)
+    after = time.monotonic()
+
+    frame = await asyncio.wait_for(sub.next_frame(), timeout=2)
+    assert before <= frame["ts"] <= after, (
+        f"ts {frame['ts']} is not a monotonic reading taken during the publish "
+        f"({before} .. {after})"
+    )
+    await sub.close()
+    await pub.close()
+
+
+async def test_the_envelope_version_is_the_callers_and_not_a_constant(bus_addr):
+    """`v` is how a schema migration begins: a producer bumps it and
+    consumers that only understand the old one hedge or drop (HealthState
+    already refuses a wrong `v`). The broker only checks `v >= 1`, so a
+    client that pinned every frame at 1 would make that migration
+    impossible and break nothing today.
+    """
+    sub = await BusClient.connect(bus_addr, src="t-v-sub")
+    await sub.subscribe(["audio.*"])
+    await asyncio.sleep(0.05)
+
+    pub = await BusClient.connect(bus_addr, src="t-v-pub")
+    body = to_body(AudioWake(model="hey_jarvis", score=0.9, threshold=0.5))
+    await pub.publish("audio.wake", body, v=2)
+
+    frame = await asyncio.wait_for(sub.next_frame(), timeout=2)
+    assert frame["v"] == 2
+    await sub.close()
+    await pub.close()
+
+
+async def test_a_pong_does_not_look_like_the_end_of_the_stream(bus_addr):
+    """`next_frame` skips pongs. Nothing has ever sent one: the Python
+    client has no `ping()`, so the branch was dead code as far as this suite
+    knew, and a client that returned None on a pong would report the bus
+    GONE — LinkPlate's blind state, every consumer's reconnect — the moment
+    anything started pinging. The first half of this test is the control
+    that a pong is a real thing this broker really sends; the second half is
+    the claim.
+    """
+    ctl = await BusClient.connect(bus_addr, src="t-pong-ctl")
+    await ctl._send({"op": "ping"})
+    assert (await asyncio.wait_for(ctl.next_event(), timeout=2))["op"] == "pong"
+    await ctl.close()
+
+    sub = await BusClient.connect(bus_addr, src="t-pong-sub")
+    await sub.subscribe(["audio.*"])
+    await sub._send({"op": "ping"})
+    await asyncio.sleep(0.05)  # the pong is queued ahead of the frame
+
+    pub = await BusClient.connect(bus_addr, src="t-pong-pub")
+    body = to_body(AudioWake(model="hey_jarvis", score=0.9, threshold=0.5))
+    await pub.publish("audio.wake", body)
+
+    frame = await asyncio.wait_for(sub.next_frame(), timeout=2)
+    assert frame is not None, "a pong was read as EOF"
+    assert frame["topic"] == "audio.wake"
+    await sub.close()
+    await pub.close()
+
+
+async def test_a_length_prefix_over_max_frame_is_refused_before_the_body():
+    """The u32 length prefix is attacker- and corruption-controlled: it is
+    read before anything is known about what follows, and `readexactly(n)`
+    on a bad `n` allocates that many bytes. The guard must fire on the
+    PREFIX ALONE — so this feeds the prefix and then EOF, and nothing else.
+    No broker: jarvisd caps its own writes at the same number, so the only
+    way to reach this branch is to be the thing on the other end.
+    """
+    reader = asyncio.StreamReader()
+    reader.feed_data((MAX_FRAME + 1).to_bytes(4, "big"))
+    reader.feed_eof()
+    c = BusClient(reader, None, "t-max")
+    with pytest.raises(BusError):
+        await c.next_event()
+
+
+def test_the_clients_frame_cap_is_the_brokers():
+    """jarvisd declares the same cap in services/jarvisd/src/proto.rs and
+    enforces it on both directions. If the two ever disagree, the smaller
+    one silently becomes the real limit and the larger one's error message
+    is a lie about why the connection died. This test READS the Rust source
+    — it does not run it (invariant 1: no service imports another).
+    """
+    proto = (REPO / "services" / "jarvisd" / "src" / "proto.rs").read_text()
+    decl = "pub const MAX_FRAME: u32 = 16 * 1024 * 1024;"
+    assert decl in proto, (
+        "jarvisd's MAX_FRAME declaration moved or changed; the Python "
+        "client's cap is pinned to it and must move with it"
+    )
+    assert MAX_FRAME == 16 * 1024 * 1024
+
+
+def test_jarvis_bus_in_the_environment_chooses_the_address(monkeypatch):
+    """`default_addr()` is what every service uses when nothing passes an
+    address, so `JARVIS_BUS` is the only handle the harness and the replay
+    rig have for pointing a whole service at a test broker. Nothing held
+    it: every test in this file passes an address explicitly.
+    """
+    if sys.platform == "win32":  # pragma: no cover — JarvisOS is NixOS
+        pytest.skip("the unset branch differs on Windows")
+    monkeypatch.setenv("JARVIS_BUS", "127.0.0.1:7999")
+    assert default_addr() == "127.0.0.1:7999"
+    monkeypatch.setenv("JARVIS_BUS", "")  # set-but-empty is not an address
+    assert default_addr() == DEFAULT_UNIX
+    monkeypatch.delenv("JARVIS_BUS")
+    assert default_addr() == DEFAULT_UNIX
