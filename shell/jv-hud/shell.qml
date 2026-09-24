@@ -35,7 +35,9 @@
 // destructive action jv-act has stopped in front of, in jv-act's own
 // words, readable rather than only audible; `StatePlate` (A3) — what
 // jv-voice and jv-ears actually published, idle / listening / speaking /
-// interrupted; `MicPlate` (A4) — whether the microphone is open, from
+// interrupted; `HeardPlate` (A26) — the words jv-ears took down, for as
+// long as Jarvis has not started answering them; `MicPlate` (A4) —
+// whether the microphone is open, from
 // jv-ears' own capture counters; and `HealthPlate` (A6) — the services
 // that are not well, and the llm rung when the brain is on the CPU floor.
 // Each one's mapping lives in a tested file under core/, and each draws
@@ -107,8 +109,12 @@ ShellRoot {
       // reports on — but a box sized by an argument about how OTHER
       // elements behave is a box that clips the day one of them changes,
       // and the thing it would clip is the HUD admitting it is blind.
+      // And again for HeardPlate (A26), whose transcript wraps to the same
+      // three 13 px lines the confirmation does, and which DOES share the
+      // surface routinely: the words are up for exactly the stretch
+      // `StatePlate` is saying THINKING.
       implicitWidth: 300
-      implicitHeight: 460
+      implicitHeight: 560
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
@@ -160,6 +166,16 @@ ShellRoot {
         // What Jarvis is doing, from speech.state + audio.wake + audio.vad.
         // Draws nothing while idle or while the bus cannot be seen.
         StatePlate {
+          anchors.right: parent.right
+        }
+
+        // What Jarvis heard you say, from jv-ears' own transcript, for as
+        // long as the question is still in flight. Directly under the
+        // state plate because the two are one reading: that one says
+        // Jarvis is thinking, this one says what about. It leaves when the
+        // answer starts, which is when the answer itself becomes the
+        // better report on whether you were heard correctly.
+        HeardPlate {
           anchors.right: parent.right
         }
 

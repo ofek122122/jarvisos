@@ -28,12 +28,11 @@
 // wrapped as `{"t":"frame","frame":...}`. Two honest differences from a
 // live HUD, both in the safe direction:
 //
-//   · the bridge forwards a whitelist (speech.state, audio.wake, audio.vad,
-//     sys.health, brain.request, brain.response), so the real HUD never
-//     sees the `audio.transcript` frames in these recordings. We feed the
-//     whole recording — a superset — and one test below asserts the
-//     transcripts change nothing, which is the claim that makes the
-//     difference safe rather than merely unnoticed.
+//   · the bridge forwards a whitelist, and as of A26 `audio.transcript` is
+//     on it — so these recordings are now replayed in FULL, exactly as the
+//     HUD would see them. What used to be asserted about the bridge is
+//     therefore asserted about the elements instead: the transcripts reach
+//     `HeardState` and move nothing else, `SpeechState` least of all.
 //   · `ts` here is the pipeline's sample clock (zero at the first sample of
 //     the WAV), so the replay drives the injected monotonic clock to each
 //     frame's own `ts`: every frame lands zero seconds old, as it would on
@@ -68,6 +67,11 @@ TestCase {
     SpeechState {}
   }
 
+  Component {
+    id: heardState
+    HeardState {}
+  }
+
   // Same reason as tst_speechstate.qml: the linter reads `createObject` as
   // returning a bare QObject, so instantiation goes through an untyped
   // function and it stops guessing.
@@ -85,6 +89,36 @@ TestCase {
     voice.bus = bus;
     bus.ingest('{"t":"link","up":true}');
     return voice;
+  }
+
+  // The same, for the element that renders the words (A26). It shares no
+  // helper with `makeVoice` on purpose: these tests are about what reaches
+  // the plate, not about what the two elements agree on.
+  function makeHeard() {
+    suite.fakeNow = 0;
+    const bus = spawn(busModel);
+    bus.monotonic = () => suite.fakeNow;
+    const heard = spawn(heardState);
+    heard.bus = bus;
+    bus.ingest('{"t":"link","up":true}');
+    return heard;
+  }
+
+  // Replay every frame of `name` into whichever element `holder` wraps.
+  function replay(holder, name) {
+    const frames = envelopes(name);
+    for (let i = 0; i < frames.length; i++)
+      deliver(holder, frames[i]);
+  }
+
+  // The one final transcript in a recording, or null. jv-ears publishes
+  // exactly one per utterance and these recordings hold one utterance.
+  function finalOn(name) {
+    const frames = envelopes(name);
+    for (let i = 0; i < frames.length; i++)
+      if (frames[i].topic === "audio.transcript" && frames[i].body.kind === "final")
+        return frames[i];
+    return null;
   }
 
   // --- reading a recording --------------------------------------------
@@ -262,19 +296,121 @@ TestCase {
 
   // --- the two differences from a live HUD, made explicit --------------
 
-  function test_the_transcripts_the_bridge_never_forwards_change_nothing() {
-    // jv-hud-bridge does not forward audio.transcript, so the real HUD sees
-    // a subset of what we replay. Feeding the superset is only safe if the
-    // extra frames are inert — assert that rather than assume it. (It is
-    // also the privacy line holding: the words are on the bus, and no
-    // element reads them.)
+  function test_the_transcripts_move_nothing_but_the_plate_that_reads_them() {
+    // The bridge forwards audio.transcript as of A26, so SpeechState now
+    // sees frames it has no business acting on. What it says must be
+    // decided by the wake and the VAD boundary and nothing else — a state
+    // machine that started taking its cue from the ASR would answer a
+    // slower question and claim the microphone for longer.
     const withText = makeVoice();
     const full = trajectory(withText, "hey-jarvis-clean");
     const withoutText = makeVoice();
     const bridged = trajectory(withoutText, "hey-jarvis-clean", {
       skipTopics: ["audio.transcript"]
     });
-    compare(bridged, full, "the transcripts moved the HUD, which they must not");
+    compare(bridged, full, "the transcripts moved the speech state, which they must not");
+  }
+
+  // --- the words, as jv-ears really transcribed them (A26) --------------
+
+  function test_a_real_question_reaches_the_plate_verbatim() {
+    // The whole point of the plate: after the utterance closes, the user
+    // can read what Jarvis took down. Asserted against the recording's own
+    // body rather than a sentence typed here, so this stays true if the
+    // fixtures are ever re-recorded and says something if the element
+    // starts editing them.
+    const heard = makeHeard();
+    replay(heard, "hey-jarvis-clean");
+    const final = finalOn("hey-jarvis-clean");
+    verify(final !== null, "the recording has no final transcript");
+    compare(heard.heard, true, "a real question left the plate empty");
+    compare(heard.text, final.body.text);
+    compare(heard.lang, "en");
+    compare(heard.foreignLang, false);
+    compare(heard.utteranceId, final.body.utterance_id);
+    verify(heard.text.length > 0);
+  }
+
+  function test_the_partials_that_precede_it_are_never_what_is_shown() {
+    // hey-jarvis-pause rewrites itself seven times before it settles —
+    // "Hey Jarvis remind me to", then "Hey Jarvis, remind me too.", then
+    // back again. Every one of those was on the bus, and none of them is
+    // what Jarvis acted on.
+    const heard = makeHeard();
+    const frames = envelopes("hey-jarvis-pause");
+    let partials = 0;
+    for (let i = 0; i < frames.length; i++) {
+      deliver(heard, frames[i]);
+      if (frames[i].topic === "audio.transcript" && frames[i].body.kind === "partial") {
+        partials += 1;
+        compare(heard.heard, false, "a provisional sentence reached the plate");
+      }
+    }
+    verify(partials >= 7, "the recording no longer rewrites itself, so this proves nothing");
+    compare(heard.text, finalOn("hey-jarvis-pause").body.text);
+  }
+
+  function test_speech_nobody_addressed_to_jarvis_never_reaches_the_plate() {
+    // This is the recording that makes showing transcripts at all a
+    // defensible thing to do. speech-no-wake is a real utterance in a real
+    // room with no wake word: ears' VAD opens and closes a segment and no
+    // ASR ever runs, so there is nothing to put on a screen. If jv-ears
+    // ever transcribes ungated speech, this plate becomes a live
+    // transcript of the room — and this test is what says so first.
+    const heard = makeHeard();
+    replay(heard, "speech-no-wake");
+    compare(heard.heard, false);
+    compare(heard.text, "");
+    const frames = envelopes("speech-no-wake");
+    let transcripts = 0;
+    for (let i = 0; i < frames.length; i++)
+      if (frames[i].topic === "audio.transcript")
+        transcripts += 1;
+    compare(transcripts, 0, "ears transcribed an utterance nobody addressed to it");
+  }
+
+  function test_every_real_transcript_clears_the_plate_however_noisy_the_room() {
+    // HeardState deliberately has no confidence bar, and these are the
+    // numbers that decided it. The three recorded finals carry 0.886 (a
+    // quiet room), 0.863 (a mid-sentence pause) and 0.739 (a music bed) —
+    // and all three transcribe their sentence correctly. So a bar anywhere
+    // in that spread would mark a word-perfect transcript as doubtful, and
+    // one below it would never fire: exp(avg_logprob) is measuring the
+    // room, not whether the words are right. A doubt marker that fires on
+    // correct transcripts is one the user learns to ignore, which is
+    // LinkPlate's cry-wolf failure with better manners.
+    //
+    // Add a bar above the quietest of these and this test fails, which is
+    // the point: the decision should cost an argument with real data.
+    let lowest = 1;
+    let highest = 0;
+    let shown = 0;
+    for (let i = 0; i < recordings.names.length; i++) {
+      const name = recordings.names[i];
+      const final = finalOn(name);
+      if (final === null)
+        continue;
+      lowest = Math.min(lowest, final.conf);
+      highest = Math.max(highest, final.conf);
+      const heard = makeHeard();
+      deliver(heard, final);
+      verify(heard.heard, name + "'s real transcript was refused by the HUD");
+      compare(heard.text, final.body.text);
+      shown += 1;
+    }
+    compare(shown, 3, "three of the four recordings contain a transcript");
+    verify(highest - lowest > 0.1,
+           "the recorded confidences (" + lowest.toFixed(3) + "-" + highest.toFixed(3) +
+           ") no longer spread far enough to say anything about a bar");
+    verify(lowest < 0.8, "the noisy room no longer scores low, so this proves nothing");
+  }
+
+  function test_the_words_leave_when_the_link_does() {
+    const heard = makeHeard();
+    replay(heard, "hey-jarvis-clean");
+    compare(heard.heard, true);
+    heard.bus.ingest('{"t":"link","up":false,"err":"bridge stopped"}');
+    compare(heard.heard, false, "a sentence from a bus we can no longer see");
   }
 
   function test_the_thinking_window_closes_when_the_brain_never_answers() {

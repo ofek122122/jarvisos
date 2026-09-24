@@ -607,6 +607,37 @@ def test_the_blind_warning_waits_longer_than_a_reconnect_takes():
         )
 
 
+# --- A26: the words and the "thinking" beside them share one window -------
+
+
+def test_the_heard_line_and_the_thinking_word_time_out_together():
+    """A26: HeardPlate shows what you said while Jarvis works on it.
+
+    Both elements are making the SAME claim about the same turn — a
+    question is in flight — and both stop making it when they can no longer
+    see whether anyone is working. They are separate files with separate
+    windows because they answer different questions, which is exactly how
+    two numbers that must agree end up drifting apart in silence.
+
+    The harmful direction is `holdS` growing past `thinkWindowS`: the
+    sentence would sit there after the HUD had given up on the turn it
+    belongs to, words with nothing left saying they are still live. The
+    other direction is merely odd — "THINKING" with nothing under it — and
+    equality is the only relation that catches a retune of either.
+    """
+    core = ROOT / "shell" / "jv-hud" / "core"
+    windows = {}
+    for name, prop in (("SpeechState.qml", "thinkWindowS"), ("HeardState.qml", "holdS")):
+        text = strip_qml_comments((core / name).read_text("utf-8"))
+        m = re.search(rf"^\s*property real {prop}:\s*([\d.]+)\s*$", text, re.M)
+        assert m, f"cannot find `{prop}` in core/{name} — a renamed window is invisible here"
+        windows[f"{name}:{prop}"] = float(m.group(1))
+    assert len(set(windows.values())) == 1, (
+        "the HUD asserts a question is in flight for two different lengths of "
+        f"time: {windows}"
+    )
+
+
 def test_core_qmldir_registers_every_component_and_no_module_name():
     qmldir = gen.render_core_qmldir()
     assert "BusModel 1.0 BusModel.qml" in qmldir

@@ -54,10 +54,23 @@ from jarvis_bus import BusError
 # was only ever spoken. Showing it is the whole point — a confirmation you
 # cannot read is one you answer by guessing. Both kinds ride this topic;
 # the answer is how the HUD knows to stop asking.
+#
+# audio.transcript is the second one (PLAN A26), and the one that needed
+# the most argument, because it is the user's OWN words rather than a
+# service's. What buys it: jv-ears transcribes ONLY wake-gated utterances
+# (the first line of its pipeline), so every frame on this topic is
+# something said TO Jarvis after a wake word — never the room's ordinary
+# conversation, which the VAD notices and no ASR ever sees. And the HUD
+# had no way to say what it heard, so the commonest failure of a voice
+# assistant (it heard something else) was invisible until it came back as
+# a wrong answer. core/HeardState.qml reads the FINALS only, which is the
+# same editorial line the schema draws: partials are provisional and may
+# be rewritten, and only finals are acted on.
 DEFAULT_TOPICS: Sequence[str] = (
     "speech.state",
     "audio.wake",
     "audio.vad",
+    "audio.transcript",
     "sys.health",
     "brain.request",
     "brain.response",
