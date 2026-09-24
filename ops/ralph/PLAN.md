@@ -496,23 +496,44 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       119+8+39 tests (was 106+8+38), seven mutations, seven caught.
       Tests: `bash ops/ralph/cargotest.sh jarvisd`.)
 
-- [ ] B22. B17's complaint now has a machine-checked half and an
-      unchecked one. `every_summary_row_stays_inside_the_columns_it_is
-      _printed_in` (B19) proves every summary ROW is the header's width —
-      it was written because the first `tool` label was 38 characters in a
-      31-character column, which shoves that row's numbers out of line and
-      reads as a broken number rather than a long label. Nothing proves
-      the `>>> turn` LINE fits a terminal, and it is six numbers plus an
-      utterance id whose length nothing here bounds. A width assertion
-      against 80 columns, with the id length that would break it named,
-      turns one of B17's two questions into a test and leaves the human
-      only the one that genuinely needs eyes ("does `turn_age>=` read as
-      noise?"). Discovered in B19.
-      **B21 makes it three lines and raises the stakes** (cd47fde): the
-      new `tool=... is you=... + ran=... over N confirmations` line is 76
-      columns with a 5-character id and ~107 with a UUID, which is the
-      exact failure this item names. Still the cheapest B item on the
-      board, and it needs no human.
+- [x] B22. B17's complaint now has a machine-checked half and an
+      unchecked one. — dd0857b
+      (The assertion was written first and failed at 133 columns — and not
+      because of the id. The line was already 96 with the five-character
+      id every test used: six numbers plus a label each do not fit a
+      terminal at all, so B22 could not be closed by adding a test. A
+      turn's report is now a LADDER, each rung dividing a span the rung
+      above it valued — `total spoke hold`, `respond is hear + think`,
+      `think includes tool`, `tool is you + ran` — in one grammar (`X is
+      A + B` for a partition, `X includes Y` for a share) that
+      `brain_split` already spoke. `Turn::lines` owns which rungs exist
+      and in what order, so no rung can name a span no printed line
+      valued; `confirm_line` gained a `think` guard so that holds of the
+      TYPE and not only of its one caller. `short_id` caps the id at
+      `ID_COLUMNS` = 11 — eight characters and `...`; an id that fits is
+      never touched, and two ids that start alike print alike, which is a
+      test and not a silence. The width test runs at the widest input
+      that can reach these lines and names each bound: the id is capped
+      by construction, both counts are two digits via `ACTS_PER_TURN`,
+      and six-digit spans (16.7 minutes) are the one bound assumed rather
+      than enforced. It carries A34's kind of control — a line far UNDER
+      budget fails too. Tables held to the same 80. Also fixed a
+      PRE-EXISTING flake: the confirm test compared three independently
+      rounded numbers with `< 1.0` where the rounding error is exactly 1.
+      124+8+39 tests (was 119+8+39), twelve mutations, twelve caught.
+      Tests: `bash ops/ralph/cargotest.sh jarvisd`.)
+
+- [ ] B23. The per-frame `jv tap --latency` hop line
+      (`{topic:<20} {src:<12} seq={seq:<8} hop={ms:8.2}ms`) is formatted
+      in `jv.rs` and is the one line the tap writes as a REPORT that B22's
+      width test cannot reach — the test lives in `cli.rs` and walks what
+      `cli.rs` renders. It is 61 columns for a 20-character topic and
+      widens with the topic, which `{:<20}` pads and does not truncate;
+      `context.window.changed` is already 22. Either move the `format!`
+      into `cli.rs` beside the tables it belongs with (where the existing
+      test picks it up for free) or give it its own assertion. Small, and
+      it closes the last hole in "every report line fits". Discovered in
+      B22.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
@@ -521,6 +542,14 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       by a human the first time B10's live recording is made, together
       with A13/A27: if the live line wraps in a terminal it is worse than
       the one number it replaced. Discovered in B14.
+      **HALF CLOSED by B22** (dd0857b): "does it wrap" is a test now, at
+      the widest input that can reach those lines, and the line that
+      prompted this worry turned out to be 133 columns on a live id. What
+      is left is the half that genuinely needs eyes, and it is a NEW
+      question because the output changed: four lines per tool turn is
+      more output than one, and does the ladder read as a decomposition or
+      as noise? Same two minutes at a terminal, same trigger (B10/A28),
+      now shared with B20.
 
 - [ ] B15. Nothing measures the last hop. `jv tap` stops at `speech.say`,
       which is jv-brain handing words to jv-voice — the user hears nothing

@@ -5162,3 +5162,95 @@ mutations below.
   to leave the partials' latency alone. **A56** and **A55/A47** unchanged and
   want a human's pick. A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and
   still want a human at ares. B7/B12/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 51 — B22: the turn report stops being wider than the
+## terminal it prints to
+- built: **`jv tap`'s per-turn report is a ladder of lines, and every one of
+  them fits 80 columns.** B22 asked for a width assertion against 80 with "the
+  id length that would break it" named. The assertion was written first and it
+  failed at 133 columns — and not because of the id. The live utterance id is
+  a `uuid.uuid4()` (`jv_ears/pipeline.py:148`), 36 characters, but the line was
+  already 96 columns with the five-character id every test used. Six numbers
+  plus a label each cannot fit a terminal at all, so B22 could not be closed by
+  adding a test. The format had to move.
+
+**What it is now.** Each rung divides a span the rung above it gave a value
+for, and nothing else:
+
+```
+>>> turn 00000002...: total=262ms spoke=? hold=20ms
+>>> turn 00000002...: respond=262ms is hear=0ms + think=262ms
+>>> turn 00000002...: think=262ms includes tool=262ms (1 jv-act call)
+>>> turn 00000002...: tool is you=202ms + ran=61ms (1 confirmation)
+```
+
+One grammar throughout — `X is A + B` for an exact partition, `X includes Y`
+for a share — which is the grammar `brain_split` already spoke and which the
+summary table's indentation already draws. `Turn::lines` owns which rungs
+exist and in what order, which is what makes "the line above it" a fact
+rather than a hope at the call site; `jv tap` prints what it hands back and
+decides nothing. And because the bottom rung says `tool` without restating
+its value, `confirm_line` gained a `think_ms?` guard it does not otherwise
+need, so "no rung names a span no printed line valued" is true of the TYPE
+and not merely of the one caller that builds these today.
+
+**The id.** `short_id` caps it at `ID_COLUMNS` = 11: eight characters and
+`...` to say out loud that it is a prefix. An id that already fits is never
+touched, so abbreviating can never make one longer — `echo_raw`'s shape. Two
+ids that start alike print alike; that is the price, and it is a test
+(`two_ids_that_start_alike_print_alike_and_that_is_the_price`) rather than a
+silence. It is also not hypothetical: the first version of the confirm pump
+varied only the last two hex digits of its uuid, every turn printed the same
+abbreviated id, and the new ladder-grouping helper collapsed four turns into
+one — the harness found the collision before a human could.
+
+**The bound, stated.** `every_line_a_turn_prints_fits_eighty_columns` runs at
+the widest input that can reach these lines and names each bound as what it
+is: the id is capped BY CONSTRUCTION, both counts are two digits because
+`ACTS_PER_TURN` stops the recording at 32, and every span is six digits —
+999999 ms is 16.7 minutes, longer than any turn that ends with somebody still
+listening, and THAT is the one bound assumed rather than enforced. A seventh
+digit adds a column to four of the five lines and this test is what would
+notice. It carries a control, in A34's spirit: a line that comes out far
+UNDER the budget fails too, because then the test stopped building a worst
+case and stopped proving anything. The summary and hop tables are held to the
+same 80 — a table that wraps loses the column alignment that is all of its
+value.
+
+**A pre-existing flake, found on the way and fixed.** The confirm test
+asserted `tool - (you + ran) < 1.0`. `ran` IS `tool - you` to the float, but
+all three are rounded to whole milliseconds INDEPENDENTLY for printing, so a
+262.4 ms tool prints as 202 + 61 and the difference is exactly 1. It failed
+about one full-suite run in three under load and had nothing to do with this
+change; the tolerance is now `<=` with the arithmetic written down.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 124 unit + 8 bus + 39
+  integration (was 119+8+39), and the integration suite run six times over
+  for the flake. TWELVE mutations run through them, all twelve caught:
+  `short_id` never truncating, its cap raised to 20, truncating without the
+  `...`, counting bytes rather than columns, the `think` guard dropped from
+  `confirm_line`, `lines()` losing the respond rung, the old six-number line
+  coming back, an over-wide label on the tool rung, the rungs printed out of
+  order, a summary row pushed past its column, `brain_split` printing the raw
+  id, and `jv` printing only the first rung. The confirm pump now stamps the
+  live id shape, so the richest ladder is proven on a uuid end to end rather
+  than only on a constructed `Turn`.
+- build: `nix build .#jarvisd` ok (its checkPhase runs the suite again),
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs, PHASE1-STATUS.md
+- commit: dd0857b
+- next: **B17 is now half-closed and the remaining half is sharper.** The
+  width question is a test; what is left for a human is whether the ladder
+  READS — four lines per tool turn is more output than one, and `turn_age>=`
+  (B20) is still unjudged. Both want the same two minutes at a terminal, and
+  both are unlocked by **B10/A28**, the one live recording of one spoken turn
+  on ares, which remains the biggest thing a human can hand this loop. New
+  item **B23**: the per-frame `jv tap --latency` hop line is formatted in
+  `jv.rs` and is the one report line the new width test cannot reach — it is
+  61 columns today and a topic longer than its `{:<20}` field widens it.
+  **A59** still wants a measurement at ares or a decision to leave the
+  partials alone. **A56** and **A55/A47** unchanged and want a human's pick.
+  A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and still want a human at
+  ares. B7/B12/B15 unchanged.
