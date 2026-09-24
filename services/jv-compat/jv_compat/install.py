@@ -24,7 +24,7 @@ from typing import Optional, Protocol
 from jarvis_bus import BusClient
 
 from .fingerprint import fingerprint, silent_args
-from .prefix import bwrap_args, create_prefix_layout
+from .prefix import bwrap_args, create_prefix_layout, sandbox_installer_path
 from .recipes import Recipe, find_recipe, load_recipes
 
 # How long we wait for jv-guard's verdict before failing closed. It must
@@ -160,11 +160,17 @@ class Installer:
         prefix = create_prefix_layout(recipe.app or app)
         await self._event("prefix_created", app, sha, recipe=recipe.app)
 
+        # The inner command names the installer where the SANDBOX sees it,
+        # not where this machine keeps it: the confinement binds the file in
+        # read-only and nothing else of the directory it came from. Handing
+        # wine the host path was handing it a path to a file that is not
+        # there (PLAN B63).
+        inside = str(sandbox_installer_path(path))
         if fp.installer == "msi":
-            inner = ["msiexec", "/i", str(path), *silent_args("msi"), *recipe.extra_args]
+            inner = ["msiexec", "/i", inside, *silent_args("msi"), *recipe.extra_args]
         else:
-            inner = ["wine", str(path), *silent_args(fp.installer), *recipe.extra_args]
-        argv = bwrap_args(recipe, prefix, inner)
+            inner = ["wine", inside, *silent_args(fp.installer), *recipe.extra_args]
+        argv = bwrap_args(recipe, prefix, inner, installer=path)
         ok, detail = await self.runner.install(argv)
         if ok:
             await self._event("installed", app, sha, recipe=recipe.app)

@@ -16,7 +16,7 @@ import pytest
 from jarvis_bus import BusClient
 from jv_compat.fingerprint import fingerprint, silent_args
 from jv_compat.install import Installer, MockRunner, app_slug
-from jv_compat.prefix import bwrap_args
+from jv_compat.prefix import SANDBOX_PREFIX, bwrap_args, sandbox_installer_path
 from jv_compat.recipes import Recipe, find_recipe
 
 REPO = Path(__file__).resolve().parents[3]
@@ -65,10 +65,14 @@ def test_recipe_matching():
 
 
 def test_bwrap_confinement_defaults_deny():
+    """The argv's shape. What the argv MEANS is tests/test_sandbox.py,
+    which runs it — these two tests passed against a confinement that
+    could not start a process (PLAN B63)."""
     r = Recipe(app="x", match_sha256=[], match_installer="")
     argv = bwrap_args(r, Path("/prefixes/x"), ["wine", "setup.exe"])
     assert "--unshare-net" in argv  # network denied by default
-    assert argv[argv.index("--setenv") + 1] == "WINEPREFIX"
+    i = argv.index("WINEPREFIX")
+    assert argv[i - 1] == "--setenv" and argv[i + 1] == str(SANDBOX_PREFIX)
     assert argv[-2:] == ["wine", "setup.exe"]
 
 
@@ -157,7 +161,17 @@ async def test_clean_install_pipeline(bus_addr, tmp_path):
     names = [e["event"] for e in events]
     assert names == ["fingerprinted", "screened", "prefix_created", "installed"]
     # the runner got a bwrap-confined, network-denied argv
-    assert "--unshare-net" in runner.argv_log[0]
+    argv = runner.argv_log[0]
+    assert "--unshare-net" in argv
+    # ...and the two halves agree about where the installer is: the inner
+    # command names the SANDBOX path, and the host path appears exactly once
+    # in the whole argv — as the read-only bind that puts the file there.
+    # These are built in different modules and were free to disagree.
+    inside = str(sandbox_installer_path(installer_file))
+    assert inside in argv
+    assert argv.count(str(installer_file)) == 1
+    assert argv[argv.index(str(installer_file)) - 1] == "--ro-bind"
+    assert argv[argv.index(str(installer_file)) + 1] == inside
 
     gtask.cancel()
     await guard.close()

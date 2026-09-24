@@ -16,6 +16,12 @@ network = false                 # true only if the app genuinely needs it
 home_paths = []                 # e.g. ["Documents/MyAppSaves"]
 ```
 
+`home_paths` entries are relative to the user's home and may not contain
+`..`, be absolute, or be empty — each of those mounts more of the home
+than the grant names, and `home_paths = ["."]` mounts all of it. They are
+refused when the argv is built (`jv_compat.prefix.grant_dest`), so a
+recipe that names one fails the install instead of widening it.
+
 Matching: a sha256 pin always wins; otherwise the first pin-less recipe
 for the installer framework applies; otherwise a zero-grant default
 recipe is synthesized (deny network, private home).
