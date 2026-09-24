@@ -708,3 +708,49 @@ def test_every_face_the_theme_names_is_bound_to_a_package_and_no_other():
         f"faces this machine has: theme.toml names {sorted(named)}, "
         f"modules/fonts.nix provides {sorted(bound)}"
     )
+
+
+def test_the_font_resolve_check_is_wired_into_the_system_build():
+    """A19: `modules/fonts.nix` proves the declared faces really ANSWER —
+    `fc-match` for each family and for the generic behind it, against the
+    fontconfig configuration this machine will actually have — and that proof
+    only happens if the check is a dependency of the system build.
+
+    Unwiring it is the one mutation nothing else notices: the faces still
+    install, the module still evaluates, every other gate stays green, and
+    the check simply never runs again. CI cannot run it (it instantiates the
+    system, it does not build it), so this is the cheap guard that the gate is
+    still attached to something."""
+    fonts_nix = (ROOT / "modules" / "fonts.nix").read_text("utf-8")
+    assert re.search(r"^  resolveCheck =", fonts_nix, re.M), (
+        "modules/fonts.nix no longer defines resolveCheck — the faces are "
+        "installed but nothing asks fontconfig what it answers for their names"
+    )
+    checks = re.search(r"^  system\.checks = \[(.*?)\];", fonts_nix, re.M | re.S)
+    assert checks and "resolveCheck" in checks.group(1), (
+        "modules/fonts.nix defines resolveCheck but no longer puts it in "
+        "system.checks, so `nixos-rebuild build` never builds it and the "
+        "check passes by never running"
+    )
+
+
+def test_every_role_the_theme_names_has_a_fontconfig_generic_behind_it():
+    """theme.toml calls the generic families the fallbacks, so a role with no
+    generic behind it falls back to nothing — and the generic is also what
+    the A19 resolve check ASKS for in place of the family. The module throws
+    at eval for a role it cannot place; this is that check where it runs
+    without nix. The other direction matters too: a generic for a role the
+    theme does not name is an alias pointed at a face nobody declared."""
+    fonts_nix = (ROOT / "modules" / "fonts.nix").read_text("utf-8")
+    block = re.search(r"\n  genericOf = \{\n(.*?)\n  \};\n", fonts_nix, re.S)
+    assert block, "modules/fonts.nix no longer has a genericOf table to check"
+    roles = set(re.findall(r"^    (\w+) = \{", block.group(1), re.M))
+
+    tokens = gen.load_tokens((ROOT / "personality" / "theme.toml").read_text("utf-8"))
+    named = {k[len("family_") :] for k in tokens["type"] if k.startswith("family_")}
+    assert named, "theme.toml names no face at all"
+    assert named == roles, (
+        "personality/theme.toml and modules/fonts.nix disagree about which "
+        f"type roles exist: theme.toml names {sorted(named)}, "
+        f"modules/fonts.nix places {sorted(roles)}"
+    )

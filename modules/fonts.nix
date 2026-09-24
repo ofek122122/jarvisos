@@ -13,7 +13,7 @@
 # it instead of leaving the two halves to disagree. What lives here is the
 # binding from a family NAME to something that provides it — and every step
 # throws rather than guesses, because every guess here is invisible.
-{ lib, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 let
   theme = builtins.fromTOML (builtins.readFile ../personality/theme.toml);
 
@@ -25,10 +25,19 @@ let
 
   # Which fontconfig generic family each role stands for. theme.toml says
   # "fallbacks are the generic families"; this is where that sentence becomes
-  # something the system actually does.
+  # something the system actually does. `option` is the name NixOS sets the
+  # alias under, `alias` the name fontconfig itself answers to — they are not
+  # always the same word, and the resolve check below has to ASK in
+  # fontconfig's spelling.
   genericOf = {
-    sans = "sansSerif";
-    mono = "monospace";
+    sans = {
+      option = "sansSerif";
+      alias = "sans-serif";
+    };
+    mono = {
+      option = "monospace";
+      alias = "monospace";
+    };
   };
 
   # The ONE place a family name is bound to something that provides it. Keep
@@ -109,6 +118,144 @@ let
       fi
     '';
 
+  # role -> everything the rest of this file needs to say about that role:
+  # the family theme.toml asked for, the generic fontconfig will be asked in
+  # its place, and the ONE derivation that installs it. Built once so that the
+  # thing `fonts.packages` installs and the thing the resolve check looks for
+  # cannot be two different store paths.
+  declared = lib.mapAttrs (role: family: {
+    inherit family;
+    generic = genericFor role;
+    face = checkedFace family;
+  }) facesByRole;
+
+  # /etc/fonts as this configuration will really have it: the same list of
+  # conf packages the fontconfig module links into the system. The check below
+  # resolves against THIS, not against a config of its own invention — a test
+  # that builds its own fontconfig setup proves something about that setup.
+  fcEtc = pkgs.buildEnv {
+    name = "jv-fonts-etc";
+    paths = config.fonts.fontconfig.confPackages;
+    ignoreCollisions = true;
+  };
+
+  # Everything above is about what gets INSTALLED. This is about what gets
+  # ANSWERED — the only question the HUD actually asks. `checkedFace` proves a
+  # family is present in a package; it says nothing about which file fontconfig
+  # hands back when something asks for that name, and those are different
+  # claims: the family can be present in three formats, and for fifteen
+  # iterations the winner was a WOFF2.
+  #
+  # Two rules, both stated as properties rather than as a copy of the
+  # mechanism that implements them (a gate that restates its implementation
+  # passes whenever the implementation changes):
+  #
+  #   1. Every file in a face this module installs is an sfnt — raw TrueType,
+  #      CFF or a collection — read from the file's own first four bytes. NOT
+  #      from its extension, which is what `checkedFace`'s find filter goes by
+  #      and therefore cannot be the witness for; and not from fc-scan's
+  #      `%{fontformat}`, which reports a WOFF2 as plain "TrueType" whenever
+  #      the FreeType doing the scanning was built with woff2 support. That is
+  #      precisely the property at issue: whether a face renders depends on the
+  #      library that opens it, so "some FreeType could read it" is not the
+  #      question. Widen the find filter and this fails on content.
+  #
+  #   2. Asking for each declared family BY NAME, and for the generic it backs,
+  #      returns that family, in a file this module linked. This is the whole
+  #      promise of the module in one sentence, and it is the only one that
+  #      covers `defaultFonts`: nothing else here checks that `monospace` ends
+  #      up at JetBrains Mono rather than at DejaVu Sans Mono.
+  resolveCheck =
+    pkgs.runCommand "jv-fonts-resolve"
+      {
+        nativeBuildInputs = [ pkgs.fontconfig ];
+      }
+      ''
+        export XDG_CACHE_HOME="$TMPDIR/fontconfig-cache"
+
+        # The system's own fonts.conf, with the single edit that lets it run
+        # before it is installed: it includes conf.d by the ABSOLUTE path
+        # /etc/fonts/conf.d, and inside a build there is no /etc. Everything
+        # else — rendering, rejections, the generated aliases, the font dirs,
+        # the prebuilt caches — is read from the real thing.
+        sed 's|/etc/fonts/conf.d|${fcEtc}/etc/fonts/conf.d|' \
+            ${pkgs.fontconfig.out}/etc/fonts/fonts.conf > "$TMPDIR/fonts.conf"
+        export FONTCONFIG_FILE="$TMPDIR/fonts.conf"
+
+        fail=0
+
+        # sfnt magic: 0x00010000 (TrueType), OTTO (CFF), ttcf (collection),
+        # true (older Apple TrueType). A web font announces itself as wOFF or
+        # wOF2 in the same four bytes.
+        outlines() {
+          local file magic
+          for file in $(find -L "$1" -type f | sort); do
+            magic=$(head -c 4 -- "$file" | od -An -tx1 | tr -d ' \n')
+            case "$magic" in
+              00010000 | 4f54544f | 74746366 | 74727565) ;;
+              *)
+                echo "fonts: $file is not an outline font (first bytes $magic)." >&2
+                echo "       Only sfnt formats belong in the font path: whether" >&2
+                echo "       anything else renders depends on how the reading" >&2
+                echo "       FreeType was built, which is a coin flip nobody sees." >&2
+                fail=1
+                ;;
+            esac
+          done
+        }
+
+        # A generic is only a question if fontconfig has heard of it. Its
+        # `49-sansserif.conf` answers ANY family it does not recognise with
+        # the sans-serif default — so `fc-match sansSerif` cheerfully returns
+        # Archivo, and asking the wrong word would look exactly like asking
+        # the right one. fontconfig's OWN shipped configuration is the
+        # vocabulary here, never the conf.d this module helped generate:
+        # otherwise the answer comes from the same place as the question.
+        generic() {
+          if ! grep -qF -- "<family>$1</family>" \
+               ${pkgs.fontconfig.out}/share/fontconfig/conf.avail/*.conf; then
+            echo "fonts: fontconfig's own configuration never names '$1' as a" >&2
+            echo "       family, so it is not a generic and asking for it proves" >&2
+            echo "       nothing — an unknown family falls through to the" >&2
+            echo "       sans-serif default and answers anyway." >&2
+            fail=1
+          fi
+        }
+
+        # $1 what to ask fontconfig for, $2 the family that must answer,
+        # $3 the face directory the answering file must come from.
+        resolves() {
+          local got file
+          got=$(fc-match -f '%{family}' "$1")
+          file=$(fc-match -f '%{file}' "$1")
+          if ! printf '%s\n' "$got" | tr ',' '\n' | grep -qxF "$2"; then
+            echo "fonts: asking fontconfig for '$1' answers \"$got\", not \"$2\"." >&2
+            echo "       personality/theme.toml asks for that family and the HUD" >&2
+            echo "       will render in whatever this line says instead." >&2
+            fail=1
+          elif [ "''${file#$3/}" = "$file" ]; then
+            echo "fonts: asking fontconfig for '$1' answers with" >&2
+            echo "         $file" >&2
+            echo "       which is not a file modules/fonts.nix installed for" >&2
+            echo "       \"$2\" ($3). Some other package on the system is" >&2
+            echo "       answering for this name." >&2
+            fail=1
+          else
+            echo "fonts: $1 -> $file"
+          fi
+        }
+
+        ${lib.concatMapStringsSep "\n" (d: ''
+          outlines ${d.face}/share/fonts
+          resolves ${lib.escapeShellArg d.family} ${lib.escapeShellArg d.family} ${d.face}/share/fonts
+          generic ${lib.escapeShellArg d.generic.alias}
+          resolves ${lib.escapeShellArg d.generic.alias} ${lib.escapeShellArg d.family} ${d.face}/share/fonts
+        '') (lib.attrValues declared)}
+
+        [ $fail -eq 0 ] || exit 1
+        touch $out
+      '';
+
   unclaimed = lib.subtractLists (lib.attrValues facesByRole) (lib.attrNames providerOf);
 in
 {
@@ -117,16 +264,32 @@ in
   # render text at all until now: nothing here declared a single font.
   fonts.enableDefaultPackages = true;
 
-  fonts.packages = lib.unique (lib.mapAttrsToList (_: checkedFace) facesByRole);
+  fonts.packages = lib.unique (lib.mapAttrsToList (_: d: d.face) declared);
 
   # sansSerif -> [ "Archivo" ], monospace -> [ "JetBrains Mono" ]. Built by
   # zipping rather than by listToAttrs so that two roles sharing a generic
   # become a fallback chain instead of one of them silently winning.
   fonts.fontconfig.defaultFonts = lib.zipAttrsWith (_: families: families) (
-    lib.mapAttrsToList (role: family: { ${genericFor role} = family; }) facesByRole
+    lib.mapAttrsToList (_: d: { ${d.generic.option} = d.family; }) declared
   );
 
+  # Built by `nixos-rebuild build`, present in no closure: a check, not a
+  # dependency. If the faces stop resolving, the build fails here rather than
+  # on ares three weeks later in a face nobody chose.
+  system.checks = [ resolveCheck ];
+
   assertions = [
+    {
+      # `confPackages`, which resolveCheck reads, is only populated while
+      # fontconfig is enabled — and with it off nothing resolves a family
+      # name at all, so the whole module would be installing faces into a
+      # system that cannot find them.
+      assertion = config.fonts.fontconfig.enable;
+      message =
+        "modules/fonts.nix declares the faces personality/theme.toml names, but "
+        + "fonts.fontconfig.enable is false — nothing on this system would resolve "
+        + "\"${lib.concatStringsSep "\", \"" (lib.attrValues facesByRole)}\" to them.";
+    }
     {
       assertion = unclaimed == [ ];
       message =
