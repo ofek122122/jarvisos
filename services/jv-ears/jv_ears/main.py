@@ -19,6 +19,22 @@ from .config import EarsConfig
 from .pipeline import EarsPipeline
 
 HEALTH_PERIOD_S = 5.0
+# How often the heartbeat re-reads the state it is about to report.
+# CaptureMeter's answer is a function of a clock — a stream stalls by a
+# chunk NOT arriving — so there is no writer to signal the change the way
+# jv-context's system pump signals its own (PLAN B35). A state nobody
+# announces has to be watched. One property read and two comparisons,
+# four times a second, publishing nothing unless the answer moved.
+HEALTH_WATCH_S = 0.25
+# ...and the fastest two heartbeats may follow each other. A microphone
+# delivering a chunk just either side of STALL_S flaps between ok and
+# degraded, and every flap is a genuine state change: without a floor the
+# watch would put sys.health at 4 Hz for as long as the device misbehaved
+# (invariant 5 — nothing blocks the bus, and a quiet topic stays quiet).
+# One second is STALL_S itself, so the news is at most a second late on a
+# fault that was already a second old when it became one — comfortably
+# inside the 6 s window `jv health --check` reads.
+HEALTH_MIN_GAP_S = 1.0
 
 
 def health_body(meter: CaptureMeter, uptime_s: float, budgets: dict) -> dict:
@@ -48,6 +64,53 @@ def health_body(meter: CaptureMeter, uptime_s: float, budgets: dict) -> dict:
     if notes:
         body["notes"] = notes
     return body
+
+
+async def pump_health(
+    beat,
+    state_of,
+    *,
+    said,
+    done,
+    period_s: float = HEALTH_PERIOD_S,
+    watch_s: float = HEALTH_WATCH_S,
+    min_gap_s: float = HEALTH_MIN_GAP_S,
+    now=time.monotonic,
+    sleep=asyncio.sleep,
+) -> None:
+    """Beat every `period_s`, and as soon as the state stops matching what
+    the bus was last told.
+
+    `schemas/sys.health.json` asks for both ("every fixed period, and
+    immediately on state change") and jv-ears only ever did the first, so
+    a microphone that stopped delivering audio was up to a full period of
+    silence about itself — on a check that reads a 6 s window, a change
+    landing just after a beat is a change nobody sees.
+
+    Three callables and no state of its own: `beat()` publishes a
+    heartbeat, `state_of()` is the meter's answer NOW, `said()` is the
+    state the last published frame carried. Comparing against what went
+    out — rather than against a variable this loop keeps — is what makes
+    the answer un-driftable: a chunk arriving between the body being built
+    and this loop's next read cannot leave the pump believing it published
+    something it did not.
+
+    Only the `state` enum is watched. jv-ears' degraded note embeds the
+    age of the last chunk, so waking on the note would beat on every
+    tick for as long as the fault lasted; the growing note rides out on
+    the periodic beat, where a number that changes belongs.
+    """
+    at = now()
+    while not done.is_set():
+        await sleep(watch_s)
+        since = now() - at
+        if since >= period_s or (state_of() != said() and since >= min_gap_s):
+            # Before the publish, not after: the period is the beat's, not
+            # the bus's, and a change beat is this period's beat — leaving
+            # the timer alone would double-publish a change that happened
+            # to land near a boundary.
+            at = now()
+            await beat()
 
 
 async def amain(argv: Optional[list[str]] = None) -> int:
@@ -133,11 +196,17 @@ async def amain(argv: Optional[list[str]] = None) -> int:
 
     bus_task = asyncio.create_task(follow_bus())
 
+    # The state of the last heartbeat that actually went out, so the watch
+    # below compares against the bus's word rather than its own. Written
+    # only here, where the frame is built, and never before the hello beat
+    # runs — so the empty string is never read.
+    said = ""
+
     async def beat() -> None:
-        await bus.publish(
-            "sys.health",
-            health_body(meter, time.monotonic() - started, pipeline.budgets()),
-        )
+        nonlocal said
+        body = health_body(meter, time.monotonic() - started, pipeline.budgets())
+        said = body["state"]
+        await bus.publish("sys.health", body)
 
     # Say hello BEFORE the frame loop, not on the loop's first yield: a
     # pipeline that ends immediately (--wav with nothing to read) used to
@@ -145,12 +214,14 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     # came and went without the bus — and the HUD — ever hearing of it.
     await beat()
 
-    async def health() -> None:
-        while not done.is_set():
-            await asyncio.sleep(HEALTH_PERIOD_S)
-            await beat()
-
-    health_task = asyncio.create_task(health())
+    health_task = asyncio.create_task(
+        pump_health(
+            beat,
+            lambda: meter.health()[0],
+            said=lambda: said,
+            done=done,
+        )
+    )
     try:
         while True:
             item = await queue.get()
