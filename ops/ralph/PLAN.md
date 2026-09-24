@@ -1029,32 +1029,35 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `bash ops/ralph/runtests.sh tools` (90), `... jv-hud-bridge` (25),
       `bash ops/ralph/hudshots.sh`, `bash ops/ralph/hudscreens.sh`.)
 
-- [ ] A41. **The one place `OutputPlate` could be confidently wrong.** It
-      reads the DEFAULT SINK, and that jv-voice plays into the default
-      sink is an assumption, not a published fact: `sd.play(audio, rate)`
-      takes no device argument (services/jv-voice/jv_voice/player.py), so
-      it lands on PortAudio's default output, which under PipeWire is the
-      default sink jv-context reads. The day jv-voice pins a device — or
-      PortAudio's default diverges from PipeWire's — the plate becomes a
-      true statement about the wrong sink, and a HUD that is confidently
-      wrong about why you cannot hear anything is worse than the empty
-      corner it replaced. **CORRECTION (found while building B16): the
-      fix's stated shape does not fit.** `sys.health` `metrics` is
-      `additionalProperties: {"type": "number"}` — numbers ONLY — so a
-      device NAME cannot ride it, and `notes` is for degraded/error
-      detail. What a number CAN say is the fact the plate actually depends
-      on: `output_device_pinned` (1.0 if jv-voice opened a device it was
-      configured to open, 0.0 if it took PortAudio's default). That turns
-      the plate's assumption into a published fact and makes the plate go
-      quiet — not confidently wrong — the day someone pins a device. B16
-      is the worked precedent for the rest of it (publish WHEN something
-      reads it, and for once something would). The other half is the
-      inverse and needs a human: PipeWire can mute jv-voice's STREAM while
-      the sink is wide open, which is exactly the failure this plate
-      exists for, one level down, and nothing on this bus can see it —
-      jv-context reads sinks. Adding a per-stream field is a
-      `context.system` schema change (FROZEN) and therefore a proposal,
-      not a build. Discovered in A40.
+- [x] A41. **The one place `OutputPlate` could be confidently wrong**, and
+      it no longer is. — d504ba4
+      (jv-voice publishes `output_device_pinned` in `sys.health.metrics`
+      on every heartbeat including the degraded ones — 1 if it opened a
+      device it was configured to open, 0 if it took PortAudio's default
+      — and `core/OutputState.qml` says OUTPUT MUTED only on the 0. No
+      schema change: `metrics` is free-form numbers, which is also why
+      this is a 1/0 and not a device name. **Unknown is not 0**: silence
+      from jv-voice, a v2 body, a hedged beat, a missing `metrics`, a
+      non-numeric gauge, a 2, and another service's gauge on the topic
+      all leave the plate dark — it never speaks about a sink nobody
+      said Jarvis uses. The gauge is deliberately NOT aged, unlike the
+      two frames either side of it: it is jv-voice's configuration
+      rather than a reading of the world, and `sayWindowS` is already
+      the backstop for a dead jv-voice. The knob is real —
+      `JARVIS_VOICE_OUTPUT_DEVICE`, empty reads as unset, and
+      `SoundDevicePlayer` passes it to `sd.play`. Both screenshot
+      harnesses learned the fact and one taught back: publishing the
+      beat ONCE made `HealthPlate` arrive mid-window saying *jv-voice
+      lost*, so the live-lit feed now carries the heartbeat with the
+      snapshot. Seven mutations, seven caught — the link guard only
+      after `test_a_bus_still_handing_out_frames_on_a_dead_link` gained
+      an `ownSink` assertion, because a third reader's guard is
+      unobservable through `unheard`. Tests:
+      `bash ops/ralph/qmltest.sh` (435, was 423),
+      `bash ops/ralph/runtests.sh jv-voice` (27, was 17), `... tools`
+      (96), `bash ops/ralph/hudshots.sh`, `bash ops/ralph/hudscreens.sh`.
+      The other half — PipeWire muting jv-voice's STREAM while the sink
+      is open — is proposal **R6** in `docs/optimization-backlog.md`.)
 
 - [x] A42. "0 fps when idle" stops being measured only on a HUD with no
       bus. — 4c63122
@@ -1098,12 +1101,46 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the one shot `docs/hud/screens/` is missing — and the harness now
       composes exactly those frames and holds them steady for ten seconds
       as a side effect of measuring something else. It would be a new
-      `SHOTS` entry (`04-unheard`) reusing `sheet.VOICE_SPEAKING` and
-      `sheet.SINK_MUTED`, plus one `captures` list and one README section.
-      Small, and the only picture in the sheet that would show two plates
-      disagreeing about whether Jarvis is working. Discovered in A42.
+      `SHOTS` entry (`04-unheard`) reusing `sheet.VOICE_SPEAKING`,
+      `sheet.SINK_MUTED` and now `sheet.VOICE_DEFAULT_SINK`, plus one
+      `captures` list and one README section. Small, and the only picture
+      in the sheet that would show two plates disagreeing about whether
+      Jarvis is working. Discovered in A42; got cheaper in A41, which
+      made the live-lit window compose and HOLD exactly that frame list.
+
+- [ ] A45. `docs/hud/screens/*.png` are not byte-reproducible, and one
+      journal entry already treated them as if they were. Three runs of
+      `ops/ralph/hudscreens.sh` in A41 produced three different files,
+      each differing from the committed ones by **2 pixels** inside a
+      plate — antialiasing jitter, in `02-heard` and `03-confirm`, shots
+      taken before anything that iteration touched. Harmless today
+      because nothing byte-compares them (unlike `docs/hud/*.png`, which
+      ARE byte-identical run to run and have a test saying so). It stops
+      being harmless the moment someone writes "the screens are
+      unchanged" as evidence, which A42's journal effectively did. Either
+      make them reproducible (the settle before each capture is the
+      suspect) or say in `docs/hud/screens/README.md` that they are not
+      and that a 2 px diff is noise — the second is ten minutes and stops
+      the wrong conclusion. Discovered in A41.
+
+- [ ] A46. `JARVIS_VOICE_OUTPUT_DEVICE` (A41) is honoured by the process
+      and declared nowhere. `modules/jarvis-services.nix` builds
+      `systemd.user.services.jv-voice` with `environment = commonEnv`
+      and no way to name a device, so pinning one today means editing a
+      unit by hand — the imperative mutation the NixOS discipline
+      forbids ("if it isn't declared, it doesn't exist"). The fix is one
+      option (`jarvis.voice.outputDevice`, a `types.nullOr types.str`
+      defaulting to null) threaded into that unit's `environment`, which
+      also makes the HUD's new quiet-when-pinned path reachable on ares
+      without touching a running system. Nothing is blocked on it — the
+      default IS unpinned and that is the honest state of this machine —
+      so it is small, tidy, and worth doing before anyone actually
+      plugs in a dedicated speaker. Discovered in A41.
 
 ## Done
+- A41 — the HUD stops assuming the sink it can see is the one Jarvis
+  speaks into: jv-voice publishes `output_device_pinned`, OutputPlate
+  goes quiet rather than confidently wrong (d504ba4, 2026-09-24)
 - A42 — "0 fps when idle" stops being measured only on a HUD with no bus:
   a plate held lit on a LIVE bus, 0 commits under 6 snapshots, and a
   mutation the other two windows cannot see (4c63122, 2026-09-24)

@@ -3773,3 +3773,121 @@ window above can see.
   missing for A40 (**A44**). A13/A27/A38 remain the oldest open question
   and are still one two-minute human opinion, answerable from
   `docs/hud/screens/02-heard-desk.png` without sitting at ares.
+
+## 2026-09-24 — iteration 37 — A41: the plate stops assuming the sink it can see is Jarvis'
+
+A40 put `OUTPUT MUTED` under `SPEAKING` and it reads the DEFAULT SINK.
+That the default sink is what jv-voice plays into was true, and it was
+true because I had read `player.py` — `sd.play(audio, rate)`, no device
+argument, PortAudio's default, which under PipeWire is the sink
+`wpctl get-volume @DEFAULT_AUDIO_SINK@` reports. That is knowledge a bus
+consumer is not allowed to have (invariant 1), and the day anyone pins a
+device the plate is a true statement about the wrong sink. A HUD that is
+confidently wrong about why you cannot hear Jarvis is worse than the
+empty corner it replaced.
+
+**The fix is the shape A41 was corrected into while building B16** —
+`sys.health.metrics` is `additionalProperties: {"type": "number"}`, so a
+device NAME cannot ride it, but a 1/0 can, and whether the visible sink
+is the relevant one is the whole of what the plate depends on. jv-voice
+publishes `output_device_pinned` on every heartbeat including the
+degraded ones; `OutputState` speaks only on the 0.
+
+**The decision that took the most thought: unknown is not 0.** The
+alternative — absence means "probably the default", which is what the
+element assumed yesterday — keeps the plate working on a jv-voice too
+old to publish, and that jv-voice ceases to exist with this commit. What
+it costs is the whole point of the change: a plate that speaks about a
+sink nobody said Jarvis uses. So silence from jv-voice, a v2 body, a
+hedged beat, a missing `metrics`, a non-numeric gauge, a 2, and another
+service's gauge on the same topic all leave the plate dark. The price is
+a few seconds of quiet after a link is made, because a heartbeat is 5 s
+away and nothing retains frames.
+
+**The one asymmetry, stated in the file:** this gauge is NOT aged, and
+the two frames either side of it are. It is jv-voice's *configuration*,
+not a reading of the world; configuration does not rot sitting still,
+and a restarting jv-voice heartbeats on its first loop pass. Expiring it
+would hang a second, shorter clock on the plate (10 s, two `period_s`)
+and hand the dead-jv-voice case to it — when `sayWindowS` (30 s) is the
+backstop written for exactly that, and is tested. The link is the one
+thing that does forget it.
+
+**The harness taught me something back.** Adding jv-voice's beat ONCE to
+A42's live-lit window passed the two-step box check — SPEAKING, then 41
+px taller with OUTPUT MUTED under it — and then failed the measurement
+it exists for: the box had grown again, to 130 px, with 37 commits under
+it. `period_s` is 5, `HealthState` calls a service lost after two of its
+own periods, and eleven seconds into the window `HealthPlate` arrived
+under the plate being held still, saying *jv-voice lost*. Obvious
+afterwards and I did not see it coming: A41 gave `OutputPlate` a second
+publisher to satisfy, and a publisher the HUD is being told is SPEAKING
+has to keep saying it is alive. The feed now carries the heartbeat with
+the snapshot (1 Hz, faster than its own nominal period, which is what a
+real service does under a state change) and the window reads 0 commits
+in 6 s under 5 snapshots on TWO topics, at exactly the box it read
+before A41.
+
+**Verified end to end, not by construction.** Removing the beat from the
+contact sheet's `09-muted` scene changes that PNG — the plate is gone —
+and putting it back makes all nine shots byte-identical to the committed
+ones. That is the gate proving itself through a QML engine; the
+hudscreens window proves it through a compositor.
+
+**Mutations — seven, all seven caught, one of them only after a new
+assertion.** `unheard` dropping the `ownSink` term (9 fail); `ownSink`
+reading unknown as "took the default" (6); the gauge read with
+`latest("sys.health")` instead of `latestFrom(..., "jv-voice")` (1); the
+degraded heartbeat dropping `metrics` (1); the player reporting pinned
+and calling `sd.play` without the device (1); the empty env var read as
+a pinned device (2). The seventh — deleting the `linked` guard from
+`devicePinned` — **survived**, because `unheard` was already false: the
+other two readers null the pair on a dead link, so the third guard is
+unobservable from outside. The existing dead-link test says exactly that
+about the first two and calls it fine. It is not fine once there are
+three, so that test now also asserts `ownSink` directly, which is where
+it *is* observable, and the mutation dies.
+
+**Not done and why:** the other half of this failure is PipeWire muting
+jv-voice's own STREAM while the sink is wide open — the same silence one
+level down, one per-app slider away, invisible to a jv-context that
+reads sinks. Seeing it needs two new optional `context.system` fields,
+which is `schemas/**` and therefore human review. Written up as **R6**
+in `docs/optimization-backlog.md`, including the shape I rejected
+(jv-voice noticing its own stream: PortAudio hands it no node id, so it
+would be jv-context's job done twice, badly, inside the synthesiser).
+`OutputState`'s header states the gap in its own words.
+
+- tests: `bash ops/ralph/qmltest.sh` — 435 (was 423; 12 new).
+  `bash ops/ralph/runtests.sh jv-voice` — 27 (was 17; new `test_config.py`,
+  two player tests, three service tests). `... tools` — 96, with three new
+  assertions guarding the harness frames. `... jv-hud-bridge` — 25,
+  unchanged (`sys.health` was already in `DEFAULT_TOPICS`).
+  `bash ops/ralph/hudshots.sh` — 9 shots, byte-identical.
+  `bash ops/ralph/hudscreens.sh` — all four idle windows pass, click probe
+  unchanged.
+- note: `docs/hud/screens/*.png` are NOT byte-reproducible. Three runs
+  gave three different files, all differing from the committed ones by
+  **2 pixels** inside the plate (antialiasing jitter), in `02-heard` and
+  `03-confirm` — shots taken before anything A41 touched. Left as
+  committed. A42's journal recorded them as unchanged, so this is either
+  new nondeterminism or a coincidence that run matched; worth knowing
+  before anyone treats that directory as a fixture (**A45**).
+- build: `nixos-rebuild build --flake .#ares` ok, and `nix build .#jv-hud`
+  (qmllint `-W 0` + the QML suite) ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin.
+- files: services/jv-voice/jv_voice/{config,player,service,main}.py,
+  services/jv-voice/tests/{test_config,test_player,test_voice_service}.py,
+  shell/jv-hud/core/OutputState.qml, shell/jv-hud/tests/tst_outputstate.qml,
+  shell/jv-hud/README.md, tools/hudscreens/{sheet,shoot}.py,
+  tools/hudshots/scene/tst_shots.qml, tools/tests/test_hudscreens.py,
+  docs/hud/README.md, docs/optimization-backlog.md
+- next: the knob exists and nothing declares it — `JARVIS_VOICE_OUTPUT_DEVICE`
+  is honoured by the process and absent from `modules/jarvis-services.nix`,
+  so pinning a device today means editing a unit by hand, which is exactly
+  the imperative mutation the NixOS discipline forbids (**A46**, small).
+  A43 and A44 are both untouched and both still cheap, and A44 got cheaper:
+  the live-lit window now composes SPEAKING + OUTPUT MUTED *and* holds it
+  with a heartbeat, which is the entire frame list a `04-unheard` screen
+  needs. A13/A27/A38 remain the oldest open question and are still one
+  two-minute human opinion.
