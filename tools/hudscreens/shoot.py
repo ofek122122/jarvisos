@@ -18,7 +18,7 @@ asked things no QML engine knows:
     the HUD exists and again while it is drawing, and it must be the same
     node. `WlrKeyboardFocus.None` was also only ever read, never tried.
   · the HUD is on EVERY monitor, in the corner it claims. Each output's
-    drawn region has to fall inside the 300x688 box shell.qml declares,
+    drawn region has to fall inside the 300x745 box shell.qml declares,
     inset from the top-right corner. An anchor that silently flipped, or
     a `Variants` that stopped making one surface per screen, would look
     completely fine in a photograph nobody measured.
@@ -1411,7 +1411,7 @@ def probe_click_through(stage: Path, background: np.ndarray) -> None:
         would report a perfect pass-through.
       · a pixel the HUD actually PAINTED. Chosen from the capture rather
         than guessed, so it is over a plate and not over transparency.
-      · a point inside the 300x688 surface box that the HUD painted
+      · a point inside the 300x745 surface box that the HUD painted
         NOTHING on. A mask narrowed to the visible plates would pass the
         previous point and fail here, and it is the likelier mistake: an
         input region that tracks the content looks reasonable in a diff.

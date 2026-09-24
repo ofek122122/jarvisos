@@ -139,8 +139,28 @@ ShellRoot {
       // on screen at once (a refused binary, then a different install
       // that failed), which is exactly the case a box sized by "they
       // never co-occur" would crop.
+      //
+      // AND THEN SOMETHING MEASURED IT (A63). Every growth above is an
+      // ARGUMENT about co-occurrence, written in this comment and checked
+      // by nothing: the only fit check that existed ran over the contact
+      // sheet, whose tallest picture lights three plates and cleared 688 px
+      // by more than five hundred. tools/hudshots/scene/tst_fit.qml builds
+      // the case these paragraphs are about — every plate but `link`, each
+      // drawing the widest thing its own cap allows, over a health list as
+      // long as this machine has services — and that corner is 713 px tall.
+      // It did not fit. A layer-shell panel floating over every window was
+      // cutting its BOTTOM plate in half, and the bottom plate is
+      // `HealthPlate`: the thing that says what is wrong, cropped exactly
+      // when everything is.
+      //
+      // So the height is no longer an argument. It is 2 x insetPx + the
+      // measured corner — the same edge gap §06 gives the top and the
+      // right, now given to the bottom as well, because a plate ending
+      // flush with the edge of a floating panel reads as a crop whether or
+      // not it is one. Grow a plate, add a plate, or add a service to this
+      // machine and that suite fails with the number of pixels it is over.
       implicitWidth: 300
-      implicitHeight: 688
+      implicitHeight: 745
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 

@@ -3,7 +3,7 @@
 # on ares' three monitors (PLAN A30).
 #
 # The sibling of hudshots.sh, and deliberately the opposite trade. That one
-# renders the plates with a plain QML engine into a 300x688 rectangle: the
+# renders the plates with a plain QML engine into a 300x745 rectangle: the
 # HUD's CONTENT, and it has to disclaim everything else — layer-shell, the
 # empty input mask, the zero exclusive zone, the three screens. This one
 # gives all of that up in exchange for the whole truth: a headless wlroots

@@ -940,3 +940,84 @@ def test_the_confirm_shot_photographs_a_question_jv_act_could_ask():
         f"jv-act would put a registry description here, and every one of them "
         f"reads like {sorted(styles)[0]!r}; the frame says {described!r}"
     )
+
+
+def test_every_driver_renders_the_box_the_shell_asks_for():
+    """A63. Three drivers in tools/hudshots/scene declare a surface box, and
+    all three of them hold a COPY of shell.qml's — the sheet renders into it,
+    the sequence replay lays out inside it, and tst_fit.qml asserts against
+    it. A box that grew in the shell and not here would leave the fit check
+    asserting yesterday's edge, which is worse than no check: it would go on
+    passing while the real surface cropped.
+
+    (test_hudscreens.py makes the same pin for the OTHER harness, which
+    measures the real binary under a real compositor. Same failure, same
+    fix; this is the half that lives in a QML engine.)
+    """
+    shell = (SHELL / "shell.qml").read_text("utf-8")
+    box = (
+        int(re.search(r"^\s*implicitWidth:\s*(\d+)", shell, re.M).group(1)),
+        int(re.search(r"^\s*implicitHeight:\s*(\d+)", shell, re.M).group(1)),
+    )
+    for driver in sorted(SCENE_DIR.glob("tst_*.qml")):
+        text = strip_qml_comments(driver.read_text("utf-8"))
+        width = re.search(r"^\s*width:\s*(\d+)", text, re.M)
+        height = re.search(r"^\s*height:\s*(\d+)", text, re.M)
+        assert width and height, f"{driver.name} declares no surface box"
+        assert (int(width.group(1)), int(height.group(1))) == box, (
+            f"{driver.name} renders {width.group(1)}x{height.group(1)} and "
+            f"shell.qml's surface is {box[0]}x{box[1]}"
+        )
+
+
+def test_the_drivers_know_every_plate_the_corner_stacks():
+    """Two drivers carry `everyPlate`, a list of the names the plates call
+    themselves — tst_sequence.qml checks no trajectory ever contains a name
+    outside it, and tst_fit.qml builds its crowd by REMOVING one name from
+    it. Both go quiet rather than loud when the list is short: a new plate
+    missing from it is a plate the sequence never validates and, worse, a
+    plate the fit check simply does not expect to be on screen, so the
+    crowd it measures is one plate lighter than the corner really is.
+
+    The names are pinned elsewhere (test_gen_theme_qml.py holds each plate's
+    `plateName` to its own file name), so the corner's stack is the truth
+    these lists have to match.
+    """
+    expected = [
+        name[: -len("Plate")].lower()
+        for name in plate_stack_children(CORNER.read_text("utf-8"))
+    ]
+    for driver in sorted(SCENE_DIR.glob("tst_*.qml")):
+        text = strip_qml_comments(driver.read_text("utf-8"))
+        found = re.search(r"property var everyPlate:\s*\[([^]]*)\]", text)
+        if not found:
+            continue
+        listed = re.findall(r'"([^"]+)"', found.group(1))
+        assert listed == expected, (
+            f"{driver.name} knows {listed} and Corner.qml stacks {expected}"
+        )
+
+
+def test_the_fit_crowd_is_sized_by_this_machines_real_services():
+    """A63's crowd puts every service on this machine into one health plate,
+    because "everything is unwell" is the tallest the health list can get and
+    the tallest corner is what the box is sized for. That roster is a COPY of
+    services/, and a tenth service would make the real worst case one row
+    taller than the measured one — silently, because the crowd would still
+    light the same nine plates and still fit.
+    """
+    fit = SCENE_DIR / "tst_fit.qml"
+    found = re.search(
+        r"property var roster:\s*\[([^]]*)\]", strip_qml_comments(fit.read_text("utf-8"))
+    )
+    assert found, "tst_fit.qml no longer declares the roster it crowds the health plate with"
+    listed = re.findall(r'"([^"]+)"', found.group(1))
+    # pylib is a library, not a service: nothing runs it and nothing on the
+    # bus has ever carried its name.
+    services = sorted(
+        d.name for d in (ROOT / "services").iterdir() if d.is_dir() and d.name != "pylib"
+    )
+    assert sorted(listed) == services, (
+        f"tst_fit.qml crowds the health plate with {sorted(listed)} and this "
+        f"repo has {services}"
+    )

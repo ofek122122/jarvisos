@@ -45,7 +45,7 @@ Item {
   // empty two-thirds is the point — §06's earned emptiness is a thing you
   // have to SEE to have an opinion about.
   width: 300
-  height: 688
+  height: 745
 
   // NOT the HUD. The real surface is `color: "transparent"` and floats
   // over whatever Niri has on screen; a PNG has to put something behind
@@ -411,7 +411,9 @@ Item {
     // together, though the surface box was grown 624 -> 688 px on the
     // argument that they co-occur. An argument no shot demonstrates is an
     // argument nobody can check, so here is the case, and it is not the
-    // one A61 guessed at.
+    // one A61 guessed at. (The argument is checked outright now — see
+    // tst_fit.qml, which stacks every plate that can co-occur and found
+    // the box 41 px short of them; A63.)
     //
     // A61 described a refusal followed by a RETRY: jv-guard blocks an
     // installer, the user fetches a different build, that one fails. That
@@ -667,16 +669,23 @@ Item {
         // or one of them is wrong.
         compare(stack.anyLit, shot.plates.length > 0, shot.file + ": stack.anyLit");
 
-        // And it FITS. The box is 300x688 because plates that can be up
-        // TOGETHER have to be, and the growth has been justified four
-        // times now by an argument about co-occurrence (shell.qml carries
-        // all four). A stack taller than the surface is not a smaller
+        // And it FITS. A stack taller than the surface is not a smaller
         // sheet — it is a plate the compositor cuts in half on a panel
-        // floating over every window, and the only thing that has ever
-        // checked it is a person looking at a PNG and seeing nothing
-        // obviously wrong. The inset is the stack's own top margin, so
-        // this is the real constraint and not a stricter one.
-        verify(Theme.insetPx + stack.height <= root.height,
+        // floating over every window, and the only thing that had ever
+        // checked it was a person looking at a PNG and seeing nothing
+        // obviously wrong.
+        //
+        // This is the WEAK half of that check and always was: no shot here
+        // lights more than three plates, so it clears the box by hundreds
+        // of pixels and would pass on a HUD that crops the moment a fourth
+        // arrives. tst_fit.qml next door is the strong half — every plate
+        // that can be up at once, at its widest — and it found the box 41
+        // px short (A63). What this line is for is the shots themselves:
+        // each picture proves its own contents are whole.
+        //
+        // Same rule as tst_fit: an inset at the top AND at the bottom, the
+        // edge gap §06 gives every side of this corner.
+        verify(Theme.insetPx * 2 + stack.height <= root.height,
                shot.file + ": the corner is " + stack.height + " px tall, "
                + Theme.insetPx + " px down a " + root.height + " px surface");
 

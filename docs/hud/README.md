@@ -12,7 +12,7 @@ something to look at without sitting at the machine.
 
 ## What you are looking at
 
-Each PNG is **one HUD surface, at its real size** — 300 × 688 px, the box
+Each PNG is **one HUD surface, at its real size** — 300 × 745 px, the box
 `shell.qml` asks the compositor for, anchored top-right. The empty two thirds
 is not a crop artifact; it is §06's earned emptiness, and it is most of what
 this HUD looks like most of the time.
@@ -421,6 +421,17 @@ shown (PLAN A61). `shell.qml` went from 624 px to 688 px twice on the
 argument that a refused binary and a failed install can genuinely be up
 together; this is that argument, rendered, and the assertion under it is
 now that the whole stack fits the box rather than that it looks fine.
+
+Two plates is not the case the box is sized for, though, and the fit check
+on a three-plate picture clears it by hundreds of pixels. The case — every
+plate that can be up at once, each drawing the widest thing its own cap
+allows — is measured in `tools/hudshots/scene/tst_fit.qml` (PLAN A63), and
+the first time it ran the corner was **713 px in a 688 px box**: the HUD
+was cropping its own bottom plate, which is `HealthPlate`, the one that
+says what is wrong. The surface is 745 px now — two insets and the
+measurement — and no picture of that corner is taken here on purpose: a
+photograph of eight unrelated plates 8 px apart is a picture of the
+question A62 is asking a human, not an answer to it.
 
 **It is not the sequence A61 assumed, and finding that out is most of what
 this shot bought.** The obvious story is a refusal and a retry: jv-guard
