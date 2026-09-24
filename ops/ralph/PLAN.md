@@ -728,18 +728,49 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       answering A21/A22/A25 says the stills were not enough. Discovered in
       A29.
 
-- [ ] A32. The empty input mask (`mask: Region {}`) is the one invariant-10
-      claim A30's compositor still cannot test. Every other one became a
-      measurement — the corner on each monitor, the keyboard that never
-      moves, the desktop left pixel-identical — but "a click passes
-      through to the window underneath" needs a SECOND client to pass
-      through to, and a way to assert that it, and not the HUD, received
-      the event. A tiny wayland client that logs its pointer events, under
-      the same headless sway, plus `swaymsg seat - cursor set/press`,
-      would close it. Small, and the last structural claim in that header
-      still resting on a reading. Discovered in A30.
+- [x] A32. The empty input mask stops being a claim nobody tested.
+      — 48d9c74
+      (`probe_click_through` in tools/hudscreens/shoot.py runs after the
+      photographs, puts an ordinary Wayland toplevel under the HUD on the
+      primary monitor and a second one on a side monitor to hold the
+      keyboard, and clicks three points: a CONTROL clear of the surface
+      — without it a harness whose clicks went nowhere would report a
+      perfect pass-through — a pixel the HUD actually PAINTED, read out
+      of the capture rather than guessed, and a point inside the 300x560
+      box it painted NOTHING on, because an input region that tracks the
+      content is the likelier mistake and looks reasonable in a diff. All
+      three must end with the keyboard on the window underneath. It starts
+      NO jarvisd: the probe needs a lit state that does not expire, every
+      other one is a frame ageing out, and a bus the HUD cannot see is the
+      one thing it says indefinitely. The witness is sway's own ROUTING,
+      read back over IPC — `node_at_coords` consults each layer surface's
+      input region before it looks at a window — and NOT the client's
+      wl_pointer, which never fires because a headless seat advertises no
+      pointer capability; the README says so. Three mutations, three
+      caught by two different points: no mask at all (the painted pixel),
+      a mask over only the lower unpainted half of the box (the third
+      point, which is how that point earned its place), and a LinkState
+      grace so long the plate never arrives (the guard against the whole
+      stage going vacuous). The compositor config moved into
+      `sheet.sway_config()` and gained `focus_follows_mouse no`, because
+      `cursor set` is a warp and a compositor that follows the mouse would
+      move focus before any button existed. 83 tools tests (was 77), eight
+      mutations through six new gates. Tests:
+      `bash ops/ralph/runtests.sh tools`.)
+
+- [ ] A33. The probe answers CLICK and says nothing about scroll or
+      hover, which ride the same input region and are the two a user
+      would notice next — a scroll eaten over a plate is a page that
+      stops moving for no reason. `swaymsg seat - cursor` has no scroll
+      verb, so this needs the axis event to come from somewhere else
+      (a virtual pointer held open for the length of the probe, which
+      would also give the client a real wl_pointer and turn the whole
+      measurement from sway's routing into the client's own log). Worth
+      it the day the mask is ever edited; not before. Discovered in A32.
 
 ## Done
+- A32 — a click over the HUD reaches the window underneath, measured
+  rather than read (48d9c74, 2026-09-24)
 - A30 — the HUD on three monitors, and the four invariant-10 claims that
   stopped being verified by construction (d56b12e, 2026-09-24)
 - A29 — the HUD, photographed: docs/hud contact sheet rendered from the

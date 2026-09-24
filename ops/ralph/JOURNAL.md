@@ -2771,3 +2771,115 @@ three times, once per screen. Nothing was built toward an answer.
   says whether the machine is ready first. New: **A32** — the empty input
   mask is the one invariant-10 claim this harness still cannot test, for
   want of a second client to click through to.
+
+## 2026-09-24 — iteration 29 — A32: the empty input mask stops being a
+## claim nobody tested
+
+A30 turned four of invariant 10's structural promises into
+measurements and left one alone, for a reason it stated in its own
+header: `mask: Region {}` is a claim about a window UNDERNEATH the
+HUD, and the harness had no second client. A compositor with nothing
+on it will let any click through, however greedy the layer surface —
+so the check would have passed on a HUD that ate input, which is worse
+than no check.
+
+So the harness gets a second client. `probe_click_through` runs after
+the photographs (it puts two windows on screen, and every shot above
+needs a bare desktop behind the HUD): one ordinary Wayland toplevel
+tiled to fill the primary monitor, underneath the HUD, and one on a
+side monitor whose only job is to hold the keyboard between clicks, so
+that "focus moved" is a fact about the click rather than about where
+focus already was. Three points, all of which must end with the
+keyboard on the window under the HUD:
+
+  · a CONTROL clear of the surface. Without it a harness whose clicks
+    went nowhere at all would report a perfect pass-through, which is
+    the way this measurement fails silently.
+  · a pixel the HUD actually PAINTED — read out of the capture rather
+    than guessed at, so it is over a plate and not over transparency.
+  · a point inside the 300x560 surface box that the HUD painted
+    NOTHING on. The likelier future mistake is an input region that
+    tracks the content, which looks perfectly reasonable in a diff.
+
+**It starts no jarvisd, on purpose.** The probe needs a lit HUD that
+does not expire, and every other lit state in this shell is a frame
+ageing out — a heartbeat speaks for two of its own periods, a
+confirmation for its window. A plate that blanked mid-probe would
+report a pass-through that was really an unmapped surface. A bus the
+HUD cannot see is the one thing it says indefinitely (LinkPlate, after
+LinkState's 5 s grace), and the input region is a property of the
+surface, never of what is drawn on it. The probe still brackets it:
+the painted box is measured before the clicks and again after the
+windows are gone, and the two must match.
+
+**What the measurement is, exactly.** The window's own `wl_pointer`
+never fires. A headless seat has no input device, so it advertises no
+pointer capability and no client binds a pointer at all — I checked,
+with `wev` under this compositor: `capabilities: none`, and not one
+pointer event for a click that sway itself was routing. (A transient
+virtual pointer via `wlrctl` does give the seat a pointer, but the
+device dies with the process, so the client is still binding when the
+button arrives — a race, not a test.) The button is synthesised through
+sway's IPC and the witness is sway's own ROUTING, read back over IPC.
+That routing IS the hit test — `node_at_coords` consults each layer
+surface's input region before it ever looks at a window — so the
+direction of the claim is right, and the mutations prove the direction
+rather than assuming it. The README says all of this on its own page;
+a reader who took it for "the client logged a button" would over-trust
+it.
+
+Three mutations, built and photographed, three caught by two different
+points:
+  · delete `mask: Region {}` → the painted pixel fails ("the keyboard
+    stayed on 10").
+  · `mask: Region { y: 200; width: 300; height: 360 }`, i.e. a region
+    over only the lower, unpainted half of the box → the painted pixel
+    PASSES and the third point fails. That is the one that shows the
+    third point is not decoration.
+  · `LinkState.graceS: 600` → the plate never arrives and the probe
+    fails with "the HUD never drew anything ... in 25s" rather than
+    sailing through. This is the guard against the whole stage going
+    vacuous, and it is the one I most wanted to see bite.
+
+Two smaller things. The compositor config moved out of the driver's
+heredoc into `sheet.sway_config()`, so the checks read the same text
+the compositor was given rather than a second copy of it; and it gained
+`focus_follows_mouse no`, because `cursor set` is a warp and a
+compositor that follows the mouse could move focus before any button
+existed — the probe would then report a pass-through that no click
+caused. Both are gated.
+
+The PNGs are unchanged and deliberately not re-committed: the HUD did
+not change, and a re-run moves about five pixels along an antialiased
+glyph edge, which the sheet already says is not evidence of anything.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 83 (was 77). Eight
+  mutations run through the six new gates, eight caught: a compositor
+  that follows the mouse, a config that drifts from the sheet's monitor
+  positions, a driver that writes its own config, a driver with no
+  second client, a shoot.py that never starts one, a `main()` that
+  defines the probe and never calls it, a README that drops the
+  wl_pointer caveat, and a README that stops naming the mask.
+  `bash ops/ralph/qmltest.sh` — 347, untouched and green.
+- build: `nix build .#jv-hud` ok, `nixos-rebuild build --flake .#ares`
+  ok. Never test/switch. No schema change, no jv-act change, no boot
+  path, no NVIDIA/kernel/flake pin touched. `wev` is realized by the
+  harness at run time and is not an input to anything the machine
+  installs.
+- files: ops/ralph/hudscreens.sh, tools/hudscreens/{sheet.py,shoot.py},
+  tools/tests/test_hudscreens.py, docs/hud/screens/README.md
+- commit: 48d9c74
+- next: the header of `docs/hud/screens/README.md` now has no
+  structural claim left that rests on a reading — which means the
+  remaining Track A items are all questions for a person, and they have
+  not moved: **A13/A27** (three copies of your own sentence across
+  three monitors — right, or noise, and should there be a
+  `personality/` switch) are two minutes on `02-heard-desk.png`, and
+  **A21/A22/A25** are one opinion about what a plate does over seconds,
+  with **A31** — the three-frame strip — as the build that follows only
+  if the stills turn out not to be enough. Still genuinely needing the
+  machine: **B10/A28**, one real spoken turn recorded off the live bus;
+  this harness would now replay it onto a real compositor AND click
+  through it. New: **A33** — the probe proves a click passes through and
+  says nothing about scroll or hover, which share the same input region
+  and are the two a user would notice next.
