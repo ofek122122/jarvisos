@@ -37,12 +37,27 @@ services/jv-voice/jv_voice/service.py
 EOF
 ```
 It runs the suite clean (must be green), then with the target file made
-impossible to import (must go RED — a suite that stays green does not execute
+impossible to load (must go RED — a suite that stays green does not execute
 that file, so no mutation of it means anything), then once per mutation, then
-clean again. Every run gets its own empty bytecode cache, because a `.pyc` is
-validated against (mtime **in seconds**, size) and an equal-length edit inside
-one second is otherwise graded without ever running. Exit 0 all caught, 1 a
-survivor, 2 the harness will not make a claim. See `tools/mutate.py`.
+clean again. Every run gets its own empty compiler cache and every write gets
+an mtime newer than the clock, because both CPython (`.pyc`) and Qt (`.qmlc`)
+validate a cached artifact against (mtime **in seconds**, size) and cargo asks
+only whether a source is newer than what it built — so an equal-length edit is
+otherwise graded without ever running. Exit 0 all caught, 1 a survivor, 2 the
+harness will not make a claim. See `tools/mutate.py`.
+
+Three languages (B49), each with its own canary:
+```
+bash ops/ralph/mutate.sh <service>              # .py   via runtests.sh
+bash ops/ralph/mutate.sh --runner qml hud       # .qml  via qmltest.sh
+bash ops/ralph/mutate.sh --runner cargo jarvisd # .rs   via cargotest.sh
+```
+`--runner qml` grades `shell/jv-hud/core/` only — measured, not assumed: the
+canary LIVES on every top-level plate, because `qmltest.sh` imports `"../core"`
+and never a plate. The harness refuses those rather than reporting them immune.
+The Rust canary is the weakest of the three and says so in its docstring: a
+`compile_error!` proves the file is compiled into the crate, not that a test
+exercises it.
 
 ## One-time setup (isolated worktree on its own branch)
 From your normal checkout (`~/jarvisos`, on `main`, clean):

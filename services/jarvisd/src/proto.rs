@@ -152,6 +152,11 @@ mod tests {
         assert!(topic_matches("audio.wake", "audio.wake"));
         assert!(!topic_matches("audio.*", "audiofoo.wake"));
         assert!(!topic_matches("audio.*", "audio"));
+        // The empty leaf. `audio.` carries the separator and names nothing
+        // after it, so the prefix check is `>` and not `>=` — deliberate
+        // since the matcher was written, asserted nowhere until the B49
+        // mutation harness graded this file and the `>=` mutant SURVIVED.
+        assert!(!topic_matches("audio.*", "audio."));
         assert!(!topic_matches("audio.wake", "audio.vad"));
         assert!(!topic_matches("speech.*", "audio.wake"));
     }

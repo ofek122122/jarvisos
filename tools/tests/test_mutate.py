@@ -1,4 +1,4 @@
-"""tools/mutate.py — the loop's own mutation harness (PLAN B48).
+"""tools/mutate.py — the loop's own mutation harness (PLAN B48, B49).
 
 Every iteration of the Ralph loop claims a number like "six mutations, six
 caught". That claim is only worth the paper it is written on if the mutant
@@ -25,6 +25,14 @@ These tests are the harness's spine, and two of them are the point:
   suite go RED. If it does not, the tests do not execute that file at all,
   every mutation would be a silent survivor, and the harness refuses to
   report anything.
+
+B49 adds QML and Rust, and its own premise was the thing that turned out to
+be wrong: it said the stale-cache half "cannot bite" them.
+`test_a_stale_qmlc_is_read_without_the_harness_env_and_cannot_be_with_it`
+reproduces it in QML with the real `qmltestrunner` — Qt caches compiled QML
+in the user's HOME and validates it against (mtime, size) exactly like a
+`.pyc` — which is why every language now gets a private cache and every
+write this harness makes gets a whole second strictly newer than the last.
 """
 
 from __future__ import annotations
@@ -215,11 +223,11 @@ def test_a_stale_pyc_is_read_without_the_harness_env_and_cannot_be_with_it(tmp_p
     assert run({"PYTHONDONTWRITEBYTECODE": "1"}) == "old"
     # What the harness actually does: a cache directory of its own, empty.
     fresh = tmp_path / "fresh"
-    assert run(mutate.run_env(fresh)) == "new"
+    assert run(mutate.python_env(fresh)) == "new"
 
 
-def test_run_env_names_a_fresh_cache_dir_and_forbids_writing_beside_the_source(tmp_path):
-    env = mutate.run_env(tmp_path / "c")
+def test_python_env_names_a_fresh_cache_dir_and_forbids_writing_beside_the_source(tmp_path):
+    env = mutate.python_env(tmp_path / "c")
     assert env["PYTHONPYCACHEPREFIX"] == str(tmp_path / "c")
     assert env["PYTHONDONTWRITEBYTECODE"] == "1"
 
@@ -425,3 +433,259 @@ def test_an_unreadable_spec_exits_two_without_running_anything(tmp_path, monkeyp
     bad.write_text("- x = 1\n", encoding="utf-8")
     monkeypatch.setattr(mutate, "run", lambda *a, **k: pytest.fail("ran on a bad spec"))
     assert mutate.main(["tools", str(bad)]) == 2
+
+
+# ======================================================================= B49
+# Three languages, three canaries. Until now the harness graded PYTHON only,
+# so the loop's QML numbers ("nine mutations, all caught") and its Rust ones
+# were still produced by the hand practice iteration 70 caught out — and the
+# question the canary answers is exactly as open there: nothing had ever
+# asked whether `qmltest.sh` executes the file an A-track iteration was
+# mutating. A `shell/jv-hud/` element no test imports would have graded as
+# immune.
+
+
+def test_each_language_has_a_canary_that_makes_its_file_unloadable():
+    py = mutate.with_canary("VALUE = 1\n", mutate.PYTHON)
+    qml = mutate.with_canary("import QtQuick\nQtObject {}\n", mutate.QML)
+    rs = mutate.with_canary("pub fn f() {}\n", mutate.CARGO)
+    assert py.splitlines()[-1].startswith("raise ImportError(")
+    assert qml.splitlines()[-1].startswith("***")      # a QML syntax error
+    assert rs.splitlines()[-1].startswith("compile_error!(")
+    for out in (py, qml, rs):
+        assert mutate.CANARY_MARK in out.splitlines()[-1]
+        assert not out.splitlines()[-1].startswith((" ", "\t"))
+
+
+def test_every_language_canary_keeps_the_original_text_byte_for_byte():
+    for lang in mutate.LANGUAGES.values():
+        src = "a\n  b\n"
+        assert mutate.with_canary(src, lang).startswith(src)
+
+
+def test_the_qml_canary_is_appended_after_the_root_objects_closing_brace():
+    # The one place it must land: outside the object, where nothing can read
+    # it as a property. Inside, `***` might parse as a binding expression.
+    out = mutate.with_canary("import QtQuick\nQtObject {\n  x: 1\n}\n", mutate.QML)
+    assert out.splitlines()[-2] == "}"
+
+
+# ------------------------------------------------- the stale QML cache bug
+
+QML_STORE_GLOB = "/nix/store/*-qtdeclarative-*/bin/qmltestrunner"
+
+
+def _qmltestrunner() -> str:
+    import glob
+
+    found = sorted(glob.glob(QML_STORE_GLOB))
+    if not found:
+        pytest.skip("no qmltestrunner in the store; this reproduction needs the real Qt")
+    return found[-1]
+
+
+def test_a_stale_qmlc_is_read_without_the_harness_env_and_cannot_be_with_it(tmp_path):
+    """B49 assumed the stale-cache half "cannot bite" QML. It does.
+
+    `qmltestrunner` writes compiled QML to
+    `$XDG_CACHE_HOME/qmltestrunner/qmlcache/*.qmlc`, validated against
+    (mtime, size) exactly like a `.pyc`. The edit below is EQUAL LENGTH
+    (`"old"` -> `"new"`) with the mtime put back, and the second run — the
+    control, the loop's hand practice — passes a test that asserts the OLD
+    value against source that no longer says it. A mutation graded that way
+    reads as "survived" and never ran.
+
+    It is arguably worse than the Python case: that cache lives in the
+    user's home, where nothing in this repo would ever think to clear it.
+    """
+    import os
+
+    runner = _qmltestrunner()
+    qtdecl = Path(runner).parents[1]
+    t = tmp_path / "t"
+    t.mkdir()
+    thing = t / "Thing.qml"
+    thing.write_text('import QtQuick\nQtObject { readonly property string value: "old" }\n')
+    (t / "qmldir").write_text("Thing 1.0 Thing.qml\n")
+    (t / "tst_thing.qml").write_text(
+        "import QtQuick\nimport QtTest\n"
+        'TestCase {\n  name: "Thing"\n  Thing { id: thing }\n'
+        '  function test_value() { compare(thing.value, "old") }\n}\n'
+    )
+
+    def run(env_extra: dict[str, str]) -> bool:
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "QT_QPA_PLATFORM": "offscreen",
+            "XDG_CACHE_HOME": str(tmp_path / "shared"),
+            **env_extra,
+        }
+        return subprocess.run(
+            [runner, "-input", str(t), "-import", str(qtdecl / "lib/qt-6/qml")],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        ).returncode == 0
+
+    assert run({}), "the baseline is red; the control is void"
+    cached = list((tmp_path / "shared" / "qmltestrunner" / "qmlcache").glob("*.qmlc"))
+    assert cached, "no .qmlc was written; the control is void"
+
+    was = thing.stat().st_mtime
+    thing.write_text('import QtQuick\nQtObject { readonly property string value: "new" }\n')
+    os.utime(thing, (was, was))
+
+    # The control: the loop's pre-B49 practice, grading QML that never ran.
+    assert run({}), "expected a STALE green — the .qmlc should have been reused"
+    # What the harness does instead, and either half of it is enough.
+    assert not run(mutate.qml_env(tmp_path / "fresh")), "the mutant should have been caught"
+    assert not run({"QML_DISABLE_DISK_CACHE": "1"})
+
+
+def test_qml_env_moves_the_qml_cache_somewhere_empty_and_disables_it(tmp_path):
+    env = mutate.qml_env(tmp_path / "c")
+    assert env["XDG_CACHE_HOME"] == str(tmp_path / "c")
+    assert env["QML_DISABLE_DISK_CACHE"] == "1"
+
+
+def test_cargo_env_is_empty_on_purpose(tmp_path):
+    # A private CARGO_TARGET_DIR would recompile the crate once per suite run.
+    # Rust's staleness control is the always-newer mtime, not a fresh cache.
+    assert mutate.cargo_env(tmp_path / "c") == {}
+
+
+# --------------------------------------------------- always-newer mtimes
+
+
+def test_every_write_gets_a_strictly_newer_whole_second(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.write_text("x")
+    b.write_text("y")
+    stamps = mutate.Stamps(1_000_000.4, now=lambda: 900_000.0)
+    first = stamps.stamp(a)
+    second = stamps.stamp(b)
+    third = stamps.stamp(a)
+    assert first == 1_000_001.0
+    assert (second, third) == (1_000_002.0, 1_000_003.0)
+    assert a.stat().st_mtime == third and b.stat().st_mtime == second
+
+
+def test_a_stamp_keeps_ahead_of_a_clock_that_moved_on_during_a_slow_suite(tmp_path):
+    """The bug this class shipped with, caught by the first real cargo run.
+
+    A counter that only ever adds a second per write falls behind a suite
+    that takes forty seconds to compile: the restore claimed start+5 s while
+    the artifacts cargo had just produced said start+35 s, cargo read the
+    restored file as OLDER than its own output, skipped the rebuild, and a
+    test failed on a byte-for-byte clean tree. Every stamp re-reads the
+    clock, so a write is always in the future no matter how slow the suite.
+    """
+    f = tmp_path / "f"
+    f.write_text("x")
+    clock = {"t": 1_000.0}
+    stamps = mutate.Stamps(1_000.0, now=lambda: clock["t"])
+    assert stamps.stamp(f) == 1_001.0
+    clock["t"] = 1_040.0  # the suite spent forty seconds compiling
+    assert stamps.stamp(f) == 1_041.0, "the stamp fell behind the build it has to invalidate"
+    assert stamps.stamp(f) == 1_042.0, "and it is still strictly increasing"
+
+
+def test_the_run_never_writes_an_mtime_older_than_what_it_started_with(tree):
+    """Backwards is the dangerous direction: cargo decides to rebuild from
+    "is any source newer than my fingerprint", so a restore that put an OLD
+    mtime back would leave the final clean baseline running the mutant."""
+    root, src = tree
+    import os
+
+    os.utime(src, (2_000_000_000, 2_000_000_000))  # a source from the future
+    seen: list[float] = []
+
+    def watch(env: dict[str, str]) -> bool:
+        seen.append(src.stat().st_mtime)
+        text = src.read_text(encoding="utf-8")
+        return mutate.CANARY_MARK not in text and "MUTANT" not in text
+
+    mutate.run(mutate.parse_spec(SPEC), watch, root=root)
+    assert seen == sorted(seen) and len(set(seen)) == len(seen)
+    assert seen[0] == 2_000_000_000, "the baseline runs on an untouched file"
+    assert all(m > 2_000_000_000 for m in seen[1:]), "a write landed in the past"
+
+
+def test_the_restore_leaves_the_bytes_identical_and_the_mtime_newer(tree):
+    root, src = tree
+    before_bytes, before_mtime = src.read_bytes(), src.stat().st_mtime
+    mutate.run(mutate.parse_spec(SPEC), FakeSuite(src), root=root)
+    assert src.read_bytes() == before_bytes
+    assert src.stat().st_mtime > before_mtime
+
+
+# ----------------------------------------------- the right grader per file
+
+
+def test_a_file_this_runner_could_not_be_grading_is_refused():
+    (m,) = mutate.parse_spec("@ qml via pytest\nshell/jv-hud/core/X.qml\n- a: 1\n+ a: 2\n")
+    with pytest.raises(mutate.HarnessError, match="wrong grader"):
+        mutate.check_language(m, mutate.PYTHON)
+    mutate.check_language(m, mutate.QML)  # and the right one is fine
+
+
+def test_the_wrong_grader_is_refused_before_any_suite_runs(tmp_path):
+    """Not pedantry: a Python `raise` appended to QML parses as nothing, so
+    the canary would LIVE and the abort would blame the tests."""
+    (tmp_path / "shell").mkdir()
+    (tmp_path / "shell" / "X.qml").write_text("import QtQuick\nQtObject { property int a: 1 }\n")
+    spec = mutate.parse_spec("@ x\nshell/X.qml\n- a: 1\n+ a: 2\n")
+    calls: list[str] = []
+    with pytest.raises(mutate.HarnessError, match="wrong grader"):
+        mutate.run(spec, lambda env: calls.append("ran") or True, root=tmp_path, lang=mutate.PYTHON)
+    assert calls == []
+
+
+# ------------------------------------------------------ the language table
+
+
+def test_every_language_names_a_runner_script_the_loop_actually_has():
+    for lang in mutate.LANGUAGES.values():
+        assert (ROOT / "ops" / "ralph" / lang.script).is_file(), lang.runner
+
+
+def test_the_qml_runner_takes_no_target_and_the_other_two_do():
+    assert mutate.QML.command(ROOT, "hud")[-1].endswith("qmltest.sh")
+    assert mutate.PYTHON.command(ROOT, "jv-ears")[-1] == "jv-ears"
+    assert mutate.CARGO.command(ROOT, "jarvisd")[-1] == "jarvisd"
+
+
+def test_a_canary_planted_by_the_qml_language_is_the_qml_one(tmp_path):
+    (tmp_path / "shell").mkdir()
+    src = tmp_path / "shell" / "X.qml"
+    src.write_text("import QtQuick\nQtObject { property int a: 1 }\n")
+    suite = FakeSuite(src)
+    report = mutate.run(
+        mutate.parse_spec("@ a mutated\nshell/X.qml\n- a: 1\n+ a: MUTANT\n"),
+        suite,
+        root=tmp_path,
+        lang=mutate.QML,
+    )
+    assert report.caught == 1
+    canaried = [t for t in suite.seen if mutate.CANARY_MARK in t]
+    assert len(canaried) == 1 and canaried[0].splitlines()[-1].startswith("***")
+
+
+# ------------------------------------------------------------ the --runner flag
+
+
+def test_the_runner_flag_picks_the_language_the_run_is_given(spec_file, monkeypatch):
+    seen: list[str] = []
+    monkeypatch.setattr(
+        mutate, "run", lambda *a, **k: seen.append(k["lang"].runner) or _report("caught")
+    )
+    assert mutate.main(["--runner", "cargo", "jarvisd", spec_file]) == 0
+    assert mutate.main(["tools", spec_file]) == 0
+    assert seen == ["cargo", "tests"]
+
+
+def test_a_target_the_qml_runner_does_not_grade_exits_two(spec_file, monkeypatch):
+    monkeypatch.setattr(mutate, "run", lambda *a, **k: pytest.fail("ran on a bad target"))
+    assert mutate.main(["--runner", "qml", "jv-ears", spec_file]) == 2

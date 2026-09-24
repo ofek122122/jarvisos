@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""The Ralph loop's mutation harness — PLAN B48.
+"""The Ralph loop's mutation harness — PLAN B48, extended to three languages
+by B49.
 
 Every iteration of this loop writes a sentence like "six mutations, six
 caught". The sentence is the loop's only evidence that the tests it just
-wrote have teeth, and until now it was produced by hand: edit the source,
+wrote have teeth, and until B48 it was produced by hand: edit the source,
 re-run pytest, read the colour, put the file back. Iteration 70 found the
 hole in that practice. CPython validates a cached `.pyc` against the source's
 (mtime **in whole seconds**, size), so an equal-length edit written inside
@@ -13,23 +14,47 @@ only tell arrives later — a full-suite failure on a file that has already
 been RESTORED and is still running the mutant out of the cache.
 
 So this harness is not an automation of the old practice. It is the old
-practice plus the two controls it never had:
+practice plus the three controls it never had:
 
 **The canary.** Before a single mutation is graded, the target file is made
-impossible to import and the suite MUST go red. If it stays green, the tests
-do not execute that file at all — every mutation would be a silent survivor
-— and the harness refuses to report anything rather than print a perfect
-score. This is the direct test of the assumption the old practice made
-implicitly, and it is stronger than reasoning about bytecode: it asks the
-suite itself whether this file is the file it runs.
+impossible to LOAD and the suite MUST go red. If it stays green, the tests do
+not execute that file at all — every mutation would be a silent survivor —
+and the harness refuses to report anything rather than print a perfect score.
+This is the direct test of the assumption the old practice made implicitly,
+and it is stronger than reasoning about caches: it asks the suite itself
+whether this file is the file it runs. Each language gets its own (see
+`LANGUAGES`), and each makes a slightly different claim — the Rust one is
+the weakest and says so.
 
-**A cache that cannot be stale.** Every suite run gets its OWN empty
-`PYTHONPYCACHEPREFIX`, so no run can read bytecode compiled by another and
-the in-tree `__pycache__` directories are unreachable rather than deleted.
+**A cache that cannot be stale.** Every suite run gets its own private,
+empty cache directory, so no run can read artifacts compiled by another.
 Note for whoever reads B48: `python -B` alone does nothing about this. It
 stops bytecode being WRITTEN, not read — the half that worked in iteration
 70 was clearing `__pycache__`. `-B` is still set here, so a harness run
 leaves no new caches beside the source, but the prefix is the guarantee.
+
+B49 assumed this half "cannot bite" QML and Rust. That was wrong about QML,
+and `test_a_stale_qmlc_is_read_...` reproduces it: `qmltestrunner` writes
+compiled QML to `$XDG_CACHE_HOME/qmltestrunner/qmlcache/*.qmlc`, validated
+against (mtime, size) exactly like a `.pyc`, and an equal-length edit with a
+restored mtime is graded GREEN without ever running. It is arguably worse
+than the Python case, because that cache lives in the user's home where
+nothing in this repo would ever think to clear it.
+
+**A mtime that is always new.** Cargo cannot be given a private cache
+cheaply — a fresh `CARGO_TARGET_DIR` per run means recompiling the world a
+dozen times — so it gets the other guarantee instead: every file this
+harness writes (mutant, canary, and the restore) is stamped with a whole
+second strictly newer than the last AND newer than the clock at the moment
+of the write. Nothing keyed on mtime can mistake one of this harness's
+writes for another, in any language. The tree is left byte-identical; only
+the mtimes move forward, which is exactly what makes the next build honest.
+
+Rust made the same lie the other two made, and it took both controls above
+to see it: the first cargo grading ended with the tree byte-for-byte clean
+and `proto::tests::matching` FAILING, because the restore had been stamped
+from a counter that started when the run did and the run had since spent
+forty seconds compiling. See `Stamps`.
 
 Usage (spec on stdin is the ergonomic path — no scratch file to clean up):
 
@@ -39,6 +64,20 @@ Usage (spec on stdin is the ergonomic path — no scratch file to clean up):
     services/jv-voice/jv_voice/service.py
     - TURN_GAP_S = 0.5
     + TURN_GAP_S = 0.9
+    EOF
+
+    bash ops/ralph/mutate.sh --runner qml hud <<'EOF'
+    @ the ember lit while merely listening
+    shell/jv-hud/core/SpeechState.qml
+    - readonly property bool active: mode === "speaking"
+    + readonly property bool active: mode !== "idle"
+    EOF
+
+    bash ops/ralph/mutate.sh --runner cargo jarvisd <<'EOF'
+    @ the seq check dropped
+    services/jarvisd/src/broker.rs
+    - if frame.seq <= last { return Err(...) }
+    + if false { return Err(...) }
     EOF
 
 `@ label` opens a block, the next bare line is the repo-relative file, and
@@ -56,16 +95,17 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import math
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
 CANARY_MARK = "jv-mutate canary: this file must be executed by the suite"
-CANARY_LINE = f'raise ImportError("{CANARY_MARK}")'
 
 
 class SpecError(Exception):
@@ -109,6 +149,125 @@ class Report:
             if o.status == "survived":
                 lines.append(f"  survived: {o.label}  ({o.path})")
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- languages
+
+
+def _appended(text: str, line: str) -> str:
+    """`text` with `line` added at column zero, after a newline the file may
+    not have had. Column zero matters: the canary has to run/parse from
+    outside any trailing indented block."""
+    tail = "" if text.endswith("\n") or not text else "\n"
+    return f"{text}{tail}{line}\n"
+
+
+def python_canary(text: str) -> str:
+    """A module that cannot be imported. Whatever else the suite does, the
+    import of this module raises, so every test that touches it fails."""
+    return _appended(text, f'raise ImportError("{CANARY_MARK}")')
+
+
+def qml_canary(text: str) -> str:
+    """A QML file that cannot be parsed. `*** ... ***` is a syntax error
+    wherever it lands, so the component becomes `Type X unavailable` and
+    every test that instantiates it fails to compile."""
+    return _appended(text, f"*** {CANARY_MARK} ***")
+
+
+def rust_canary(text: str) -> str:
+    """A crate that cannot be compiled.
+
+    Honest limit, and it is why this is the weakest of the three: this proves
+    the file is part of the compiled crate, not that any test exercises it.
+    A `mod` that nobody calls still fails to build. It catches the one thing
+    worth catching anyway — a file not in the module tree at all, or a suite
+    run against a different crate than the one being mutated — and no more.
+    Read a Rust survivor as "no test asserts this line", never as "the tests
+    never load this file".
+    """
+    return _appended(text, f'compile_error!("{CANARY_MARK}");')
+
+
+def python_env(cache_dir: Path) -> dict[str, str]:
+    """A private, empty bytecode cache (so nothing compiled by another run
+    can be read) and no writing beside the source (so a harness run leaves
+    the tree as it found it)."""
+    return {
+        "PYTHONPYCACHEPREFIX": str(cache_dir),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+
+
+def qml_env(cache_dir: Path) -> dict[str, str]:
+    """The same two guarantees for Qt. `XDG_CACHE_HOME` moves
+    `qmltestrunner/qmlcache/*.qmlc` somewhere empty; `QML_DISABLE_DISK_CACHE`
+    means the guarantee does not depend on Qt honouring `XDG_CACHE_HOME`."""
+    return {
+        "XDG_CACHE_HOME": str(cache_dir),
+        "QML_DISABLE_DISK_CACHE": "1",
+    }
+
+
+def cargo_env(cache_dir: Path) -> dict[str, str]:
+    """Deliberately nothing. A private `CARGO_TARGET_DIR` would recompile the
+    crate and its dependencies once per suite run — minutes each — so Rust's
+    only staleness control is the always-newer mtime every write gets."""
+    return {}
+
+
+@dataclasses.dataclass(frozen=True)
+class Language:
+    """A suite this harness knows how to run, and what a canary means in it."""
+
+    runner: str                       # the --runner value
+    script: str                       # ops/ralph/<script>
+    suffixes: tuple[str, ...]         # which files it may grade
+    canary: Callable[[str], str]
+    env: Callable[[Path], Mapping[str, str]]
+    targets: tuple[str, ...] | None    # None = the script validates the name
+    pass_target: bool                  # does the script take the target as argv?
+
+    def command(self, root: Path, target: str) -> list[str]:
+        cmd = ["bash", str(root / "ops" / "ralph" / self.script)]
+        if self.pass_target:
+            cmd.append(target)
+        return cmd
+
+
+PYTHON = Language(
+    runner="tests",
+    script="runtests.sh",
+    suffixes=(".py",),
+    canary=python_canary,
+    env=python_env,
+    targets=None,
+    pass_target=True,
+)
+
+QML = Language(
+    runner="qml",
+    script="qmltest.sh",
+    suffixes=(".qml",),
+    canary=qml_canary,
+    env=qml_env,
+    # qmltest.sh grades the whole of shell/jv-hud/tests and takes no target,
+    # so the name exists only to be typed and checked.
+    targets=("hud",),
+    pass_target=False,
+)
+
+CARGO = Language(
+    runner="cargo",
+    script="cargotest.sh",
+    suffixes=(".rs",),
+    canary=rust_canary,
+    env=cargo_env,
+    targets=None,
+    pass_target=True,
+)
+
+LANGUAGES: dict[str, Language] = {lang.runner: lang for lang in (PYTHON, QML, CARGO)}
 
 
 # --------------------------------------------------------------------- spec
@@ -174,6 +333,19 @@ def resolve(mut: Mutation, *, root: Path) -> Path:
     return target
 
 
+def check_language(mut: Mutation, lang: Language) -> None:
+    """Refuse a file this runner's suite could not be grading.
+
+    Not pedantry: `--runner tests` on a `.qml` file would append a Python
+    `raise` to QML, which parses as nothing, so the canary would LIVE and the
+    harness would abort with a confusing message about the wrong thing."""
+    if Path(mut.path).suffix not in lang.suffixes:
+        raise HarnessError(
+            f"{mut.path} is not a {'/'.join(lang.suffixes)} file, so --runner "
+            f"{lang.runner} is the wrong grader for it"
+        )
+
+
 # ------------------------------------------------------------------- edits
 
 
@@ -189,22 +361,44 @@ def apply_once(text: str, old: str, new: str) -> str:
     return text.replace(old, new)
 
 
-def with_canary(text: str) -> str:
-    """The same file, made impossible to import. Appended at column zero so
-    it runs on import from outside any trailing indented block, and after a
-    newline the file may not have had."""
-    tail = "" if text.endswith("\n") or not text else "\n"
-    return f"{text}{tail}{CANARY_LINE}\n"
+def with_canary(text: str, lang: Language = PYTHON) -> str:
+    """The same file, made impossible for `lang`'s suite to load."""
+    return lang.canary(text)
 
 
-def run_env(cache_dir: Path) -> dict[str, str]:
-    """The environment every suite run gets: a private, empty bytecode cache
-    (so nothing compiled by another run can be read) and no writing beside
-    the source (so a harness run leaves the tree as it found it)."""
-    return {
-        "PYTHONPYCACHEPREFIX": str(cache_dir),
-        "PYTHONDONTWRITEBYTECODE": "1",
-    }
+class Stamps:
+    """Whole-second mtimes, strictly increasing, and always in the future.
+
+    Every build tool this harness drives decides "do I need to recompile
+    this?" from the source's mtime, and at least two of them (CPython's
+    `.pyc`, Qt's `.qmlc`) compare it in whole seconds. So the harness never
+    lets two of its own writes share a second, and never writes a file that
+    looks OLDER than the artifact built from its predecessor — including the
+    restore, which is why the tree comes back byte-identical but not
+    mtime-identical. Going BACKWARDS is the dangerous direction: cargo asks
+    "is any source newer than what I built", so a source that looks old is a
+    source it will not recompile.
+
+    The `now` re-read on every stamp is not decoration — it is the fix for a
+    bug this class shipped with and the first real Rust run caught. A counter
+    that starts at "now" and adds a second per write falls behind a slow
+    suite: the cargo grading below took ~40 s of wall clock, so the fifth
+    stamp said start+5 s while the artifacts cargo had just written said
+    start+35 s. The restored file looked THIRTY SECONDS OLD, cargo skipped
+    the rebuild, and `proto::tests::matching` failed with the tree byte-for-
+    byte clean — iteration 70's bug again, in a third language. B48's
+    run-the-suite-once-more-at-the-end check is what caught it.
+    """
+
+    def __init__(self, floor: float, now: Callable[[], float] = time.time) -> None:
+        self._now = now
+        self._next = float(math.floor(floor) + 1)
+
+    def stamp(self, path: Path) -> float:
+        at = max(self._next, float(math.floor(self._now()) + 1))
+        os.utime(path, (at, at))
+        self._next = at + 1.0
+        return at
 
 
 # --------------------------------------------------------------------- run
@@ -212,7 +406,13 @@ def run_env(cache_dir: Path) -> dict[str, str]:
 Runner = Callable[[Mapping[str, str]], bool]
 
 
-def run(mutations: Iterable[Mutation], runner: Runner, *, root: Path) -> Report:
+def run(
+    mutations: Iterable[Mutation],
+    runner: Runner,
+    *,
+    root: Path,
+    lang: Language = PYTHON,
+) -> Report:
     """Grade `mutations`. `runner(env)` runs the suite and returns True if it
     passed; `env` carries this run's private cache directory.
 
@@ -223,7 +423,10 @@ def run(mutations: Iterable[Mutation], runner: Runner, *, root: Path) -> Report:
     if not mutations:
         raise HarnessError("no mutations in the spec; a perfect score of zero is not a claim")
 
-    targets = {m.path: resolve(m, root=root) for m in mutations}
+    targets: dict[str, Path] = {}
+    for m in mutations:
+        check_language(m, lang)
+        targets[m.path] = resolve(m, root=root)
     for rel, path in targets.items():
         if not path.is_file():
             raise HarnessError(f"no such file to mutate: {rel}")
@@ -231,21 +434,26 @@ def run(mutations: Iterable[Mutation], runner: Runner, *, root: Path) -> Report:
 
     base = Path(tempfile.mkdtemp(prefix="jv-mutate-"))
     state = {"n": 0}
+    stamps = Stamps(max([time.time()] + [p.stat().st_mtime for p in targets.values()]))
+
+    def write(path: Path, text: str) -> None:
+        path.write_text(text, encoding="utf-8")
+        stamps.stamp(path)
 
     def suite() -> bool:
         state["n"] += 1
         cache = base / f"run{state['n']:03d}"
         cache.mkdir()
-        return bool(runner(run_env(cache)))
+        return bool(runner(lang.env(cache)))
 
     def swapped(rel: str, text: str) -> bool:
         """Run the suite with `rel` holding `text`, then put it back."""
         path = targets[rel]
         try:
-            path.write_text(text, encoding="utf-8")
+            write(path, text)
             return suite()
         finally:
-            path.write_text(originals[rel], encoding="utf-8")
+            write(path, originals[rel])
 
     try:
         if not suite():
@@ -255,13 +463,13 @@ def run(mutations: Iterable[Mutation], runner: Runner, *, root: Path) -> Report:
             )
 
         for rel in targets:
-            if swapped(rel, with_canary(originals[rel])):
+            if swapped(rel, with_canary(originals[rel], lang)):
                 raise HarnessError(
                     f"the canary lived: the suite stayed GREEN with {rel} made "
-                    f"impossible to import, so the suite does not execute that "
+                    f"impossible to load, so the suite does not execute that "
                     f"file. Nothing this harness could report about it would "
-                    f"mean anything — check the runner, the service, and that "
-                    f"the tests import the worktree and not an installed copy."
+                    f"mean anything — check the runner, the target, and that "
+                    f"the tests read the worktree and not an installed copy."
                 )
 
         outcomes: list[Outcome] = []
@@ -289,12 +497,13 @@ def run(mutations: Iterable[Mutation], runner: Runner, *, root: Path) -> Report:
 # --------------------------------------------------------------------- cli
 
 
-def pytest_runner(root: Path, service: str, *, quiet: bool = False) -> Runner:
-    """The real runner: the loop's own `ops/ralph/runtests.sh <service>`."""
+def script_runner(root: Path, lang: Language, target: str, *, quiet: bool = False) -> Runner:
+    """The real runner: one of the loop's own `ops/ralph/*.sh` suites."""
+    cmd = lang.command(root, target)
 
     def go(env: Mapping[str, str]) -> bool:
         proc = subprocess.run(
-            ["bash", str(root / "ops" / "ralph" / "runtests.sh"), service],
+            cmd,
             cwd=root,
             env={**os.environ, **env},
             capture_output=True,
@@ -310,9 +519,24 @@ def pytest_runner(root: Path, service: str, *, quiet: bool = False) -> Runner:
 
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="mutate", description=__doc__.split("\n")[0])
-    ap.add_argument("service", help="a service name ops/ralph/runtests.sh knows")
+    ap.add_argument(
+        "--runner",
+        choices=sorted(LANGUAGES),
+        default="tests",
+        help="tests = a Python service (runtests.sh), qml = the HUD "
+        "(qmltest.sh), cargo = a Rust crate (cargotest.sh)",
+    )
+    ap.add_argument("target", help="the service, `hud`, or the crate to grade")
     ap.add_argument("spec", nargs="?", default="-", help="spec file, or - for stdin")
     args = ap.parse_args(argv)
+
+    lang = LANGUAGES[args.runner]
+    if lang.targets is not None and args.target not in lang.targets:
+        print(
+            f"--runner {lang.runner} grades {' or '.join(lang.targets)}, not {args.target!r}",
+            file=sys.stderr,
+        )
+        return 2
 
     root = Path(
         subprocess.run(
@@ -331,11 +555,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"spec: {exc}", file=sys.stderr)
         return 2
 
-    print(f"{len(muts)} mutation(s) against {args.service}", flush=True)
+    print(f"{len(muts)} mutation(s) against {args.target} ({lang.runner})", flush=True)
     for m in muts:
         print(f"  @ {m.label}  ({m.path})", flush=True)
     try:
-        report = run(muts, pytest_runner(root, args.service), root=root)
+        report = run(muts, script_runner(root, lang, args.target), root=root, lang=lang)
     except HarnessError as exc:
         print(f"\nHARNESS: {exc}", file=sys.stderr)
         return 2
