@@ -304,10 +304,11 @@ async def test_the_gap_is_bounded(bus_addr, synth):
 
 
 async def test_a_sentence_published_after_a_barge_in_never_speaks(bus_addr, synth):
-    """jv-brain does not watch audio.wake: it keeps streaming the sentences
-    of a reply the user already interrupted. Purging what is QUEUED is not
-    enough — the turn stays dropped, or Jarvis talks over the user a second
-    later with the rest of an answer nobody is listening to."""
+    """jv-brain stops generating an interrupted reply, but a sentence it
+    published in the moment before that still arrives. Purging what is
+    QUEUED is not enough — the turn stays dropped, or Jarvis talks over the
+    user a second later with the tail of an answer nobody is listening
+    to."""
     watcher = await BusClient.connect(bus_addr, src="t-watch")
     await watcher.subscribe(["speech.state"])
     player = FakePlayer(clip_seconds=5.0)

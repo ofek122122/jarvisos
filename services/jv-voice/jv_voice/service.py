@@ -41,11 +41,11 @@ HEALTH_PERIOD_S = 5.0
 # mid-answer looks like.
 TURN_GAP_S = 0.5
 
-# Groups we refuse to speak any more of. jv-brain does not watch
-# audio.wake, so it keeps publishing the sentences of a reply the user
-# already interrupted; purging what is QUEUED only silences the ones that
-# had arrived. Bounded — this service runs for weeks, and a group older
-# than the last handful is long over.
+# Groups we refuse to speak any more of. jv-brain cancels an interrupted
+# reply now, but it cannot un-publish: the sentence it was writing as the
+# wake landed still arrives, and purging what is QUEUED only silences the
+# ones that had already got here. Bounded — this service runs for weeks,
+# and a group older than the last handful is long over.
 DROPPED_GROUPS = 8
 
 
@@ -102,7 +102,7 @@ class VoiceService:
         """Purge a streamed reply — when one of its sentences is interrupted,
         the rest of the turn must go too, or Jarvis talks over the user who
         just barged in. Both the sentences already queued and the ones the
-        brain has not published yet (it does not know about the wake)."""
+        brain publishes in the moment before its own barge-in stops it."""
         if not reply_group:
             return
         if reply_group not in self._dropped:
