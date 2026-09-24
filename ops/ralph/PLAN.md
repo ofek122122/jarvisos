@@ -1377,7 +1377,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the day a read relation reports a survivor nobody can explain.
       Discovered in B55.
 
-- [ ] B58. The gate has never been testing the tree it is run on. Until
+- [x] B58. The gate has never been testing the tree it is run on. Until
       d55348b, `ops/ralph/runtests.sh` ran `python -m pytest` from the
       service's own directory, which puts that directory first on
       `sys.path` — so `jv_guard` came from the worktree and `jarvis_bus`
@@ -1394,7 +1394,38 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       suite read a DIFFERENT COPY of the file is indistinguishable today
       from one that lives because no test touches it. Small, and it is
       the harness grading its own reach for the first time.
-      Discovered in B38.
+      Discovered in B38. — 3f347b4, 58ae92a
+      (`runtests.sh --origin <module> <service>` resolves a module the way
+      that suite resolves it — same venv, cwd and PYTHONPATH — and prints the
+      file or prints nothing. The harness asks it only when every control has
+      LIVED on a Python file, and the abort carries one of three sentences:
+      SHADOWED with the other copy named, "this very file" (the old abort,
+      now measured rather than assumed), or nothing at all when the question
+      could not be asked. One runner only: "where did this come from" has an
+      answer for an interpreter and not for a qmltestrunner import path.
+      B58's own control is a test —
+      `test_the_gate_imports_the_worktrees_shared_library_and_not_the_nix_store`
+      — and it is the first test in tools/ that would have failed at every
+      point in this loop's history before d55348b. Running the control for
+      real then found B59. tools 266, was 254; 9 mutations, 9 caught.)
+
+- [ ] B59. **What else could the gate not reach?** B58's control was run for
+      real and its first finding was not about the harness: a canary on
+      `services/pylib/jarvis_bus/client.py` killed jv-guard's suite (so the
+      gate does reach the shared library now), and then BOTH mutations
+      survived — `seq` never advancing, and every publish claiming
+      `conf: 1.0`. Invariant 4 is implemented for the whole of Python by one
+      line in `BusClient.publish` and nothing held it; the round-trip test
+      publishes `conf=0.93` and never looks at what arrived. Two tests closed
+      those two (58ae92a, 3/3 caught). What has not been asked is the rest of
+      the same file, which every service on the bus depends on: `ts`, `src`
+      and `v` on the envelope, `next_frame`'s pong skip and its `BusError`
+      path, `MAX_FRAME`, and `default_addr`'s env override. The method is now
+      cheap and honest — probe the file, then grade a mutation per claim — and
+      the likely shape of the answer is that the file was undertested for
+      exactly as long as the gate could not see it. Small, mechanical, and it
+      is the one file where a silent survivor costs every service at once.
+      Discovered in B58.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above

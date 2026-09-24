@@ -8160,3 +8160,94 @@ all ten suites are green on both sides of it.
   has now been READ for it, which is the whole of what B38 had left —
   and **B10/A28**, one live recording of one spoken turn on ares, remains
   the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 80 — B58: the second meaning of a canary that lived
+
+B48 gave this loop a control that makes every "n mutations, n caught"
+sentence honest: before grading anything, make the target file impossible
+to load and demand the suite go RED. A canary that LIVES has meant
+exactly one thing since — the tests do not touch this file — and the
+abort says so.
+
+It has always had a second meaning. The tests touch **another copy** of
+it. Iteration 79 found that in the wild: `runtests.sh` ran pytest from
+the service's own directory, so every jv-* suite imported `jarvis_bus`
+from the NIX STORE while importing its own package from the worktree. A
+canary on `services/pylib` would have lived, and the harness would have
+reported the file immune and been wrong about why.
+
+**Nothing inside a suite run can tell the two apart.** Both are a green
+suite with the file unloadable, and both are a green suite with it
+erased. So the harness asks outside the run. `runtests.sh --origin
+<module> <service>` resolves a module the way that suite resolves it —
+same venv, same cwd, same PYTHONPATH — and prints the file or prints
+nothing. The load question belongs to that script and to nothing else:
+an answer from this interpreter's `find_spec` would be about a different
+program.
+
+Three answers, three sentences in the abort. **SHADOWED**, naming the
+other copy, which also says every mutation graded against it would have
+meant nothing. **"this very file"**, which does not excuse the canary —
+it turns the original abort from an assumption into a measurement.
+**Nothing**, when the question could not be asked, which is the same
+discipline B53's stale-sheet hint follows: a hint that guessed would be
+the one thing this harness never does. The probe is asked only on the way
+out of a run already aborting, costs ~95 ms, and exists for `--runner
+tests` alone — "where did this come from" has an answer for an
+interpreter, and inventing one for a qmltestrunner import path or a cargo
+module tree would be the overclaim the harness exists to prevent.
+
+**And then the control was run for real, and found something.** B58's own
+ask was: a canary on `services/pylib/jarvis_bus/client.py` graded against
+jv-guard must kill that suite, where before d55348b it would have lived.
+It killed it — the gate does reach the shared library now. Then both
+mutations SURVIVED, and survived pylib's own suite too: `seq` never
+advancing, and every publish claiming `conf: 1.0`. Invariant 4 ("every
+producer publishes confidence") is implemented for the whole of Python by
+one line in `BusClient.publish`, and nothing held it — the existing
+round-trip test publishes `conf=0.93` and never looks at what arrived.
+`seq` is the same shape: the envelope's only ordering handle, and a
+client that published the same one forever was invisible to every
+consumer that watches for a drop. Two tests against the real broker
+close both, and the same three mutations are now caught 3/3.
+
+That is the first thing this harness found by grading its own reach, and
+it is worth stating plainly: the hole was not in the tests anyone wrote
+for the bus client. It was that for as long as this loop has existed, the
+one file every service depends on was the file the gate was least able to
+grade.
+
+- tests: tools **266 (was 254)**, pylib **13 (was 11)**. Green and
+  unchanged under the changed `runtests.sh`: jv-brain 115, jv-ears 114,
+  jv-voice 29, jv-context 105, jv-guard 34, jv-compat 10, jv-hud-bridge
+  26, harness 88.
+- graded with `ops/ralph/mutate.sh`: **12 mutations, 12 caught.** Nine on
+  the harness (the package walk, the `__init__` name no importer says, a
+  failed script still getting to answer, "no answer" becoming an answer,
+  the two copies never compared, the note never reaching the abort, the
+  module name never worked out, the python runner losing its probe, and
+  the CLI building a probe for a runner that has none) and three on the
+  bus client (seq that stops advancing, conf always 1.0, and a seq that
+  advances in the client but goes onto the wire as 0).
+- the abort path was also run for real, against a file jv-guard neither
+  runs nor reads: it aborted correctly and the probe said nothing,
+  because jv-guard's interpreter has never heard of `jv_brain` and
+  `find_spec` RAISES on the missing parent. The probe now catches that
+  and answers "no answer" instead of dying — found by running it, not by
+  reading it.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/mutate.py, tools/tests/test_mutate.py, ops/ralph/runtests.sh,
+  ops/ralph/mutate.sh, services/pylib/tests/test_client.py
+- commits: 3f347b4, 58ae92a
+- next: **B59** raised, and it is the obvious next question rather than a
+  new idea: `client.py` was untested on two of its five envelope fields,
+  and nothing has asked what else the gate could not reach. The harness
+  can now answer that per file — probe first, then grade — and `ts`,
+  `src` and `v`, `next_frame`'s pong skip and its `BusError`, and
+  `MAX_FRAME` are the rest of that file. Otherwise unchanged: **Track A
+  is one human look at `docs/hud/` away from unblocking ten items** (A47,
+  A55, A62, A63, A68 and the A21/A22/A25 cluster), **B27** needs one
+  decision between three named options, **B43/B47/B54** are one question
+  asked three times, and **B10/A28** — one live recording of one spoken
+  turn on ares — remains the biggest thing a human can hand this loop.
