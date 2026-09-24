@@ -24,6 +24,26 @@ bash ops/ralph/nixtest.sh             # the flake's own options -> the units are
 bash ops/ralph/hudscreens.sh          # the HUD photographed through a real compositor
 ```
 
+## Grading the tests themselves
+Every journal entry claims a number like "six mutations, six caught" — the
+loop's only evidence that the tests it just wrote have teeth. That claim is
+produced by this, not by hand:
+```
+bash ops/ralph/mutate.sh jv-voice <<'EOF'
+@ the inter-sentence gap widened
+services/jv-voice/jv_voice/service.py
+- TURN_GAP_S = 0.5
++ TURN_GAP_S = 0.9
+EOF
+```
+It runs the suite clean (must be green), then with the target file made
+impossible to import (must go RED — a suite that stays green does not execute
+that file, so no mutation of it means anything), then once per mutation, then
+clean again. Every run gets its own empty bytecode cache, because a `.pyc` is
+validated against (mtime **in seconds**, size) and an equal-length edit inside
+one second is otherwise graded without ever running. Exit 0 all caught, 1 a
+survivor, 2 the harness will not make a claim. See `tools/mutate.py`.
+
 ## One-time setup (isolated worktree on its own branch)
 From your normal checkout (`~/jarvisos`, on `main`, clean):
 ```
