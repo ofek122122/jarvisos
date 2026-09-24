@@ -3265,3 +3265,140 @@ re-rendering them would have been a diff of antialiasing noise.
   asks are unchanged and now number five (A13/A27 together, A21/A22/A25
   together, B10+A28+B17 together, B13/B15) — this loop has built every
   measurement it can build without them.
+
+## 2026-09-24 — iteration 33 — A37: the HUD says what Jarvis did to your
+## machine when it did not work
+
+Track A's open items are still questions for a human (A13/A27, A21/A22/
+A25, A31) or gated on a signal that does not exist yet (A35, A36);
+`docs/optimization-backlog.md` is human-review-required from top to
+bottom, so it is not the "non-human-review backlog item" the ladder
+points at. The ladder's own fallback is to find the highest-value thing
+the HUD does not yet say, and there was one left that nothing in PLAN.md
+had ever named.
+
+**Invariant 3 gives exactly one process the right to change this
+computer, and the HUD had no word for the outcome of any of it.** A20
+put the QUESTION jv-act asks before a destructive tool on screen; what
+came of it — of that tool or of any other — was never shown. So "it did
+it", "it broke", "it was refused" and "nothing was ever asked" were the
+same empty corner, and the only report on any of them was a sentence
+jv-brain composed afterwards out of `action.result.output`. That
+sentence is a paraphrase by a language model of an error it did not
+witness; this plate is the tool's registry name and the schema's own
+error word, which is to say the two strings you can go and grep for in
+`jv act-log`.
+
+`core/ActionState.qml` decides and `ActionPlate.qml` draws. Three
+decisions are the element:
+
+  · **FAILURES ONLY.** An action that worked draws nothing. The machine
+    visibly doing the thing is the report that it was done, and a corner
+    that lights up for every volume change is one nobody reads on the
+    day it matters — HealthPlate's argument (A6) applied to actions
+    instead of services, and the thing that keeps §06's earned emptiness
+    real rather than decorative. A success is not merely ignored, it
+    CLEARS a held failure: the brain retrying with another tool and
+    getting it right is newer news about the same machine, and a failure
+    left standing under it would describe a machine that is not the one
+    in front of you.
+  · **NEVER A TOOL IT CANNOT PROVE.** This is the one that took the
+    thinking. `action.result` carries a `request_id` and no tool name —
+    the name is in the `intent.action` that asked — and `bus.latest()`
+    holds exactly ONE frame per topic, which may well belong to a
+    different request by the time an outcome lands. A HUD that took the
+    name on faith would eventually name the wrong tool, and a lie about
+    what touched your machine is strictly worse than the empty line it
+    replaced. So the ids must match or the failure is reported without a
+    name, and the pair is latched TOGETHER at the instant the failure is
+    accepted, because both of its sources keep moving afterwards. The
+    mutation that binds the displayed name to `toolFor()` at render time
+    instead reads beautifully and relabels a failure that has not
+    changed the moment the brain tries the next thing.
+  · **NOT `denied` / `confirm_timeout`.** Those two are how a
+    CONFIRMATION ended, and A22 — granted, denied and timed out all
+    leaving the screen identically — is deliberately an open question
+    for a human. Answering it as a side effect of a different element is
+    exactly what A22 asked not to happen. They are passed over, and
+    passed over as NO NEWS rather than as an outcome, so a denial
+    landing after a real failure cannot silently take it off the screen.
+
+The exit is a real signal and not a timer, which is the rule A26 set and
+this keeps: Jarvis starting to explain (jv-brain is handed every
+action.result and phrases it, so from then on the explanation is the
+better report), a newer outcome, or the link dropping — with `holdS` as
+the backstop for a failure nobody ever explains (a `jv` run with nothing
+to speak, a brain that died between the tool and the sentence). The
+comparison is against the failure's own `ts` and not against a
+`speaking` frame merely existing, because a tool call in the middle of a
+streamed reply leaves one on the topic that is about the sentence
+BEFORE the attempt; deleting that comparison passes qmllint and silences
+the plate on every turn where Jarvis narrated first.
+
+`intent.action` and `action.result` joined the bridge's topic list, and
+`intent.action.args` is the most sensitive body on it — whatever the
+tool was asked to operate on, a path or a search string or a window
+title. The bridge forwards whole envelopes on purpose (`conf`, `ts` and
+`seq` are why), so the rule has to live at the other end: a new tools
+gate fails the build if any element under `shell/jv-hud/core` so much as
+NAMES `args` or `detail`, scoped to core/ because that is the only half
+where those words can mean the bus field (HealthPlate has a row field
+called `detail` built out of the health schema's own state words, and
+it is innocent). The `08-action` shot composes frames carrying both
+fields, so the contact sheet is the demonstration rather than the
+claim.
+
+Also found, and recorded against B15 rather than acted on: **`speech.state`
+`speaking` is not the moment the user can hear anything.** jv-voice
+publishes it BEFORE handing the text to Piper, so the whole CPU
+synthesis of the first sentence sits between that frame and the first
+audible sample. B15 was written on the premise that it is "exactly that
+moment" and would have measured a number labelled "until you hear it"
+that excludes synthesis — the same failure B13 was written against. The
+options are not equal and both are now written down in PLAN.md; neither
+is a schema change.
+
+- tests: `bash ops/ralph/qmltest.sh` — 384 (was 347), 35 of them new.
+  `bash ops/ralph/runtests.sh tools` — 90 (was 89).
+  `bash ops/ralph/runtests.sh jv-hud-bridge` — 25.
+  `bash ops/ralph/hudshots.sh` — the sheet regenerated, 8 shots, and the
+  seven committed PNGs came back byte-identical, which is the evidence
+  that a plate nobody fed changed nothing.
+  `bash ops/ralph/hudscreens.sh` — the whole three-monitor sheet green
+  end to end, because shell.qml changed: three outputs, the idle probe
+  (0 commits quiet, 0 lit and still, 45 and 42 on its two controls) and
+  the click probe all pass with the new plate in the stack. Its five
+  PNGs were reverted: the diff was 3 to 12 pixels at a maximum channel
+  difference of 1 — antialiasing noise, not content.
+  Eight mutations, eight caught: the id match in `toolFor`, the
+  confirm-outcome guard, the success branch, latch-time vs render-time
+  tool resolution, the `ts` comparison in `noteExplained`, the `ok`
+  boolean floor, the unhedged-`conf` floor, and the new privacy gate
+  (an element reaching for `args`). A ninth bit for real without being
+  planted: adding the plate to `shell.qml` failed
+  `test_the_sheet_stacks_the_same_plates_the_shell_does` until the
+  contact-sheet scene was updated too.
+- build: `nix build .#jv-hud` ok (qmllint `-W 0` + 384 QML tests in its
+  checkPhase), `nixos-rebuild build --flake .#ares` ok. Never
+  test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin touched.
+- files: shell/jv-hud/core/ActionState.qml (new),
+  shell/jv-hud/ActionPlate.qml (new),
+  shell/jv-hud/tests/tst_actionstate.qml (new),
+  shell/jv-hud/shell.qml, shell/jv-hud/README.md, shell/jv-hud/qmldir,
+  shell/jv-hud/core/qmldir, tools/gen_theme_qml.py,
+  tools/tests/test_gen_theme_qml.py, tools/hudshots/scene/tst_shots.qml,
+  services/jv-hud-bridge/jv_hud_bridge/bridge.py, docs/hud/README.md,
+  docs/hud/08-action.png (new)
+- next: the HUD now draws seven plates and the questions about ALL of
+  them are the same four a human has to answer by looking, which A38
+  makes sharper rather than new — the failure line is the least
+  ignorable thing to repeat across three screens. **A39** is the only
+  new buildable item and it is deliberately gated: A22 answered "yes,
+  say the word" is now one line in `apply()` and one entry in
+  `reportableReasons`, with no timer and no new rule, which is the
+  cheapest that question has ever been to answer. The B15 correction is
+  the one thing in this entry a human should read before the next
+  latency iteration. Human asks unchanged in number and now worth more:
+  A13/A27/A38 together, A21/A22/A25 together, B10+A28+B17 together,
+  B13/B15.

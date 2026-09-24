@@ -416,8 +416,23 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 
 - [ ] B15. Nothing measures the last hop. `jv tap` stops at `speech.say`,
       which is jv-brain handing words to jv-voice — the user hears nothing
-      until Piper has synthesised and the device has started playing, and
-      `speech.state` `speaking` is exactly that moment. Adding it would
+      until Piper has synthesised and the device has started playing.
+      **CORRECTION (found while building A37): `speech.state` `speaking`
+      is NOT that moment.** `_speak_one` in jv-voice publishes `speaking`
+      BEFORE it hands the text to Piper (service.py: `await
+      self._state("speaking", say_id)` and only then the synth executor),
+      so the frame means "jv-voice accepted this utterance", and the whole
+      CPU synthesis of the first sentence sits between it and the first
+      audible sample. Measuring to it and calling the result "until you
+      hear it" is exactly the "a number stops meaning its label" failure
+      B13 was written against. So this needs a decision first and the
+      options are not equal: moving the publish to after synth would make
+      the HUD go dark for the length of a synth (StatePlate reads the same
+      frame) and would leave an utterance interrupted mid-synth with an
+      `interrupted` it never said `speaking` for; publishing time-to-first
+      -audio as a jv-voice `sys.health` gauge is B16's shape and is
+      per-turn data on a heartbeat topic. Not a schema question either way
+      — `speech.state`'s enum is frozen and neither option adds a state. Adding it would
       make `total` the thing the budget actually names ("hey jarvis" →
       spoken reply) instead of a proxy for it. Worth doing WITH the human
       decision B13 leaves open, because moving the end of the measurement
@@ -898,7 +913,57 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       sensor feeds yet. Re-read this the day the first moving layer lands,
       and measure it on ares rather than here. Discovered in A34.
 
+- [x] A37. The HUD says what Jarvis did to your machine when it did not
+      work. — 7bc1eb5
+      (`core/ActionState.qml` decides — 35 QML tests, 8 mutations run
+      through them — and `ActionPlate.qml` draws ACTION FAILED, the
+      registry tool name verbatim, and the schema's own error word, in
+      `risk` rather than ember. Invariant 3 gives one process the right to
+      change this computer and the HUD could show the QUESTION jv-act asks
+      before a destructive tool (A20) and never the outcome of any tool at
+      all. Three decisions: FAILURES ONLY (a success draws nothing — the
+      machine visibly doing the thing is the report that it was done,
+      HealthPlate's argument applied to actions); NEVER A TOOL IT CANNOT
+      PROVE (`action.result` has a request_id and no tool name, the name
+      is in the `intent.action` that asked, `bus.latest()` holds one frame
+      per topic — so the ids must match or the failure is reported
+      nameless, and the pair is latched TOGETHER at the moment the failure
+      is accepted because both sources keep moving); and NOT `denied` /
+      `confirm_timeout`, which are how a CONFIRMATION ended and therefore
+      A22's question for a human — passed over here, and passed over as NO
+      NEWS so a denial cannot silently clear a real failure. The exit is a
+      real signal and not a timer, the same three HeardState uses: Jarvis
+      starting to explain, a newer outcome (including a SUCCESS — holding
+      a failure under a retry that worked describes a machine that is not
+      the one in front of you), and the link dropping, with `holdS` as the
+      backstop. `intent.action` + `action.result` joined the bridge's
+      topic list, and a new tools gate fails the build if any element
+      under `core/` so much as names `args` or `detail` — the 08-action
+      shot composes frames carrying both, so the sheet is the
+      demonstration. Tests: `bash ops/ralph/qmltest.sh` (384, was 347),
+      `bash ops/ralph/runtests.sh tools` (90), `... jv-hud-bridge`.)
+
+- [ ] A38. `ActionPlate` is drawn on EVERY monitor, like every other
+      plate, so the A13/A27 question ("three copies across three screens:
+      right, or noise?") now has a third instance — and this one is the
+      least ignorable of the three, because it is the one that says
+      something went wrong. Nothing was built toward an answer: it is one
+      `ActionPlate {}` in the stack, and a `personality/` switch is the
+      obvious shape if the answer is "sometimes". Answer it with A13/A27,
+      not separately. Discovered in A37.
+
+- [ ] A39. A22 now has a ready-made shape if the human answering it wants
+      one. `ActionState` deliberately passes over `denied` and
+      `confirm_timeout` because they are how a confirmation ENDED, but it
+      already reads the topic, already latches, and already leaves on a
+      real signal — so "the word, then gone" would be one line in
+      `apply()` and one more `reportableReasons` entry, with no timer and
+      no new rule. Do NOT build it until A22 is answered; this note exists
+      so that answering it is cheap. Discovered in A37.
+
 ## Done
+- A37 — the HUD says what Jarvis did to your machine when it did not work
+  (7bc1eb5, 2026-09-24)
 - A34 — the HUD renders nothing while nothing changes, counted off its own
   Wayland socket instead of argued from how Qt Quick works
   (d420e24, 2026-09-24)
