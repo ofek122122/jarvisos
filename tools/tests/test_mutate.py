@@ -749,6 +749,133 @@ def test_the_shots_abort_names_the_two_things_its_stage_drops(tmp_path):
     assert 'rm -rf "$stage/tests"' in script
 
 
+# ------------------------------------------ what a RED baseline means (B53)
+
+
+def _repo(tmp_path, plate="import QtQuick\nQtObject { property int a: 1 }\n"):
+    """A throwaway git repo with one committed plate and one committed sheet.
+
+    The hint below is a MEASUREMENT of the working tree against HEAD, so it
+    cannot be tested against a bare directory: `git status` has to have
+    something to answer."""
+    git = ["git", "-C", str(tmp_path), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run(git + ["init", "-q", "-b", "main"], check=True)
+    (tmp_path / "shell" / "jv-hud").mkdir(parents=True)
+    (tmp_path / "shell" / "jv-hud" / "P.qml").write_text(plate, encoding="utf-8")
+    (tmp_path / "docs" / "hud").mkdir(parents=True)
+    (tmp_path / "docs" / "hud" / "state-idle.png").write_bytes(b"\x89PNG committed")
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-qm", "sheet"], check=True)
+    return tmp_path / "shell" / "jv-hud" / "P.qml"
+
+
+SHOTS_SPEC = "@ x\nshell/jv-hud/P.qml\n- a: 1\n+ a: 2\n"
+
+
+def test_a_red_baseline_under_the_shots_runner_says_the_sheet_is_stale(tmp_path):
+    """B53, measured rather than reasoned: with an uncommitted edit to a plate,
+    `--runner shots` renders a sheet that differs from `HEAD:docs/hud`,
+    tools/hudsheet.py exits 1, the BASELINE run is red and the harness aborts.
+    The refusal is right and the sentence was wrong — the suite is fine, the
+    SHEET is stale — and the comparator's four lines saying so are the tail of
+    a log `script_runner` prints one line of."""
+    plate = _repo(tmp_path)
+    plate.write_text("import QtQuick\nQtObject { property int a: 1 }\n// edited\n", encoding="utf-8")
+    with pytest.raises(mutate.HarnessError) as exc:
+        mutate.run(
+            mutate.parse_spec(SHOTS_SPEC),
+            lambda env, scratch: False,
+            root=tmp_path,
+            lang=mutate.SHOTS,
+        )
+    said = str(exc.value)
+    assert "baseline" in said                       # still the same abort
+    assert "shell/jv-hud/P.qml" in said             # and it names what moved
+    assert "hudshots.sh" in said and "commit" in said
+    assert "docs/hud" in said
+
+
+def test_the_stale_sheet_hint_is_not_printed_when_the_plates_match_head(tmp_path):
+    """The other half, and the reason the hint is a measurement: with the tree
+    at HEAD a red baseline is NOT a stale sheet, and a harness that blamed one
+    anyway would send the reader to run `hudshots.sh` over a suite that is
+    genuinely broken."""
+    _repo(tmp_path)
+    with pytest.raises(mutate.HarnessError) as exc:
+        mutate.run(
+            mutate.parse_spec(SHOTS_SPEC),
+            lambda env, scratch: False,
+            root=tmp_path,
+            lang=mutate.SHOTS,
+        )
+    said = str(exc.value)
+    assert "hudshots.sh" not in said
+    assert "matches HEAD" in said
+
+
+def test_an_uncommitted_sheet_is_still_a_stale_sheet(tmp_path):
+    """The gotcha worth one sentence: hudsheet.py compares against
+    `HEAD:docs/hud`, so PNGs that were re-rendered and not COMMITTED leave the
+    baseline exactly as red as before. The advice has to say commit."""
+    plate = _repo(tmp_path)
+    plate.write_text("import QtQuick\nQtObject { property int a: 2 }\n", encoding="utf-8")
+    (tmp_path / "docs" / "hud" / "state-idle.png").write_bytes(b"\x89PNG refreshed")
+    with pytest.raises(mutate.HarnessError) as exc:
+        mutate.run(
+            mutate.parse_spec(SHOTS_SPEC),
+            lambda env, scratch: False,
+            root=tmp_path,
+            lang=mutate.SHOTS,
+        )
+    said = str(exc.value)
+    assert "hudshots.sh" in said
+    assert "not committed" in said
+
+
+def test_the_red_baseline_abort_says_nothing_about_the_sheet_for_other_runners(tree):
+    """Only one of the four runners reads a committed artifact back, so only
+    one of them has this failure mode. The Python abort stays what it was."""
+    root, _ = tree
+    with pytest.raises(mutate.HarnessError) as exc:
+        mutate.run(mutate.parse_spec(SPEC), lambda env, scratch: False, root=root)
+    assert "hudshots" not in str(exc.value)
+    assert mutate.PYTHON.baseline_hint is None
+
+
+def test_a_hint_that_cannot_run_git_says_nothing_at_all(tmp_path):
+    """The hint shells out to git, and the abort it decorates must survive a
+    root that is not a repository — the harness has one job at that moment and
+    it is to refuse, not to raise a second exception about the first.
+
+    It must also not fill the silence: "I could not look" is not "nothing is
+    modified", and printing the tree-matches-HEAD sentence here would be the
+    harness asserting something it did not measure."""
+    (tmp_path / "shell" / "jv-hud").mkdir(parents=True)
+    (tmp_path / "shell" / "jv-hud" / "P.qml").write_text(
+        "import QtQuick\nQtObject { property int a: 1 }\n", encoding="utf-8"
+    )
+    assert mutate._modified(tmp_path, "shell/jv-hud") is None      # could not look
+    assert mutate.shots_baseline_hint(tmp_path) == ""
+    with pytest.raises(mutate.HarnessError, match="baseline") as exc:
+        mutate.run(
+            mutate.parse_spec(SHOTS_SPEC),
+            lambda env, scratch: False,
+            root=tmp_path,
+            lang=mutate.SHOTS,
+        )
+    said = str(exc.value)
+    assert "B53" not in said and "matches HEAD" not in said
+    assert said.endswith("fix the suite first.")
+
+
+def test_nothing_modified_and_could_not_look_are_different_answers(tmp_path, tmp_path_factory):
+    """The distinction the sentence above rests on, held on its own: a clean
+    repository answers `[]` and a directory that is not one answers `None`."""
+    _repo(tmp_path)
+    assert mutate._modified(tmp_path, "shell/jv-hud") == []
+    assert mutate._modified(tmp_path_factory.mktemp("plain"), "shell/jv-hud") is None
+
+
 def test_a_target_the_shots_runner_does_not_grade_exits_two(spec_file, monkeypatch):
     monkeypatch.setattr(mutate, "run", lambda *a, **k: pytest.fail("ran on a bad target"))
     assert mutate.main(["--runner", "shots", "jv-ears", spec_file]) == 2

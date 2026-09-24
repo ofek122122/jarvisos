@@ -106,6 +106,17 @@ repo; the script now compares what it rendered against the sheet committed at
 HEAD (tools/hudsheet.py). A mutation that moves a pixel is caught by the
 picture — which is the only assertion here that is about the HUD's look.
 
+B53 is the bill for that comparison, and it arrived the first time the loop
+mutated a plate it had just edited: an uncommitted change to `StatePlate.qml`
+makes the rendered sheet differ from `HEAD:docs/hud`, so the BASELINE run is
+red and the harness aborts with "fix the suite first" about a suite that is
+perfectly fine. The comparator says exactly what happened, in four lines at
+the tail of a log `script_runner` prints one line of. So the red-baseline abort
+now carries a per-runner hint, and for the only runner that reads a committed
+artifact back it is a measurement of the tree rather than a slogan — it names
+the plates that differ from HEAD, or says the tree matches HEAD and the red is
+real, or (when git cannot answer) says nothing at all.
+
 `@ label` opens a block, the next bare line is the repo-relative file, and
 the `-`/`+` lines are the hunk (joined in order, indentation kept verbatim).
 `old` must appear EXACTLY once in the file: a hunk that matches twice is an
@@ -272,6 +283,78 @@ def shots_env(cache_dir: Path) -> dict[str, str]:
     return {"QML_DISABLE_DISK_CACHE": "1"}
 
 
+# --------------------------------------------------- what a RED baseline means
+
+
+def _modified(root: Path, path: str) -> list[str] | None:
+    """The paths under `path` that differ from HEAD, tracked or not — `None`
+    when git could not answer at all, which includes a `root` that is not a
+    repository (every unit test in this file works in one that is not).
+
+    `None` and `[]` are deliberately different. "Nothing is modified" is a
+    finding; "I could not look" is not, and the caller must not print the first
+    sentence when it only has the second. A hint must also never be the reason
+    a refusal turns into a traceback."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--", path],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    out = []
+    for line in proc.stdout.splitlines():
+        name = line[3:].strip()
+        if name:
+            out.append(name.split(" -> ")[-1].strip('"'))
+    return sorted(out)
+
+
+def shots_baseline_hint(root: Path) -> str:
+    """Why `--runner shots` alone can go red with a healthy suite (B53).
+
+    It is the only runner that reads a COMMITTED artifact back: `hudshots.sh`
+    renders the plates and then compares every PNG against `HEAD:docs/hud`
+    (tools/hudsheet.py), so an uncommitted change to a plate that draws
+    anything new makes the baseline run red, the harness abort, and the abort
+    say "fix the suite first" about a suite that is fine. Measured while
+    closing B52, on an uncommitted edit to `StatePlate.qml`.
+
+    Which is why this is a measurement and not a fixed sentence. With the tree
+    at HEAD there is nothing for the read-back to disagree with, the red is
+    real, and a harness that sent the reader off to re-render a contact sheet
+    would be pointing at the wrong thing. And when git cannot answer, this says
+    NOTHING — the abort it decorates is a refusal to make a claim, and a hint
+    that guessed at the reason would be the one thing this harness never does.
+    """
+    moved = _modified(root, "shell/jv-hud")
+    if moved is None:
+        return ""
+    if not moved:
+        return (
+            "Not the stale-sheet case (B53): shell/jv-hud matches HEAD, so the "
+            "sheet read-back has nothing to disagree with and the suite itself "
+            "is red."
+        )
+    named = ", ".join(moved[:3]) + (f", +{len(moved) - 3} more" if len(moved) > 3 else "")
+    stale = (
+        f"The SHEET may be stale rather than the suite (B53): "
+        f"{len(moved)} file(s) under shell/jv-hud differ from HEAD ({named}), and "
+        f"hudshots.sh compares every PNG it renders against HEAD:docs/hud, so a "
+        f"plate that now draws something new makes the BASELINE red. Run "
+        f"`bash ops/ralph/hudshots.sh`, LOOK at the new PNGs, commit them, then grade."
+    )
+    if _modified(root, "docs/hud"):
+        stale += (
+            " docs/hud is itself modified and not committed, which does not help "
+            "yet: the comparison is against HEAD."
+        )
+    return stale
+
+
 @dataclasses.dataclass(frozen=True)
 class Language:
     """A suite this harness knows how to run, and what a canary means in it."""
@@ -293,6 +376,11 @@ class Language:
     # file, when there is one. A generic "check the runner" is no help to a
     # loop that has just been told its plate numbers mean nothing.
     canary_hint: str = ""
+    # Appended to the RED-baseline abort, called with the repo root. Only one
+    # runner reads a committed artifact back, so only one has a red baseline
+    # that is not the suite's fault — and the useful version of that sentence
+    # is a measurement of the tree, not a slogan (B53).
+    baseline_hint: Callable[[Path], str] | None = None
 
     def command(self, root: Path, target: str, scratch: Path) -> list[str]:
         cmd = ["bash", str(root / "ops" / "ralph" / self.script)]
@@ -352,6 +440,7 @@ SHOTS = Language(
     targets=("hud",),
     pass_target=False,
     scratch_out=True,
+    baseline_hint=shots_baseline_hint,
     canary_hint=(
         "hudshots.sh stages the shell but DROPS shell.qml and tests/, so a "
         "canary in either lives. shell.qml is the Quickshell half no other "
@@ -554,9 +643,11 @@ def run(
 
     try:
         if not suite():
+            hint = lang.baseline_hint(root) if lang.baseline_hint else ""
             raise HarnessError(
                 "the baseline suite is RED before any mutation. Every mutation "
                 "would be reported as caught for free; fix the suite first."
+                + (f" {hint}" if hint else "")
             )
 
         for rel in targets:

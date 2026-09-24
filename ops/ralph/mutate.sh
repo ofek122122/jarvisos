@@ -33,6 +33,12 @@
 # Exit: 0 every mutation caught · 1 a mutation survived · 2 the harness
 # cannot make an honest claim (red baseline, a canary that lived, a bad spec,
 # the wrong grader for the file, a tree still red after the last restore).
+#
+# A RED BASELINE UNDER --runner shots IS USUALLY THE SHEET (B53). hudshots.sh
+# compares every PNG it renders against HEAD:docs/hud, so an uncommitted change
+# to a plate makes the baseline red with nothing wrong with the suite. The abort
+# names the plates that differ from HEAD and tells you the fix: run
+# `bash ops/ralph/hudshots.sh`, LOOK at the new PNGs, commit them, then grade.
 set -euo pipefail
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 exec python3 "$root/tools/mutate.py" "$@"
