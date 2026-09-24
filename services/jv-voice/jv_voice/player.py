@@ -51,6 +51,7 @@ class FakePlayer(Player):
         self.played: list[int] = []  # sample counts handed to us
         self.aborted = 0
         self.started = asyncio.Event()  # set when playback actually begins
+        self.finished = asyncio.Event()  # set when a clip plays to its end
 
     async def play(self, audio: np.ndarray, rate: int, abort: asyncio.Event) -> bool:
         self.played.append(len(audio))
@@ -62,4 +63,5 @@ class FakePlayer(Player):
                 self.aborted += 1
                 return False
             await asyncio.sleep(0.01)
+        self.finished.set()
         return True
