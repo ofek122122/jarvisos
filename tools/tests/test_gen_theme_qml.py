@@ -556,6 +556,48 @@ def test_every_topic_the_hud_reads_is_one_the_bridge_subscribes_to():
     )
 
 
+# --- A37: bodies the HUD may carry but must not render ---------------------
+
+# Two body fields ride the bridge because the envelope is forwarded whole,
+# and neither may reach a screen. `intent.action.args` is whatever the tool
+# was asked to operate on — a path, a search string, a window title — and
+# `action.result.detail` is free text jv-act writes for logs. The HUD's case
+# for reading action bodies at all (bridge.py) is that a registry tool name
+# and a frozen error enum are VOCABULARY; these two are content, and drawing
+# them would put the contents of the user's machine on a panel that is on
+# top of every window.
+#
+# core/ only, because core/ is where a bus body is read: a plate receives
+# whatever its element decided to expose and never touches an envelope.
+# `detail` is an ordinary English word — HealthPlate has a row field by that
+# name, built out of the health schema's own state words — so this gate is
+# scoped to the half of the HUD where the name can only mean the bus field.
+UNRENDERED_BODY_FIELDS = (
+    ("args", "intent.action.args — whatever the tool was asked to operate on"),
+    ("detail", "action.result.detail — free text for logs and debugging"),
+)
+
+
+def test_no_core_element_reads_the_body_fields_the_hud_only_carries():
+    """A body the bridge forwards is not a body the HUD may draw.
+
+    The gate is the field NAME anywhere in core/, not a particular read
+    shape, because there are a dozen ways to reach a property in QML and
+    only one of them is worth having a rule about. If an element ever needs
+    a local called `args`, that is the moment to argue for it in review
+    rather than the moment this test is deleted.
+    """
+    core = ROOT / "shell" / "jv-hud" / "core"
+    for path in sorted(core.glob("*.qml")):
+        text = strip_qml_comments(path.read_text("utf-8"))
+        for field, what in UNRENDERED_BODY_FIELDS:
+            assert not re.search(rf"\b{field}\b", text), (
+                f"{path.name} names `{field}` outside a comment. That is {what}, "
+                "which this pipe carries and the HUD must never render "
+                "(invariant 7)."
+            )
+
+
 # --- A23: the blind-HUD warning must outlast every ordinary reconnect ------
 
 # The two cadences that decide how long a healthy machine can be off the bus.

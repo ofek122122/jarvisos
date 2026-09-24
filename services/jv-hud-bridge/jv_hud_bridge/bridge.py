@@ -66,6 +66,24 @@ from jarvis_bus import BusError
 # a wrong answer. core/HeardState.qml reads the FINALS only, which is the
 # same editorial line the schema draws: partials are provisional and may
 # be rewritten, and only finals are acted on.
+#
+# intent.action + action.result are the third (PLAN A37), and they are the
+# pair that says what jv-act DID. The HUD could show the question asked
+# before a destructive tool and never the outcome of any tool, so "it did
+# it", "it broke" and "nothing was ever asked" were one empty corner.
+# They arrive together because neither answers the question alone:
+# action.result carries a request_id and no tool name, intent.action
+# carries the name, and core/ActionState.qml will not put a name on screen
+# unless the two ids match — a tool name taken on faith is a lie about what
+# touched the machine.
+#
+# `intent.action.args` is the most sensitive body on this list: it is
+# whatever the tool was asked to operate on, a path or a search string or
+# a window title. It rides this pipe because the envelope is forwarded
+# whole (that is what `conf`, `ts` and `seq` are for) and it goes no
+# further — no element reads it, and a tools gate fails the build if one
+# starts to. Same rule as brain.request/brain.response above: the HUD may
+# know a frame exists without rendering what is inside it.
 DEFAULT_TOPICS: Sequence[str] = (
     "speech.state",
     "audio.wake",
@@ -75,6 +93,8 @@ DEFAULT_TOPICS: Sequence[str] = (
     "brain.request",
     "brain.response",
     "action.confirm",
+    "intent.action",
+    "action.result",
 )
 
 # Exactly the envelope (schemas/envelope.json). Forwarding the whole thing

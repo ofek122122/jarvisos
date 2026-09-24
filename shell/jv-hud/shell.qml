@@ -179,6 +179,16 @@ ShellRoot {
           anchors.right: parent.right
         }
 
+        // What came of the last thing Jarvis did to this machine, from
+        // jv-act's own action.result — and only when it did not work.
+        // Directly under the heard line because it is the end of the same
+        // story the three plates above tell: Jarvis is doing something,
+        // this is what you asked for, and this is why nothing happened.
+        // On a machine whose actions all worked it is never here at all.
+        ActionPlate {
+          anchors.right: parent.right
+        }
+
         // Whether the microphone is open, from jv-ears' own capture
         // counters. Below the state plate on purpose: what Jarvis is doing
         // changes minute to minute, while the recording light is a

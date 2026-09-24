@@ -86,6 +86,10 @@ Item {
       anchors.right: parent.right
     }
 
+    ActionPlate {
+      anchors.right: parent.right
+    }
+
     MicPlate {
       anchors.right: parent.right
     }
@@ -238,6 +242,33 @@ Item {
       suite.beat("jv-compat", "degraded", undefined, "wine prefix rebuild pending");
     }
 
+    // COMPOSED. jv-act reaching into the machine and getting nowhere. The
+    // pair is what the plate needs and what the bus really carries: the
+    // intent names the tool, the result says only that request_id failed,
+    // and core/ActionState.qml will not put the name on screen unless the
+    // two ids match. `denied` and `confirm_timeout` are deliberately NOT
+    // photographed here — they are how a confirmation ended, which is
+    // A22's open question and not this plate's to answer.
+    function shot_action() {
+      Bus.ingest('{"t":"link","up":true}');
+      suite.micOpen();
+      suite.send("intent.action", "jv-brain", {
+        "request_id": "req-9c07",
+        "tool": "app.launch",
+        "args": {
+          "name": "obsidian"
+        },
+        "capability": "benign"
+      });
+      suite.send("action.result", "jv-act", {
+        "request_id": "req-9c07",
+        "ok": false,
+        "duration_ms": 214,
+        "error": "execution_failed",
+        "detail": "exec: \"obsidian\": executable file not found in $PATH"
+      });
+    }
+
     // The HUD admitting it cannot see the machine at all (A23). Every
     // plate below refuses to guess, and a refusal draws the same nothing a
     // calm machine draws — so without this line a dark recording light
@@ -262,7 +293,8 @@ Item {
       // LinkState holds a 5 s grace before it will call the HUD blind — a
       // reconnecting bridge is not a lost machine — so this one settles
       // past that rather than photographing the silence in between.
-      { "file": "07-no-bus.png", "build": suite.shot_nobus, "lit": true, "settleMs": 6500 }
+      { "file": "07-no-bus.png", "build": suite.shot_nobus, "lit": true, "settleMs": 6500 },
+      { "file": "08-action.png", "build": suite.shot_action, "lit": true }
     ]
 
     function test_the_sheet() {

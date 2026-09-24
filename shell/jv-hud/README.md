@@ -9,13 +9,24 @@ fakes sensor state (invariant 10).
 `shell.qml` maps one layer-shell surface per connected monitor, and that
 surface is **unmapped unless an element has something true to draw** — the
 default state of the screen is your work and nothing else, and an unmapped
-surface renders at 0 fps. Today it stacks two elements in the top-right
-corner: `StatePlate` (A3), which draws only while Jarvis is listening,
-speaking or was interrupted, and `MicPlate` (A4), the recording light,
-which draws only while the microphone is actually open.
+surface renders at 0 fps. Today it stacks seven plates in the top-right
+corner, in this order:
 
-Both read the bus and nothing else, and both take jv-ears' own tuning from
-`core/EarsBudgets.qml` (A14) rather than mirroring it.
+| plate | draws while | topic |
+|---|---|---|
+| `LinkPlate` (A23) | the HUD cannot see the bus at all | (the pipe itself) |
+| `ConfirmPlate` (A20) | jv-act is waiting on your yes or no | `action.confirm` |
+| `StatePlate` (A3) | Jarvis is listening, thinking, speaking or was interrupted | `speech.state` + `audio.wake` + `brain.*` |
+| `HeardPlate` (A26) | your words are still the live question | `audio.transcript` |
+| `ActionPlate` (A37) | the last thing Jarvis did to the machine failed | `intent.action` + `action.result` |
+| `MicPlate` (A4) | the microphone is actually open | `sys.health` (jv-ears) |
+| `HealthPlate` (A6) | some service is not well | `sys.health` |
+
+Every one of them reads the bus and nothing else, several take jv-ears' own
+tuning from `core/EarsBudgets.qml` (A14) rather than mirroring it, and every
+one of them draws NOTHING until it has something true to say — which is why
+the ordinary state of this HUD is an unmapped surface. `docs/hud/` is a
+contact sheet of all seven, at the surface's real size.
 
 The skeleton pins the properties that make the HUD safe by construction,
 and `tools/tests/test_gen_theme_qml.py` fails the build if any of them is
@@ -44,9 +55,8 @@ Jarvis does. `jv tap speech.state audio.wake` shows the same frames the HUD
 is reading, which is the fastest way to tell a HUD bug from a bus one.
 
 `JV_HUD_SELFTEST` reports that the *shell* is alive, never a sensor — which
-is why its marker sits in the opposite corner from the real elements. The
-only sensor-backed thing on screen is `StatePlate`, and it comes off the bus
-or it does not appear.
+is why its marker sits in the opposite corner from the real elements.
+Everything in the table above comes off the bus or does not appear.
 
 ## Theme tokens (A2)
 
@@ -431,8 +441,9 @@ bash ops/ralph/runtests.sh tools       # the drift gates
 
 ## Next
 
-Track A's open items are `A8` (font packaging — needs an identity call,
-invariant 9), `A11` (real sources for `Motion.onBattery`/`fullscreen` —
-blocked on proposal R1's schema fields) and `A13` (one `StatePlate` per
-monitor: right, or noise?). And the standing one: nobody has looked at this
-HUD on ares yet.
+Track A's open items are `A11` (real sources for
+`Motion.onBattery`/`fullscreen` — blocked on proposal R1's schema fields)
+and the questions a human has to answer by looking: `A13`/`A27` (one plate
+per monitor — right, or noise?), `A21`/`A22`/`A25` (what a plate should do
+over seconds). And the standing one: nobody has looked at this HUD on ares
+yet — `docs/hud/` and `docs/hud/screens/` are the nearest thing to it.

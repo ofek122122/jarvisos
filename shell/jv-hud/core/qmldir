@@ -13,5 +13,6 @@ HealthState 1.0 HealthState.qml
 ConfirmState 1.0 ConfirmState.qml
 LinkState 1.0 LinkState.qml
 HeardState 1.0 HeardState.qml
+ActionState 1.0 ActionState.qml
 PlateStack 1.0 PlateStack.qml
 EarsBudgets 1.0 EarsBudgets.qml

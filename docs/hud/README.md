@@ -120,6 +120,35 @@ line a dark recording light over a microphone the HUD simply cannot see would
 read as "off". It waits 5 s first: a reconnecting bridge is not a lost
 machine. It cannot yet say how long it has been blind (A25).
 
+### 08 — action failed
+
+![08-action.png](08-action.png)
+
+`composed`. The end of the story the plates above tell: Jarvis reached into
+the machine and the machine did not move (A37). Invariant 3 gives exactly one
+process the right to change this computer, and until now the HUD could show
+the question jv-act asks before a destructive tool and never the outcome of
+any tool at all — so "it did it", "it broke" and "nothing was ever asked"
+were the same empty corner, and the only report on any of them was a sentence
+the language model composed afterwards.
+
+`risk`, not ember: ember means Jarvis is doing something, and this is the
+opposite. The tool's registry name is verbatim, because it is the same string
+`jv act-log` and the audit log use — what you read here is what you can go
+and grep for — and the reason is the schema's own enum word rather than a
+friendlier paraphrase nobody could look up.
+
+Two things are deliberately NOT in this picture. Successes: an action that
+worked draws nothing, because the machine visibly doing the thing is the
+report that it was done (the HealthPlate argument). And `denied` /
+`confirm_timeout` — those are how a *confirmation* ended, which is A22's open
+question and not this plate's to answer as a side effect.
+
+The composed frames behind it also carry `args` (`{"name": "obsidian"}`) and
+`detail` (the exec error), which is the point: the bridge forwards whole
+envelopes, and neither field is on screen. A tools gate fails the build if
+any element under `shell/jv-hud/core` so much as names them.
+
 ## Regenerating
 
 ```
