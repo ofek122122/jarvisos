@@ -1214,6 +1214,51 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       Tests: `bash ops/ralph/runtests.sh tools` (104),
       `bash ops/ralph/hudscreens.sh` (7 screens).)
 
+- [x] A51. The HUD says when this machine refused to run a program.
+      — ecc89c5
+      (Invariant 8 makes jv-guard's screening the only moment JarvisOS
+      says NO to something its user asked for, and it was the one moment
+      with no pixels. `core/GuardState.qml` decides — 41 QML tests, 10
+      mutations run through them — and `GuardPlate.qml` draws BINARY
+      BLOCKED in `risk` or BINARY SUSPICIOUS in `warn`, over the file's
+      own name. REFUSALS ONLY; NOT the scanner's `reasons`, which the
+      schema says are spoken on request and which are the only text on
+      this topic a schema does not fix; the NAME IS SANITISED, because it
+      is the one string this HUD draws that an attacker chose — whitespace
+      collapsed first, then C0/C1, zero-width marks and bidi overrides
+      stripped, then capped, and a name with nothing left falls back to
+      the first 12 hex of the sha256 labelled as a hash; and NO SPOKEN
+      EXIT, because a verdict is not part of a voice turn, which makes the
+      30 s hold the ordinary exit rather than a backstop. `guard.verdict`
+      joined the bridge's topics; the surface box grew 560 → 624 and three
+      other files carry that number. Tests: `bash ops/ralph/qmltest.sh`
+      (476), `... runtests.sh tools` (125), `... jv-hud-bridge` (25),
+      `bash ops/ralph/hudshots.sh` (10 shots, `10-guard.png` new),
+      `bash ops/ralph/hudscreens.sh` (7 screens, green against the real
+      `.#jv-hud`).)
+
+- [ ] A52. The HUD reads jv-guard and not jv-compat, so it can say a
+      binary was REFUSED and nothing else about an install: a prefix build
+      that failed, an install abandoned after the refusal it photographed,
+      or the app SLUG (`compat.install.app`) that a reader would recognise
+      where GuardPlate currently shows a file name. The whole lifecycle is
+      on the bus already — `compat.install` carries
+      fingerprinted/screened/prefix_created/installed/failed/blocked — and
+      `sha256` threads it to the verdict, which is the same join
+      discipline ActionState uses for a request_id. One topic, one
+      element, and a decision to make first: an install is a MINUTES-long
+      process and every other plate in this stack is about a moment, so
+      "what is jv-compat doing right now" may be a progress indicator,
+      which is a shape §06 does not have yet. Discovered in A51.
+
+- [ ] A53. `10-guard.png` is a picture only a human can tell apart from a
+      picture of `ActionPlate`: same corner, same two-line shape, same
+      severity colour, and the screens harness's growth checks would say
+      the identical thing about either. That is A47's complaint with a
+      fifth instance, and the answer is still OCR or a QML-side probe.
+      Worth writing down so nobody reads the new shot as proof that the
+      new plate is what arrived. Discovered in A51.
+
 - [ ] A47. The growth check proves a plate ARRIVED, never WHICH plate.
       `grows_from` (A44) and A42's live-lit window both measure the same
       thing: the drawn region got taller from the same top-right corner.
@@ -1249,8 +1294,22 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       drift, and a picture nobody byte-compares does not need to be a
       fixture. Done as part of A44, which rewrites the directory anyway.)
 
-- [ ] A46. `JARVIS_VOICE_OUTPUT_DEVICE` (A41) is honoured by the process
-      and declared nowhere. `modules/jarvis-services.nix` builds
+- [x] A46. `JARVIS_VOICE_OUTPUT_DEVICE` (A41) is honoured by the process
+      and declared nowhere. — 61f26a4
+      (`jarvis.voice.outputDevice`, a `types.nullOr types.str` defaulting
+      to null, threaded into jv-voice's unit environment and NO other
+      unit's. The repo's first NixOS option, so the module grew an
+      `options`/`config` split to hold it. The empty string is refused by
+      an assertion, because jv-voice reads an empty variable as "no
+      device" and `outputDevice = ""` would be a configuration claiming a
+      device is pinned while the service it configures reports none.
+      Tests: `bash ops/ralph/nixtest.sh` — NEW machinery, 7 cases, each a
+      `nix eval` of an `extendModules`-overridden ares asserting the
+      GENERATED UNIT TEXT rather than the attrset, with four mutations run
+      through it. The toplevel derivation path is identical to its
+      parent's: a knob on ares, and not a byte of what ares would boot.
+      Committed in iteration 43 and journalled in iteration 44 — the
+      iteration that built it never wrote it down.) `modules/jarvis-services.nix` builds
       `systemd.user.services.jv-voice` with `environment = commonEnv`
       and no way to name a device, so pinning one today means editing a
       unit by hand — the imperative mutation the NixOS discipline
@@ -1264,6 +1323,14 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       plugs in a dedicated speaker. Discovered in A41.
 
 ## Done
+- A51 — the HUD says when this machine refused to run a program: jv-guard's
+  verdict on a plate, the reasons deliberately left for the voice, and the
+  one string in this HUD an attacker chose made safe to draw (ecc89c5,
+  2026-09-24)
+- A46 — the speaker Jarvis talks into becomes something the machine
+  declares: `jarvis.voice.outputDevice`, the repo's first NixOS option, and
+  `ops/ralph/nixtest.sh` to assert what options do to units (61f26a4,
+  2026-09-24)
 - A49 — the last plate in the stack gets watched standing still, and the
   turn gets an ending: a sixth measured window on the fifth's own broker
   and shell, the first check of a plate LEAVING, 0 commits, and a

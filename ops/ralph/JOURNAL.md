@@ -4384,3 +4384,147 @@ for `detail` on the result.
   `modules/jarvis-services.nix`) is still the smallest untouched item on
   the board. B20 and B17 are still both waiting on the same two minutes
   of a human's attention at a terminal.
+
+## 2026-09-24 — iteration 44 — A51: the machine gets a face for the one
+## time it says no to you
+
+Two things in this entry, and the second one is bookkeeping the previous
+iteration owed and did not pay.
+
+**A46 was built, verified and committed in iteration 43 (61f26a4) and
+never journalled, never marked done in PLAN.md, and never pushed.** The
+loop's own memory is this repository, so an undocumented commit is a
+thing that happened to a machine nobody can ask about later. The work
+itself is sound and its verification is recorded in the commit message:
+`jarvis.voice.outputDevice` is the repo's first NixOS option, the module
+grew an `options`/`config` split to hold it, the empty string is refused
+by an assertion because jv-voice reads an empty variable as "no device",
+and `ops/ralph/nixtest.sh` is new machinery — seven cases, each one a
+`nix eval` of an `extendModules`-overridden ares that greps the GENERATED
+UNIT TEXT, so no case can pass because of how an option happens to be
+expressed. Four mutations were run through it. The toplevel derivation
+path was unchanged from its parent commit, which is the strongest thing
+that can be said about a knob with a null default: it adds an option to
+ares and not a byte to what ares would boot. PLAN.md marks it done below;
+nothing about it was re-litigated here beyond re-running the build.
+
+**A51 is the iteration's own work: the HUD can now say that this machine
+refused to run a program.** Invariant 8 — Windows binaries are untrusted
+by default, jv-guard screens every one before jv-compat builds a prefix —
+makes that screening the only moment in JarvisOS where the machine says
+NO to something its user asked for. It was the one moment with no pixels:
+a `guard.verdict` on the bus, jv-compat failing closed in a terminal, and
+a HUD showing the same empty corner it shows for a machine nobody has
+asked to install anything. jv-guard is a real system unit on ares
+(`modules/jarvis-services.nix`), so this plate is reachable today by
+running `jv-compat install` on something a scanner objects to — it is not
+a picture of a future phase.
+
+`core/GuardState.qml` decides and `GuardPlate.qml` draws BINARY BLOCKED
+in `risk` — that verdict is final — or BINARY SUSPICIOUS in `warn`,
+because the confirmation flow may still override that one, over the
+file's own name. What is NOT on it took as much deciding as what is:
+
+**No reasons.** "matched ClamAV signature Win.Trojan.Agent" is in every
+frame this element reads and on none of its pixels, because
+`schemas/guard.verdict.json` says in as many words that the reasons are
+"spoken on request". They are also the only text on this topic written by
+a scanner rather than fixed by a schema, which is exactly the line
+ActionPlate draws when it renders `execution_failed` and never jv-act's
+free-text `detail`. A glance says a file was refused and which one;
+asking why is what your voice is for.
+
+**The name is sanitised, and that is the part of this element that is not
+a copy of ActionState.** Every other string this HUD draws was chosen by
+a service (a tool name, a state word) or by the user's own mouth (the
+transcript). A file name was chosen by whoever built the installer, which
+invariant 8 says outright is untrusted — and a Linux file name may carry
+newlines (a plate three lines tall on a surface that floats over every
+window), a bidirectional override (`setup<U+202E>exe.bat` renders as
+`setup.bat` and is not), or four kilobytes of nothing. `plainName()`
+collapses whitespace FIRST — a newline is a word boundary as well as a
+control character, and stripping first would join two words its author
+separated — then removes C0/C1, the zero-width marks and the bidi
+overrides, then caps the length. A name with nothing left of it is
+reported as NO name, which falls back to the first 12 hex of the sha256,
+labelled as a hash: the identity jv-guard's own log uses and the only
+thing about a file that may ever leave this machine (invariant 7).
+
+**No spoken exit, on purpose.** ActionState lets go of a failure when
+Jarvis starts explaining it, and copying that here would have been wrong:
+a verdict is not part of a voice turn — the trigger is `jv-compat
+install` at a terminal — so a `speaking` frame landing after one is
+almost certainly about something else, and an unrelated sentence would
+take the refusal off the screen. The 30 s hold is therefore the ORDINARY
+exit here rather than a backstop, which is the one place this element
+leans on a timer where its siblings lean on a signal, and it is written
+down as such. The other two exits are the family's: a newer verdict
+(including a clean one — the element reports the LAST binary screened, so
+holding a refusal under a later screening would describe a machine that
+is not the one in front of you), and the link dropping.
+
+That last one produced the only mutation that survived the first pass.
+`refused` is gated on `linked`, so an element that merely stopped
+REPORTING on a dropped link looks identical to one that FORGETS — until
+the bridge reconnects, BusModel comes back with an empty cache, and a
+latch nobody let go of puts a verdict back on screen that nothing on the
+bus is saying any more. A test for the reconnect was written and the
+mutation dies.
+
+The surface box grew 560 → 624. Unlike LinkPlate's growth (which can
+never share the surface with anything) this one is about genuine
+co-occurrence: a refused install says nothing about whether a service is
+unwell or the microphone is open, so all of it can be on screen at once.
+Three other files carry that number — both shot harnesses and the
+sheet's README — and `tools/tests/test_hudscreens.py` pins the measuring
+one to shell.qml's binding. Also corrected while in there: shell.qml's
+"what it shows today" list had been missing `ActionPlate` since A37.
+
+- tests: `bash ops/ralph/qmltest.sh` — 476 (was 435; 41 new), with TEN
+  mutations run through them: a clean verdict reported like any other
+  (3 fail), the name drawn as its author typed it (6), the length cap
+  gone (1), a word outside the enum read as a verdict (1), a dropped link
+  that keeps the refusal (1, after the reconnect test was added — 0
+  before it, which is why it was), the hash shortened whatever it is (2),
+  the hash left in whatever case it arrived in (1), the backstop never
+  firing (4), a late frame treated as fresh (1), the envelope floor
+  dropping the schema version (3). All ten reverted.
+  `bash ops/ralph/runtests.sh tools` — 125, `... jv-hud-bridge` — 25.
+  `bash ops/ralph/hudshots.sh` — 10 shots (all rewritten at the new box
+  height; `10-guard.png` is new). `bash ops/ralph/hudscreens.sh` — 7
+  screens, every window and probe green against the REAL `.#jv-hud` that
+  now carries this plate. The six screens that moved are A45's documented
+  2-5 px glyph drift, committed because the shell genuinely changed.
+  One process note worth keeping: the first hudscreens run reported
+  nothing wrong while its `nix build .#jv-hud` had FAILED, because the
+  new files were untracked and nix builds the git tree — the failure was
+  hidden by piping the script into `tail`, which ate its exit status. Run
+  the gates unpiped, or `git add -N` first.
+- build: `nix build .#jv-hud` ok (qmllint `-W 0` and the QML suite both
+  run in its checkPhase), `nixos-rebuild build --flake .#ares` ok — twice,
+  once on the parent commit as a baseline and once on this work. Never
+  test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin.
+- files: shell/jv-hud/core/GuardState.qml (new),
+  shell/jv-hud/GuardPlate.qml (new),
+  shell/jv-hud/tests/tst_guardstate.qml (new), shell/jv-hud/shell.qml,
+  shell/jv-hud/qmldir, shell/jv-hud/core/qmldir, tools/gen_theme_qml.py,
+  tools/hudshots/scene/tst_shots.qml, tools/hudscreens/sheet.py,
+  tools/hudscreens/shoot.py, ops/ralph/hudscreens.sh,
+  services/jv-hud-bridge/jv_hud_bridge/bridge.py, docs/hud/README.md,
+  docs/hud/*.png (10), docs/hud/screens/*.png (6)
+- next: **A52** is what this element could not answer inside its own
+  scope: GuardPlate says a binary was refused and jv-compat's whole
+  lifecycle (`compat.install`) is on the bus unread, so the HUD cannot
+  say a prefix build FAILED, or that an install it showed a refusal for
+  was abandoned — and `compat.install.app` is the slug a reader would
+  recognise where the HUD currently shows a file name. One topic, one
+  element, and the same join discipline ActionState uses (`sha256` threads
+  the lifecycle to its verdict). **A53** is the mirror of A47 for this
+  plate: nothing but a human eye can tell `10-guard.png` apart from a
+  picture of `ActionPlate`, and the growth checks in the screens harness
+  would say the same thing about both.
+  A50 (a destructive tool in jv-act's registry, human review) and A47
+  (four windows that prove a plate ARRIVED and cannot say which) are
+  unchanged. B20 and B17 are still waiting on the same two minutes of a
+  human's attention at a terminal.
