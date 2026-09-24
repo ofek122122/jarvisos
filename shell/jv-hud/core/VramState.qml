@@ -51,12 +51,20 @@
 //
 // THE NUMBER IS QUOTED, NEVER JUDGED. No threshold lives here. "Enough
 // VRAM for the 8B Q4 brain" is a fact about the rung ladder in jv-brain's
-// launcher, and the ladder's requirements are not on the bus — so a HUD
-// deciding "the card is free now, restart the brain" would be guessing at
-// another service's configuration through a wall invariant 1 put there on
-// purpose. It says the number; the reader knows their own card. Publishing
-// the rung's VRAM need as a gauge is the follow-up that would let the HUD
-// say the rest, and it belongs to jv-brain.
+// launcher, and a HUD deciding "the card is free now, restart the brain"
+// would be guessing at another service's configuration through a wall
+// invariant 1 put there on purpose.
+//
+// Which is why the second row (B46) is a QUOTE and not a verdict.
+// jv-brain now publishes what its own ladder would need — `llm_gpu_floor_mb`,
+// 5424 MiB of ares' 6144 MiB card — and this element puts that figure on
+// the line below the reading, in the same units, and stops there. It
+// never subtracts the two, never colours one against the other, and never
+// says "restart jv-llm": the comparison a reader makes from two numbers
+// standing next to each other is theirs, and the same two numbers are on
+// the bus for anything that wants to make it properly. The floor is an
+// INPUT here for the same reason `brainOnCpu` is — it arrives on
+// `sys.health`, which `HealthState` owns.
 //
 // On confidence (invariant 4): `context.system` fixes envelope conf at 1.0.
 // A hedged snapshot of a mixer or a card is a frame that disagrees with
@@ -86,6 +94,17 @@ QtObject {
   // cannot see the bus says.
   property bool brainOnCpu: false
 
+  // What the card would have to give back before jv-brain's ladder would
+  // pick a GPU rung again, in whole MiB — or -1 for "the brain is not
+  // saying". Fed from `HealthState.llmGpuFloorMb`, which reads it off
+  // jv-brain's own heartbeat (B45), and never computed here: the ladder
+  // and its VRAM requirements live in `jv_brain/config.py`, on the far
+  // side of the wall invariant 1 put there, and a HUD that guessed at
+  // them would be quoting another service's configuration back at its
+  // user. Unfed, it is -1, and the row below never appears — which is
+  // exactly what this plate drew before the gauge existed.
+  property real gpuFloorMb: -1
+
   // --- the outputs ------------------------------------------------------
 
   // Is there a free-VRAM figure this element is willing to stand behind
@@ -108,6 +127,27 @@ QtObject {
   // tools/tests/test_gen_theme_qml.py holds every file here to that.
   readonly property string line: root.reporting ? root.render(root.freeMb) : ""
 
+  // --- and what it would take (B46) --------------------------------------
+
+  // Is there a requirement to put UNDER the reading? Only ever under it.
+  // `reporting` is in the condition and not merely nearby: a requirement
+  // with no measurement beside it is a number a reader cannot check —
+  // "the brain wants 5424 MiB" says nothing about whether this machine
+  // has them — and jv-brain refuses the same line for the same reason
+  // (its `notes` quote the floor only next to a reading it actually
+  // took). So the two rows arrive and leave together, and a HUD that can
+  // see jv-brain but not jv-context draws exactly what it drew before.
+  readonly property bool needKnown: root.reporting && root.gpuFloorMb > 0 && isFinite(root.gpuFloorMb)
+
+  // The second row, as `HealthPlate` draws it — "NEEDS 5424 MiB" — or "".
+  // Two rows rather than one composed sentence, because the two figures
+  // come from two different services: jv-context measured the first and
+  // jv-brain computed the second, and a single string would be the HUD
+  // synthesising a claim neither of them made. Side by side, the
+  // comparison is a glance instead of something the reader has to know
+  // this machine's ladder to make.
+  readonly property string needLine: root.needKnown ? "NEEDS " + root.amount(root.gpuFloorMb, true) : ""
+
   // Whole MiB below five digits, then GiB — one decimal, and none at all
   // past 100 GiB. Not cosmetic: the HUD surface is a fixed 300 px box
   // (shell.qml) sized to the longest line any plate may ever draw, which is
@@ -119,10 +159,29 @@ QtObject {
   // reason ares' own reading is a whole number: nothing here is decided by
   // a fraction of a mebibyte.
   function render(mb: real): string {
+    return root.amount(mb, false) + " FREE";
+  }
+
+  // The quantity on its own, in at most eight characters — `9999 MiB`,
+  // `99.9 GiB`, `1024 GiB` — so that neither row can widen past the box:
+  // `vram ` + eight + ` FREE` is thirteen, and `NEEDS ` + eight is
+  // fourteen under a three-letter name.
+  //
+  // `up` is which way a figure that does not divide evenly is allowed to
+  // move, and it is not cosmetic. A free-VRAM reading rounds to nearest
+  // (nothing here is decided by a fraction of a MiB, and ares' own
+  // reading is a whole number); a REQUIREMENT rounds up, so the pair can
+  // never draw a fit that the ladder would not actually take. jv-brain
+  // already rounds its floor up for the same reason, which makes this
+  // belt and braces — and belt and braces is the right amount of care for
+  // a number whose whole job is to be compared against another one.
+  function amount(mb: real, up: bool): string {
     if (mb < 10000)
-      return Math.round(mb) + " MiB FREE";
+      return (up ? Math.ceil(mb) : Math.round(mb)) + " MiB";
     const gib = mb / 1024;
-    return (gib < 100 ? gib.toFixed(1) : String(Math.round(gib))) + " GiB FREE";
+    if (gib >= 100)
+      return String(up ? Math.ceil(gib) : Math.round(gib)) + " GiB";
+    return (up ? Math.ceil(gib * 10) / 10 : gib).toFixed(1) + " GiB";
   }
 
   // --- reading the frame -------------------------------------------------

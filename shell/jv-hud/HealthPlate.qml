@@ -35,6 +35,14 @@
 //     as the ladder working. Dimmer than the line it explains, because it
 //     is not itself news — and never on screen on its own account, which
 //     is what would make it the all-day gauge §06 refuses.
+//   · `llm NEEDS 5424 MiB` under THAT, when jv-brain says what its ladder
+//     would take (B46). Two numbers, two publishers, one row each: the
+//     card as jv-context measured it, and the requirement as jv-brain
+//     computed it off a ladder the HUD may not read (invariant 1). Side
+//     by side they turn "943 MiB free" from a figure a reader has to know
+//     this machine to judge into one they can judge on the spot — and
+//     into the moment a closed game makes them equal, which is the whole
+//     reason to look. Never without the reading above it.
 //
 // Colour is the severity and nothing else. Ember never appears: ember
 // means Jarvis is doing something (§06), and a service falling over is
@@ -64,6 +72,11 @@ Item {
   readonly property VramState vram: VramState {
     bus: Bus
     brainOnCpu: root.health.llmOnCpu
+    // And what the card would have to give back. Off the same heartbeat
+    // as the rung, through the same reader, because a floor and a rung
+    // that disagreed about which brain they describe would be worse than
+    // neither.
+    gpuFloorMb: root.health.llmGpuFloorMb
   }
 
   // How many findings fit before the list becomes a wall. Past this the
@@ -116,6 +129,18 @@ Item {
       out.push({
         "name": "vram",
         "detail": root.vram.line,
+        "tone": Theme.text3
+      });
+    // And what the brain would need before the card were an option again
+    // (B46). Named `llm` and not `vram` because it is jv-brain's number
+    // about jv-brain's ladder, where the row above is jv-context's
+    // measurement of the card — one row per publisher, and the reader
+    // does the comparing. Never on its own: `VramState` only offers this
+    // line under a reading to compare it with.
+    if (root.vram.needKnown)
+      out.push({
+        "name": "llm",
+        "detail": root.vram.needLine,
         "tone": Theme.text3
       });
     return out;

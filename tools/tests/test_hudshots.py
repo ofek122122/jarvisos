@@ -430,6 +430,7 @@ ACT = ROOT / "services" / "jv-act"
 
 sys.path[:0] = [str(BRAIN), str(COMPAT)]
 from jv_brain.config import LADDER  # noqa: E402
+from jv_brain.launcher import gpu_floor_mb  # noqa: E402
 from jv_compat import fingerprint as compat_fingerprint  # noqa: E402
 
 BRACKETS = {"(": ")", "[": "]", "{": "}"}
@@ -698,6 +699,12 @@ def test_the_health_shot_photographs_a_rung_jv_brain_can_report():
     jv-brain, because `metrics` is free-form by schema — a service-local
     key nobody publishes is a key `jv health` will never print.
 
+    B46 added the requirement beside it: `llm_gpu_floor_mb`, which the
+    HUD draws under the free-VRAM reading as `NEEDS 5424 MiB`. That one
+    is recomputed here off the same ladder rather than compared to a
+    constant — it is `min()` over the GPU rungs, and a reordered or
+    re-quantised ladder moves it.
+
     Not checked: `notes`. It is free text, and "VRAM pressure: fell back
     to CPU" is a composed sentence in a composed frame.
     """
@@ -733,6 +740,30 @@ def test_the_health_shot_photographs_a_rung_jv_brain_can_report():
             f"rung {rung.index} is {rung.label!r}, which runs "
             f"{'on the GPU' if rung.gpu else 'on the CPU'}; the frame says "
             f"llm_gpu={metrics['llm_gpu']}"
+        )
+        # B46: the second row of the picture. The floor is not a figure
+        # anyone chose — it is `min()` over the GPU rungs of the same
+        # ladder above, in whole MiB rounded up — and the HUD renders it
+        # verbatim, so a sheet showing a floor jv-brain would not compute
+        # is a picture of another machine's ladder. Present exactly while
+        # the shot is of a brain that is off the card: that is the only
+        # state in which jv-brain publishes it at all.
+        floor = gpu_floor_mb()
+        if rung.gpu or floor is None:
+            assert "llm_gpu_floor_mb" not in metrics, (
+                "jv-brain withholds the floor once the requirement is met, "
+                "or when its ladder has no GPU rung to meet"
+            )
+            continue
+        assert "llm_gpu_floor_mb" in metrics, (
+            "the shot is of a brain on the CPU with a card present, which is "
+            "exactly when jv-brain publishes the floor — and the second row "
+            "of the health plate is the picture of it"
+        )
+        assert metrics["llm_gpu_floor_mb"] == float(floor), (
+            f"jv-brain's ladder needs {floor} MiB free before it would pick "
+            f"the card; the frame says {metrics['llm_gpu_floor_mb']}, so the "
+            "picture is of a requirement it never publishes"
         )
     assert saw == 1, f"{saw} rungs in the health shot; it photographs exactly one"
 

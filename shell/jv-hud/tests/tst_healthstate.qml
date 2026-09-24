@@ -496,6 +496,109 @@ TestCase {
     compare(suite.entry(health, "jv-brain").state, "lost");
   }
 
+  // --- what the card would have to give back (B46) ---------------------
+
+  function test_the_floor_is_read_from_the_brains_own_heartbeat() {
+    // jv-brain publishes it only while something is waiting on it: a
+    // brain on the CPU, on a machine that HAS a card. 5424 MiB is ares'
+    // own ladder — the cheapest GPU rung, of a 6144 MiB card.
+    const health = makeHealth();
+    beat(health, "jv-brain", "ok", {
+      "metrics": {
+        "llm_rung": 4.0,
+        "llm_gpu": 0.0,
+        "llm_gpu_floor_mb": 5424.0
+      }
+    });
+    compare(health.llmGpuFloorMb, 5424);
+  }
+
+  function test_a_brain_that_names_no_floor_is_not_a_brain_that_needs_nothing() {
+    // The ordinary case for a brain already on the GPU, and for a machine
+    // with no card at all: jv-brain withholds the gauge, and the HUD may
+    // not fill the gap with a ladder it cannot read (invariant 1).
+    const health = makeHealth();
+    beat(health, "jv-brain", "ok", {
+      "metrics": {
+        "llm_rung": 4.0,
+        "llm_gpu": 0.0
+      }
+    });
+    verify(health.llmOnCpu);
+    compare(health.llmGpuFloorMb, -1);
+  }
+
+  function test_another_services_floor_is_not_the_brains() {
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "metrics": {
+        "llm_rung": 4.0,
+        "llm_gpu": 0.0,
+        "llm_gpu_floor_mb": 5424.0
+      }
+    });
+    compare(health.llmGpuFloorMb, -1, "jv-ears does not own the ladder");
+  }
+
+  function test_a_stale_brain_heartbeat_is_not_a_floor() {
+    const health = makeHealth();
+    beat(health, "jv-voice", "ok");
+    beat(health, "jv-brain", "ok", {
+      "period_s": 5,
+      "metrics": {
+        "llm_rung": 4.0,
+        "llm_gpu": 0.0,
+        "llm_gpu_floor_mb": 5424.0
+      }
+    }, {
+      "ts": suite.fakeNow + 100 - 11
+    });
+    compare(health.llmGpuFloorMb, -1, "a requirement off a dead brain describes nothing");
+  }
+
+  // `metrics` is free-form by schema, so anything at all can arrive under
+  // this name from a service that meant something else by it — and every
+  // one of these would render as a requirement if it were let through. 0
+  // is on the list because it is not a floor: it is a ladder that asks
+  // for nothing, which no rung on jv-brain's does.
+  function test_a_floor_that_is_not_a_quantity_is_not_a_floor() {
+    for (const bad of ["5424", true, null, 0.0, -1.0]) {
+      const health = makeHealth();
+      beat(health, "jv-brain", "ok", {
+        "metrics": {
+          "llm_rung": 4.0,
+          "llm_gpu": 0.0,
+          "llm_gpu_floor_mb": bad
+        }
+      });
+      compare(health.llmGpuFloorMb, -1, String(bad) + " is not a VRAM requirement");
+    }
+  }
+
+  // The two that cannot arrive as a bridge line — QML's JSON parser
+  // refuses a `1e999` or a NaN whole, and core/BusModel drops the line —
+  // but `bus` is duck-typed, and the shot harness already hands these
+  // elements bodies built in QML rather than parsed from a line. So the
+  // guard is reachable by the path a stub takes, and it is tested by that
+  // path: `NEEDS Infinity MiB` is not a thing to put on a screen.
+  function test_a_floor_that_is_not_a_number_of_mebibytes_is_not_a_floor() {
+    for (const bad of [Infinity, -Infinity, NaN]) {
+      const health = suite.makeStubbed(["jv-brain"]);
+      let env = health.bus.beats["jv-brain"];
+      env.body.metrics = {
+        "llm_rung": 4.0,
+        "llm_gpu": 0.0,
+        "llm_gpu_floor_mb": bad
+      };
+      // Reassigned whole rather than mutated in place: `beats` is a var
+      // property, and a binding does not re-run because an object it
+      // already holds grew a field.
+      health.bus.beats = ({ "jv-brain": env });
+      verify(health.llmOnCpu, "the stub really is a brain on the CPU floor");
+      compare(health.llmGpuFloorMb, -1, bad + " is not a number of mebibytes");
+    }
+  }
+
   function test_a_degraded_brain_still_reports_which_rung_it_is_on() {
     // Both facts at once, and they are different facts: the service is
     // impaired AND the model is on the CPU floor.

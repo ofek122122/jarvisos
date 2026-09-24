@@ -630,6 +630,35 @@ def test_the_vram_row_is_gated_on_the_rung_it_explains():
     )
 
 
+def test_the_requirement_row_is_bound_to_the_brain_that_publishes_it():
+    """B46: the second row quotes jv-brain, and may not invent it.
+
+    Same shape as the gate above and the same reason for it: the floor
+    (`llm_gpu_floor_mb`) arrives on jv-brain's own heartbeat, HealthState is
+    the file that owns that heartbeat and its expiry, and VramState takes the
+    number as an INPUT. A plate that built the element and forgot the binding
+    would draw the reading with no requirement under it — silent, correct
+    looking, and a row short — and nothing headless can catch it, because
+    plates import the Quickshell singletons.
+
+    The third claim is the one that matters most on screen: the requirement is
+    drawn only while VramState offers it, and VramState offers it only under a
+    reading. A row that appeared on its own would put "the brain needs 5424
+    MiB" in front of someone who has not been told what their card has.
+    """
+    plate = ROOT / "shell" / "jv-hud" / "HealthPlate.qml"
+    text = strip_qml_comments(plate.read_text("utf-8"))
+    assert re.search(r"^\s*gpuFloorMb\s*:\s*\w+\.\w+\.llmGpuFloorMb\s*$", text, re.M), (
+        "HealthPlate builds a VramState and never binds `gpuFloorMb` to the "
+        "floor HealthState read, so the reading would stand with nothing to "
+        "compare it against"
+    )
+    assert re.search(r"if\s*\(\s*\w+\.vram\.needKnown\s*\)", text), (
+        "HealthPlate draws its requirement row without asking VramState "
+        "whether there is a reading to put it under"
+    )
+
+
 # --- A20: an element cannot read a topic nothing subscribes to -------------
 
 # Every way a core/ element can ask the bus about a topic. Each one takes the

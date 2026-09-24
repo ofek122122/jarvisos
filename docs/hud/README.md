@@ -200,6 +200,26 @@ screen all day is the gauge §06 refuses — and on a machine with no GPU there
 is no such field, so the rung line stands alone rather than being explained
 by a shortage that does not exist.
 
+The line under *that* is what the card would have to give back (B46).
+`5424 MiB` is not composed either, and it is not the HUD's arithmetic: it is
+`launcher.gpu_floor_mb` — the least free VRAM at which jv-brain's ladder
+would still land on a GPU rung, `min()` over the GPU rungs of the same five,
+in whole MiB rounded up — published on its own heartbeat as
+`llm_gpu_floor_mb` and recomputed off that ladder by a test, so a picture of
+a requirement jv-brain would not make fails rather than prints. Two numbers,
+two publishers, one row each: jv-context measured the card, jv-brain
+computed what its ladder wants, and the HUD puts them one above the other
+and stops. It does not subtract them, colour one against the other, or
+suggest restarting anything — the ladder is jv-brain's configuration and
+invariant 1 keeps it on jv-brain's side of the wall. What the pair buys is
+that `943 MiB free` stops being a figure you have to know this machine to
+judge: **943 against 5424 is the ladder working**, and the day a closed game
+makes those two numbers meet is visible at a glance. The requirement never
+appears without a reading beside it — a number with nothing to compare it to
+is jv-brain's own rule for its `notes`, and it is this plate's for its rows —
+and jv-brain withholds it entirely once the brain is on the card, or on a
+machine that has no card to free.
+
 ### 07 — no bus
 
 ![07-no-bus.png](07-no-bus.png)

@@ -240,6 +240,127 @@ TestCase {
     compare(vram.line, "");
   }
 
+  // --- what it would take (B46) ------------------------------------------
+  //
+  // jv-brain publishes the least free VRAM at which its ladder would
+  // still land on the card (`llm_gpu_floor_mb`, 5424 MiB on ares), and
+  // this element quotes it under the reading. The failures worth pinning
+  // are the ones that would make the second row worse than no second row:
+  // a requirement standing alone with nothing to compare it against, a
+  // requirement rounded DOWN so the pair draws a fit the ladder would not
+  // take, and a figure invented here out of a ladder the HUD may not read.
+
+  function test_says_what_the_ladder_would_need_under_what_the_card_has() {
+    const vram = makeVram({});
+    vram.gpuFloorMb = 5424;
+    snapshot(vram, { free: 943 });
+    compare(vram.line, "943 MiB FREE", "the measurement is untouched by the requirement");
+    verify(vram.needKnown);
+    compare(vram.needLine, "NEEDS 5424 MiB");
+  }
+
+  // The whole point of the pair: the moment a closed game makes the card
+  // enough. Nothing here JUDGES that — no verdict, no colour, no
+  // "restart jv-llm" — the two numbers simply stop disagreeing, and the
+  // reader can see it without knowing this machine's ladder.
+  function test_the_pair_is_quoted_and_never_judged() {
+    const vram = makeVram({});
+    vram.gpuFloorMb = 5424;
+    snapshot(vram, { free: 5600 });
+    compare(vram.line, "5600 MiB FREE");
+    compare(vram.needLine, "NEEDS 5424 MiB", "the row says the same thing either way");
+  }
+
+  // An element nobody wired the floor into draws exactly what this plate
+  // drew before B46 — which is also every machine whose brain is already
+  // on the GPU, and every machine with no card, because jv-brain
+  // withholds the gauge in both.
+  function test_an_unfed_floor_is_no_second_row() {
+    const vram = makeVram({});
+    snapshot(vram, { free: 943 });
+    compare(vram.line, "943 MiB FREE");
+    verify(!vram.needKnown, "nobody said what the ladder wants");
+    compare(vram.needLine, "");
+  }
+
+  // The requirement is never the only thing on screen. A reader told
+  // "the brain needs 5424 MiB" and not how much the card has cannot do
+  // anything with it — it is jv-brain's own rule for its `notes`, and it
+  // is this element's for its rows.
+  function test_a_requirement_never_stands_without_a_reading() {
+    const vram = makeVram({});
+    vram.gpuFloorMb = 5424;
+    verify(!vram.needKnown, "no snapshot yet: nothing to compare it with");
+    compare(vram.needLine, "");
+    snapshot(vram, { noVram: true });
+    verify(!vram.needKnown, "a machine with no card is not one to quote a floor at");
+    snapshot(vram, { free: 943 });
+    verify(vram.needKnown, "now there is something to put it beside");
+  }
+
+  // And it leaves with the reading. `reporting` gates both rows, so a
+  // brain that got its GPU back, a jv-context that went quiet, and a
+  // dropped link all take the pair away together rather than leaving half
+  // a comparison up.
+  function test_the_second_row_leaves_with_the_first() {
+    const vram = makeVram({});
+    vram.gpuFloorMb = 5424;
+    snapshot(vram, { free: 943 });
+    verify(vram.needKnown);
+    vram.brainOnCpu = false;
+    compare(vram.line, "");
+    compare(vram.needLine, "", "half a comparison is worse than none");
+  }
+
+  // The floor arrives on jv-brain's 5 s heartbeat and the reading on
+  // jv-context's 1 Hz snapshot, so it can land either side of the frame.
+  function test_the_second_row_appears_when_the_floor_is_learned() {
+    const vram = makeVram({});
+    snapshot(vram, { free: 943 });
+    compare(vram.needLine, "");
+    vram.gpuFloorMb = 5424;
+    compare(vram.needLine, "NEEDS 5424 MiB", "the floor is live, not read once at startup");
+  }
+
+  // -1 is "the brain is not saying", and 0 is not a floor: a ladder that
+  // asks for nothing is not one any rung of jv-brain's has. Neither may
+  // become a row — `NEEDS 0 MiB` under a card with 943 MiB free would say
+  // the requirement is met while the brain sits on the CPU.
+  function test_a_floor_that_is_not_a_quantity_is_no_second_row() {
+    for (const bad of [-1, 0, NaN, Infinity]) {
+      const vram = makeVram({});
+      vram.gpuFloorMb = bad;
+      snapshot(vram, { free: 943 });
+      verify(vram.reporting, "the reading itself is fine");
+      verify(!vram.needKnown, bad + " is not a VRAM requirement");
+      compare(vram.needLine, "");
+    }
+  }
+
+  // Rounded UP, always: the pair exists to be compared, and a requirement
+  // rounded to nearest could draw `943 MiB FREE` over `NEEDS 943 MiB` on
+  // a ladder that wants 943.4 and would not start.
+  function test_a_requirement_is_never_rounded_down() {
+    const vram = makeVram({});
+    snapshot(vram, { free: 943 });
+    vram.gpuFloorMb = 5424.2;
+    compare(vram.needLine, "NEEDS 5425 MiB");
+    vram.gpuFloorMb = 23500;
+    compare(vram.needLine, "NEEDS 23.0 GiB", "22.94 GiB is not 22.9 GiB of requirement");
+    vram.gpuFloorMb = 102400.5;
+    compare(vram.needLine, "NEEDS 101 GiB");
+  }
+
+  // The same unit ladder as the reading above it, so the two rows are
+  // always in the same units and the comparison never needs arithmetic.
+  function test_the_two_rows_are_written_in_the_same_units() {
+    const vram = makeVram({});
+    snapshot(vram, { free: 23500 });
+    vram.gpuFloorMb = 24000;
+    compare(vram.line, "22.9 GiB FREE");
+    compare(vram.needLine, "NEEDS 23.5 GiB");
+  }
+
   // --- bodies this element may not read ---------------------------------
 
   function test_refuses_a_schema_version_it_was_not_written_against() {
@@ -484,6 +605,22 @@ TestCase {
       verify(vram.line.length > 0, "every one of these is a reading");
       verify(("vram" + vram.line).length <= widest,
              free + " MiB renders as \"" + vram.line + "\", which is wider than the box allows");
+    }
+  }
+
+  // And neither can any ladder (B46). The second row is drawn under the
+  // name `llm`, which is three characters to the reading's four, so the
+  // requirement gets one more than the figure does — and `NEEDS ` spends
+  // six of them. Every branch, at the biggest number it can be handed.
+  function test_no_ladder_can_widen_the_second_row_past_the_box() {
+    const vram = makeVram({});
+    const widest = ("jv-compat" + "DEGRADED").length;
+    snapshot(vram, { free: 943 });
+    for (const need of [1, 943, 9999, 10000, 99.9 * 1024, 102400, 1048576, 9999 * 1024]) {
+      vram.gpuFloorMb = need;
+      verify(vram.needLine.length > 0, "every one of these is a requirement");
+      verify(("llm" + vram.needLine).length <= widest,
+             need + " MiB renders as \"" + vram.needLine + "\", which is wider than the box allows");
     }
   }
 }

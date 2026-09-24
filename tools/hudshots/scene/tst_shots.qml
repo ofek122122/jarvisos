@@ -243,9 +243,15 @@ Item {
     function shot_health() {
       Bus.ingest('{"t":"link","up":true}');
       suite.micOpen();
+      // The floor is jv-brain's own arithmetic over its own ladder
+      // (`launcher.gpu_floor_mb`, B45), published only while something is
+      // waiting on it — which a brain on rung 4 with a card present is.
+      // tools/tests/test_hudshots.py recomputes it off that ladder, so
+      // this figure is checked rather than chosen.
       suite.beat("jv-brain", "degraded", {
         "llm_rung": 4,
-        "llm_gpu": 0
+        "llm_gpu": 0,
+        "llm_gpu_floor_mb": 5424
       }, "VRAM pressure: fell back to CPU");
       suite.beat("jv-voice", "ok");
       suite.beat("jv-compat", "degraded", undefined, "wine prefix rebuild pending");

@@ -116,6 +116,29 @@ QtObject {
 
   readonly property bool llmOnCpu: root.llmBackend === "cpu"
 
+  // The least free VRAM at which jv-brain's ladder would still land on the
+  // card, in whole MiB — or -1 when the brain is not saying. jv-brain
+  // computes it off its own ladder (`launcher.gpu_floor_mb`) and publishes
+  // it only while something is waiting on it: never while the model is
+  // already on the GPU, and never on a machine with no card, where a
+  // floor would send a reader hunting VRAM that machine has never had.
+  // So its mere PRESENCE is meaningful, and this reads it exactly as
+  // published rather than deriving a floor for a brain that did not offer
+  // one (invariant 1: the ladder is jv-brain's configuration, not the
+  // HUD's to guess at).
+  //
+  // Refused: anything that is not a positive, finite number. `metrics` is
+  // free-form by schema, so a string, a NaN, or the Infinity `1e999`
+  // parses to would otherwise reach a screen as a requirement — and 0 is
+  // not a floor either, it is a ladder that asks for nothing.
+  readonly property real llmGpuFloorMb: {
+    const m = root.brainMetrics;
+    if (m === null)
+      return -1;
+    const mb = m.llm_gpu_floor_mb;
+    return typeof mb === "number" && isFinite(mb) && mb > 0 ? mb : -1;
+  }
+
   // jv-brain's free-form gauges, or null. Same expiry as everything else:
   // a rung read off a three-minute-old heartbeat describes a process that
   // may not be running.
