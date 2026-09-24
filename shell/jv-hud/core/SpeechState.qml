@@ -29,9 +29,11 @@
 //     (If that segment was NOT gated, ears stays armed and we stop saying
 //     "listening" a little early. Early is the safe direction.)
 //   · otherwise the window expires on its own after `wakeWindowS`, which
-//     mirrors jv-ears' `wake_timeout_s`. It is a fallback, not the primary
-//     rule, and it is a HUD-side constant because nothing publishes ears'
-//     configuration — so keep it AT OR BELOW the value ears is tuned to.
+//     is ears' own `wake_timeout_s`, read off its heartbeat (A14). It is
+//     a fallback, not the primary rule. This used to be a constant typed
+//     in here because nothing published ears' configuration; ears now
+//     states the budgets it enforces, so the HUD reads them instead of
+//     being asked to remember them.
 //
 // "thinking" (A12) is the other half of the same honesty problem. Between
 // the moment Jarvis has your words and the moment you hear anything back
@@ -79,7 +81,10 @@ QtObject {
   property var bus: null
 
   // How long a wake word keeps meaning "listening" when nothing else has
-  // said otherwise. jv-ears' `wake_timeout_s` default is 8 s; see above.
+  // said otherwise. StatePlate binds this to what jv-ears reports on its
+  // own heartbeat (core/EarsBudgets.qml, A14); the value here is the
+  // fallback for a jv-ears that has not said, and a tools test fails the
+  // build if it drifts from ears' `wake_timeout_s` default.
   property real wakeWindowS: 8.0
 
   // How long an unanswered prompt keeps meaning "thinking". Unlike

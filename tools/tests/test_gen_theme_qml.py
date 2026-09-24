@@ -422,6 +422,96 @@ def test_nothing_in_the_hud_waits_for_a_pointer_it_can_never_receive():
     )
 
 
+# --- A14: the budgets the HUD falls back to are jv-ears' own ---------------
+
+# Each budget jv-ears now publishes on its heartbeat, the Python that
+# enforces it, and the QML property names that mirror it as a fallback.
+# The mirror cannot be deleted — the HUD has to say something before the
+# first heartbeat lands — so it is pinned instead.
+BUDGET_MIRRORS = (
+    (
+        "wake window",
+        Path("services/jv-ears/jv_ears/config.py"),
+        re.compile(r"^\s*wake_timeout_s: float = ([\d.]+)", re.M),
+        re.compile(r"^\s*(?:readonly\s+)?property\s+real\s+(wakeWindow\w*S)\s*:\s*([\d.]+)\s*$", re.M),
+    ),
+    (
+        "capture stall",
+        Path("services/jv-ears/jv_ears/audio.py"),
+        re.compile(r"^\s*STALL_S = ([\d.]+)", re.M),
+        re.compile(r"^\s*(?:readonly\s+)?property\s+real\s+(stall\w*S)\s*:\s*([\d.]+)\s*$", re.M),
+    ),
+)
+
+
+def test_the_huds_fallback_budgets_still_match_the_jv_ears_that_enforces_them():
+    """A14: jv-ears states its budgets on sys.health, and the HUD reads them.
+
+    But it can only read them once a heartbeat has landed, so the shipped
+    defaults still live in QML — and a copy under a comment asking the next
+    reader to keep it in step is exactly what A14 set out to delete. So the
+    copies are checked against the Python instead. Both directions matter and
+    neither is symmetric: a wake window LONGER than ears' keeps "listening"
+    on screen over a disarmed microphone, and a stall budget longer than
+    ears' calls a deaf one live.
+    """
+    core = ROOT / "shell" / "jv-hud" / "core"
+    for label, source, py, qml in BUDGET_MIRRORS:
+        m = py.search((ROOT / source).read_text("utf-8"))
+        assert m, f"cannot find the {label} budget in {source} — did it move or get renamed?"
+        enforced = float(m.group(1))
+        found = {}
+        for path in sorted(core.glob("*.qml")):
+            for name, value in qml.findall(strip_qml_comments(path.read_text("utf-8"))):
+                found[f"{path.name}:{name}"] = float(value)
+        # The same name shape covers the ceilings EarsBudgets refuses a
+        # reported budget above. They are not mirrors and must not equal the
+        # default — but a ceiling BELOW what jv-ears enforces would refuse
+        # the truth and silently fall back to the mirror forever, so they
+        # are checked here rather than filtered out and forgotten.
+        ceilings = {k: v for k, v in found.items() if "Ceiling" in k}
+        mirrors = {k: v for k, v in found.items() if k not in ceilings}
+        assert len(mirrors) >= 2, (
+            f"expected the {label} fallback in both the element that uses it and "
+            f"core/EarsBudgets.qml, found {sorted(mirrors)} — a renamed property is "
+            "invisible to this gate, which is the one thing it cannot allow"
+        )
+        wrong = {k: v for k, v in mirrors.items() if v != enforced}
+        assert not wrong, (
+            f"the HUD's {label} fallback disagrees with the {source.name} that "
+            f"enforces it ({enforced}): {wrong}"
+        )
+        low = {k: v for k, v in ceilings.items() if v <= enforced}
+        assert not low, (
+            f"a {label} ceiling at or below what jv-ears enforces ({enforced}) "
+            f"would make the HUD refuse ears' own tuning: {low}"
+        )
+
+
+def test_the_plates_take_their_budgets_from_jv_ears_not_from_the_fallback():
+    """The fallback must stay a fallback.
+
+    A plate that instantiates SpeechState or MicState and forgets to bind the
+    budget would run on the hand-written default forever — correct today,
+    wrong the day jv-ears is retuned, and silent either way, because the HUD
+    would go on drawing a perfectly plausible indicator.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    for plate, element, prop in (
+        ("StatePlate.qml", "SpeechState", "wakeWindowS"),
+        ("MicPlate.qml", "MicState", "stallS"),
+    ):
+        text = strip_qml_comments((hud / plate).read_text("utf-8"))
+        assert f"{element} {{" in text, f"{plate} no longer builds a {element}"
+        assert "EarsBudgets {" in text, (
+            f"{plate} builds a {element} but no EarsBudgets, so its `{prop}` is "
+            "whatever the HUD guessed rather than what jv-ears reports"
+        )
+        assert re.search(rf"^\s*{prop}\s*:\s*\w+\.\w+\.{prop}\s*$", text, re.M), (
+            f"{plate} never binds `{prop}` to the EarsBudgets it built"
+        )
+
+
 def test_core_qmldir_registers_every_component_and_no_module_name():
     qmldir = gen.render_core_qmldir()
     assert "BusModel 1.0 BusModel.qml" in qmldir

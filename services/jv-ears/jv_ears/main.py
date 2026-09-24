@@ -21,7 +21,7 @@ from .pipeline import EarsPipeline
 HEALTH_PERIOD_S = 5.0
 
 
-def health_body(meter: CaptureMeter, uptime_s: float) -> dict:
+def health_body(meter: CaptureMeter, uptime_s: float, budgets: dict) -> dict:
     """One heartbeat, carrying what the microphone is actually doing.
 
     `metrics` is the schema's free-form numeric section (service-local by
@@ -29,6 +29,13 @@ def health_body(meter: CaptureMeter, uptime_s: float) -> dict:
     intact. `state` is the frozen enum: a live mic that has stopped
     delivering audio is `degraded`, which is exactly what the 2026-09-15
     field bug looked like from the outside and what nothing reported.
+
+    `budgets` (EarsPipeline.budgets) rides in the same section: the
+    windows jv-ears enforces, stated by the only process that knows them.
+    Required, not optional, so a caller that forgets is a TypeError here
+    rather than a consumer quietly falling back to a guess (PLAN A14).
+    Values are floated on the way out: the schema says every metric is a
+    number, and anything else raises here instead of reaching the bus.
     """
     state, notes = meter.health()
     body = {
@@ -36,7 +43,7 @@ def health_body(meter: CaptureMeter, uptime_s: float) -> dict:
         "state": state,
         "uptime_s": uptime_s,
         "period_s": HEALTH_PERIOD_S,
-        "metrics": meter.metrics(),
+        "metrics": {**meter.metrics(), **{k: float(v) for k, v in budgets.items()}},
     }
     if notes:
         body["notes"] = notes
@@ -113,7 +120,10 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     state_task = asyncio.create_task(follow_speech_state())
 
     async def beat() -> None:
-        await bus.publish("sys.health", health_body(meter, time.monotonic() - started))
+        await bus.publish(
+            "sys.health",
+            health_body(meter, time.monotonic() - started, pipeline.budgets()),
+        )
 
     # Say hello BEFORE the frame loop, not on the loop's first yield: a
     # pipeline that ends immediately (--wav with nothing to read) used to

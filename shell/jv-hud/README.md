@@ -14,6 +14,9 @@ corner: `StatePlate` (A3), which draws only while Jarvis is listening,
 speaking or was interrupted, and `MicPlate` (A4), the recording light,
 which draws only while the microphone is actually open.
 
+Both read the bus and nothing else, and both take jv-ears' own tuning from
+`core/EarsBudgets.qml` (A14) rather than mirroring it.
+
 The skeleton pins the properties that make the HUD safe by construction,
 and `tools/tests/test_gen_theme_qml.py` fails the build if any of them is
 changed, dropped, or forgotten on a surface added later:
@@ -246,9 +249,10 @@ stop saying it too early rather than too late:
   disarms there for a wake-gated utterance.
 - `interrupted` never closes it: jv-voice publishes that *because* of the
   wake, and blanking the plate there would blank it while you are talking.
-- otherwise it expires after `wakeWindowS` (8 s, mirroring jv-ears'
-  `wake_timeout_s`). Nothing publishes ears' configuration, so this is a
-  HUD-side constant — **keep it at or below whatever ears is tuned to.**
+- otherwise it expires after `wakeWindowS` — jv-ears' own `wake_timeout_s`,
+  read off its heartbeat (see *How jv-ears is tuned* below). This used to be
+  a constant typed into the QML under a comment asking the next reader to
+  keep it in step with the service.
 
 Frames are refused rather than guessed at: a body from a schema version we
 were not written against, a wake that scored below the threshold it declares
@@ -296,9 +300,10 @@ service-local — no schema change, nothing frozen touched:
 | `mic_open` | `1` for a real microphone, `0` for a `--wav` run |
 | `capture_age_s` | seconds since the device last delivered audio — **absent** until it ever has |
 | `captured_s` | total audio delivered since start |
+| `capture_stall_s` | the stall budget ears judges by — a budget, not a measurement, so it is there from the first heartbeat |
 
 A live microphone that has delivered nothing for longer than
-`CaptureMeter.STALL_S` also turns the heartbeat itself `degraded`, so `jv
+`capture_stall_s` also turns the heartbeat itself `degraded`, so `jv
 tap sys.health` tells the same story the HUD is telling.
 
 `capture_age_s` is absent rather than infinite on purpose: the bridge
@@ -321,8 +326,45 @@ jv tap sys.health --for 12          # the same heartbeats the HUD reads
 bash ops/ralph/runtests.sh jv-ears  # CaptureMeter + the heartbeat body
 ```
 
+## How jv-ears is tuned (A14)
+
+Two of the claims above are only true for as long as jv-ears is tuned to
+make them true: how long a wake word means `listening`, and how long an open
+microphone may go quiet and still read as `live`. Both were typed into the
+QML by hand, under comments asking whoever retuned the service to remember
+the HUD. So jv-ears states the budgets it enforces on its own heartbeat —
+`metrics` again, still no schema change — and `core/EarsBudgets.qml` is the
+one place that reads them:
+
+| budget | jv-ears | the HUD's fallback |
+|---|---|---|
+| `wake_timeout_s` | `EarsPipeline.budgets()`, off the sample-clock count the code compares against, not off `cfg` | `wakeWindowDefaultS` |
+| `capture_stall_s` | `CaptureMeter.STALL_S` | `stallDefaultS` |
+
+The fallbacks cannot be deleted — the HUD has to say something before the
+first heartbeat lands — so they are pinned instead: `tools/tests` fails the
+build if either drifts from the Python that enforces it, and if a plate
+stops binding the reported value and quietly runs on the fallback.
+
+A reported budget is refused unless it is a number, positive, and under a
+ceiling (`"12"` is not twelve; an infinite window never closes; the value
+also ends up in a `Timer` interval). Refused means *fall back*, never zero.
+
+Unlike the mic gauges, budgets do **not** expire with the heartbeat that
+carried them: a gauge describes a moment, a budget describes how a service
+is configured and stays true until it says otherwise. jv-ears beats
+immediately on start, so a retuned restart lands within one frame, and a
+jv-ears too dead to beat publishes no wakes for the window to bound.
+
+```sh
+bash ops/ralph/qmltest.sh              # EarsBudgets and the elements it feeds
+bash ops/ralph/runtests.sh tools       # the drift gates
+```
+
 ## Next
 
-`A6` — the `sys.health` glance (service health + llm rung), which now has
-`Bus.latestFrom` to build on, and `A12` — a `thinking` state between the
-end of your utterance and Jarvis's first word.
+Track A's open items are `A8` (font packaging — needs an identity call,
+invariant 9), `A11` (real sources for `Motion.onBattery`/`fullscreen` —
+blocked on proposal R1's schema fields) and `A13` (one `StatePlate` per
+monitor: right, or noise?). And the standing one: nobody has looked at this
+HUD on ares yet.

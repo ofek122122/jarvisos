@@ -153,10 +153,18 @@ class CaptureMeter(AudioSource):
         arrived: the HUD bridge serializes frames with json.dumps, which
         writes a bare `Infinity` that no JSON parser accepts — the line
         would be dropped whole and the HUD would go blind.
+
+        `capture_stall_s` is the budget this meter judges by, not a
+        measurement, so it rides along from the very first heartbeat —
+        before any audio has arrived is exactly when a consumer needs it.
+        The HUD used to keep its own copy of STALL_S with a "keep this in
+        step with jv-ears" comment; only the service that enforces a
+        budget can state it (PLAN A14).
         """
         out = {
             "mic_open": 1.0 if self.mic else 0.0,
             "captured_s": float(self.captured_s),
+            "capture_stall_s": float(self.STALL_S),
         }
         age = self.age_s
         if age is not None:

@@ -32,24 +32,28 @@ class FakeBusClient:
         return FakeBus()
 
 
-class CrashingPipeline:
-    """PortAudio losing the ALSA race, distilled."""
+class FakePipeline:
+    """The half of EarsPipeline main.py touches: run it, ask its budgets."""
 
     def __init__(self, cfg, publish):
         pass
+
+    def budgets(self):
+        return {"wake_timeout_s": 8.0}
+
+    def run(self, source):
+        pass
+
+
+class CrashingPipeline(FakePipeline):
+    """PortAudio losing the ALSA race, distilled."""
 
     def run(self, source):
         raise RuntimeError("PaAlsaStream_Configure failed")
 
 
-class CleanPipeline:
+class CleanPipeline(FakePipeline):
     """A pipeline that ends normally (e.g. --wav ran out of files)."""
-
-    def __init__(self, cfg, publish):
-        pass
-
-    def run(self, source):
-        pass
 
 
 @pytest.fixture(autouse=True)

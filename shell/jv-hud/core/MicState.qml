@@ -19,6 +19,9 @@
 //   capture_age_s  seconds since the device last delivered audio.
 //                  ABSENT means it never has.
 //   captured_s     total audio delivered, for the log.
+//   capture_stall_s  how long ears itself lets a device go quiet before
+//                  calling its own heartbeat degraded. A budget, not a
+//                  measurement: MicPlate feeds it in as `stallS` (A14).
 //
 // Which is why the process being alive is not the test. The 2026-09-15
 // field bug was exactly that: PortAudio opened nothing, jv-ears stayed up
@@ -42,8 +45,11 @@ QtObject {
   property string service: "jv-ears"
 
   // How long the device may deliver nothing before we stop calling it
-  // live. Mirrors jv-ears' `CaptureMeter.STALL_S`; keep it AT OR ABOVE
-  // that value, or a healthy mic reads as stalled between chunks.
+  // live. MicPlate binds this to what jv-ears reports on its own
+  // heartbeat (core/EarsBudgets.qml, A14); the value here is the fallback
+  // for a jv-ears that has not said, and a tools test fails the build if
+  // it drifts from `CaptureMeter.STALL_S`. Stays a plain property, not a
+  // binding: this element decides one thing and takes its inputs.
   property real stallS: 1.0
 
   // "unknown" — nothing trustworthy to say (no link, no heartbeat, a

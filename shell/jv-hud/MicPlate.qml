@@ -36,10 +36,17 @@ import "core"
 Item {
   id: root
 
+  // How jv-ears is tuned, as jv-ears reports it (A14) — the budget below
+  // is ears', not a number this file decided on.
+  readonly property EarsBudgets ears: EarsBudgets {
+    bus: Bus
+  }
+
   // What jv-ears' heartbeat says about the device. `Bus` is the read-only
   // link (A5): the HUD subscribes and can do nothing else.
   readonly property MicState mic: MicState {
     bus: Bus
+    stallS: root.ears.stallS
   }
 
   // On screen exactly while the microphone is open — live or stalled.

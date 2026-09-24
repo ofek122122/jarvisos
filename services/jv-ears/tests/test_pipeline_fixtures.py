@@ -89,3 +89,20 @@ def test_wake_scores_are_confident():
     assert len(wakes) == 1
     assert wakes[0]["score"] >= 0.8
     assert wakes[0]["threshold"] == CFG.wake_threshold
+
+
+def test_the_pipeline_reports_the_wake_window_it_actually_enforces():
+    """The HUD stops calling itself "listening" when ears has disarmed.
+
+    It used to mirror `wake_timeout_s` in QML with a "keep this at or
+    below what ears is tuned to" comment (PLAN A14). Now ears says it,
+    on sys.health.metrics — and says what it ENFORCES, which is the
+    sample-clock count the code compares against, not the number in the
+    config file. Today they agree to within one sample; the day anything
+    here rounds differently, the published value follows the code.
+    """
+    pipe = EarsPipeline(CFG, lambda t, c, v, b: None)
+    reported = pipe.budgets()["wake_timeout_s"]
+    assert reported == pipe._wake_timeout / CFG.sample_rate
+    assert reported == pytest.approx(CFG.wake_timeout_s, abs=1.0 / CFG.sample_rate)
+    assert reported > 0

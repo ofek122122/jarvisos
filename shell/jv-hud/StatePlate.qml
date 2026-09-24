@@ -32,10 +32,18 @@ import "core"
 Item {
   id: root
 
+  // How jv-ears is tuned, as jv-ears reports it (A14). The HUD used to
+  // keep its own copy of the wake window under a comment asking whoever
+  // changed ears to remember this file.
+  readonly property EarsBudgets ears: EarsBudgets {
+    bus: Bus
+  }
+
   // What the bus says, as a state. `Bus` is the read-only link (A5): it
   // subscribes and nothing more, so nothing in the HUD can act.
   readonly property SpeechState voice: SpeechState {
     bus: Bus
+    wakeWindowS: root.ears.wakeWindowS
   }
 
   // Is there something to show? Unknown means we cannot see, idle means

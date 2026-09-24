@@ -165,7 +165,7 @@ def test_health_body_carries_the_gauges_and_the_required_fields():
     clock = FakeClock()
     m = meter_on([chunk()], clock=clock)
     list(m.chunks())
-    body = health_body(m, 12.5)
+    body = health_body(m, 12.5, {})
     assert body["service"] == "jv-ears"
     assert body["state"] == "ok"
     assert body["uptime_s"] == 12.5
@@ -180,15 +180,62 @@ def test_health_body_reports_a_stall_with_its_note():
     m = meter_on([chunk()], clock=clock)
     list(m.chunks())
     clock.now += 5.0
-    body = health_body(m, 20.0)
+    body = health_body(m, 20.0, {})
     assert body["state"] == "degraded"
     assert "no audio" in body["notes"]
 
 
 def test_health_body_keys_stay_inside_the_frozen_schema():
     allowed = {"service", "state", "uptime_s", "period_s", "drops", "metrics", "notes"}
-    body = health_body(meter_on([], mic=True), 1.0)
+    body = health_body(meter_on([], mic=True), 1.0, {"wake_timeout_s": 8.0})
     assert set(body) <= allowed
+    # metrics is free-form but not lawless: the schema says every value is
+    # a number, and the bridge serializes the frame with json.dumps.
+    assert all(isinstance(v, float) for v in body["metrics"].values())
+
+
+# --- the budgets the HUD used to mirror by hand (A14) ---------------------
+
+
+def test_the_gauges_carry_the_stall_budget_they_are_judged_by():
+    """The HUD had `stallS = 1.0` copied into QML with a "keep this at or
+    above jv-ears" comment, because nothing published ears' tuning. A
+    comment is not a gate: change STALL_S here and the copy over there
+    would have gone on being wrong quietly. So the meter reports the
+    budget it judges by, in the same frame as the age it judges."""
+    m = meter_on([], mic=True, clock=FakeClock())
+    assert m.metrics()["capture_stall_s"] == CaptureMeter.STALL_S
+
+
+def test_the_stall_budget_is_there_before_any_audio_has_arrived():
+    # `capture_age_s` is absent until the first chunk (never is not an
+    # age). The budget is not a measurement and must not wait for one:
+    # a mic that has NEVER delivered is exactly when the HUD needs it.
+    body = health_body(meter_on([], mic=True), 0.5, {})
+    assert "capture_age_s" not in body["metrics"]
+    assert body["metrics"]["capture_stall_s"] == CaptureMeter.STALL_S
+
+
+def test_a_wav_run_still_reports_the_budget_with_no_microphone():
+    # mic_open 0 means the HUD draws nothing, but the budget is a fact
+    # about jv-ears, not about the device, and stays readable.
+    m = meter_on([], mic=False, clock=FakeClock())
+    assert m.metrics()["capture_stall_s"] == CaptureMeter.STALL_S
+    assert m.metrics()["mic_open"] == 0.0
+
+
+def test_health_body_publishes_the_budgets_it_is_handed():
+    body = health_body(meter_on([], mic=True), 1.0, {"wake_timeout_s": 8.0})
+    assert body["metrics"]["wake_timeout_s"] == 8.0
+
+
+def test_a_budget_that_is_not_a_number_never_reaches_the_bus():
+    # sys.health.metrics is free-form but every value is a number, and the
+    # HUD bridge writes the frame with json.dumps. A budget that is not a
+    # number is a bug in jv-ears and must fail here, loudly, rather than
+    # ride out as a string the HUD will refuse in silence.
+    with pytest.raises((TypeError, ValueError)):
+        health_body(meter_on([], mic=True), 1.0, {"wake_timeout_s": "eight"})
 
 
 # --- and it is actually wired to the bus ---------------------------------
@@ -227,6 +274,9 @@ def test_the_heartbeat_jv_ears_publishes_carries_the_mic_gauges(monkeypatch):
         def run(self, source):
             pass  # a source that ends immediately, like --wav running out
 
+        def budgets(self):
+            return {"wake_timeout_s": 8.0}
+
     monkeypatch.setattr(main_mod, "BusClient", Client)
     monkeypatch.setattr(main_mod, "MicSource", lambda *a, **k: FakeSource([]))
     monkeypatch.setattr(main_mod, "EarsPipeline", Pipeline)
@@ -236,3 +286,6 @@ def test_the_heartbeat_jv_ears_publishes_carries_the_mic_gauges(monkeypatch):
     assert health, "jv-ears published no heartbeat at all"
     assert health[0]["metrics"]["mic_open"] == 1.0
     assert health[0]["metrics"]["captured_s"] == 0.0
+    # ...and the pipeline's own budgets, or the HUD is back to guessing.
+    assert health[0]["metrics"]["wake_timeout_s"] == 8.0
+    assert health[0]["metrics"]["capture_stall_s"] == CaptureMeter.STALL_S

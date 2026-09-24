@@ -73,6 +73,24 @@ class EarsPipeline:
         """Sample clock in seconds (fixture-deterministic)."""
         return self._pos / self.cfg.sample_rate
 
+    def budgets(self) -> dict:
+        """The perception budgets this pipeline ENFORCES, in seconds.
+
+        Published on sys.health.metrics — free-form and service-local by
+        schema, so this costs no schema change (invariant 2). The point is
+        that a consumer never has to mirror a constant from this file: the
+        HUD's wake-window fallback was a hand-copied 8.0 with a comment
+        asking a future reader to keep it in step, which is a comment
+        waiting to rot (PLAN A14).
+
+        Read off the SAMPLE-clock counts the code compares against rather
+        than off cfg, for the same reason CaptureMeter counts what the
+        device delivered: what runs is the truth. Today it differs from
+        `cfg.wake_timeout_s` by at most one sample; the day this rounds
+        differently, what is published follows the code.
+        """
+        return {"wake_timeout_s": self._wake_timeout / self.cfg.sample_rate}
+
     def set_suppressed(self, value: bool) -> None:
         """Half-duplex gate: True while jv-voice is speaking. Blocks only
         utterance-open; wake detection stays live — that's barge-in."""
