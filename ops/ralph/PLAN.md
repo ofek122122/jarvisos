@@ -138,6 +138,11 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       ARE Quickshell types. Probably wants a different gate: grep the file for
       the five properties, or a quickshell-run smoke test on ares. Small, and
       it closes the last unguarded corner of invariant 10. Discovered in A9.
+      A15 built the parsing this wants — `surface_visible_expr` and
+      `plate_stack_children` in tools/tests/test_gen_theme_qml.py — and
+      confirmed the other half is not reachable headlessly: the offscreen
+      window qmltestrunner uses is never exposed, so it has no polish cycle
+      and cannot answer a layout question at all.
 
 ## Track B — Features / hardening (when UI is blocked, or for variety)
 - [~] B1. Pull the next safe item from `docs/optimization-backlog.md` that is NOT
@@ -243,15 +248,23 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `metrics` on sys.health; reporting its own budgets there would let
       the HUD read them instead of guessing, with no schema change. Small,
       and it deletes two footguns. Discovered in A4.
-- [ ] A15. `shell.qml`'s `visible` is a hand-maintained OR of every plate's
-      `shown`/`lit`, and it grew a term per element (three plates, six
-      terms). The next element that forgets to add itself will simply never
-      appear, on a surface that is unmapped by design — nothing fails, and
-      nothing notices. Wants the Column to answer for itself (`children`
-      opacity, or a `visibleChildren.length` test), or a tools test that
-      fails when a plate in the stack is missing from the expression. Same
-      family as A10: the properties that make the HUD safe and the ones that
-      make it appear are both asserted by nobody. Discovered in A6.
+- [x] A15. `shell.qml`'s `visible` is no longer a hand-maintained OR of every
+      plate's `shown`/`lit`. — 0dbe844
+      (`core/PlateStack.qml` is a Column that asks its own children — `shown`
+      (something true to say now) or `lit` (still on screen, fade included) —
+      and the surface is mapped while `stack.anyLit`. Nothing upstream keeps a
+      list. Both properties are load-bearing: `shown` MAPS the surface, and
+      waiting for `lit` would deadlock, because an unmapped window has no
+      animation driver to run the fade that would light it. A JS block, not a
+      chain of ORs, because QML tracks what a binding READS — so a plate added
+      later counts, and the early return is safe. A child that answers NEITHER
+      question is counted as drawing: idle frames are cheaper than a plate that
+      never appears. Two tools gates keep that branch unreachable — every direct
+      child of the stack must be a `*Plate` declaring `shown`, `lit` and its own
+      `visible: shown || lit`, and the surface's `visible` may not name a plate
+      again. 11 new QML tests, 9 mutations run through them, 5 more through the
+      gates. Tests: `bash ops/ralph/qmltest.sh`,
+      `bash ops/ralph/runtests.sh tools`.)
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
       right (you see it wherever you look) or noise. Needs a human eye on
@@ -279,3 +292,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   (7eca614, 2026-09-24)
 - A16 — jv-voice speaks turns, not sentences: one answer, one speaking/idle
   pair, and the half-duplex gate stays shut across it (8944abe, 2026-09-24)
+- A15 — PlateStack: the surface asks the stack whether anything is on screen,
+  so the list that could rot is gone (0dbe844, 2026-09-24)

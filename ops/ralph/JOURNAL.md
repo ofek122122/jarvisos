@@ -993,3 +993,85 @@ not a schema), and while proving it I found it was never only a HUD problem.
   this HUD on ares (A13, A10) — and nobody has heard a streamed reply since
   this change, so the first live answer on ares is worth listening to for a
   seam between sentences.
+
+## 2026-09-24 — iteration 13 — A15: the surface asks the stack, not a list
+
+Picked A15, the smaller of the two the last entry offered, because the hole it
+closes is the kind nothing else in the build can see. UI again, and the first
+pure-HUD iteration since A12.
+
+- the bug that had not happened yet: the HUD's surface is unmapped by design,
+  so ONE expression decides whether it reaches the screen at all, and that
+  expression was a hand-written OR in `shell.qml` — `statePlate.shown ||
+  statePlate.lit || micPlate.shown || ...`, two terms per element, six by the
+  third plate. Every element I have added this week had to remember to add
+  itself to it. The one that forgets would draw nothing, on a surface that is
+  invisible on purpose: no test fails, no warning fires, and the symptom is
+  "the HUD never appeared", three iterations after the cause.
+- the fix is to stop keeping the list. `core/PlateStack.qml` is a Column that
+  asks its own children the two questions a plate can answer — `shown` (it has
+  something true to say right now) and `lit` (it is still on screen, INCLUDING
+  its fade out) — and `shell.qml` maps the surface while `stack.anyLit`.
+  Nothing upstream knows how many plates there are.
+- both properties are load-bearing, and the reason is not symmetry.
+  `shown` is what MAPS the surface: at the instant a frame lands no opacity
+  has moved yet, so `lit` is still false — and an unmapped window has no
+  animation driver, so if the surface waited for `lit` the fade that would
+  have lit it would never run. That is a deadlock, not a flicker. `lit` is
+  what keeps the surface mapped while the last plate evaporates, so the exit
+  is an element fading and not a window vanishing out from under it.
+- a JS block rather than a chain of ORs, because QML tracks what a binding
+  READS: every `shown`/`lit` touched becomes a dependency, and `children`
+  itself is one, so a plate created later counts too. The early `return true`
+  is safe for the same reason — if the child that said yes goes quiet, the
+  re-run reads the ones after it (that one has a test, because a cache would
+  pass every other test in the file).
+- the judgement call, written down: a child that answers NEITHER question is
+  counted as drawing. Of the two ways to be wrong about an unaskable plate,
+  "the surface stays mapped with nothing on it" costs idle frames and "the
+  plate that was trying to warn you never appeared" is exactly the bug A15
+  exists to kill. Fail toward the truth being visible.
+- and then keep that branch unreachable, since a fail-safe nobody checks is
+  just a slow leak: a tools test requires every direct child of the stack to
+  be a `*Plate` declaring `shown`, `lit` and its own `visible: shown || lit`,
+  and a second one forbids the surface's `visible` from naming a plate again.
+  The per-plate `visible` moved OUT of shell.qml and into the plates — it is
+  each plate's own business whether it takes room in the stack, and it is
+  what makes the survivors close up over a silenced one rather than leaving
+  a hole where a signal used to be.
+- what is deliberately NOT asserted, and why it is in a comment in the test
+  file: that the plates below a silenced one actually close up. A Column
+  repositions on polish, and the offscreen window these tests run in is never
+  exposed, so it has no polish cycle — `tryCompare` waits out its two seconds
+  and reads the old layout. That is Qt's behaviour rather than ours; what
+  makes it fire is the per-plate `visible`, which is checked where it can be.
+  The tests do pin that a PlateStack is a positioner at all, so the plates
+  cannot land on top of each other.
+- proving the tests bite: 9 mutations on PlateStack, 9 caught — never lit,
+  always lit, only the first child consulted, forgetting `shown`, forgetting
+  `lit`, the fail-safe inverted, the fail-safe fired for a child that answers
+  one of the two, the base type demoted to Item, and `anyLit` computed once at
+  startup instead of bound. Plus 5 on the two tools gates (the OR grown back,
+  a `Text` child wedged into the stack, a plate with no `visible`, a `visible`
+  that forgot `shown`, a plate that renamed `shown`) — all 5 bit.
+- tests: `bash ops/ralph/qmltest.sh` — 202 green, was 191 (11 new);
+  `bash ops/ralph/runtests.sh tools` — 25 green, was 23.
+- build: `nix build .#jv-hud` (qmllint + the same tests in checkPhase) and
+  `nixos-rebuild build --flake .#ares` both ok. Never test/switch. No schema
+  change, no jv-act, no boot path, no pins.
+- files: shell/jv-hud/core/PlateStack.qml (new),
+  shell/jv-hud/tests/tst_platestack.qml (new), shell/jv-hud/shell.qml,
+  shell/jv-hud/{State,Mic,Health}Plate.qml, shell/jv-hud/core/qmldir,
+  tools/gen_theme_qml.py, tools/tests/test_gen_theme_qml.py
+- commit: 0dbe844
+- next: **A10** is now the last unguarded corner of invariant 10 and it is the
+  sibling of what just landed — the surface properties that make the HUD safe
+  (keyboardFocus None, exclusionMode Ignore, the empty input mask) are still
+  asserted by nobody, and `surface_visible_expr`/`plate_stack_children` in
+  tools/tests are the parsing this iteration built for exactly that kind of
+  gate. Otherwise **A14** (the HUD hand-mirrors two jv-ears constants) or
+  **B5** (`jv act-log --since/--failed`), both small and self-contained. The
+  standing one, unchanged: nobody has ever LOOKED at this HUD on ares — and
+  this iteration moved the expression that decides whether it appears at all,
+  so the next human on that machine should run `JV_HUD_SELFTEST=1 jv-hud`
+  once and then watch a real wake word light the corner.
