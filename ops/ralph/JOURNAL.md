@@ -623,3 +623,83 @@ everything here (and every commit) since the last time you asked. Format per ent
   now uses, and the HUD could stop guessing. And the HUD has earned a human
   eyeball on ares more than ever: there are two stacked plates now, on three
   monitors (A13), and nobody has ever seen one.
+
+## 2026-09-24 — iteration 9 — B4: the two CLI paths that touch the actuator
+
+- ladder: the last FOUR iterations were UI (A9, A7, A3, A4), so this one took
+  a feature. B4 was also the smallest thing guarding the most dangerous
+  surface: `jv act-log` reads back everything jv-act — the only service
+  allowed to change the machine — actually did, and `jv confirm` can cause a
+  destructive action to happen. Neither had a single test.
+- **act-log was silently lying, and that is the real find.** It did
+  `let Ok(e) = serde_json::from_str(line) else { continue };` — every line it
+  could not parse simply vanished from the report. The line most likely to be
+  torn is the LAST one written, i.e. the action that was running when
+  something went wrong, so the failure mode was "the audit trail looks
+  complete precisely when it isn't". Now: an unreadable line is rendered in
+  place (`!! unreadable audit line N: <raw>`, bounded to 100 chars and
+  char-boundary-safe, because a torn write can cut mid-UTF-8 and slicing
+  bytes would panic and take the reader with it), a stderr warning says how
+  many, and the command exits 1 so `jv act-log --tail 1 && ...` cannot
+  proceed on the strength of a line nobody could parse.
+- also refused: valid JSON that is not an object. Fed a bare string,
+  `act_log_line` renders a plausible row of `?` that reads like a real action
+  with missing fields — an invented row is worse than an admission.
+- also: a blank `JARVIS_ACT_AUDIT` is now an UNSET one. An empty shell
+  expansion used to become the file `""`, whose error message ("no audit log
+  at ") reads as "jv-act has never acted" — the most misleading thing this
+  command could say.
+- logic moved to `jarvisd::cli` (`act_log_render`, `act_audit_path_from`,
+  `act_log_exit_code`) so it is unit-testable; `bin/jv.rs` keeps printing and
+  the exit code, per the B2 split.
+- `jv confirm`: the frame is now pinned against the FROZEN `action.confirm` v1
+  binding — kind=answer, request_id, granted, answered_by=cli, conf 1.0, and
+  the request-only fields absent — because jv-act acts only on exactly that
+  (`services/jv-act/src/service.rs` ignores an answer whose `answered_by` is
+  not `cli`, since it echoes its own voice/timeout answers on the same topic).
+  An answer that is neither yes nor no must not reach the bus at all, in
+  EITHER direction: "maybe" becoming a denial would be as wrong as it
+  becoming a grant.
+- two things fell out of building it:
+  · `broker::from_value_named`, the missing inverse of `to_value_named`. The
+    bus convention spells an enum as its snake_case STRING, and
+    `rmpv::ext::from_value` only accepts serde's tagged forms — so it rejects
+    every generated body with a `kind`/`state`/`answered_by` in it, and no
+    Rust consumer could read a schema binding back off the wire. Found by the
+    confirm test failing with "invalid type: string \"answer\"".
+  · `common::subscribe_live`, which PROVES a subscription is live (by probing
+    with frames of its own until one returns) before a one-shot publisher
+    runs. The broker does not ack a `Sub`, so "subscribe, then spawn
+    `jv confirm`" would have been a race — exactly the flake that makes an
+    unattended gate useless.
+- proving the tests bite: 14 mutations, 14 caught — skipping an unreadable
+  line, renumbering lines under `--tail`, accepting non-object JSON, byte-
+  slicing the raw echo (this one SURVIVED at first: my UTF-8 test used
+  `"é"*300` and the 100-byte cut landed exactly on a char boundary, so the
+  test was tightened to an odd leading byte before it bit), an unbounded
+  echo, always exiting 0, dropping the stderr warning, an empty env var as a
+  path, confirm claiming `answered_by=voice`, confirm sending kind=request,
+  confirm hedging its `conf`, a bad answer becoming a denial, and both halves
+  of the wire convention.
+- jv-act itself untouched (human-review-only). Its duplicate copy of the
+  audit path default is now proposal **R2** in the backlog: one import and
+  one deleted function, and the failure mode if someone moves the file and
+  misses the reader is `jv act-log` printing an older complete-looking
+  history, or claiming jv-act never acted.
+- tests: 46 green, was 30 (25 lib, 7 bus, 14 cli); also green INSIDE the nix
+  sandbox.
+- build: `nix build .#jarvisd` ok; `nixos-rebuild build --flake .#ares` ok.
+  Never test/switch. No schema, no jv-act, no boot path, no pins.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/src/broker.rs, services/jarvisd/tests/cli.rs,
+  services/jarvisd/tests/bus.rs, services/jarvisd/tests/common/mod.rs,
+  docs/optimization-backlog.md
+- commit: 3a3e8ec
+- next: back to UI — **A6** (the `sys.health` glance) is the cheapest real
+  element and `latestFrom` + jv-ears' `degraded` already give it something
+  true to show; **A12** (a `thinking` state) is still one line in the
+  bridge's topic list plus one branch in `core/SpeechState.qml`. New
+  follow-up **B5**: `jv act-log` can print but cannot be asked a question —
+  `--since` and an outcome filter over the entries it already parses are pure
+  additions to `act_log_render`. And the standing one: nobody has ever LOOKED
+  at this HUD on ares (A13), which no amount of green tests fixes.

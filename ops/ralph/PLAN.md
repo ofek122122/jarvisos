@@ -140,11 +140,30 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       moved to `jarvisd::cli`; 30 tests green, 8 of them running the real `jv`
       binary against a real broker. Tests: `bash ops/ralph/cargotest.sh jarvisd`,
       gate `nix build .#jarvisd`.)
-- [ ] B4. `jv act-log` / `jv confirm` are still untested: reading+tailing the
-      audit file has no coverage, and nothing asserts the `action.confirm` frame
-      `jv confirm` publishes is the shape jv-act's `resolve_voice` expects.
-      Small, and it guards the one path where the CLI can cause a real action.
-      Discovered building B2.
+- [x] B4. `jv act-log` / `jv confirm` are tested, and act-log stopped lying.
+      — 3a3e8ec
+      (Reading/tailing moved into `jarvisd::cli` — `act_log_render`,
+      `act_audit_path_from`, `act_log_exit_code` — and an unreadable line is
+      now RENDERED, warned about, and exits 1 instead of being skipped in
+      silence: the line most likely to be torn is the last one written, i.e.
+      the action that was running when something went wrong. `jv confirm`'s
+      frame is pinned against the frozen `action.confirm` v1 binding, since
+      jv-act acts only on kind=answer + answered_by=cli. Fallout:
+      `broker::from_value_named` (the bus spells enums as snake_case strings,
+      which `rmpv::ext::from_value` refuses — no Rust consumer could read a
+      generated body back) and `common::subscribe_live` (the broker does not
+      ack a Sub, so subscribing then spawning a one-shot publisher was a
+      latent flake). 46 tests green, 14 mutations caught. Tests:
+      `bash ops/ralph/cargotest.sh jarvisd`, gate `nix build .#jarvisd`.)
+
+- [ ] B5. `jv act-log` has no way to ask a question: it prints the whole file
+      (or `--tail N`) and nothing else. The two questions a human actually has
+      after something happened are "what did jv-act do in the last 10 minutes"
+      and "show me everything that was not `ok`" — a `--since` and a
+      `--failed`/`--outcome` filter over the already-parsed entries, plus
+      exit-1 when a filter matches nothing so it is scriptable. `ts_mono` and
+      the ISO `ts` are both already in every entry. Small, pure, and it lands
+      entirely in `cli::act_log_render`. Discovered building B4.
 - [ ] B3. More replay-harness fixtures for perception (recorded-session tests).
 
 ## Track C — Creative (within blueprint + invariants)
@@ -184,3 +203,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   first pixels that mean something (769dcdd, 2026-09-24)
 - A4 — the recording light: CaptureMeter in jv-ears + MicState/MicPlate,
   and the counters that make it honest (6796579, 2026-09-24)
+- B4 — `jv act-log`/`jv confirm` tested; a torn audit log now reads as torn
+  (3a3e8ec, 2026-09-24)
