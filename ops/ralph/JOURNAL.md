@@ -5069,3 +5069,96 @@ was not theirs. The restore is now a `cleanup()`.
   **A55** still waits on **A47**'s decision about an IPC seam.
   A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and still want a
   human at ares. B21/B22/B17/B20/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 50 — B21: `tool` stops charging the machine for your
+## own hesitation
+
+UI was the last three iterations (A54, A57, A58), so the ladder says take a
+feature. B21 was the direct follow-up to B19, which shipped `tool` — the
+`intent.action` -> `action.result` union inside a turn's `think` — and named
+its own flaw in the footnote it printed: that span includes the whole 15 s
+confirmation window jv-act holds open for a destructive tool, "never spoken,
+and otherwise indistinguishable from a slow LLM." One number over a window
+that is mostly a human deciding cannot be argued about against a budget, and
+the half a faster machine could shorten is precisely the half it cannot name.
+
+**What it buys.** `jv tap --latency` now prints, under the `tool` line, which
+is under `>>> turn`:
+
+    >>> turn utt-c: think=26000ms includes tool=16000ms over 1 call (jv-act)
+    >>> turn utt-c: tool=16000ms is you=15000ms + ran=1000ms over 1 confirmation
+
+and two summary rows indented one level under `  tool`:
+
+        you    of tool: you, deciding             1   15000ms ...
+        ran    of tool: jv-act's own work         1    1000ms ...
+
+**The seam was free, like hear/think and like tool.** `action.confirm`
+kind=request is jv-act asking; kind=answer is the question closing, by an
+answer or by the window expiring. Both frames carry the `request_id` that
+`intent.action` already named, so the join is the same one `action.result`
+goes through (`act_mut`, now shared by all three). No new publisher, no gauge,
+no schema change. jv-act's `duration_ms` was NOT usable for this and it is
+worth writing down why: it is measured from `t0`, before the confirmation, so
+it is the whole request including the wait — the same number, not its
+complement.
+
+**Five refusals, because a number that mixes two things is what this commit
+exists to stop.** No question asked at all is not a 0 ms window. A question
+still open when the reply landed was open for a length nobody can state.
+A window that does not NEST inside its own call's round trip means two frames
+disagree about the order the pipeline ran in — and that nesting is also the
+thing that makes `ran = tool - you` a plain subtraction that cannot go
+negative, so `ran_ms` needs no fit check of its own and does not pretend to
+have one. A `tool` nobody could measure leaves its share unreported: a share
+of an unmeasured whole is not a share. A question for a request this tap never
+saw belongs to no turn it can name. `confirm_waits` rides beside `confirm_ms`
+for the same reason `tool_calls` rides beside `tool_ms`: "you were never
+asked" and "you were asked and it could not be timed" are different facts.
+
+**One live-order detail the integration test pumps rather than assumes.**
+jv-act ECHOES the answer it acted on (`kind=answer`, answered_by=voice/cli/
+timeout) onto the same topic the `jv confirm` CLI publishes its answer on, so
+one decision produces two frames. The user stopped deciding at the first.
+`keep_earliest`, and a test that publishes both in the real order.
+
+**An unrelated hole closed on the way, because these rows fall straight into
+it.** B19's `every_summary_row_stays_inside_the_columns_it_is_printed_in`
+filtered out every line starting with four spaces, to skip footnote
+continuations — which would have exempted the two new rows, the deepest and
+the most likely to overflow their column, from the check written for exactly
+that failure. It now takes the header and the rows under it and stops at the
+first footnote, and a deliberately over-wide `ran` label is one of the seven
+mutations below.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 119 unit + 8 bus + 39
+  integration (was 106+8+38). SEVEN mutations run through them, all seven
+  caught: the nesting check dropped, an open question timed to its own
+  result, `confirm` no longer gated on `tool`, the union turned into a sum
+  (which needed a new overlapping-windows test to bite — the first union test
+  used disjoint windows, where union and sum agree), jv-act's echo taken as
+  the answer, an over-wide label in a deep row, and a join that fell back to
+  whatever turn was open. An eighth — bypassing the `reqs` index and scanning
+  every turn's acts — turned out to be an EQUIVALENT mutant, not a survivor:
+  `reqs` and `u.acts` are written and evicted together, so the index is a
+  shortcut and never a filter. Noted rather than papered over with a test that
+  would pass either way.
+- build: `nix build .#jarvisd` ok (its checkPhase runs the suite again),
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change (it was read, not touched), no boot path, no
+  NVIDIA/kernel/flake pin.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs
+- next: **B22** is now slightly more urgent than it was and is still the
+  cheapest B item: nothing bounds a `>>> turn` line's width, and this commit
+  added a third such line whose id is the same unbounded utterance id. With a
+  UUID in it the new line is ~107 columns. B22 asks for exactly that assertion
+  and names the id length that breaks it. **B20/B17** still want two minutes
+  of a human reading real output at a terminal, and **B10/A28** — one live
+  recording of one spoken turn on ares — remains the single biggest thing a
+  human can unlock; it would also be the first recording containing an
+  `action.confirm` at all, which is to say the first real number this commit
+  could ever print. **A59** wants either a measurement at ares or a decision
+  to leave the partials' latency alone. **A56** and **A55/A47** unchanged and
+  want a human's pick. A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and
+  still want a human at ares. B7/B12/B15/B13 unchanged.

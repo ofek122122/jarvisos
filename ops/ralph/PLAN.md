@@ -472,16 +472,29 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       (was 89+8+36), 13 mutations, 13 caught. Tests:
       `bash ops/ralph/cargotest.sh jarvisd`.)
 
-- [ ] B21. `tool` is one number over a window that is mostly the human
+- [x] B21. `tool` is one number over a window that is mostly the human
       deciding, and the half a faster machine could never shorten is
-      exactly the half it cannot name. Another free seam, on frames
-      already on the bus: `action.confirm{kind=request}` states its own
-      `window_s` and `action.result` carries `duration_ms`, so the time a
-      confirming tool spent WAITING FOR YOU separates from the time it
-      spent running. It is `spoke` one level down — the user's own time
-      inside the machine's span — and the same rule applies: a number
-      that mixes the two cannot be argued about against a budget.
-      Discovered in B19.
+      exactly the half it cannot name. — cd47fde
+      (`you` is the UNION of the `action.confirm` request -> answer
+      windows inside a turn, and `ran` is `tool - you`. The seam that
+      worked was NOT the one this item guessed at: `action.result`'s
+      `duration_ms` is measured from jv-act's `t0`, BEFORE the
+      confirmation, so it is the whole request including the wait — the
+      same number, not its complement. The two `action.confirm` frames
+      are, and they carry the `request_id` `intent.action` already named,
+      so the join is `action.result`'s. Five refusals, each tested: no
+      question asked (not a 0 ms window), a question still open when the
+      reply landed, a window not NESTED inside its own call's round trip
+      — which is also what makes `ran` a subtraction that cannot go
+      negative — a `tool` nobody could measure, and a question for a
+      request this tap never saw. jv-act ECHOES the answer it acted on
+      onto the topic `jv confirm` publishes on, so one decision is two
+      frames and the earliest is when the user stopped deciding. Its own
+      line under the `tool` line; `>>> turn` keeps its six numbers. Also
+      closed a hole in B19's width check, which filtered out 4-space
+      indented lines and would have exempted these two rows from it.
+      119+8+39 tests (was 106+8+38), seven mutations, seven caught.
+      Tests: `bash ops/ralph/cargotest.sh jarvisd`.)
 
 - [ ] B22. B17's complaint now has a machine-checked half and an
       unchecked one. `every_summary_row_stays_inside_the_columns_it_is
@@ -495,6 +508,11 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       turns one of B17's two questions into a test and leaves the human
       only the one that genuinely needs eyes ("does `turn_age>=` read as
       noise?"). Discovered in B19.
+      **B21 makes it three lines and raises the stakes** (cd47fde): the
+      new `tool=... is you=... + ran=... over N confirmations` line is 76
+      columns with a 5-character id and ~107 with a UUID, which is the
+      exact failure this item names. Still the cheapest B item on the
+      board, and it needs no human.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
