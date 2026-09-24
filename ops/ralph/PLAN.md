@@ -901,7 +901,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the mic and health plates; the other three need a frame clock the
       harness can hold. Worth building the day a second element is allowed
       to move, which is exactly what A21/A25 are asking for. Discovered in
-      A34.
+      A34. **A42 is the cheaper half of this, and A40 made it possible.**
 
 - [ ] A36. The probe counts frames and never milliseconds. §06 budgets the
       ambient scene at "< 2 ms of GPU per frame AND 0 fps when idle", and
@@ -950,7 +950,8 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       something went wrong. Nothing was built toward an answer: it is one
       `ActionPlate {}` in the stack, and a `personality/` switch is the
       obvious shape if the answer is "sometimes". Answer it with A13/A27,
-      not separately. Discovered in A37.
+      not separately. Discovered in A37. **A40 added a fourth instance
+      (`OutputPlate`), which does not change the question.**
 
 - [ ] A39. A22 now has a ready-made shape if the human answering it wants
       one. `ActionState` deliberately passes over `denied` and
@@ -961,7 +962,74 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       no new rule. Do NOT build it until A22 is answered; this note exists
       so that answering it is cheap. Discovered in A37.
 
+- [x] A40. The HUD stops saying SPEAKING while the room is silent.
+      — b643c22
+      (`core/OutputState.qml` decides — 36 QML tests, 17 mutations run
+      through them — and `OutputPlate.qml` draws ONE line, OUTPUT MUTED or
+      OUTPUT AT ZERO, directly under the word it qualifies. SPEAKING is a
+      claim about jv-voice and not about the room: with the default sink
+      muted, jv-voice accepts the utterance, Piper synthesises it,
+      PortAudio plays it, every service heartbeats `ok`, and you hear
+      nothing — no error anywhere in the sequence, which makes it the
+      failure with the least evidence attached. Four decisions: ONLY WHILE
+      SPEAKING (a muted machine is a choice, not news — §06's earned
+      emptiness); SILENCE, NOT QUIETNESS (muted or zero, with no threshold
+      on "too quiet", which would be a guess about your room — and two
+      words because they are two different controls, a toggle and a
+      slider); THE RAW jv-voice WORD rather than `SpeechState`'s, which
+      lets the microphone claim outrank the speaking one; and A LIVE
+      READING, NOT A LATCH — both inputs describe the present, so there is
+      nothing to forget, and the one timer in the file exists to stop
+      BELIEVING a frame, armed on the earlier of two deadlines (three 1 Hz
+      periods for the snapshot, the rate stated by the schema itself; 30 s
+      under a `speaking` frame a dead jv-voice would never retract).
+      `context.system` joined the bridge's topic list — the first
+      NON-EVENT topic the HUD subscribes to, a frame every second forever
+      — so the idle probe's QUIET window stopped being a bus with nothing
+      on it and became a bus TALKING: six ordinary snapshots over six
+      seconds, 0 Wayland commits, both controls still biting at 45 and 41.
+      Tests: `bash ops/ralph/qmltest.sh` (423, was 384),
+      `bash ops/ralph/runtests.sh tools` (90), `... jv-hud-bridge` (25),
+      `bash ops/ralph/hudshots.sh`, `bash ops/ralph/hudscreens.sh`.)
+
+- [ ] A41. **The one place `OutputPlate` could be confidently wrong.** It
+      reads the DEFAULT SINK, and that jv-voice plays into the default
+      sink is an assumption, not a published fact: `sd.play(audio, rate)`
+      takes no device argument (services/jv-voice/jv_voice/player.py), so
+      it lands on PortAudio's default output, which under PipeWire is the
+      default sink jv-context reads. The day jv-voice pins a device — or
+      PortAudio's default diverges from PipeWire's — the plate becomes a
+      true statement about the wrong sink, and a HUD that is confidently
+      wrong about why you cannot hear anything is worse than the empty
+      corner it replaced. The fix has a known shape and is B16's: jv-voice
+      states the device it actually opened on its own `sys.health`
+      `metrics`, and this element reads it — publish it WHEN something
+      reads it, and for once something would. The other half is the
+      inverse and needs a human: PipeWire can mute jv-voice's STREAM while
+      the sink is wide open, which is exactly the failure this plate
+      exists for, one level down, and nothing on this bus can see it —
+      jv-context reads sinks. Adding a per-stream field is a
+      `context.system` schema change (FROZEN) and therefore a proposal,
+      not a build. Discovered in A40.
+
+- [ ] A42. A40 hands A35 the lit-and-still measurement it said was worth
+      building. A35's complaint was that the only lit state a harness can
+      hold still is `LinkPlate` with no bus — every other plate is a frame
+      ageing out — so "0 fps with a plate on screen" has only ever been
+      measured on a HUD that could see NOTHING. `OutputPlate` is the first
+      plate that stays lit on a LIVE bus for as long as the harness keeps
+      feeding it: one `speaking` frame plus a `context.system` snapshot
+      re-published every second, indefinitely. That window would measure
+      something genuinely new — a mapped surface, a real bus, a plate
+      drawn, a property changing once a second (the snapshot's `seq`
+      moves, the expiry timer re-arms) and NOTHING on screen changing. If
+      Qt commits a frame for that, §06's budget is being spent on
+      bookkeeping. One more window in `probe_idle_frames`, which already
+      has both halves of the machinery. Discovered in A40.
+
 ## Done
+- A40 — the HUD stops saying SPEAKING while the room is silent
+  (b643c22, 2026-09-24)
 - A37 — the HUD says what Jarvis did to your machine when it did not work
   (7bc1eb5, 2026-09-24)
 - A34 — the HUD renders nothing while nothing changes, counted off its own

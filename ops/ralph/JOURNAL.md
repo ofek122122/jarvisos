@@ -3402,3 +3402,148 @@ is a schema change.
   latency iteration. Human asks unchanged in number and now worth more:
   A13/A27/A38 together, A21/A22/A25 together, B10+A28+B17 together,
   B13/B15.
+
+## 2026-09-24 — iteration 34 — A40: the HUD stops saying SPEAKING while
+## the room is silent
+
+Same ladder walk as iteration 33 and the same answer. Track A's open
+items are still questions for a human (A13/A27/A38, A21/A22/A25, A31) or
+gated on a signal that does not exist yet (A33, A35, A36, A39);
+`docs/optimization-backlog.md` is human-review-required from top to
+bottom, so it is still not the "non-human-review backlog item" the
+ladder points at. So: the highest-value thing the HUD does not yet say.
+
+The way to find it was to ask which frozen, actually-published topic the
+HUD still does not read. There was exactly one that mattered —
+`context.system`, jv-context's 1 Hz snapshot — and it carries the one
+field pair that answers a question no other topic on this bus can:
+**when the HUD says SPEAKING, is anything reaching the room?**
+
+Because SPEAKING is a claim about jv-voice, not about the room. With the
+default sink muted, jv-voice accepts the utterance, Piper synthesises
+it, PortAudio plays it, `action.result` is clean, every service
+heartbeats `ok`, and you hear nothing. There is no error anywhere in
+that sequence. Of all the ways a voice assistant fails, this is the one
+with the least evidence attached — and the HUD was showing a true frame
+that added up to a false impression, which is the same failure shape
+A26 (the HUD could not say what it heard) and A37 (it could not say
+what it broke) were each written against.
+
+`core/OutputState.qml` decides; `OutputPlate.qml` draws one line and
+nothing else, directly under the word it qualifies. Four decisions are
+the element:
+
+  · **ONLY WHILE SPEAKING.** A muted machine is not news — it is a
+    choice you made, probably on purpose — and a plate that nags about
+    it all day is the opposite of §06's earned emptiness. It becomes
+    news at exactly one moment. That is also why it sits under
+    `StatePlate` rather than anywhere else in the stack: the two are one
+    reading, the way HeardPlate is one reading with THINKING above it,
+    and the contact sheet is the argument (`09-muted.png` — SPEAKING in
+    ember, OUTPUT MUTED in warn, MIC underneath, one story top to
+    bottom).
+  · **SILENCE, NOT QUIETNESS.** `audio_muted` is silence by definition
+    and so is `audio_volume` at zero. There is no threshold on "too
+    quiet to hear", because that would be a guess about your speakers
+    and your room, and it would put a plate on screen for a machine you
+    deliberately turned down. The failure that leaves — a reply at 3% in
+    a loud room — is at least one the user can reason about. And the two
+    silences are two WORDS, OUTPUT MUTED and OUTPUT AT ZERO, because
+    they are two different controls: one is a toggle and one is a
+    slider, and a single "no sound" would send you to the wrong one half
+    the time.
+  · **THE RAW jv-voice WORD, NOT `SpeechState`'s.** SpeechState answers
+    "what is Jarvis doing" and lets the microphone claim outrank the
+    speaking one, so a barge-in reads as `listening` while jv-voice is
+    still finishing its sentence. Right answer to its question, wrong
+    input to this one: what matters here is whether an utterance is
+    being played, which is `speech.state` verbatim.
+  · **A LIVE READING, NOT A LATCH.** Every element built since A20 has
+    been a memory of something the bus stopped carrying, with rules for
+    letting go of it. Both inputs here describe the present, so there is
+    nothing to forget: the line leaves the instant jv-voice stops
+    speaking or the sink comes back. The only clock in the file exists
+    to stop BELIEVING a frame, never to hide one — ONE timer on the
+    earlier of two deadlines, because believing the pair is believing
+    both. Three 1 Hz periods for the snapshot (the rate is stated by the
+    schema itself, so it is not the hand-copied constant B7 warns
+    about; three rather than two because jv-context is a Python process
+    competing with CPU Whisper and an 8B prefill, and the moment it is
+    late is exactly the moment this machine is busy). Thirty seconds
+    under the `speaking` frame, as the backstop for a jv-voice that died
+    mid-sentence and will never publish the `idle` that ordinarily ends
+    this — without it, a muted machine would carry this plate until the
+    next reboot, which is the one thing §06 will not have.
+
+**The one assumption, written down where it will be found.** jv-voice
+plays through `sd.play(audio, rate)` with no device argument, which is
+PortAudio's default output — the same default sink jv-context reads with
+`wpctl get-volume @DEFAULT_AUDIO_SINK@`. That is a routing assumption
+and it is the only one in the file. The other direction is safe and
+stays unreported: PipeWire can mute jv-voice's STREAM while the sink is
+open, and that is a silence this element cannot see, so it under-claims
+— the direction everything in `core/` errs in. Both halves are now A41.
+
+**The new cost, measured rather than argued.** `context.system` is the
+first NON-EVENT topic the bridge subscribes to: a frame every second,
+forever, on a HUD whose entire design is to cost nothing while nothing
+happens. A34 proved "0 fps when idle" off the HUD's own Wayland socket
+six days' work ago, and the honest thing was to re-ask that question
+with the new subscription live rather than to assert that an unmapped
+surface cannot commit. So the idle probe's QUIET window stopped being a
+bus with nothing on it and became a bus TALKING: six ordinary unmuted
+snapshots over six seconds, every one of them reaching the HUD, not one
+of them anything to draw. It read 0 commits, and both its controls still
+bit (waking the HUD cost 45, the blind plate arriving cost 41). That
+also makes the window less tautological than A35 found it — though only
+a little, because the surface is still unmapped. The real prize A35 is
+after is now closer for a different reason: see A42.
+
+- tests: `bash ops/ralph/qmltest.sh` — 423 (was 384), 36 of them new.
+  `bash ops/ralph/runtests.sh tools` — 90. `... jv-hud-bridge` — 25.
+  17 mutations, 15 caught first time and BOTH survivors were real:
+  (1) a `root.linked &&` term in `unheard` that no test could ever
+  reach, because both readers already refuse a frame off a dead link —
+  a third guard on top of two is a guard whose deletion is invisible, so
+  it was removed and the gate now lives where the frame is read, once,
+  with the pair pinned by a hand-made bus that hands out frames while
+  `linkUp` is false; (2) the `typeof audio_muted !== "boolean"` check,
+  which the strict `=== true` downstream makes behaviourally dead — what
+  it really buys is that the frame is refused OUTRIGHT, so there is
+  nothing to TIME either, and that is what the test now asserts.
+  Worth recording as a limit: deleting the link gate from ONE reader is
+  unobservable (the other one nulls the pair, and BusModel throws its
+  frames away on link-down anyway), so only the pair is pinned.
+  `bash ops/ralph/hudshots.sh` — 9 shots, and the eight committed PNGs
+  came back byte-identical, which is the evidence that a plate nobody
+  fed changed nothing. `bash ops/ralph/hudscreens.sh` — green end to end
+  with the new plate in the stack and the new 1 Hz feed in the idle
+  probe: three outputs, quiet (0 commits under 6 snapshots), lit and
+  still (0), and all three click-through points. Its five PNGs were
+  reverted — 6 to 33 differing bytes at a maximum channel delta of 1,
+  which is antialiasing, not content.
+- build: `nix build .#jv-hud` ok (qmllint `-W 0` + 423 QML tests in its
+  checkPhase), `nixos-rebuild build --flake .#ares` ok. Never
+  test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin touched.
+- files: shell/jv-hud/core/OutputState.qml (new),
+  shell/jv-hud/OutputPlate.qml (new),
+  shell/jv-hud/tests/tst_outputstate.qml (new),
+  shell/jv-hud/shell.qml, shell/jv-hud/README.md, shell/jv-hud/qmldir,
+  shell/jv-hud/core/qmldir, tools/gen_theme_qml.py,
+  tools/hudshots/scene/tst_shots.qml, tools/hudscreens/sheet.py,
+  tools/hudscreens/shoot.py,
+  services/jv-hud-bridge/jv_hud_bridge/bridge.py, docs/hud/README.md,
+  docs/hud/09-muted.png (new)
+- next: the HUD now draws eight plates and every frozen topic anything
+  actually publishes is read by one of them, so the "what does the HUD
+  not say yet" seam this iteration and the last two mined is closed
+  until a new producer exists. What is left on Track A is four questions
+  a human answers by LOOKING (A13/A27/A38 now with a fourth instance,
+  A21/A22/A25, A31, B17) and two new items this iteration created:
+  **A41** (jv-voice's output path is assumed, not published — and the
+  per-stream mute is a silence nothing on this bus can see) and **A42**
+  (A40 hands A35 the first lit plate a harness can hold still on a LIVE
+  bus, which is the measurement A35 said was worth building the day a
+  second element could be held). A41 is the one a human should read
+  first: it is the only place this plate could be confidently wrong.
