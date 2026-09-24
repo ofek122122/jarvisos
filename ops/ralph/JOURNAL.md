@@ -8334,3 +8334,102 @@ grading it have now found seven unheld claims in one 130-line module.
   decision between three named options, **B43/B47/B54** are one question
   asked three times, and **B10/A28** — one live recording of one spoken
   turn on ares — remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 82 — B60: the codec every body on the bus goes through
+
+Track A is unchanged — still one human look at `docs/hud/` away from ten
+items — so this took the item the last iteration raised. B59 graded
+`client.py`, one of pylib's three modules. B60 named the other two:
+`health.py`, whose `HealthBeat` is the clock every service's `sys.health`
+beat is owed against, and `schema.py`, whose `to_body`/`from_body` are how
+EVERY body on this bus is encoded and decoded.
+
+**health.py: 4 mutations, 4 caught.** Its suite (written with d55348b) has
+teeth. The deadline becoming a gap, a clock nobody has beaten not being
+due, an off-schedule beat leaving the old schedule running, and a period of
+zero being accepted are all held. Nothing to do there, which is worth
+recording as plainly as a hole would be.
+
+**schema.py: 9 mutations, 0 caught.** The codec is eleven lines each way
+and had one test on it — `test_to_body_wire_rules`, on an `AudioWake`,
+which is the one body in the frozen set with an empty `_optional`, no
+nested field and no array. It exercises none of the rules the function
+exists for. So: the nested-object branch, both array branches, the
+Optional unwrap, the null-nested guard, the absent-key default and BOTH
+halves of the omit rule could all be broken and the suite stayed green.
+
+One of the nine was caught elsewhere, and it is worth being precise about:
+`from_body`'s absent-key branch is held by **jv-context's** suite, which
+decodes a `context.system` body with `battery_pct` missing and fails seven
+tests when the branch goes. That is the only reason any of this was held
+anywhere — a consumer's suite happening to use a shape. The other eight
+were held by nothing in the repository.
+
+A survivor here is not local. A survivor in jv-voice is wrong in jv-voice;
+a survivor in this file is wrong in eight services and on every topic at
+once, and it surfaces far from its cause: a nested dataclass left
+unconverted is a `msgpack` TypeError thrown by the transport inside
+`publish`, on a frame the calling code built correctly.
+
+The sharpest claim is the omit rule, and it is really two rules facing each
+other. **"Absent" and "present and null" are different words on this bus.**
+Optional keys are declared with a bare type (`"type": "string"`), so an
+explicit null in one fails validation — it must be omitted. But
+`in_reply_to_utterance` is required AND nullable
+(`"type": ["string", "null"]`), because a system announcement has no
+triggering utterance and has to SAY so. A codec that omitted every None
+would publish a `speech.say` rejected for a missing required key, and only
+ever for unprompted speech: the proactivity path, the one that runs when
+nobody is watching.
+
+Three tests read `schemas/*.json` instead of restating it, which is the B55
+shape — the frozen schema is the law (invariant 2) and the codec's whole
+job is to agree with it, so the assertion is a RELATION: every emitted key
+is a declared property, every required key survives the encode, and a null
+is only ever on a key the schema permits null. Stated that way it holds all
+five shapes at once, and it holds the next shape too, which a hand-written
+expected dict would not.
+
+A fourth reads `tools/gen_bindings.py`. `schema.py` says DO NOT EDIT and
+means it: the codec is the generator's epilogue copied in verbatim, so a
+fix applied to the generated file is erased by the next regeneration and a
+fix applied only to the generator is not what any service imports. The
+harness graded that one as a read relation and reported it in those words —
+"the suite reads tools/gen_bindings.py — it never runs it". (Checked while
+there: the generator's docstring claims CI runs `--check`, and
+`.github/workflows/check.yml` really does. No drift item to raise.)
+
+Two claims the grading turned up as behaviour worth PINNING rather than
+holes to close. An unknown wire key is IGNORED — `from_body` iterates the
+dataclass's fields, not the body's keys — which is the forward-compatibility
+half of the envelope's `v`: a v2 producer that adds a key cannot crash a v1
+consumer. And a body missing a REQUIRED key fails loudly at the decode
+rather than being filled with None, because a required key is required
+precisely because consumers may not check it.
+
+- tests: pylib **63 (was 19)**. Green. One new file; no source touched.
+- graded with `ops/ralph/mutate.sh`: **12 mutations, 12 caught** — 11 on the
+  codec and 1 on the generator's epilogue. Before the tests: **0 of 9**.
+  health.py separately: 4 of 4, before and after.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/pylib/tests/test_schema.py
+- commits: 184b6b1
+- next: **B61** raised, and it is the last of pylib: the two `client.py`
+  claims B60 named and deliberately left. `next_event` returns None for a
+  short read on the head and for a short read on the BODY, and neither is
+  distinguishable from a frame that never came — a truncated frame and a
+  closed bus produce the same answer to every consumer's reconnect logic.
+  And `connect()`'s address rule (`":" in addr and not addr.startswith("/")`)
+  dials a RELATIVE unix socket path containing a colon as TCP; every real
+  path is absolute so it cannot bite today, and the replay rig is the one
+  thing in this repo that invents socket paths. B61 says what the cheap
+  honest half is: pin TODAY's rule with a test so a change to it is
+  deliberate and visible, and leave the rule itself as a decision. With
+  that, all three pylib modules will have been graded. Otherwise unchanged:
+  **Track A is one human look at `docs/hud/` away from unblocking ten
+  items** (A47, A55, A62, A63, A68 and the A21/A22/A25 cluster), **B27**
+  needs one decision between three named options, **B43/B47/B54** are one
+  question asked three times, and **B10/A28** — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this
+  loop.

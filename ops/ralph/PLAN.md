@@ -1443,24 +1443,39 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       goes red, and the harness reports "reads it, never runs it". pylib 19,
       was 13; 10 mutations, 10 caught.)
 
-- [ ] B60. **`client.py` was one of pylib's three modules.** B59 graded it
-      and five of six claims were unheld; `jarvis_bus/health.py` and
-      `jarvis_bus/schema.py` have never been graded at all, and they are
-      the same shape of risk — `HealthBeat` is the clock every service's
-      `sys.health` beat is owed against (d55348b just fixed a real bug in
-      it, found by reading rather than by grading), and `to_body` /
-      `from_body` are how EVERY body on the bus is encoded and decoded, so
-      a silent survivor there is wrong in every service and every topic at
-      once. The method is now routine: probe, then a mutation per claim.
-      Two things `client.py` itself still has no test for, found while
-      writing B59's and deliberately left: `next_event`'s two EOF paths
-      (a short read on the head and on the body both return None, and
-      nothing distinguishes them from a frame that never came), and
-      `connect()`'s address rule — `":" in addr and not addr.startswith("/")`
-      means a RELATIVE unix socket path containing a colon is dialled as
-      TCP. Every real path is absolute so it cannot bite today, and it is
-      a latent trap for the replay rig, which is the one thing that makes
-      up socket paths. Naming it rather than changing it. Discovered in B59.
+- [x] B60. **`client.py` was one of pylib's three modules.** The other two
+      are now graded. — 184b6b1
+      (`health.py`: 4 mutations, 4 caught — its suite already had teeth.
+      `schema.py`: **9 mutations, 0 caught**. The codec that encodes and
+      decodes every body on this bus had one test on it, on the one body in
+      the frozen set with an empty `_optional`, no nested field and no array.
+      Both halves of the omit rule, both array branches, the Optional unwrap,
+      the null-nested guard and the absent-key default were all unheld — and
+      the absent-key one only looked held because **jv-context's** suite
+      happens to decode a `context.system` with `battery_pct` missing. Three
+      of the new tests read `schemas/*.json` rather than restating it (the
+      B55 shape: every emitted key declared, every required key surviving, a
+      null only where the schema permits null), and a fourth reads
+      `tools/gen_bindings.py`, because the codec is the generator's epilogue
+      copied verbatim and a fix to the generated file is erased by the next
+      regeneration. pylib 63, was 19; 12 mutations, 12 caught.)
+
+- [ ] B61. **The last of pylib: the two `client.py` claims B60 named and
+      left.** (a) `next_event` returns None for a short read on the HEAD and
+      for a short read on the BODY, and nothing distinguishes either from a
+      frame that never came — so a truncated frame and a closed bus give
+      every consumer's reconnect logic the same answer, and the one that
+      means "the broker is mid-write" is the one that should not trigger a
+      reconnect. (b) `connect()`'s rule `":" in addr and not
+      addr.startswith("/")` dials a RELATIVE unix socket path containing a
+      colon as TCP. No real path is relative, so it cannot bite today; the
+      replay rig is the one thing in this repo that invents socket paths.
+      The cheap honest half of both is the same and should come first: pin
+      TODAY's behaviour with a test, graded, so that changing either rule is
+      deliberate and visible in a diff — then the rule itself is a decision
+      someone can make on purpose rather than a thing that quietly differs
+      from what every reader assumes. With this, all three pylib modules
+      will have been graded. Discovered in B59, deferred by B60.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
