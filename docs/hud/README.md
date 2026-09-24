@@ -534,7 +534,18 @@ engine. `tools/hudshots/` holds those two stubs and the scene;
 files do, if the scene's plate stack drifts from `shell.qml`'s, or if a shot
 is taken and never committed.
 
-The PNGs themselves are not byte-compared against anything — a pixel
-assertion breaks when a font ships a new version, and the point of this
-directory is a picture a person can look at, not a comparison a machine can
-make.
+**These PNGs are assertions now** (B52). `hudshots.sh` renders the sheet and
+then reads it back, comparing every picture against the one committed here at
+`HEAD` (`tools/hudsheet.py`). It used to not: the sheet was written and never
+opened, and a mutation that painted the ember — the one accent §06 spends on
+nothing else — on every state that is not idle left all thirteen photographs,
+all fifteen driver assertions and all 585 QML tests exactly as they were.
+
+The old worry was that a pixel assertion breaks when a font ships a new
+version. It cannot here: the faces are pinned from the flake, and so is Qt, so
+these bytes move when the HUD moves and not otherwise — which is the whole
+point of A45 making them reproducible. When they do move, the script says
+which shots moved, the box they moved in and three of the pixels by colour,
+and leaves the new PNGs on disk. **That is the refresh**: look at them, commit
+them, and the next run is green. If you did not change the HUD, something drew
+a different picture than the one in this directory.

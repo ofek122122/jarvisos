@@ -8,6 +8,13 @@
 # after any change to shell/jv-hud and commit the diff — a HUD whose look
 # changed and whose sheet did not is a HUD nobody looked at.
 #
+# It then READS THE SHEET BACK (B52): every PNG it just rendered, compared
+# against the one committed at HEAD, by tools/hudsheet.py. A run whose plates
+# drew something else ends nonzero, naming the shots that moved and three of
+# the pixels that moved in them. If the change was yours, that is the refresh
+# telling you what you changed — look at the new PNGs, commit them, and the
+# next run is green.
+#
 # It also runs the one suite that needs this same stage and takes no
 # pictures: tst_sequence.qml (A54) replays the recorded sessions through the
 # real plates and asserts the corner's TRAJECTORY — which plates go up, in
@@ -45,6 +52,11 @@ qtdecl=$(nixpkgs qt6.qtdeclarative.out)
 fontconfig=$(nixpkgs fontconfig.out)
 fcbin=$(nixpkgs fontconfig.bin)
 mono=$(nixpkgs jetbrains-mono.out)
+# The comparator that reads the sheet back (B52). Pinned like everything
+# else here rather than borrowed from the machine's PATH: this script
+# already refuses to render in whatever fonts happen to be installed, and
+# the same argument applies to the thing that grades what it rendered.
+python=$(nixpkgs python3)
 sans=$(nix build "$root#archivo" --no-link --print-out-paths)
 
 stage=$(mktemp -d)
@@ -124,3 +136,20 @@ export HOME="$stage"
 
 echo
 echo "hudshots: wrote $(ls "$out"/*.png | wc -l) shots to $out"
+echo
+
+# And READ THEM BACK (B52). Until this line the sheet was thirteen pictures
+# nothing ever opened: B51's first grading run painted the ember — the one
+# accent §06 spends on nothing else — on every state that is not idle, and all
+# thirteen photographs, all fifteen driver assertions and all 585 QML tests
+# came back unchanged. A45 made the shots byte-reproducible, so the expected
+# bytes already exist; the only real question was where "expected" lives, and
+# the answer has to be git. A run that renders INTO docs/hud and compares
+# against docs/hud has compared a file to itself, so both paths — the grading
+# run that renders into a scratch directory and the refresh run that renders
+# over the sheet — are checked against the last COMMITTED sheet.
+#
+# Which means a deliberate HUD change ends here, nonzero, naming the shots
+# that moved and the pixels that moved in them. That is the report, not a
+# failure: the new PNGs are on disk, and committing them is the refresh.
+"$python/bin/python3" "$root/tools/hudsheet.py" --root "$root" --out "$out"

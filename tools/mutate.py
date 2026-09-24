@@ -99,6 +99,13 @@ hands it one inside this run's own scratch), and its cost had to be measured
 rather than promised — it is ~53 s a run on this machine, against ~14 s for
 `qmltest.sh`, so `main` prints the run count before a grading starts.
 
+B52 is what makes that runner able to grade what a plate LOOKS like. Its own
+first run found that `hudshots.sh` wrote thirteen PNGs and read none of them
+back, so a mutation that changed a plate's COLOUR survived every suite in the
+repo; the script now compares what it rendered against the sheet committed at
+HEAD (tools/hudsheet.py). A mutation that moves a pixel is caught by the
+picture — which is the only assertion here that is about the HUD's look.
+
 `@ label` opens a block, the next bare line is the repo-relative file, and
 the `-`/`+` lines are the hunk (joined in order, indentation kept verbatim).
 `old` must appear EXACTLY once in the file: a hunk that matches twice is an

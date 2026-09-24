@@ -69,6 +69,14 @@ a lint failure — and what it DOES catch is a file the stage drops entirely
 (`shell.qml`, `tests/`). That a plate is instantiated and lit at all is gated
 elsewhere, by `test_every_plate_in_the_shell_is_lit_in_some_shot`.
 
+What `--runner shots` can grade about a plate's LOOK is B52's: `hudshots.sh`
+now reads its own sheet back, comparing every PNG it just rendered against the
+one committed at `HEAD` (`tools/hudsheet.py`), and naming the shots that moved,
+the box they moved in and three of the pixels by colour. Expected lives in git
+because a refresh run renders over `docs/hud` and a file cannot be compared to
+itself. So a deliberate HUD change ends that script nonzero, with the new PNGs
+on disk: look at them, commit them, and the next run is green.
+
 ## One-time setup (isolated worktree on its own branch)
 From your normal checkout (`~/jarvisos`, on `main`, clean):
 ```
