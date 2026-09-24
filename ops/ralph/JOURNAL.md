@@ -7180,3 +7180,112 @@ mutations in this journal were measured without it.
   Track A is one look at `docs/hud/` away from unblocking five items.
   **B10/A28** — one live recording of one spoken turn on ares — is
   still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 71 — B48: the mutation numbers, with controls
+
+Track A is still where the ladder points and still where every open item
+is a human's to answer (A13/A21/A22/A25/A27/A38/A62/A63/A65/A68 — one
+look at `docs/hud/`) or says "do not build before that one is". So the
+B track again, and this time its smallest item is about the loop's own
+evidence rather than about JarvisOS.
+
+**What the claim was worth.** Sixty journal entries say some version of
+"nine mutations, nine caught". That sentence is the only evidence in
+this repo that the tests an iteration just wrote have teeth — nothing
+else distinguishes a suite that pins behaviour from a suite that
+executes code and asserts nothing. It was produced by hand: edit the
+source, re-run pytest, read the colour, put the file back. Iteration 70
+found the hole. CPython validates a cached `.pyc` against the source's
+(mtime in whole **seconds**, size), so an equal-length edit written
+inside the same second as the write before it reuses stale bytecode:
+pytest passes, the loop writes "survived", and the mutant never ran.
+
+**So this is not an automation of the old practice.** It is the old
+practice plus the two controls it never had, which is the whole of why
+it was worth a file.
+
+*The canary.* Before a single mutation is graded, the target file is
+made impossible to import — one `raise ImportError` appended at column
+zero — and the suite MUST go red. If it stays green the tests do not
+execute that file at all, every mutation of it would be a silent
+survivor, and the harness reports NOTHING rather than a perfect score.
+This asks the suite the question the hand practice assumed the answer
+to, and it is stronger than any amount of reasoning about bytecode:
+it is an experiment, not an argument.
+
+*A cache that cannot be stale.* Every suite run gets its own empty
+`PYTHONPYCACHEPREFIX`, so no run can read bytecode another compiled and
+the in-tree `__pycache__` directories become unreachable rather than
+deleted. Per-run and impossible to forget, which "remember to clear the
+cache" is not.
+
+**A correction to B48 as it was written, found by reproducing it.**
+`python -B` alone does nothing about this bug. It sets
+`dont_write_bytecode` — it stops the cache being WRITTEN, and the read
+is the half that bites. Measured three ways in a subprocess, with an
+equal-length edit and the mtime put back: plain reads the stale value,
+`-B` reads the stale value, a fresh cache prefix reads the new one. The
+half that actually worked in iteration 70 was clearing `__pycache__`.
+Both un-fixed runs are kept in the test as controls, because a probe
+that can only pass is not a probe — the same lesson A34 learned about
+counting zero frames.
+
+**The other things it refuses to do**, each because the hand practice
+could get it wrong quietly: a red baseline aborts before anything is
+touched (a broken suite catches every mutation for free); a hunk that
+matches twice is an error, not a coin flip about which copy moved; a
+mutation identical to the original is an error; the file is restored
+even when the runner raises; and the suite runs ONCE MORE at the end
+with the tree back as it was, because iteration 70's actual tell was a
+failure on an already-restored file and the next thing the loop does
+should not be built on a tree it has quietly broken.
+
+**The re-run half of the item, and what it found.** B48 said past
+equal-length numbers were "worth ONE re-run, not trusted". Iteration
+69's three equal-length mutations on jv-ears went back through the
+controls: 3/3 caught, that entry stands. Worth writing down WHY they
+stand, because it is nearly luck — `test_health_watch.py` computes its
+expectations from the very constants it mutates
+(`TICKS_PER_PERIOD = HEALTH_PERIOD_S / HEALTH_WATCH_S`), so moving one
+moves the code and the assertion together. What caught all three was
+the two ABSOLUTE claims in that file (`HEALTH_MIN_GAP_S <
+HEALTH_PERIOD_S`, `seen_at < HEALTH_PERIOD_S`). A suite parameterised
+on its own constants needs at least one assertion that is not; raised
+as **B50**, with the file/line limit of the canary.
+
+- tests: `bash ops/ralph/runtests.sh tools` — **173 green, was 138**
+  (35 new: the spec grammar and its eight refusals, the exactly-once
+  edit rule, the canary's shape, the run's order
+  (`clean → canary → mutant → clean`), one canary per FILE rather than
+  per mutation, a red baseline aborting untouched, a canary that LIVES
+  aborting the whole run with no mutation executed, restore through a
+  raising runner, a tree still red after the last restore, and the four
+  exit codes the loop reads with `$?`). **Twelve mutations on the
+  harness, by the harness, twelve caught** — including the canary never
+  planted, the cache prefix left shared, the restore dropped, and the
+  escape check opened. The first self-run scored 11/12: the survivor was
+  a `main()` that returned 0 with a mutation still standing, which is
+  the one case the exit code exists for, and the four tests that close
+  it were written because the harness found it.
+  `bash ops/ralph/runtests.sh jv-ears` — 114, unchanged, run six times
+  by the harness and green at both ends.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change,
+  no jv-act, no boot path, no pins, no service touched, no QML (so no
+  HUD shots to re-take). Nothing here is on the bus or in the closure —
+  `tools/mutate.py` is read by no derivation.
+- files: tools/mutate.py, tools/tests/test_mutate.py,
+  ops/ralph/mutate.sh, ops/ralph/README.md, ops/ralph/PLAN.md
+- commit: 3961e85
+- next: **B49** extends the canary to QML and Rust, where the
+  stale-bytecode half cannot bite but "does this suite even execute the
+  file I am mutating" is exactly as unanswered — and the A track has
+  been claiming QML mutation numbers for thirty iterations. **B38's**
+  last unexamined service is jv-voice, and reading it for this iteration
+  turned up that its only fault (`synthesis/playback error`) already
+  beats immediately, so what is left there is B47's latching question
+  and not a build. Everything else small is a human's: **B43/B47** are
+  one question asked three times ("may `jv health --check` be red on an
+  ordinary day?"), Track A is one look at `docs/hud/` away from
+  unblocking five items, and **B10/A28** — one live recording of one
+  spoken turn on ares — is still the biggest thing a human can hand
+  this loop.

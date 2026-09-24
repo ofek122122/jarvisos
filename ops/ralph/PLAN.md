@@ -1054,22 +1054,61 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       more places, and it should be answered once for all three. Cheap
       either way; nothing else waits on it. Discovered in B38.
 
-- [ ] B48. **The loop's own mutation harness can silently test
-      UNMUTATED code, and it did once in this iteration.** Mutations are
-      applied by rewriting the source file in place and re-running
-      pytest. CPython validates a cached `.pyc` by (mtime seconds, size)
-      — so a mutation that keeps the file's size and lands in the same
-      second as the write before it (flipping `0o640` to `0o600`, say,
-      or any other equal-length edit) reuses the stale bytecode and the
-      run reports a PASS for code that never executed. It showed up here
-      as a mutation that "survived" and a later full-suite failure from
-      a restored file that was still running the mutant. The fix that
-      worked is one flag — `python -B` (and clearing `__pycache__`
-      between runs) — but every mutation number in this JOURNAL before
-      iteration 70 was measured without it, so equal-length mutations in
-      past iterations are worth ONE re-run, not trusted. Worth writing
-      the harness down in `ops/ralph/` as a small script with `-B` baked
-      in instead of re-typing it per iteration. Discovered in B42.
+- [x] B48. **The loop's own mutation harness can silently test
+      UNMUTATED code, and it did once in this iteration.** — 3961e85
+      (`ops/ralph/mutate.sh` + `tools/mutate.py`: a spec of `@ label` /
+      file / `-`/`+` hunks on stdin, graded with the two controls the
+      hand practice never had. **The canary** — the target file made
+      impossible to import, which the suite MUST go red for, or it does
+      not execute that file and every mutation of it would be a silent
+      survivor; the harness then reports NOTHING rather than a perfect
+      score. **A cache that cannot be stale** — every suite run gets its
+      own empty `PYTHONPYCACHEPREFIX`, so no run can read another's
+      bytecode and the in-tree `__pycache__` dirs are unreachable rather
+      than deleted. Plus: green baseline before anything is touched, one
+      more clean run at the END (iteration 70's real tell was a failure
+      on an already-restored file), a hunk that matches twice is an error
+      rather than a coin flip, restore even when the runner raises.
+      **A correction to this item's stated fix: `python -B` alone does
+      NOTHING here.** It stops bytecode being WRITTEN, not read — the
+      half that worked in iteration 70 was clearing `__pycache__`. One
+      test reproduces the bug in a subprocess with both un-fixed runs
+      (plain, and `-B`) as its controls. Tests: `runtests.sh tools` —
+      **173, was 138**; twelve mutations on the harness by the harness,
+      twelve caught. The re-run half: iteration 69's three EQUAL-LENGTH
+      claims on jv-ears (the floor dropped, the floor raised above the
+      period, the watch interval widened) re-measured through the
+      controls — **3/3 caught**, so that entry stands. Every other past
+      entry is now one pasted spec away from the same treatment, which is
+      as far as "worth ONE re-run" can be discharged by building a tool.)
+
+- [ ] B49. The harness's runner is `ops/ralph/runtests.sh` and nothing
+      else, so it grades PYTHON only. The QML claims ("nine mutations,
+      all caught") and the Rust ones are still hand-run, and while the
+      stale-bytecode half cannot bite them, the CANARY half is exactly as
+      valuable there: nothing has ever asked whether `qmltest.sh`
+      executes the file an A-track iteration was mutating, and a
+      `core/` element that no test imports would grade as immune. One
+      `--runner {tests,qml,cargo}` and a canary per language (an
+      unparseable QML file, a `compile_error!` in Rust) is the shape.
+      Discovered in B48.
+
+- [ ] B50. The canary proves the suite executes the FILE and never the
+      LINE, which is the honest meaning of a survivor and also its
+      blind spot: "the tests do not cover this branch" and "this branch
+      is dead code" are the same report. The other half is sharper and
+      showed up in the jv-ears re-run: `test_health_watch.py` computes
+      its expectations FROM the constants it tests
+      (`TICKS_PER_PERIOD = HEALTH_PERIOD_S / HEALTH_WATCH_S`), so moving
+      a constant moves the code and the assertion together and a whole
+      class of mutation is ungradeable by construction. Those three were
+      caught anyway — by the two ABSOLUTE assertions in that file
+      (`HEALTH_MIN_GAP_S < HEALTH_PERIOD_S`, `seen_at <
+      HEALTH_PERIOD_S`), which is the lesson worth generalising rather
+      than a defect to fix: a suite parameterised on its own constants
+      needs at least one claim that is not. Worth one pass over the
+      other services' constant-derived expectations the next time a
+      journal entry wants to mutate one. Discovered in B48.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
