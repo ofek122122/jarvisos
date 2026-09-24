@@ -97,6 +97,40 @@ def surface_traffic(text):
     return len(COMMIT_RE.findall(text)), len(FRAME_RE.findall(text))
 
 
+def grew_downwards(before, after):
+    """Did a plate ARRIVE UNDER another one, in this stack's geometry?
+
+    Both arguments are `drawn_box` results — (x0, y0, x1, y1) around
+    everything on a monitor that is not desktop, or None for a bare one.
+    The stack is docked to the TOP-RIGHT, so those two edges are what pin
+    it and neither may move; the bottom must grow. The left edge may
+    travel OUTWARDS and routinely does — OUTPUT MUTED is a longer line
+    than SPEAKING — so it is allowed to decrease and not to increase. The
+    first version of this rule, written inline, called that widening a
+    failure.
+
+    Two things in shoot.py need exactly this and for the same reason:
+    `StatePlate` has said SPEAKING since A3 and lights on jv-voice's frame
+    alone, so "something is drawn" is never evidence that `OutputPlate`
+    is on screen. The idle probe's live-lit window needs to know that the
+    thing it holds still for six seconds includes the plate A40 added, and
+    the `04-unheard` shot needs to know that the picture it is about to
+    write has under it the second line its caption claims. Both light the
+    HUD twice — an audible sink, then the mute — and both ask this.
+
+    It lives here, with the frame counter and the compositor config,
+    because a rule the harness measures with is one a test with no
+    compositor should be able to run.
+    """
+    if before is None or after is None:
+        return False
+    left, top, right, bottom = before
+    grown_left, grown_top, grown_right, grown_bottom = after
+    if grown_top != top or grown_right != right:
+        return False
+    return grown_left <= left and grown_bottom > bottom
+
+
 def sway_config():
     """The compositor the sheet runs on, as a config file.
 
@@ -313,6 +347,54 @@ SHOTS = [
                 }
             },
         ],
+    },
+    {
+        "file": "04-unheard",
+        "lit": True,
+        # The primary alone. The three-screen question (A13/A27) is already
+        # asked twice above, and what this shot is for is the one thing
+        # neither sheet has ever shown: two plates on a real 1440p panel
+        # disagreeing about whether Jarvis is working. One says an
+        # utterance is in flight; the one under it says none of it is
+        # arriving.
+        "captures": ["primary"],
+        "source": (
+            "composed (nothing committed has recorded jv-voice speaking, and "
+            "no recording carries a muted mixer)"
+        ),
+        # Split in two, because this is the first shot in the sheet whose
+        # subject is a LIVE READING rather than an event.
+        #
+        # The event: one `speaking` from jv-voice. It is ended by a real
+        # signal (jv-voice publishing `idle`) and nothing here publishes
+        # one, so it stands for the length of the shot.
+        "frames": [VOICE_SPEAKING],
+        # The reading: republished at jv-context's own 1 Hz for as long as
+        # the camera takes. core/OutputState.qml stops believing a snapshot
+        # after three of those periods, and core/HealthState.qml calls a
+        # service lost after two of the `period_s` its heartbeat declares.
+        #
+        # Measured rather than argued, because the argument overstates it:
+        # publishing this pair ONCE and sleeping writes the same picture
+        # today, byte for byte. A single exposure reaches grim about two
+        # seconds after the publish and the snapshot expires at three, so
+        # publish-once is INSIDE the window — by under a second, on this
+        # machine, with one capture. The feed is what stops that margin
+        # from being load-bearing: the frames are true at the instant of
+        # every exposure whatever the machine is doing, and they stay true
+        # if this shot ever grows a second monitor (a 33 Mpx grim and a
+        # PNG encode each) or the settle gets longer. The failure at the
+        # far end of that margin is not hypothetical: A42's live-lit
+        # window published the heartbeat once, and `jv-voice lost` arrived
+        # under the plate it was holding still.
+        "hold": [VOICE_DEFAULT_SINK, SINK_MUTED],
+        # The same HUD one plate shorter. Identical frames with an AUDIBLE
+        # sink: StatePlate says SPEAKING on jv-voice's frame alone, so
+        # "something is drawn" would be true of a HUD where A40's plate
+        # never appeared and the caption under this picture would be
+        # describing a line that is not in it. The harness photographs this
+        # first and insists the real shot GREW DOWNWARDS from it.
+        "grows_from": [VOICE_DEFAULT_SINK, SINK_OK],
     },
 ]
 

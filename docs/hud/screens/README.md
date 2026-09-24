@@ -86,6 +86,39 @@ QML engine can answer:
   never arrives fails the probe rather than passing it — an unmapped
   surface passes every click whatever its mask says.*
 
+- **A shot of two plates is a shot of two plates.** `04-unheard` is the
+  first picture here whose subject is a *live reading* rather than an
+  event, and it is photographed twice. First with an **audible** sink —
+  which lights `StatePlate` and nothing else, because SPEAKING has been
+  drawn off `jv-voice`'s frame alone since A3 — and then with the mute,
+  and the drawn region must have grown *downwards* with its top and right
+  edges unmoved. That is a plate arriving under another one on a stack
+  docked to the corner. Without it, an `OutputState` that had stopped
+  drawing would still produce a perfectly sharp photograph of one plate,
+  under a caption describing a line that is not in it. (The left edge
+  travels outwards, because OUTPUT MUTED is a longer line than SPEAKING.)
+
+  The same shot is also the first one the harness has to **hold**. Every
+  other picture here is of a frame that stands on its own for longer than
+  a camera takes; `OutputState` believes a `context.system` snapshot for
+  three of `jv-context`'s periods, and a heartbeat speaks for two of its
+  own `period_s`. So the settle *is* a feed, at the 1 Hz `jv-context`
+  publishes at all day.
+
+  *Measured, rather than argued, because the argument overstates it:*
+  publishing the pair **once** and sleeping writes the same picture
+  today, byte for byte. One exposure reaches `grim` about two seconds
+  after the publish and the snapshot expires at three, so publish-once is
+  inside the window — by under a second, on this machine, with this
+  shot's single capture. The feed is what stops that margin from being
+  the thing that makes the picture right: the frames are true at the
+  instant of every exposure whatever else is happening, and they stay
+  true if the shot grows a second monitor (a 33 Mpx `grim` and a PNG
+  encode each) or the settle gets longer. The far end of that margin is
+  not hypothetical — the live-lit window below published a heartbeat
+  once, and **jv-voice lost** arrived under the plate it was holding
+  still.
+
 - **The HUD renders nothing while nothing changes.** Commits are counted
   on the HUD's own side of the Wayland socket (libwayland's
   `WAYLAND_DEBUG` log) over **three** six-second windows, all of which
@@ -173,10 +206,17 @@ No pixel colour is asserted anywhere. A font ships a new version, Qt
 changes its rasteriser, and a byte comparison fails in a way nobody can
 read.
 
-Two runs of an unchanged HUD are not byte-identical: measured over
-consecutive runs, a handful of pixels along an antialiased glyph edge move
-by one value. So `git status` after a re-run is not evidence of anything,
-and neither is a clean one — look at the picture.
+Two runs of an unchanged HUD are **not byte-identical**, and the numbers
+are worth stating because a journal entry has already read a clean
+`git status` here as evidence that nothing moved (A45). Re-running this
+harness against an untouched `shell/jv-hud` changes `02-heard` and
+`03-confirm` by a **handful of pixels per monitor** — single values, one
+channel, on antialiased glyph edges inside the plate. Over three runs,
+`01-quiet` (which draws nothing) and `04-unheard` (two short monospace
+labels) came back byte for byte every time, and the two shots carrying a
+long wrapped sentence never did. So a dirty `git status` after a
+re-run is not a regression and a clean one is not a pass. Look at the
+picture; the measurements above are what the run actually asserts.
 
 ---
 
@@ -243,3 +283,26 @@ The same composed request at real size on the primary. The summary is
 jv-act's own sentence, wrapped to the plate's width, over the tool id —
 and it can only be read: the surface takes no input at all, so answering
 stays with your voice or `jv confirm` (invariant 3).
+
+### 04-unheard-primary.png
+
+![SPEAKING, with OUTPUT MUTED under it, on the 1440p monitor](04-unheard-primary.png)
+
+**Composed** — nothing committed has recorded jv-voice speaking, and no
+recording carries a muted mixer. The only picture in either sheet where
+two plates **disagree about whether Jarvis is working**: the top one says
+an utterance is in flight, the one under it says none of it is arriving.
+Both are true. Of all the ways a voice assistant fails, this is the one
+with the least evidence attached — no service is unwell, nothing errored,
+the audit log is clean, and the only thing wrong is a toggle somewhere
+else on the machine (A40).
+
+The second line is on screen only because `jv-voice` published
+`output_device_pinned: 0` in its heartbeat — it took the default output
+device, so the sink `jv-context` can see is the one the samples land on
+(A41). Pin a device and this plate goes dark rather than becoming a
+confident statement about the wrong mixer.
+
+The mic plate is absent, and that is the honest picture: nothing on this
+bus published `jv-ears`' counters, and invariant 10's recording light is
+not drawn on a guess.

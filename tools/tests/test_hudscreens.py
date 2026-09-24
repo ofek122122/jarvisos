@@ -594,20 +594,19 @@ def test_the_live_lit_window_proves_it_is_holding_the_output_plate():
         "first, so nothing distinguishes 'OutputPlate arrived' from 'the HUD "
         "drew the word SPEAKING'"
     )
-    assert "speaking_box" in live and "box[3] <= speaking_box[3]" in live, (
+    assert "speaking_box" in live, (
+        "the live-lit window no longer measures the HUD before the mute, so "
+        "there is nothing for the lit one to have grown from"
+    )
+    # The rule itself — top and right pinned, bottom grown, left free to
+    # travel outwards — is `sheet.grew_downwards`, and
+    # test_the_growth_rule_is_the_geometry_the_stack_actually_has runs it
+    # rather than grepping for it. What is asserted here is only that this
+    # window still asks.
+    assert "sheet.grew_downwards(speaking_box, box)" in live, (
         "the live-lit window no longer insists the drawn region GREW when the "
         "sink went muted — whatever it holds still for six seconds may not "
         "include OutputPlate at all"
-    )
-    # The stack is docked to the TOP-RIGHT, so those are the two edges that
-    # pin it; the left one legitimately travels outwards, because OUTPUT
-    # MUTED is a longer line than SPEAKING.
-    assert (
-        "box[1] != speaking_box[1]" in live and "box[2] != speaking_box[2]" in live
-    ), (
-        "the live-lit window no longer insists the top and right edges stayed "
-        "put, so a plate that REPLACED the one above it — or a stack that moved "
-        "— would pass as one arriving under it"
     )
 
 
@@ -625,4 +624,196 @@ def test_the_readme_says_the_third_window_is_on_a_live_bus():
         "docs/hud/screens/README.md does not say which plate the live-lit "
         "window held on screen — without it a reader cannot tell whether "
         "the measurement was of a HUD with a bus or without one"
+    )
+
+
+# ------------------------------------------------- the shot that is a reading
+#
+# `04-unheard` (A44) is the first shot in this sheet whose subject is a
+# LIVE reading rather than an event. Every other picture here is of a
+# plate that holds itself up: a wake word happened, jv-act asked a
+# question, and the frame behind it stays true on its own for longer than
+# a camera takes. core/OutputState.qml is a reading of the present —
+# three of jv-context's periods and it stops believing the snapshot — so
+# this one has to be HELD, and a harness that stopped holding it would
+# write a photograph of a bare desktop or of a plate that had left. These
+# are the gates on that, and on the picture showing the two plates its
+# caption claims rather than the one StatePlate would have drawn anyway.
+
+
+def shot_loop_text() -> str:
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    return shoot.split("\ndef main(")[-1]
+
+
+def unheard() -> dict:
+    for shot in sheet.SHOTS:
+        if shot["file"] == "04-unheard":
+            return shot
+    raise AssertionError(
+        "the sheet no longer takes 04-unheard — the one picture in either "
+        "sheet where two plates disagree about whether Jarvis is working"
+    )
+
+
+def test_the_unheard_shot_is_split_into_the_event_and_the_reading():
+    """jv-voice's `speaking` is an event and ends with a real signal;
+    the sink snapshot and the heartbeat are readings and rot where they
+    stand. Putting all three in `frames` would publish them once, and the
+    picture would be of whatever was left three seconds later.
+    """
+    shot = unheard()
+    assert shot["frames"] == [sheet.VOICE_SPEAKING], (
+        "04-unheard's one-shot frame is no longer jv-voice saying it is "
+        "speaking, which is the half of this picture StatePlate draws"
+    )
+    assert sheet.SINK_MUTED in shot["hold"], (
+        "04-unheard no longer HOLDS a muted snapshot, so OutputPlate has "
+        "nothing to say and the picture is of SPEAKING alone"
+    )
+    assert sheet.VOICE_DEFAULT_SINK in shot["hold"], (
+        "04-unheard's feed no longer re-publishes jv-voice's heartbeat: "
+        "core/HealthState.qml calls a service lost after two of its own "
+        "period_s, so `jv-voice lost` would arrive under the plate being "
+        "photographed — the failure A42's window found the hard way"
+    )
+
+
+def test_a_held_shot_is_actually_fed_while_the_camera_takes_it():
+    """The quiet way for this to break is for `hold` to become a key
+    nothing reads. Nothing would go red: the picture would still be
+    written and, on this machine today, would still be right — publishing
+    the pair once lands inside OutputState's three-second window by under
+    a second. What would be gone is the reason it is right. A second
+    capture, a slower run or a longer settle spends that margin, and the
+    failure it turns into is a photograph of a plate that has expired.
+    """
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    settle = shoot.split("\ndef settle(")[-1].split("\ndef ")[0]
+    assert "feed_snapshots(" in settle, (
+        "shoot.py's settle no longer republishes a held shot's frames, so a "
+        "reading is photographed after it has stopped being believed"
+    )
+    loop = shot_loop_text()
+    assert 'hold = shot.get("hold", [])' in loop and "settle(SETTLE_S, hold" in loop, (
+        "the shot loop no longer feeds a shot's `hold` frames through its "
+        "settle — `hold` is now a key in sheet.py that nothing reads"
+    )
+
+
+def test_the_shorter_exposure_differs_only_in_the_thing_the_shot_is_of():
+    """The growth measurement is only evidence if ONE thing changed
+    between the two exposures. A `grows_from` that also dropped the
+    heartbeat, or changed the volume, would grow the region for a reason
+    nobody looked at — and the check would pass while the picture showed
+    something else.
+    """
+    shot = unheard()
+    before = {f["publish"]["topic"]: f["publish"]["body"] for f in shot["grows_from"]}
+    after = {f["publish"]["topic"]: f["publish"]["body"] for f in shot["hold"]}
+    assert set(before) == set(after), (
+        f"the two exposures of {shot['file']} carry different topics: "
+        f"{sorted(before)} and {sorted(after)}"
+    )
+    differ = [t for t in before if before[t] != after[t]]
+    assert differ == ["context.system"], (
+        f"the two exposures of {shot['file']} differ on {differ}, not on the "
+        "sink snapshot alone"
+    )
+    changed = [
+        k for k in before["context.system"]
+        if before["context.system"][k] != after["context.system"][k]
+    ]
+    assert changed == ["audio_muted"], (
+        f"the two exposures differ on {changed} — the only difference may be "
+        "the mute, or the plate that arrives is not the one A40 added"
+    )
+
+
+def test_a_shot_that_grows_from_another_is_measured_on_the_monitor_it_photographs():
+    """shoot.py measures the growth on the primary, because that is the
+    region it photographed first. A shot that declared `grows_from` and
+    never captured the primary would compare a box against None, and the
+    only thing the run would prove is that it failed.
+    """
+    for shot in sheet.SHOTS:
+        if shot.get("grows_from"):
+            assert "primary" in shot["captures"], (
+                f"{shot['file']} grows from a shorter exposure of the primary "
+                "and never photographs the primary"
+            )
+
+
+def test_the_growth_rule_is_the_geometry_the_stack_actually_has():
+    """A plate arriving UNDER another one, on a stack docked to the
+    top-right: the top and right edges pin it, the bottom grows, and the
+    left travels outwards because OUTPUT MUTED is a longer line than
+    SPEAKING. Every one of those is a way for the rule to be wrong, and
+    the inline version of it got the last one backwards first time.
+    """
+    one = (2244, 16, 2544, 57)
+    assert sheet.grew_downwards(one, (2244, 16, 2544, 98)), "a taller stack"
+    assert sheet.grew_downwards(one, (2180, 16, 2544, 98)), (
+        "the left edge travelling outwards is a longer line, not a move"
+    )
+    assert not sheet.grew_downwards(one, one), "nothing arrived"
+    assert not sheet.grew_downwards(one, (2244, 16, 2544, 40)), "the stack shrank"
+    assert not sheet.grew_downwards(one, (2244, 24, 2544, 98)), (
+        "the top edge moved: something REPLACED the plate above rather than "
+        "arriving under it"
+    )
+    assert not sheet.grew_downwards(one, (2244, 16, 2500, 98)), (
+        "the right edge moved: the stack is no longer docked where it was"
+    )
+    assert not sheet.grew_downwards(one, (2300, 16, 2544, 98)), (
+        "the left edge moved INWARDS: the line got shorter, so this is a "
+        "different plate rather than a second one"
+    )
+    assert not sheet.grew_downwards(None, one), "nothing was drawn first"
+    assert not sheet.grew_downwards(one, None), "nothing is drawn now"
+
+
+def test_the_growth_rule_is_stated_once():
+    """Two callers, one rule. A second inline copy is a rule that can
+    drift on one side, and the side that drifts is the one nobody is
+    looking at.
+    """
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    assert shoot.count("sheet.grew_downwards(") == 2, (
+        "the idle probe's live-lit window and the shot loop must both ask "
+        "sheet.grew_downwards — an inline copy of the geometry is one the "
+        "unit tests above do not cover"
+    )
+    assert "box[3] <= speaking_box[3]" not in shoot, (
+        "the live-lit window has an inline growth rule again"
+    )
+
+
+def test_the_readme_shows_the_one_picture_of_two_plates_disagreeing():
+    """A photograph nobody is told how to read is decoration. This one
+    needs its caption more than most: both plates are telling the truth,
+    and the thing the reader is meant to see is that the truth adds up to
+    a machine that is not working.
+    """
+    readme = (SCREENS / "README.md").read_text("utf-8")
+    for name in sheet.capture_files(unheard()):
+        assert name in readme, f"docs/hud/screens/README.md never shows {name}"
+    assert "OUTPUT MUTED" in readme and "SPEAKING" in readme, (
+        "docs/hud/screens/README.md shows the unheard shot without naming "
+        "the two lines in it"
+    )
+
+
+def test_the_readme_says_the_screens_are_not_byte_reproducible():
+    """These PNGs are NOT a fixture, and one journal entry has already
+    treated them as one ("the screens are unchanged", as evidence). Two
+    runs of an unchanged HUD differ by a couple of pixels along an
+    antialiased glyph edge — harmless until somebody reads a clean
+    `git status` as proof that nothing moved (A45).
+    """
+    readme = (SCREENS / "README.md").read_text("utf-8")
+    assert "not byte-identical" in readme, (
+        "docs/hud/screens/README.md no longer says the screens are not "
+        "reproducible byte for byte — without it a clean diff after a "
+        "re-run reads as evidence, and a dirty one reads as a regression"
     )

@@ -293,6 +293,37 @@ def feed_snapshots(seconds: float, frames: list, bus_addr: str) -> int:
     return sent
 
 
+def settle(seconds: float, hold: list, bus_addr: str) -> None:
+    """Let the HUD arrive at what its frames mean — and, for a shot whose
+    subject is a LIVE reading, keep those frames true while it does.
+
+    Most shots here are events. A wake word happened, jv-act asked a
+    question: the plates they light stay lit for as long as their own
+    state says, and a single publish followed by a sleep photographs
+    exactly what the bus said. A shot that declares `hold` is the other
+    kind. core/OutputState.qml is a reading of the PRESENT and believes a
+    `context.system` snapshot for three of jv-context's periods; a
+    heartbeat speaks for two of the `period_s` it declares. So the settle
+    IS the feed, at the 1 Hz jv-context publishes at all day. Nothing
+    else changes: a shot with no `hold` sleeps, exactly as before.
+
+    What that is worth was measured and is smaller than it sounds:
+    publishing 04-unheard's pair once and sleeping writes the same PNG
+    today, byte for byte, because one exposure reaches grim about two
+    seconds after the publish and the snapshot expires at three. The feed
+    is what stops a sub-second margin from being the thing that makes the
+    picture right — it survives a slower machine, a longer settle, and a
+    second monitor, none of which anything here would notice. A42's
+    live-lit window is the same margin at the far end: it published a
+    heartbeat once, and `jv-voice lost` arrived under the plate it was
+    holding still.
+    """
+    if hold:
+        feed_snapshots(seconds, hold, bus_addr)
+    else:
+        time.sleep(seconds)
+
+
 # --------------------------------------------------------------------- pixels
 
 
@@ -784,19 +815,13 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         feed_snapshots(IDLE_SETTLE_S, muted, bus_addr)
         capture("primary", ppm)
         box = drawn_box(read_ppm(ppm), background)
-        # What "a plate arrived UNDER another one" is, in this geometry. The
-        # stack is docked to the top-right, so the top edge and the RIGHT
-        # edge are the ones that must not move; the bottom must grow. The
-        # left edge may travel outwards and does — OUTPUT MUTED is a longer
-        # line than SPEAKING, so the region widens leftwards, which the
-        # first version of this check called a failure.
-        moved = (
-            box is None
-            or box[1] != speaking_box[1]
-            or box[2] != speaking_box[2]
-            or box[0] > speaking_box[0]
-        )
-        if moved or box[3] <= speaking_box[3]:
+        # What "a plate arrived UNDER another one" is, in this geometry.
+        # sheet.grew_downwards is the rule, stated once and unit-tested
+        # without a compositor: the top and right edges are what dock the
+        # stack and must not move, the bottom must grow, and the left edge
+        # may travel outwards — OUTPUT MUTED is a longer line than
+        # SPEAKING, which the first version of this check called a failure.
+        if not sheet.grew_downwards(speaking_box, box):
             raise Fail(
                 f"muting the sink changed the drawn region from {speaking_box} "
                 f"to {box}, which is not a plate ARRIVING UNDER another one at "
@@ -1109,7 +1134,28 @@ def main() -> int:
             hud.wait_for("Configuration Loaded")
             time.sleep(SETTLE_S)
             publish_shot(shot, bus_addr)
-            time.sleep(SETTLE_S)
+            hold = shot.get("hold", [])
+
+            # A shot that declares `grows_from` is photographed TWICE. The
+            # first exposure is thrown away: it is the same HUD fed the same
+            # frames MINUS the one thing the picture is of, and its only job
+            # is to be smaller. `StatePlate` has said SPEAKING since A3 and
+            # lights on jv-voice's frame alone, so a `04-unheard` in which
+            # `OutputPlate` never appeared would be a perfectly good
+            # photograph of one plate, pass every check in this file, and
+            # sit under a caption describing a second line that is not in
+            # it. The measured claim is the same one A42's window makes: the
+            # drawn region grew DOWNWARDS, which is what a plate arriving
+            # under another one looks like on a stack docked to the corner.
+            shorter = None
+            if shot.get("grows_from"):
+                settle(SETTLE_S, shot["grows_from"], bus_addr)
+                before = stage / f"{shot['file']}-shorter.ppm"
+                capture("primary", before)
+                shorter = drawn_box(read_ppm(before), background)
+                log(f"  one plate shorter: drawn at {shorter}")
+
+            settle(SETTLE_S, hold, bus_addr)
 
             # AFTER the frames, on purpose. `visible` is false whenever the
             # HUD has nothing to say, and an unmapped layer surface reserves
@@ -1126,15 +1172,54 @@ def main() -> int:
                     "which invariant 10 forbids"
                 )
 
+            grown = None
             for target in shot["captures"]:
                 ppm = stage / f"{shot['file']}-{target}.ppm"
+                # Re-fed immediately before every exposure, for the same
+                # reason the settle above feeds: three monitors and three
+                # PNG encodes can outlast a snapshot, and the last shot of
+                # the run is the one that would quietly be of a bare
+                # desktop.
+                if hold:
+                    publish_shot({"frames": hold}, bus_addr)
                 capture(target, ppm)
                 img = read_ppm(ppm)
                 check_capture(shot, target, img, background)
+                if target == "primary" and shot.get("grows_from"):
+                    # BEFORE the PNG is written, not after: a failed run
+                    # that had already saved the picture would leave the
+                    # wrong one sitting in docs/hud/screens, where the next
+                    # reader finds it looking exactly as finished as the
+                    # others.
+                    grown = drawn_box(img, background)
+                    if not sheet.grew_downwards(shorter, grown):
+                        raise Fail(
+                            f"{shot['file']}: the HUD drew {shorter} on the "
+                            f"primary without the frame this shot is OF, and "
+                            f"{grown} with it — which is not a plate arriving "
+                            "under another one at the same top-right corner. "
+                            "The picture about to be written is of a HUD "
+                            "saying less than its caption says it does"
+                        )
+                    log(
+                        f"  and {grown[3] - shorter[3]} px taller with it: "
+                        f"{grown}"
+                    )
                 name = f"{shot['file']}-{target}.png"
                 write_png(outdir / name, img)
                 written.append(name)
                 log(f"  wrote {name} ({img.shape[1]}x{img.shape[0]})")
+
+            # The measurement above only happens on the primary, which is
+            # where the shorter exposure was taken. A shot that declared
+            # `grows_from` and photographed something else would otherwise
+            # skip it in silence.
+            if shot.get("grows_from") and grown is None:
+                raise Fail(
+                    f"{shot['file']} grows from a shorter exposure of the "
+                    "primary and never photographed the primary, so nothing "
+                    "measured whether the plate it is OF ever arrived"
+                )
         finally:
             if hud is not None:
                 hud.stop()
