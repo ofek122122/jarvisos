@@ -635,8 +635,10 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       own words — which makes A13's question ("three copies of LISTENING
       across three screens: right, or noise?") sharper rather than new.
       There is also no way to turn it off. Both are the same human call and
-      should be answered together with A13, at the machine, by someone
-      looking at it. Nothing was built toward either answer: the plate is
+      should be answered together with A13 — and as of A30 by looking at
+      `docs/hud/screens/02-heard-desk.png`, which is your own sentence
+      repeated across three real-sized monitors, rather than at ares.
+      Nothing was built toward either answer: the plate is
       one `HeardPlate {}` in the stack and a `personality/` switch would be
       the obvious shape if the answer is "sometimes". Discovered in A26.
 
@@ -658,8 +660,11 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
-      right (you see it wherever you look) or noise. Needs a human eye on
-      ares before it is worth changing. Discovered in A3.
+      right (you see it wherever you look) or noise. **No longer needs a
+      seat at ares**: `docs/hud/screens/02-heard-desk.png` is that exact
+      picture, at ares' real monitor sizes (A30). It is a two-minute human
+      opinion now, and it should be answered together with A27.
+      Discovered in A3.
 
 - [x] A29. The HUD can be looked at without sitting at ares. — fea019c
       (`docs/hud/*.png`: seven shots of one real surface at its real size,
@@ -682,18 +687,34 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       assertion breaks when a font ships a new version. Tests:
       `bash ops/ralph/runtests.sh tools`.)
 
-- [ ] A30. The sheet is the CONTENT of one surface and nothing else:
-      layer-shell, the empty input mask, the zero exclusive zone, focus
-      behaviour and the three real monitors are all `shell.qml`'s, and
-      A13/A27 — three copies of one plate across three screens — is exactly
-      the question a single-surface photograph cannot answer. A headless
-      wlroots compositor (cage, or sway with `WLR_BACKENDS=headless`) plus
-      `grim` could photograph the REAL quickshell surface, on three
-      outputs at ares' real resolutions, and would answer A13/A27 without
-      anybody being at the machine. Deliberately not attempted in A29: a
-      compositor inside the loop's sandbox is a much larger and flakier
-      thing than a QML engine, and a flaky gate is worse than an honest
-      gap. Worth one iteration of its own. Discovered in A29.
+- [x] A30. The surface stops being verified by reading the source.
+      — d56b12e
+      (`ops/ralph/hudscreens.sh` runs the SHIPPED `.#jv-hud` — quickshell,
+      layer-shell, its own bridge — against a real jarvisd on a headless
+      wlroots compositor carrying ares' three monitors, and photographs
+      every screen with grim into `docs/hud/screens/`. Nothing is staged,
+      which is the one claim A29's sheet cannot make and the first thing a
+      future run would give up, so a tools gate reads the driver and fails
+      on any `cp`/`ln -s`/`shell/jv-hud` outside a comment. The pictures
+      are the smaller half: no PNG is written unless the HUD drew on EVERY
+      monitor and only inside the 300x560 box shell.qml anchors to the
+      top-right corner at `inset_px`; unless the seat's keyboard is the
+      same node it was before the HUD existed; unless the quiet shot comes
+      back pixel-identical to the bare desktop on all three screens; and
+      unless every workspace still has its whole monitor. Five mutations
+      built and photographed, three caught by three different checks
+      (anchored left, `WlrKeyboardFocus.Exclusive`, a health plate that
+      reports a well machine); a sixth, one surface instead of one per
+      screen, caught by the corner check. ONE EQUIVALENCE RECORDED: on a
+      CORNER-anchored surface the layer-shell protocol ignores an
+      exclusive zone entirely, so `ExclusionMode.Normal` and `.Auto` both
+      change nothing — the anchor is what keeps the HUD out of the way and
+      `Ignore` is the belt to its braces. That check is kept for the day
+      the anchors change and VERIFIED to bite then (left+right+top with
+      `Auto` → usable 2560x880). Not ares: sway is not Niri and the
+      outputs are headless, so this answers "on all three, in the right
+      corner, costing nothing" and never "does it look right". 10 tools
+      mutations, 10 caught. Tests: `bash ops/ralph/runtests.sh tools`.)
 
 - [ ] A31. A29 cannot photograph time. A21 (the confirm window shortening),
       A22 (granted / denied / timed out leaving differently) and A25 (how
@@ -707,7 +728,20 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       answering A21/A22/A25 says the stills were not enough. Discovered in
       A29.
 
+- [ ] A32. The empty input mask (`mask: Region {}`) is the one invariant-10
+      claim A30's compositor still cannot test. Every other one became a
+      measurement — the corner on each monitor, the keyboard that never
+      moves, the desktop left pixel-identical — but "a click passes
+      through to the window underneath" needs a SECOND client to pass
+      through to, and a way to assert that it, and not the HUD, received
+      the event. A tiny wayland client that logs its pointer events, under
+      the same headless sway, plus `swaymsg seat - cursor set/press`,
+      would close it. Small, and the last structural claim in that header
+      still resting on a reading. Discovered in A30.
+
 ## Done
+- A30 — the HUD on three monitors, and the four invariant-10 claims that
+  stopped being verified by construction (d56b12e, 2026-09-24)
 - A29 — the HUD, photographed: docs/hud contact sheet rendered from the
   real plates (fea019c, 2026-09-24)
 - B11 — `jv health --check`: the machine can be asked whether it is well,

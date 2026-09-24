@@ -2655,3 +2655,119 @@ them easier to reason about without bringing any of them closer to decided.
   (`harness/record.py`), which would turn shot 04 from an assumption into
   a recording. `jv health --check` (B11) will tell you whether the machine
   is ready before you start.
+
+---
+
+## 2026-09-24 — iteration 28 — A30: the surface stops being verified by reading the source
+
+For thirty iterations every claim in `shell.qml`'s header was true because
+somebody read the file. `WlrKeyboardFocus.None` was a line of QML that
+qmllint proved RESOLVES; it would have been just as happy with
+`.Exclusive`. `ExclusionMode.Ignore`, the empty input mask, one surface per
+monitor, "visible is false whenever nothing is on screen" — all of it was
+verified by construction, which is a polite way of saying nobody had
+tried it. A29 closed the other gap (nobody had SEEN the plates) and was
+explicit that it could not close this one: a QML engine rendering into a
+300x560 rectangle knows nothing about compositors.
+
+`ops/ralph/hudscreens.sh` runs the real thing. Headless wlroots (sway,
+`WLR_BACKENDS=headless`, pixman) with ares' three monitors — 2560x1440 at
+the origin and two 1920x1080 beside it — a real `jarvisd` on a private
+socket, and the **shipped** `.#jv-hud`: quickshell, its layer-shell
+surface, its own `jv-hud-bridge` child. Frames go onto that bus and the
+HUD reads them the way it reads any frame. `grim` photographs each output
+and the whole desk. The whole thing comes up in about ninety seconds from
+a warm store.
+
+Nothing is staged. That is the one claim this sheet makes that A29's
+cannot, and it is also the first thing a future iteration would give up to
+make a stubborn run go green, so `test_the_harness_photographs_the_shipped_binary_and_stages_nothing`
+reads the driver and fails on any `cp`, `ln -s`, or mention of
+`shell/jv-hud` outside a comment.
+
+**The pictures are the smaller half.** Before any PNG is written the run
+has to survive four measurements no QML engine can make:
+
+- Everything drawn on each output falls inside the 300x560 box `shell.qml`
+  anchors to the top-right, with the right-hand gap equal to
+  `geometry.inset_px`. Measured per monitor, so "one surface per screen"
+  is part of it.
+- The seat's focused node, read with no HUD running and again while the
+  HUD is drawing, is the same node.
+- The quiet shot comes back pixel-identical to the bare desktop on all
+  three monitors. Not "looks dark": an unmapped surface, measured.
+- No workspace has lost usable area.
+
+Five mutations were built and photographed. **Three caught**: anchoring
+the surface `left` (drew at x46..283 on a monitor whose box starts at
+2244), `WlrKeyboardFocus.Exclusive` + `focusable: true` (the seat moved
+from node 6 to node 0), and a `HealthPlate` whose `shown` is hard-coded
+true (the quiet shot drew a 20x20 square on a screen that should have been
+bare). A sixth, `model: [Quickshell.screens[0]]`, was caught by the
+per-monitor corner check — which is the A13 claim itself.
+
+**Two equivalences, both recorded rather than papered over.** The first is
+the interesting one and cost three builds to pin down. `ExclusionMode`
+set to `Normal` — and then to `Auto` — changed not one pixel of any
+workspace rect. The reason is the wlr-layer-shell protocol: an exclusive
+zone is only honoured for a surface anchored to ONE edge, or to an edge
+plus both perpendicular ones, and this surface is anchored to a CORNER
+(top + right). So what actually keeps the HUD from pushing anyone's
+windows around is the anchor, and `ExclusionMode.Ignore` is the belt to
+its braces. The check is kept because the day those anchors change — a
+status strip along the top edge is the obvious future — the zone becomes
+real; VERIFIED it bites then, by anchoring left+right+top with `Auto`,
+which took HEADLESS-1's usable area to 2560x880. The second equivalence:
+the self-test `Loader` forced `active: true` shows nothing, because
+`visible` still gates the whole surface on `anyLit`.
+
+What the sheet **cannot** say, and says so on its own first page: sway is
+not Niri, the outputs are headless (right sizes, no scanout, no panel, no
+NVIDIA, named `HEADLESS-1..3`), and nothing here knows whether an 11 px
+label is comfortable from where you actually sit. It answers "is it on all
+three screens, in the right corner, costing nothing" — which is what
+A13/A27 were blocked on — and not "does it look right".
+
+Two smaller decisions. The desktop behind the HUD is the same flat
+`#31353B` A29 paints its backdrop with, and a tools gate now requires the
+two sheets to agree: without something behind them the plates' 0.86
+opacity is invisible, and two different greys across two documents read as
+two different HUDs. And the sheet is honest that reruns are not
+byte-identical — consecutive runs of an unchanged HUD move about five
+pixels by one value along an antialiased glyph edge, so a dirty
+`git status` after a re-run is not evidence of anything.
+
+`02-heard-desk.png` is the picture A13 and A27 have been blocked on: the
+same THINKING, the same "Hey Jarvis, what time is it?", the same MIC,
+three times, once per screen. Nothing was built toward an answer.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 77 (was 66). Ten mutations
+  run through the new gates, ten caught: an orphan PNG, a backdrop that is
+  a Jarvis colour, a driver that stages a copy of the shell, a driver that
+  sets `JV_HUD_SELFTEST`, a shot with no README section, a surface box
+  that drifts from shell.qml, an inset that drifts from theme.toml, a
+  dropped monitor, the only dark shot going lit, and a sheet with no
+  whole-desk photograph. `bash ops/ralph/qmltest.sh` — 347, untouched and
+  green.
+- build: `nix build .#jv-hud` ok, `nixos-rebuild build --flake .#ares` ok.
+  Never test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin touched. Nothing new enters any closure: sway,
+  swaybg, grim, numpy and msgpack are realized by the harness at run time
+  and are not inputs to anything the machine installs.
+- files: ops/ralph/hudscreens.sh, tools/hudscreens/{sheet.py,shoot.py},
+  tools/tests/test_hudscreens.py, docs/hud/screens/{README.md, 6 PNGs}
+- commit: d56b12e
+- next: **A13 and A27 are now one look at `docs/hud/screens/`**, and
+  answering them is a two-minute human opinion rather than a seat at ares:
+  three copies of your own sentence across three monitors — right, or
+  noise, and should there be a `personality/` switch. The three timing
+  questions (A21 the shortening window, A22 granted/denied/timed-out
+  leaving differently, A25 "NO BUS FOR 4 MIN") are still one human call on
+  `docs/hud/`, and A31 — the three-frame strip — is the build that follows
+  IF the stills turn out not to be enough. Still genuinely needing the
+  machine: **B10/A28**, one real spoken turn recorded off the live bus, is
+  now worth more again, because this harness would replay it onto a real
+  compositor and photograph the answer arriving. `jv health --check` (B11)
+  says whether the machine is ready first. New: **A32** — the empty input
+  mask is the one invariant-10 claim this harness still cannot test, for
+  want of a second client to click through to.
