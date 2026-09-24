@@ -1481,3 +1481,105 @@ and both were real:
   The standing item, unchanged and now seventeen iterations old: nobody has
   ever LOOKED at this HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then a real
   wake word.
+
+## 2026-09-24 — iteration 18 — B5: `jv act-log` can be asked a question
+
+Track A is human-blocked in all four of its open items (A8 wants a font
+decision that is identity and so a human's under invariant 9; A11 wants two
+additive fields in frozen schemas; A13 wants an eye on ares; A18 is a warning
+note, not work), so this is the B5 the last journal entry named.
+
+`jv act-log` could print the whole file or `--tail N` of it. That is a
+listing, not a reader. After something happens on this machine the human has
+exactly two questions — **"what did jv-act do in the last ten minutes"** and
+**"show me everything that was not ok"** — and neither could be asked of the
+record of the one service allowed to change the machine. Both land entirely
+in the already-parsed entries: `--since`, `--failed`, `--outcome WORD`
+(repeatable), and `--failed`/`--outcome` made mutually exclusive, since
+`--failed` IS `--outcome` negated and accepting both would have to invent a
+meaning for their intersection.
+
+**one rule, and it is the same rule the file already lived by.** `act_log_render`
+has always refused to drop a line it cannot parse, because a reader that
+silently skips a hole reports a torn audit trail as a clean one. A filter is
+the second chance to tell that lie, and a better-hidden one: a `--failed`
+view that quietly omits the entries something went wrong with is worse than
+no filter at all. So: **a filter narrows what is shown, and never hides what
+it could not evaluate.** Stated once, reached three ways —
+
+  · an unreadable LINE has no ts and no outcome, so no filter can exclude it;
+  · a readable entry with a missing or nonsense `ts` cannot be proven older
+    than the cutoff;
+  · one whose `outcome` is not a string has not been shown to have succeeded.
+
+Each of those prints `?` in the column the filter was about, so the admission
+is on screen rather than only in a doc comment. An unreadable line is SHOWN
+but is not counted as an ANSWER (`matched`), which is the distinction that
+keeps the exit code honest.
+
+**filters run before `--tail`**, so `--failed --tail 1` is "the newest
+failure" and not "the last line of the file, if it happens to be a failure".
+The second reading makes `--tail` silently answer a different question than
+the one asked. `matched` is likewise counted before the window narrows it:
+"did anything match" is about the filter, not about how many of the matches
+were asked for.
+
+**grep's exit rule.** A question nothing answers exits 1 and prints NOTHING
+for it. Two reasons it has to be silent: on a healthy machine `--failed`
+matching nothing is the GOOD answer, and a warning printed every time would
+train a human to ignore this command. And that exit is the only thing
+standing between a typo'd `--outcome denyed` and a reassuring empty listing —
+which is precisely why `--outcome` words are NOT validated against jv-act's
+outcome enum. Validating would be a second hand-copy of a human-review-only
+file (`act_audit_path` is already one, proposal R2), and an old `jv` would
+then refuse to show a record whose outcome word a newer jv-act had learnt to
+write; refusing to display a record because you do not recognise it is the
+wrong failure for an audit reader. `--tail` is a WINDOW and not a question
+(`ActLogFilter::is_query`), so `--tail 0` and a plain empty log still exit 0
+exactly as before.
+
+**wall clock, not `ts_mono`.** Entries carry both, and `ts_mono` is the better
+clock in every way except the one that matters here: "the last ten minutes"
+is a question about the clock on the wall, `ts_mono` restarts at every boot,
+and no human can type one. So `iso_to_epoch` had to exist — the exact inverse
+of jv-act's `now_iso` civil-from-days, hand-written rather than by adding
+chrono (a new dependency is a vendored-registry change for one date
+function). Deliberately strict: an offset like `+03:00` is REFUSED rather
+than ignored, because ignoring one shifts an entry by hours and then answers
+the wrong question with complete confidence — and jv-act writes UTC and only
+UTC, so a stamp with an offset did not come from jv-act. An unreadable
+`--since` is an error raised BEFORE the file is opened; a filter that
+silently widens prints the whole log and reads as a great deal of recent
+activity, and printing the log first would bury the message.
+
+Deleted while here: the `0 <=` halves of the hour/minute/second range checks.
+`small_int` and `plain_number` both refuse a sign, so no input could reach
+them. Dead defensiveness reads like protection — the A14/B6/A17 lesson, a
+fourth time. (A mutation pass is how it was found: the branch could not be
+made to fail.)
+
+**27 mutations, 27 caught**, across the filter predicate, the tail/filter
+ordering, both exit-code clauses, the duration and ISO parsers, and the clap
+wiring (`--failed` reaching the filter, the `conflicts_with`, `--since` being
+judged before the file is read). No survivors this round — the first time in
+several iterations, and worth noting that the three edge tests that made it
+so (the inclusive `--since` boundary, three-digit seconds, one past the leap
+second) were all written because a mutation was aimed at them first.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 57 green (was 36: 14 new
+  unit tests, 7 new integration tests running the real `jv` binary).
+- build: `nix build .#jarvisd` ok; `nixos-rebuild build --flake .#ares` ok.
+  Never test/switch. No schema change, no new topic, no jv-act change, no
+  boot path, no pins.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs
+- commit: da134b9
+- next: Track A stays human-blocked, so Track B again. The candidate found
+  here and logged as **B8**: `jv act-log` is now the only reader of the audit
+  trail that can answer a question, and jv-guard/jv-compat have no equivalent
+  — but before adding more flags, the honest next item is **B3** (replay
+  harness fixtures), which is the oldest unstarted item in the plan and the
+  one thing Phase 3 says is used forever. **A18** remains a note rather than
+  work. The standing item, unchanged and now EIGHTEEN iterations old: nobody
+  has ever LOOKED at this HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then a
+  real wake word.

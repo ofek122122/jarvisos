@@ -183,14 +183,36 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       latent flake). 46 tests green, 14 mutations caught. Tests:
       `bash ops/ralph/cargotest.sh jarvisd`, gate `nix build .#jarvisd`.)
 
-- [ ] B5. `jv act-log` has no way to ask a question: it prints the whole file
-      (or `--tail N`) and nothing else. The two questions a human actually has
-      after something happened are "what did jv-act do in the last 10 minutes"
-      and "show me everything that was not `ok`" — a `--since` and a
-      `--failed`/`--outcome` filter over the already-parsed entries, plus
-      exit-1 when a filter matches nothing so it is scriptable. `ts_mono` and
-      the ISO `ts` are both already in every entry. Small, pure, and it lands
-      entirely in `cli::act_log_render`. Discovered building B4.
+- [x] B5. `jv act-log` can be asked a question. — da134b9
+      (`--since` — a duration back from now, 10m/2h/90s/3d, or a UTC
+      timestamp — plus `--failed` and a repeatable `--outcome WORD`, the two
+      of them mutually exclusive since `--failed` IS `--outcome` negated.
+      ONE rule governs it: **a filter narrows what is shown and never hides
+      what it could not evaluate** — an unreadable line has no ts and no
+      outcome, a missing/nonsense `ts` cannot be proven older than the
+      cutoff, a non-string `outcome` has not been shown to be `ok`; all
+      three survive every filter and print `?` in the column the filter was
+      about. A `--failed` view quietly missing the damaged entries is the
+      same lie `act_log_render` already refuses about a torn line. Filters
+      run BEFORE `--tail`, so `--failed --tail 1` is the newest FAILURE.
+      Exit follows grep: a question nothing answers exits 1 and prints
+      nothing (on a healthy machine "nothing failed" is the good answer),
+      which is also the only thing between a typo'd `--outcome denyed` and a
+      reassuring empty listing — so the words are deliberately NOT validated
+      against jv-act's enum (a second hand-copy of a human-review-only file,
+      and an old `jv` would refuse to display a record it did not
+      recognise). `--tail` is a window, not a question, so `--tail 0` still
+      exits 0. Wall clock, not `ts_mono`: `ts_mono` restarts at every boot
+      and no human can type one. `iso_to_epoch` is the hand-written inverse
+      of jv-act's `now_iso` (no chrono for one date function) and refuses an
+      offset rather than ignoring it. 57 tests green (was 36), 27 mutations,
+      27 caught. Tests: `bash ops/ralph/cargotest.sh jarvisd`.)
+
+- [ ] B8. jv-guard and jv-compat write their own records and neither can be
+      asked a question the way `jv act-log` now can. Worth ONE shared
+      reader rather than three flag sets that drift — but only when there
+      is a second real caller, not on the strength of this one. Do B3
+      first. Discovered in B5.
 - [x] B6. jv-brain subscribes to `audio.wake`: a barge-in stops the answer,
       not just the speaking of it. — 4d05900
       (A spoken turn runs as a CHILD task of the input worker, so the wake
@@ -221,6 +243,10 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       on the bus and a second thing to keep true. Noted so the next
       hand-copied constant is recognised as one. Discovered in A14.
 - [ ] B3. More replay-harness fixtures for perception (recorded-session tests).
+      **The oldest unstarted item in this plan, and the next one to take**
+      while Track A is human-blocked: the blueprint says the harness is
+      built in Phase 3 and used forever, and every perception test after it
+      depends on there being fixtures.
 
 ## Track C — Creative (within blueprint + invariants)
 - [ ] C1. Propose and add genuinely new, on-brand capabilities here before building
@@ -380,3 +406,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   lost is recorded as interrupted (4d05900, 2026-09-24)
 - A17 — the question you gave up on stops reading "thinking" (b0c8262,
   2026-09-24)
+- B5 — `jv act-log` can be asked a question: --since/--failed/--outcome, and
+  a filter that never hides what it could not evaluate (da134b9, 2026-09-24)
