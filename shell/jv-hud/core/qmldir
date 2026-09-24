@@ -10,5 +10,6 @@ MotionPolicy 1.0 MotionPolicy.qml
 SpeechState 1.0 SpeechState.qml
 MicState 1.0 MicState.qml
 HealthState 1.0 HealthState.qml
+ConfirmState 1.0 ConfirmState.qml
 PlateStack 1.0 PlateStack.qml
 EarsBudgets 1.0 EarsBudgets.qml

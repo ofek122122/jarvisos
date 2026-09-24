@@ -512,6 +512,50 @@ def test_the_plates_take_their_budgets_from_jv_ears_not_from_the_fallback():
         )
 
 
+# --- A20: an element cannot read a topic nothing subscribes to -------------
+
+# Every way a core/ element can ask the bus about a topic. Each one takes the
+# topic as a literal string, which is what makes this checkable at all.
+TOPIC_READS = re.compile(r"\b(?:latest|latestFrom|publishersOf)\(\s*\"([^\"]+)\"")
+
+# The bridge's own list, read out of the source rather than imported: this
+# gate has to run in CI's bare checkout, where no service is installed.
+BRIDGE_TOPICS = re.compile(r"DEFAULT_TOPICS: Sequence\[str\] = \(([^)]*)\)", re.S)
+
+
+def test_every_topic_the_hud_reads_is_one_the_bridge_subscribes_to():
+    """The HUD only ever sees what jv-hud-bridge subscribed to.
+
+    An element that reads a topic missing from that list is not broken in any
+    way anything would notice: it builds, it lints, its own tests pass (they
+    hand it frames directly), and on the machine it simply draws nothing,
+    forever, on a surface that is unmapped by design. That is the A15 failure
+    mode again — the plate that never appears — arriving through the other
+    end of the pipe.
+
+    One direction only. The bridge may subscribe ahead of the element that
+    will read a topic; it may not fall behind one that already does.
+    """
+    bridge = ROOT / "services" / "jv-hud-bridge" / "jv_hud_bridge" / "bridge.py"
+    block = BRIDGE_TOPICS.search(bridge.read_text("utf-8"))
+    assert block, f"cannot find DEFAULT_TOPICS in {bridge.name} — did it move or get renamed?"
+    subscribed = set(re.findall(r'"([^"]+)"', block.group(1)))
+    assert subscribed, "the bridge subscribes to nothing at all"
+
+    core = ROOT / "shell" / "jv-hud" / "core"
+    read = {}
+    for path in sorted(core.glob("*.qml")):
+        for topic in TOPIC_READS.findall(strip_qml_comments(path.read_text("utf-8"))):
+            read.setdefault(topic, []).append(path.name)
+    assert read, "no core/ element reads the bus at all — did the call shape change?"
+
+    missing = {t: v for t, v in read.items() if t not in subscribed}
+    assert not missing, (
+        "these elements read topics jv-hud-bridge never subscribes to, so they "
+        f"would draw nothing on the machine and nothing would fail: {missing}"
+    )
+
+
 def test_core_qmldir_registers_every_component_and_no_module_name():
     qmldir = gen.render_core_qmldir()
     assert "BusModel 1.0 BusModel.qml" in qmldir

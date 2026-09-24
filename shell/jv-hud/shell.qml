@@ -28,8 +28,10 @@
 // reduced-motion switch — so stillness is one setting, not a promise every
 // element has to keep on its own.
 //
-// What it shows today, top to bottom: `StatePlate` (A3) — what jv-voice
-// and jv-ears actually published, idle / listening / speaking /
+// What it shows today, top to bottom: `ConfirmPlate` (A20) — the
+// destructive action jv-act has stopped in front of, in jv-act's own
+// words, readable rather than only audible; `StatePlate` (A3) — what
+// jv-voice and jv-ears actually published, idle / listening / speaking /
 // interrupted; `MicPlate` (A4) — whether the microphone is open, from
 // jv-ears' own capture counters; and `HealthPlate` (A6) — the services
 // that are not well, and the llm rung when the brain is on the CPU floor.
@@ -93,9 +95,12 @@ ShellRoot {
       // plus its inset, with room for the longest line any of them draws —
       // `jv-compat DEGRADED` at 11 px mono — and for the health plate's
       // four rows sitting under the other two. A surface no bigger than
-      // what it may ever draw.
+      // what it may ever draw. The height grew with ConfirmPlate (A20),
+      // whose question wraps to three 13 px lines above a tool id; its
+      // width is capped below this box on purpose (`maxTextPx`), so a long
+      // sentence wraps rather than reaching for the middle of the screen.
       implicitWidth: 300
-      implicitHeight: 260
+      implicitHeight: 380
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
@@ -123,6 +128,17 @@ ShellRoot {
         anchors.topMargin: Theme.insetPx
         anchors.rightMargin: Theme.insetPx
         spacing: Theme.gapPx
+
+        // The question Jarvis is waiting on, from jv-act's own
+        // action.confirm. First in the stack because it is the only thing
+        // the HUD ever shows that is waiting on YOU, and because its window
+        // closes on its own: a plate that appears under three others, in
+        // the fifteen seconds you have to answer it, is a plate that was
+        // not there. It can only be read — the surface takes no input at
+        // all — so answering stays with your voice and `jv confirm`.
+        ConfirmPlate {
+          anchors.right: parent.right
+        }
 
         // What Jarvis is doing, from speech.state + audio.wake + audio.vad.
         // Draws nothing while idle or while the bus cannot be seen.

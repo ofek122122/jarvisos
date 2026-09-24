@@ -47,6 +47,13 @@ from jarvis_bus import BusError
 # box, and no element reads those bodies — the HUD uses only the fact that
 # a frame exists and when. A future element that wants the words is free to,
 # but it should be a deliberate choice rather than a thing that happened.
+#
+# action.confirm is that deliberate choice (PLAN A20), and the first body
+# the HUD actually RENDERS: jv-act stops in front of every destructive tool
+# and asks a question with a 15 s window on it, and until now that question
+# was only ever spoken. Showing it is the whole point — a confirmation you
+# cannot read is one you answer by guessing. Both kinds ride this topic;
+# the answer is how the HUD knows to stop asking.
 DEFAULT_TOPICS: Sequence[str] = (
     "speech.state",
     "audio.wake",
@@ -54,6 +61,7 @@ DEFAULT_TOPICS: Sequence[str] = (
     "sys.health",
     "brain.request",
     "brain.response",
+    "action.confirm",
 )
 
 # Exactly the envelope (schemas/envelope.json). Forwarding the whole thing
