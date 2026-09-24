@@ -5471,3 +5471,109 @@ become.
   A39 still want a human at ares. **B10/A28 — one live recording of one
   spoken turn on ares — remains the biggest thing a human can hand this
   loop.** B7/B12/B15/B17/B20/B23 unchanged.
+
+## 2026-09-24 — iteration 54 — A64: the verdict three files describe gets
+## something that can actually say it
+
+- built: **jv-guard's shape engine — the `suspicious` rung now has a
+  producer.** `decide()` could return `clean` or `blocked` and nothing
+  else, so the approved policy's middle rung lived in three files and no
+  code path: the schema's policy note, jv-compat's "override requires
+  explicit confirmation — not wired in v0" message, and `GuardPlate`'s
+  `warn` colour. A61 came within one composed frame of photographing that
+  colour, which is what made it worth fixing rather than noting: a picture
+  of a verdict nothing can publish would have put an intention into the one
+  sheet whose whole value is that it isn't one.
+
+`jv_guard/pe.py` reads a Windows binary's section table and nothing else —
+no imports resolved, no relocations walked, no network, ~90 lines of
+`struct.unpack_from` with a bounds check before every read. Anything it
+cannot parse confidently it refuses to parse at all, because a half-read
+header is a worse input to a security decision than no input.
+`jv_guard/heuristics.py` turns sections into concerns: an **executable**
+section that measures ≥ 7.2 bits of entropy (packed or encrypted), one
+that is also **writable** (W+X — it can rewrite the code it runs), one
+with **no bytes in the file** but hundreds of KiB of virtual space (the
+UPX0 shape, which entropy cannot see because there is nothing to measure).
+It reads a 64 KiB header window and then only the executable sections'
+bytes, capped at 8 MiB each — an installer is gigabytes and none of it
+belongs in memory.
+
+**The word "executable" is the entire difference between a rung and a
+nuisance.** Every Inno/NSIS/7z installer on earth carries a compressed
+payload at entropy ~8, and it lives in a data section or an overlay. Had
+the check been "any high-entropy section", `suspicious` would have meant
+"is an installer" by the end of the first week. A test states that case as
+its own argument, and flipping the executable guard off makes it fail.
+
+**The regression this nearly introduced is the part worth reading.** Before
+today, "no engine ran" and "ClamAV is down" were the same sentence, and
+that sentence is what fail-closed is made of: no verdict published, compat
+times out, the install refuses. Add a second engine that always runs and
+that equivalence silently dies — ClamAV goes down, the shape engine reports
+an ordinary-looking binary, `decide()` sees an engine that ran and says
+**clean**. Fail-closed deleted by a feature, with no test failing anywhere.
+So engines now declare a KIND: `SIGNATURE` is authoritative (its silence is
+what `clean` is made of) and `HEURISTIC` is advisory (may raise suspicion,
+may never grant trust). `decide()` returns None unless an authoritative
+engine ran — and does so even when the advisory engine is shouting, because
+the approved policy's outage clause says an outage must neither grant trust
+nor invite an override, and publishing `suspicious` during one invites
+exactly that. The degraded health note stopped saying "no scan engine
+available" when one demonstrably ran; it now names the outage precisely and
+says which advisory engine looked anyway.
+
+**Missing Authenticode was the other candidate in A64 and is deliberately
+not here.** It fails twice. Nearly every binary this machine will ever
+screen — indie games, mod tools, decade-old installers — is unsigned, so
+the rung would fire on almost everything and come to mean "is a Windows
+program". And the cheap half is worthless regardless: the PRESENCE of a
+signature blob is not trust, only a verified chain is, and verifying one
+needs a certificate store and a policy about who is trusted. That is a
+different and much bigger piece of work, and it is written into the module
+docstring so the next reader doesn't re-derive it.
+
+**What this costs, deliberately.** A UPX-packed freeware tool and a
+Themida/VMProtect-wrapped game installer both read as packed, because they
+are — and in v0 `suspicious` refuses, with a message describing an override
+that isn't wired. So a class of installs that used to succeed now stops and
+asks for a confirmation nobody can give yet. That is invariant 8 behaving
+as written (untrusted by default, fail closed), and it is also the moment
+the confirm-surface override stopped being a nice-to-have: it is now the
+only door out of a verdict this machine can produce (A65).
+
+- tests: `bash ops/ralph/runtests.sh jv-guard` — 33 (was 6), written
+  first and red before the modules existed. Five mutations run through
+  them: authority rule removed (any engine counts) → the two fail-closed
+  tests FAIL; entropy measured on all sections → the data-section test
+  FAILS; no minimum measurable size → the 256-byte-section test FAILS;
+  heuristic promoted over a signature hit → six FAIL; threshold dropped to
+  5.0 → the calibration test FAILS. That last one is the one to keep: it
+  measures /bin/sh (6.13 over 1.2 MB of real compiled code) and asserts it
+  sits under the threshold, so the constant cannot quietly drift down into
+  ordinary binaries. Two of the new tests are end-to-end against a real
+  jarvisd: a packed PE publishes `suspicious` on the bus with both engines
+  in `scanned_by`, and the same PE with ClamAV broken publishes nothing at
+  all. `... runtests.sh jv-compat` — 9, `... runtests.sh pylib` — 4, both
+  unchanged (nothing outside jv-guard imports these types).
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change (`suspicious` was already in the frozen enum — this is the
+  first thing that can put it there), no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin.
+- files: services/jv-guard/jv_guard/pe.py (new),
+  services/jv-guard/jv_guard/heuristics.py (new),
+  services/jv-guard/jv_guard/scan.py, services/jv-guard/jv_guard/service.py,
+  services/jv-guard/jv_guard/main.py,
+  services/jv-guard/tests/test_pe_heuristics.py (new),
+  services/jv-guard/tests/test_guard.py
+- next: **A66 is now honest and cheap** — `GuardPlate`'s `warn` branch has
+  a real producer, so the thirteenth contact-sheet shot A61 stopped itself
+  from taking can be taken from frames `jv-guard` really publishes. **A65
+  is the one a human should see first**: the override path is no longer
+  theoretical, it is the only exit from a verdict this machine now
+  produces. A62 (does the corner need a grammar for "these two plates are
+  unrelated") and A63 (a crowded-corner shot, which wants A62 answered)
+  unchanged. A60/A50/A55/A47/A56/A59 still want a decision; A21/A22/A25/
+  A27/A31/A38/A39 still want a human at ares. **B10/A28 — one live
+  recording of one spoken turn on ares — remains the biggest thing a human
+  can hand this loop.** B7/B12/B15/B17/B20/B23 unchanged.

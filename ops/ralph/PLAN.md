@@ -1419,23 +1419,57 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       is a picture of exactly the confusion A62 names, so it wants A62
       answered first. Discovered in A61.
 
-- [ ] A64. `GuardPlate`'s entire `warn` branch is unreachable on this
-      machine. `jv-guard`'s `decide()` returns `clean` or `blocked` and
-      nothing else — the `suspicious` rung of the approved policy needs a
-      heuristic engine, and the only scanners that exist are ClamAV (a
-      signature engine) and the test mock. So three files describe a
-      verdict nothing can publish: `schemas/guard.verdict.json`'s policy
-      note, `install.py`'s "override requires explicit confirmation — not
-      wired in v0" message, and the HUD's second colour for this plate.
-      Nearly photographed in A61 before it came to light, which is the
-      real cost: a composed frame no code path can produce would have put
-      a picture of an intention in a sheet whose value is that it is not
-      one. Two honest ways out and both are small: give jv-guard one
-      heuristic (PE entropy, missing Authenticode — both local, both
-      hash-free) so the rung exists, or label the `warn` branch and the
-      override message as waiting on one. The first is a jv-guard change
-      with its own tests; the second is three comments. Discovered in
-      A61.
+- [x] A64. `GuardPlate`'s entire `warn` branch was unreachable on this
+      machine: `decide()` returned `clean` or `blocked` and nothing else,
+      so the approved policy's middle rung lived in the schema's policy
+      note, jv-compat's override message and the HUD's second colour —
+      and in no code path. — eca239e
+      (Took the first of the two ways out: jv-guard grew a local,
+      hash-free SHAPE engine. `jv_guard/pe.py` reads the section table
+      and refuses to guess at anything it cannot parse confidently;
+      `jv_guard/heuristics.py` raises a concern for an EXECUTABLE section
+      at entropy >= 7.2, one that is also writable (W+X), or one with no
+      bytes in the file but virtual space to unpack into. "Executable" is
+      the whole difference between a rung and a nuisance: every
+      Inno/NSIS/7z installer carries a ~8-entropy compressed payload in a
+      DATA section, and a test says so. Engines now declare a KIND —
+      SIGNATURE is authoritative, HEURISTIC is advisory — because without
+      it the new engine would have silently deleted fail-closed: ClamAV
+      down + shape engine ordinary would have become `clean`. `decide()`
+      returns None unless an authoritative engine ran, even when the
+      advisory one is shouting (the outage clause forbids inviting an
+      override too). Missing Authenticode was rejected with reasons in the
+      docstring: it fires on nearly every binary this machine will screen,
+      and signature PRESENCE is not trust. Tests:
+      `bash ops/ralph/runtests.sh jv-guard` (33, was 6; five mutations),
+      jv-compat 9 and pylib 4 unchanged.)
+
+- [ ] A65. **Human decision, and it just stopped being theoretical.** The
+      `suspicious` override path is now the only exit from a verdict this
+      machine can actually produce. A UPX-packed freeware tool and a
+      Themida/VMProtect-wrapped game installer both read as packed —
+      because they are — and v0 refuses them with a message describing a
+      confirmation nobody can give. That is invariant 8 behaving exactly
+      as written, and it is also a class of install that used to succeed
+      and now stops. Three things a human could decide: (a) wire the
+      override through the confirm surface that already exists
+      (`ConfirmPlate` + jv-act owns confirmations — this is the designed
+      answer and the biggest); (b) leave it refusing and accept that
+      packed installers need a human at a terminal; (c) tune which
+      concerns reach `suspicious` (W+X alone is rarer than packing; the
+      thresholds are two named constants with a calibration test).
+      Discovered in A64.
+
+- [ ] A66. The thirteenth contact-sheet shot A61 refused to take is now
+      honest. `GuardPlate`'s `warn` colour has a producer, so a composed
+      frame of a `suspicious` verdict is a picture of something jv-guard
+      really publishes rather than of an intention — and the reasons it
+      carries ("executable section '.text' looks packed or encrypted:
+      entropy 7.96 of a possible 8.00") are longer than any blocked
+      reason yet photographed, which makes it a real test of the plate's
+      wrapping and of the fit check A61 added. Cheap, and unlike A63 it
+      lights one plate, so it does not want A62 answered first.
+      Discovered in A64.
 
 
 - [x] A53. `10-guard.png` is a picture only a human can tell apart from a
