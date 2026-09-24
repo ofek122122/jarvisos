@@ -1200,7 +1200,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the loop will hit this the first time it mutates a plate it has just
       changed. Discovered in B52.
 
-- [ ] B50. The canary proves the suite executes the FILE and never the
+- [x] B50. The canary proves the suite executes the FILE and never the
       LINE, which is the honest meaning of a survivor and also its
       blind spot: "the tests do not cover this branch" and "this branch
       is dead code" are the same report. The other half is sharper and
@@ -1215,7 +1215,62 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       than a defect to fix: a suite parameterised on its own constants
       needs at least one claim that is not. Worth one pass over the
       other services' constant-derived expectations the next time a
-      journal entry wants to mutate one. Discovered in B48.
+      journal entry wants to mutate one. Discovered in B48. — 40e395f
+      (The pass was RUN, not reasoned: every suite that imports a constant
+      from the code it tests was mutated at that constant and graded.
+      **Four survived** — jv-hud-bridge `FIRST_BACKOFF_S` and
+      `MAX_BACKOFF_S`, jv-voice `TURN_GAP_S`, jv-compat
+      `VERDICT_TIMEOUT_S` — and **four were caught**: jv-ears `STALL_S`,
+      jv-brain `SAFETY_MARGIN_BYTES`, jv-guard `ENTROPY_SUSPECT`, the
+      harness's `ASR_LATENCY_S`. The split is exactly the lesson: every
+      catch came from the one assertion in the file written in ABSOLUTE
+      units (`clock.now += 5.0`, not `STALL_S + 0.5`), and every survivor
+      had none. Each survivor now carries one claim that is not derived —
+      bounds on what the number exists to be true FOR, deliberately looser
+      than the shipped value in both directions so it is the promise and
+      not a second copy of the tuning. Re-graded: 4/4, 3/3, 2/2 caught,
+      including the 0.5 -> 0.9 `TURN_GAP_S` edit that mutate.sh's own
+      docstring uses as its usage example and that survived until today.
+      Asking the question of `VERDICT_TIMEOUT_S` found a REAL bug — see
+      B54 — and the test naming it was rewriting a module global in place
+      and never putting it back, so the jv-compat suite's result depended
+      on its own order.)
+
+- [ ] B54. **Closed by the same commit that found it, and worth a human's
+      eye anyway.** jv-compat waited 60 s for `guard.verdict` and then
+      failed closed; jv-guard's `ClamAVScanner` gives clamscan 120 s. An
+      installer whose scan ran 70 s was refused with "screening
+      unavailable — refusing to install" while the only authoritative
+      engine on this machine was still scanning it and about to publish
+      `clean` onto a topic nobody was reading — a clean binary refused for
+      a reason that was not true, which is not what invariant 8's
+      fail-closed guarantee is for. Raised to 180 s (120 s of scan plus the
+      re-hash of a large installer and jv-guard's 0.1 s poll) and the
+      relation pinned in jv-compat's suite, read out of jv-guard's source
+      rather than imported. What a human should still weigh: 180 s is now
+      the longest an install can sit with nothing on `compat.install` since
+      `fingerprinted`, and the HUD says nothing at all during it (A62's
+      corner has no "still screening" plate). Either direction of the fix
+      was defensible — the other is to cut clamscan's budget instead —
+      and this one was taken because refusing a clean binary is the worse
+      failure. Discovered in B50.
+
+- [ ] B55. The mutation harness cannot grade a relation between two files
+      when one of them is READ rather than imported. `--runner tests
+      jv-compat` correctly refused to grade a mutation of
+      `services/jv-guard/jv_guard/scan.py`: its canary made that file
+      impossible to load, jv-compat's suite stayed green (it never imports
+      it — it regexes the source, per invariant 1), and the harness said so
+      and exited 2 instead of claiming anything. The refusal is right and
+      the coverage gap is real: this is the same shape as
+      `RECONNECT_CADENCES` and `BUDGET_MIRRORS` in
+      tools/tests/test_gen_theme_qml.py, so there are already three
+      source-read relations in this repo that the grader declines to grade,
+      and both arms of B50's new one had to be checked by hand (edit,
+      run, restore). A canary for a source-read reference is a different
+      control — the file must be made unMATCHABLE, not unloadable, and the
+      suite must go red — which is a real design question rather than a
+      flag. Discovered in B50.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above

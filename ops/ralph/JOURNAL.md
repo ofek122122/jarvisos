@@ -7635,3 +7635,110 @@ in the quiet shot is a plate that spoke when it should not have.
   `docs/hud/` away from unblocking ten items, and **B10/A28** — one live
   recording of one spoken turn on ares — remains the biggest thing a
   human can hand this loop.
+
+---
+
+## 2026-09-25 — iteration 75 — B50: the constants nothing was holding
+
+Track A is still one human look away from unblocking (A47/A55/A62/A63/A68
+are all the same two questions asked about `docs/hud/`), and every item in
+`docs/optimization-backlog.md` is human-review-required by construction, so
+this took the B track's cheapest open item — and it turned out to have a
+real bug under it.
+
+B50's claim was a lesson learned once, in one file: a suite that computes
+its expectations FROM the constants it tests moves the code and the
+assertion together, so a whole class of mutation is ungradeable by
+construction, and the only thing that saves it is one claim written in
+absolute units. This iteration RAN that as a sweep instead of repeating it
+as advice. Every Python suite that imports a constant out of the code it
+tests was mutated at that constant and graded by `ops/ralph/mutate.sh`.
+
+**Four survived, four were caught**, and the split is the lesson exactly:
+
+- survived: `FIRST_BACKOFF_S` 0.5 -> 2.0 and `MAX_BACKOFF_S` 8.0 -> 30.0
+  (jv-hud-bridge), `TURN_GAP_S` 0.5 -> 2.0 (jv-voice), `VERDICT_TIMEOUT_S`
+  60 -> 300 (jv-compat).
+- caught: `STALL_S` 1.0 -> 8.0 (jv-ears), `SAFETY_MARGIN_BYTES` x3 and -> 0
+  (jv-brain), `ENTROPY_SUSPECT` 7.2 -> 5.0 and -> 7.99 (jv-guard),
+  `ASR_LATENCY_S` 2.2 -> 4.4 (harness).
+
+Every catch came from an assertion written in absolute units. The jv-ears
+one is the cleanest illustration in the repo: five lines in
+`test_capture_meter.py` say `capture_stall_s == CaptureMeter.STALL_S` and
+one line in the middle of a different test says `clock.now += 5.0`, and
+that sixth line is the entire reason an eight-second stall budget cannot
+ship. Every survivor's file had no such line.
+
+Each survivor now has one. Not a second copy of the tuning — bounds on
+what the number exists to be true FOR, deliberately looser than the
+shipped value in both directions, with the reasoning in the docstring:
+the bridge's first retry has to land inside the grace `LinkState.qml`
+waits out before it draws NO BUS and must not be a spin; its ceiling is
+the worst-case staleness of the whole HUD after the bus returns; the
+voice's gap bridges A BUS HOP and not the brain, which is what its own
+comment says it deliberately does not do.
+
+**The real find was jv-compat.** Asking what `VERDICT_TIMEOUT_S` had to be
+true for turned up a disagreement between two services that never read
+each other: jv-compat stopped listening for `guard.verdict` after 60 s and
+then failed closed, while jv-guard's `ClamAVScanner` gives clamscan 120 s.
+An installer whose scan ran 70 s was refused with "screening unavailable —
+refusing to install (fail closed)" while the only authoritative engine on
+this machine was still scanning it and about to publish `clean` onto a
+topic nobody was reading. That is not invariant 8's guarantee working —
+it is a clean binary refused for a reason that was not true. Raised to
+180 s and the relation pinned, read out of jv-guard's SOURCE rather than
+imported (invariant 1: services never import each other), in the shape
+`RECONNECT_CADENCES` already uses for the two cadences `LinkState.qml`
+depends on. Both directions of the fix were defensible; this one was taken
+because refusing a clean binary is the worse failure, and the other is
+written down as B54 for a human.
+
+One more thing fell out of the same file: `test_fail_closed_when_no_verdict`
+said "we shorten the timeout via monkeypatch" and then assigned
+`inst_mod.VERDICT_TIMEOUT_S = 1.0` in place, never putting it back. Every
+jv-compat test after it ran with a one-second screening window, and the
+suite's result depended on its own order. It is a real `monkeypatch` now.
+
+- tests: `runtests.sh jv-compat` **10 green, was 9** · `jv-hud-bridge`
+  **26, was 25** · `jv-voice` **28, was 27** · `jv-guard` 33, unchanged.
+  Re-graded after the fix: jv-hud-bridge **4/4 caught** (both retunes plus
+  a ceiling below the first retry and a backoff of zero), jv-voice **3/3**
+  — including the 0.5 -> 0.9 edit that `mutate.sh`'s own docstring uses as
+  its usage example and that survived until today — and jv-compat **2/2**.
+  The cross-service arm could not be graded by the harness and was checked
+  by hand instead (see B55): with jv-guard's clamscan budget raised to 600
+  the new test fails, and with its `"clamscan"` argv renamed so the regex
+  misses, it fails with "cannot find clamscan's timeout ... which is how it
+  drifted" rather than passing quietly.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. One production constant moved
+  (`VERDICT_TIMEOUT_S`), in a non-forbidden service, with the relation that
+  forced it pinned by a test.
+- files: services/jv-compat/jv_compat/install.py,
+  services/jv-compat/tests/test_compat.py,
+  services/jv-hud-bridge/tests/test_bridge.py,
+  services/jv-voice/tests/test_voice_service.py
+- commit: 40e395f
+- raised: **B54** (the 180 s wait is now the longest an install can sit
+  with nothing on `compat.install` since `fingerprinted`, and the HUD says
+  nothing during it — a human should weigh that against cutting clamscan's
+  budget instead) and **B55** (the harness cannot grade a relation between
+  two files when one is READ rather than imported; its canary correctly
+  refused and exited 2, and there are now three such relations in the repo
+  that must be checked by hand).
+- honest note: the first jv-voice run after adding its test showed one
+  unrelated failure in `test_streamed_reply_is_one_speaking_idle_pair` at
+  50 s of wall clock against its usual 21 s — the jv-ears mutation was
+  running on the same machine. It passed on every run since, alone. Worth
+  remembering that this suite's timing assertions are not load-proof.
+- next: **B53** is the one concrete cheap item left (one conditional line
+  in mutate.py's red-baseline abort, so `--runner shots` says "the SHEET is
+  stale" instead of "fix the suite first"), and **B55** is the same file
+  with a harder question in it. Otherwise the loop is where it has been for
+  several iterations: **Track A is one human look at `docs/hud/` away from
+  unblocking ten items** (A47, A55, A62, A63, A68 and the A21/A22/A25
+  cluster are two questions asked five ways), **B43/B47** are one question
+  asked three times, and **B10/A28** — one live recording of one spoken
+  turn on ares — remains the biggest thing a human can hand this loop.
