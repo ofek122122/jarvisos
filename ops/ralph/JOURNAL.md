@@ -1812,3 +1812,105 @@ parsed and re-dumped every line looked correct. The fixture is now a line
   **A18** remains a note; **B8** still waits for a second real caller. The
   standing item, now TWENTY iterations old: nobody has ever LOOKED at this
   HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then a real wake word.
+
+## 2026-09-24 — iteration 21 — A8: the machine finally has the faces the theme names
+
+`personality/theme.toml` has named Archivo and JetBrains Mono since A2 and
+nothing installed either of them. Every pixel of type the HUD has drawn since
+A3 — every plate, every label — was rendering in whatever fontconfig picked
+that day. That is the worst shape a missing dependency can take: it does not
+fail, it does not warn, it just looks like something else. For a versioned
+identity (invariant 9) it is the only failure mode that matters.
+
+`modules/fonts.nix` does not repeat the family names. It reads them out of
+theme.toml with `builtins.fromTOML`, which is the same thing
+`tools/gen_theme_qml.py` does for the HUD — one source of truth, two
+compilers, so renaming a face moves the system with it. What the module owns
+is the binding from a family NAME to something that provides it, and every
+step **throws rather than guesses**, because every guess here is invisible:
+a face theme.toml names with nothing bound to it is an eval-time throw, a
+provider theme.toml does not name fails an assertion (a face installed for no
+declared reason is one more family fontconfig can substitute), and a
+`family_<role>` with no fontconfig generic behind it throws too — theme.toml
+calls the generic families "the fallbacks", and a role with no generic has no
+fallback at all.
+
+The system installs the face it **checked**. A font package is only worth
+having if it really reports the family asked for; that name lives inside the
+font binary and nothing about a package's name or its file names guarantees
+it. So each declared face goes through a derivation that asks `fc-scan` —
+the same thing that will resolve the name at runtime — and fails the build if
+the family is not in there. "Provides the family" and not "every file is that
+family", deliberately: jetbrains-mono ships `JetBrains Mono NL` next to
+`JetBrains Mono`, and refusing that is refusing the packaging, not catching a
+drift.
+
+**That check found a real one on its first run.** The first version of the
+module was a plain `symlinkJoin`, and `fc-match monospace` against the built
+system answered `JetBrainsMono-Regular.woff2` — nixpkgs ships every face
+three times (opentype, truetype, WOFF2) and fontconfig indexes the web font
+like any other. Whether a WOFF2 renders at all depends on how the FreeType
+doing the rendering was built, so shipping one is the same silent
+substitution this module exists to stop, one layer further in. The join now
+links outline formats only, and `fc-list | grep -c woff2` over the built
+closure is 0.
+
+`pkgs/archivo` is the pin A8's research recommended. nixpkgs has no
+`archivo`; the only packaged source is `google-fonts`, whose src is 1.1 GiB
+to fetch and 2.7 GiB unpacked even overridden to one family, on a machine
+that builds its own system and never garbage-collects during development.
+Upstream is 66 MiB of source for 3.4 MiB of installed face — one rev, one
+hash, no tags or releases exist so the pin is a commit. Base width only:
+theme.toml names no Condensed/Expanded/SemiExpanded/AAA cut, and a family
+installed but never asked for is one more thing fontconfig can reach for when
+the real one is missing. Its install check asserts all 18 faces report family
+`Archivo` (widening the glob to `Archivo*.ttf` lets ArchivoCondensed in and
+fails the build — VERIFIED) and that the upright Regular is among them, since
+a package carrying only Thin and Black would pass the first check and render
+nothing anyone asked for.
+
+Two Python gates, because two things the nix side cannot see: no QML file may
+name a font family of its own (the same rule as colour — a literal
+`font.family: "monospace"` would put the drift back one binding at a time with
+nothing failing), and theme.toml's faces must equal `providerOf`'s keys. That
+second one IS checked at eval by the module; it is repeated in `tools/tests`
+because that is the one place it can run without nix — the `tools` CI job on
+a bare checkout, in half a second, with a diff instead of a stack trace.
+
+One thing this does NOT do: `Theme.familySans` still has no reader. Every HUD
+element is mono, exactly as A8 said. Archivo is packaged because theme.toml
+declares it and a declared face must exist, not because anything draws in it
+yet.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 54 green (was 52), 2 new. 11
+  mutations across the whole change, 11 caught: wrong package bound to a
+  family, provider deleted, provider nothing asks for, a `family_serif` with
+  no generic, `providerOf` renamed out of the gate's sight, the archivo glob
+  widened, archivo installing no Regular, a face dir with no outline files, a
+  hardcoded `font.family` string, the grouped `font { family: }` form, and a
+  provider key typo.
+- build: `nixos-rebuild build --flake .#ares` ok, `nix flake check --no-build`
+  ok, `nix eval ...toplevel.drvPath` ok (CI parity), `nix build .#archivo` ok,
+  `nix build .#jv-hud` ok. Never test/switch. No schema change, no jv-act
+  change, no boot path, no NVIDIA/kernel/flake pin touched.
+- verified end to end, as far as a sandbox can: `fc-match` for `Archivo`,
+  `JetBrains Mono`, `sans-serif` and `monospace` against the BUILT system
+  closure's own `conf.d` all resolve to the declared outline faces. Not
+  verified: what it looks like. That needs a human on ares.
+- files: modules/fonts.nix (new), pkgs/archivo/default.nix (new), flake.nix,
+  hosts/ares/default.nix, tools/tests/test_gen_theme_qml.py,
+  shell/jv-hud/README.md
+- commit: 5e5ef8d
+- next: **A19** (new): nothing pins the outline-only rule. If a later hand
+  widens the `-iname` filter in `checkedFace`, the WOFF2 comes back and every
+  check still passes — the face check only asks whether the family is present.
+  The honest gate is the one this iteration ran by hand: build a fontconfig
+  config from `fonts.packages` and assert `fc-match "<family>"` returns a file
+  this module linked. Small, and it would make the verification above
+  automatic instead of a paragraph in a journal. **A13** and **A18** are
+  unchanged notes; **B8** still waits for a second real caller; **B10** needs
+  a human at the machine. The standing item is now TWENTY-ONE iterations old
+  and has just grown a second half: nobody has ever LOOKED at this HUD on
+  ares, and now nobody has looked at its type either. `JV_HUD_SELFTEST=1
+  jv-hud`, then a real wake word — and tell me whether the labels are
+  JetBrains Mono.

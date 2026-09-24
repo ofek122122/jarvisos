@@ -73,25 +73,37 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       build if any HUD QML file animates without consulting `Motion`, so the
       off switch cannot be bypassed — VERIFIED it bites. Tests:
       `bash ops/ralph/qmltest.sh`, `bash ops/ralph/runtests.sh tools`.)
-- [ ] A8. Font packaging: theme.toml names Archivo + JetBrains Mono, but nothing
-      declares them in the system yet — a missing font silently becomes a
-      different look. Add them to `fonts.packages` (its own small commit),
-      plus `fontconfig.defaultFonts` so the generic families resolve to
-      them, plus a tools test asserting every `[type] family_*` in
-      theme.toml is declared (or the gate does not bite).
-      **Researched 2026-09-24, and it is NOT the ten-minute commit it looks
-      like — decide this before writing code:** nixpkgs has no `archivo`.
-      The only packaged source is `google-fonts`, and even overridden to one
-      family its src is **1.1 GiB to download / 2.7 GiB unpacked**, on a
-      machine that never garbage-collects (the runtime closure is small; the
-      source is not, and ares builds its own system). Options: (a) pay it,
-      (b) a small pinned derivation from upstream Omnibus-Type/Archivo — a
-      few MB, network works, needs a rev + hash, (c) change `family_sans` to
-      a face nixpkgs already carries, which is IDENTITY and a human's call
-      (invariant 9), not Ralph's. Recommendation: (b).
-      JetBrains Mono is already in nixpkgs (grub-theme uses it) and is the
-      only face on screen today — every HUD element is mono, so the mono
-      half is pure win and can land whatever is decided about the sans.
+- [x] A8. Font packaging: theme.toml named Archivo + JetBrains Mono and
+      nothing installed either. — 5e5ef8d
+      (`modules/fonts.nix` reads the family names out of
+      `personality/theme.toml` with `builtins.fromTOML` — the same source
+      `tools/gen_theme_qml.py` compiles for the HUD, so the two cannot
+      disagree about which faces are wanted. What the module owns is the
+      binding from a NAME to something that provides it, and every step
+      throws rather than guesses: an unbound family is an eval throw, a
+      provider theme.toml does not name fails an assertion, a `family_<role>`
+      with no fontconfig generic throws (theme.toml calls the generics the
+      fallbacks; a role without one falls back to nothing). The system
+      installs the face it CHECKED — each goes through a derivation that asks
+      `fc-scan`, the thing that resolves the name at runtime, and fails if the
+      family is not in there. "Provides the family", not "every file is that
+      family": jetbrains-mono legitimately ships JetBrains Mono NL alongside.
+      **The check caught a real one immediately**: as a plain symlinkJoin,
+      `fc-match monospace` answered `JetBrainsMono-Regular.woff2`, because
+      nixpkgs ships every face three times and fontconfig indexes web fonts
+      too — whether a WOFF2 renders depends on how the reading FreeType was
+      built. Outline formats only now; 0 woff2 in the built font path.
+      `pkgs/archivo` is option (b) from the research: upstream pinned at a
+      commit (no tags exist), 66 MiB of source for 3.4 MiB of face, BASE WIDTH
+      only, with an install check that all 18 faces report family `Archivo`
+      and that the upright Regular is there. Plus `enableDefaultPackages`, so
+      the generic fallbacks resolve to something. Two tools gates: no QML file
+      may name a family of its own, and theme.toml's faces must equal
+      providerOf's keys (the module checks that at eval; tools/tests is where
+      it can run without nix, i.e. CI's bare checkout). `Theme.familySans`
+      still has no reader — every HUD element is mono, as A8 always said;
+      Archivo is packaged because the toml declares it. 11 mutations, 11
+      caught. Tests: `bash ops/ralph/runtests.sh tools`.)
 - [x] A9. Headless QML tests for the HUD, wired into jv-hud's checkPhase.
       — 4c7c048
       (Quickshell links its QML plugin into its own binary, so its types can
@@ -428,6 +440,16 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the rule explicit there or leave this note as the warning. Small,
       and worth doing the day that topic appears. Discovered in A17.
 
+- [ ] A19. Nothing pins the outline-only rule that keeps WOFF2 out of the
+      font path. Widen the `-iname` filter in `checkedFace` and the web
+      fonts come back with every check still green — the face check only
+      asks whether the family is PRESENT, not which file answers for it.
+      The honest gate is the one iteration 21 ran by hand: build a
+      fontconfig config from `fonts.packages`, run `fc-match "<family>"`
+      for each declared face, and assert the answer is a file this module
+      linked. That would also make "the faces resolve" a build result
+      instead of a paragraph in a journal. Small. Discovered in A8.
+
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
       right (you see it wherever you look) or noise. Needs a human eye on
@@ -471,5 +493,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   lost is recorded as interrupted (4d05900, 2026-09-24)
 - A17 — the question you gave up on stops reading "thinking" (b0c8262,
   2026-09-24)
+- A8 — the faces theme.toml names finally exist on the machine, and the one
+  that was silently a web font does not (5e5ef8d, 2026-09-24)
 - B5 — `jv act-log` can be asked a question: --since/--failed/--outcome, and
   a filter that never hides what it could not evaluate (da134b9, 2026-09-24)
