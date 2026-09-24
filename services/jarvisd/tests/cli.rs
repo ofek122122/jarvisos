@@ -166,6 +166,143 @@ async fn health_reads_the_brokers_own_heartbeat() {
     assert!(lines[0].contains("drops=-"), "{:?}", lines[0]);
 }
 
+// ------------------------------------------------------------- health --check
+
+/// Publish `frames` as `src`, every `every_ms`, until aborted. `pump` cannot
+/// serve here: a `sys.health` body naming a service other than the one the
+/// broker saw publish it is exactly what `--check` refuses to read.
+fn pump_as(
+    bus: &TestBus,
+    src: &'static str,
+    frames: Vec<(&'static str, rmpv::Value)>,
+    every_ms: u64,
+) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut c = BusClient::connect(&addr, src).await.expect("pump connect");
+        loop {
+            for (topic, b) in &frames {
+                if c.publish(topic, 1.0, 1, b.clone()).await.is_err() {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(every_ms)).await;
+        }
+    })
+}
+
+fn heartbeat(service: &str, state: &str, notes: Option<&str>) -> rmpv::Value {
+    let mut pairs: Vec<(&str, rmpv::Value)> = vec![
+        ("service", service.into()),
+        ("state", state.into()),
+        ("uptime_s", 12.0.into()),
+        ("period_s", 5.0.into()),
+    ];
+    if let Some(n) = notes {
+        pairs.push(("notes", n.into()));
+    }
+    body(&pairs)
+}
+
+/// A broker whose own heartbeat will not land inside a short window — the
+/// only way to ask what `--check` says about a bus nobody is heartbeating on.
+fn silent_broker() -> Config {
+    Config { health_period: Duration::from_secs(3600), ..Config::default() }
+}
+
+#[tokio::test]
+async fn health_check_reports_the_brokers_own_heartbeat_and_exits_clean() {
+    let bus = start(Config { health_period: Duration::from_millis(50), ..Config::default() }).await;
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["health", "--check", "--for", "0.6"]), 8.0).await;
+
+    assert_eq!(out.code, 0, "a machine whose only service says ok is well; stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 2, "one service and the footer: {lines:?}");
+    assert!(lines[0].starts_with("jarvisd      ok    "), "{:?}", lines[0]);
+    assert!(lines[0].contains("age="), "{:?}", lines[0]);
+    assert_eq!(lines[1], "heard from 1 service in 0.6s; all well");
+}
+
+#[tokio::test]
+async fn health_check_says_a_silent_bus_is_not_a_well_machine() {
+    let bus = start(silent_broker()).await;
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["health", "--check", "--for", "0.4"]), 8.0).await;
+
+    assert_eq!(out.code, 1, "silence is not an all-clear; stderr: {}", out.stderr);
+    assert_eq!(out.lines(), ["heard from no service in 0.4s"]);
+}
+
+#[tokio::test]
+async fn health_check_puts_the_worst_finding_first_and_fails() {
+    let bus = start(silent_broker()).await;
+    let ears = pump_as(&bus, "jv-ears", vec![("sys.health", heartbeat("jv-ears", "ok", None))], 50);
+    let brain = pump_as(
+        &bus,
+        "jv-brain",
+        vec![("sys.health", heartbeat("jv-brain", "degraded", Some("fell back to CPU")))],
+        50,
+    );
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["health", "--check", "--for", "0.6"]), 8.0).await;
+    ears.abort();
+    brain.abort();
+
+    assert_eq!(out.code, 1, "one impaired service is not a well machine; stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(lines[0].starts_with("jv-brain     degraded "), "{:?}", lines[0]);
+    assert!(lines[0].ends_with("fell back to CPU"), "{:?}", lines[0]);
+    assert!(lines[1].starts_with("jv-ears      ok "), "{:?}", lines[1]);
+    assert_eq!(lines[2], "heard from 2 services in 0.6s; 1 not well");
+}
+
+#[tokio::test]
+async fn health_check_reports_a_heartbeat_it_is_not_entitled_to_read() {
+    let bus = start(silent_broker()).await;
+    // The body names a service other than the one the broker saw publish it.
+    let liar = pump_as(&bus, "jv-ears", vec![("sys.health", heartbeat("jv-voice", "ok", None))], 50);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["health", "--check", "--for", "0.6"]), 8.0).await;
+    liar.abort();
+
+    assert_eq!(out.code, 1, "an unreadable heartbeat is a finding; stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert!(lines[0].starts_with("jv-ears      unknown "), "{:?}", lines[0]);
+    assert!(lines[0].contains('?'), "no age may be invented for it: {:?}", lines[0]);
+    assert_eq!(lines[1], "heard from 1 service in 0.6s; 1 not well");
+}
+
+#[tokio::test]
+async fn health_check_prints_the_rung_the_brain_reports() {
+    let bus = start(silent_broker()).await;
+    let mut beat = heartbeat("jv-brain", "ok", None);
+    if let rmpv::Value::Map(pairs) = &mut beat {
+        pairs.push((
+            "metrics".into(),
+            body(&[("llm_rung", 4.into()), ("llm_gpu", 0.into())]),
+        ));
+    }
+    let brain = pump_as(&bus, "jv-brain", vec![("sys.health", beat)], 50);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["health", "--check", "--for", "0.6"]), 8.0).await;
+    brain.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert_eq!(lines[1], "llm rung=4 backend=cpu");
+}
+
+#[tokio::test]
+async fn check_and_count_are_two_different_questions_and_cannot_both_be_asked() {
+    let bus = start(silent_broker()).await;
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["health", "--check", "-n", "1"]), 8.0).await;
+
+    assert_eq!(out.code, 2, "a usage error must not be mistaken for 'not well'; stdout: {}", out.stdout);
+    assert!(out.stdout.is_empty(), "{:?}", out.stdout);
+    assert!(out.stderr.contains("--check"), "{}", out.stderr);
+}
+
 #[tokio::test]
 async fn a_streamed_reply_reports_end_to_end_exactly_once() {
     let bus = start(Config::default()).await;

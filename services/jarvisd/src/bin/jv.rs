@@ -71,8 +71,18 @@ enum Cmd {
         #[arg(long)]
         latency: bool,
     },
-    /// Follow sys.health heartbeats.
-    Health,
+    /// Follow sys.health heartbeats; with --check, answer once whether this
+    /// machine is well.
+    Health {
+        /// Listen for one window (--for SECS, default 6 — a heartbeat period
+        /// plus a margin), then print one line per service HEARD FROM, worst
+        /// first, and exit 0 only if every one of them is `ok`. Nothing on
+        /// the bus says which services are supposed to be running, so a
+        /// service that never started is absent from the report, not failed;
+        /// the footer states the window so absence can be weighed.
+        #[arg(long, conflicts_with = "count")]
+        check: bool,
+    },
     /// Read the jv-act audit log (newest last). Path: $JARVIS_ACT_AUDIT
     /// or the platform default. Exits non-zero if the log is missing, if any
     /// line in it could not be read as an audit entry, or if --since/--failed/
@@ -294,7 +304,7 @@ async fn main() -> anyhow::Result<()> {
             0
         }
 
-        Cmd::Health => {
+        Cmd::Health { check: false } => {
             let mut c = BusClient::connect(&addr, "jv-health").await?;
             c.subscribe(&["sys.health"]).await?;
             let run = drive(&mut c, count, for_secs, |frame| {
@@ -303,6 +313,29 @@ async fn main() -> anyhow::Result<()> {
             })
             .await?;
             cli::exit_code(run.outcome, count, run.seen)
+        }
+
+        Cmd::Health { check: true } => {
+            let window = for_secs.unwrap_or(cli::HEALTH_CHECK_WINDOW_S);
+            let mut c = BusClient::connect(&addr, "jv-health").await?;
+            c.subscribe(&["sys.health"]).await?;
+            let mut heard = cli::HealthCheck::default();
+            // Ctrl-C ends the window early and still answers: an impatient
+            // reader gets the report for as long as we listened, which the
+            // footer states, rather than nothing at all.
+            drive(&mut c, None, Some(window), |frame| heard.observe(&frame)).await?;
+            // ONE reading of the clock for the whole report, so two lines of
+            // the same answer cannot disagree about when "now" was.
+            let now = mono_now();
+            let report = heard.report(now);
+            for w in &report {
+                println!("{}", cli::wellbeing_line(w));
+            }
+            if let Some(line) = heard.llm_line(now, cli::BRAIN) {
+                println!("{line}");
+            }
+            println!("{}", cli::health_check_footer(&report, window));
+            cli::health_check_exit(&report)
         }
     };
 

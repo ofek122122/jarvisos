@@ -267,6 +267,266 @@ pub fn act_log_line(e: &serde_json::Value) -> String {
     )
 }
 
+// ---------------------------------------------------------------- health check
+
+/// How long `jv health --check` listens when `--for` does not say. Every
+/// service in this repo heartbeats every 5 s, so one nominal period plus a
+/// margin hears every RUNNING service at least once, and it is still short
+/// enough to type at a terminal and wait for.
+pub const HEALTH_CHECK_WINDOW_S: f64 = 6.0;
+
+/// The service that owns the LLM. It is the only one that can see which rung
+/// the ladder picked (invariant 6), so the gauges are read from ITS heartbeat
+/// by name rather than from whoever published `llm_rung` last.
+pub const BRAIN: &str = "jv-brain";
+
+/// How well a service is, in the only words `--check` may print.
+///
+/// Five come off the wire (`schemas/sys.health.json`). Two are this reader's
+/// own: `lost`, a heartbeat that outlived the two periods the schema grants
+/// it, and `unknown`, a frame we are not entitled to interpret. Both rank
+/// ABOVE `degraded` on purpose — a service that told us it is impaired is in
+/// better shape than one we cannot hear, or cannot read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wellness {
+    Ok,
+    Starting,
+    Stopping,
+    Degraded,
+    Unknown,
+    Lost,
+    Error,
+}
+
+impl Wellness {
+    /// The frozen enum, and nothing else. A state word this binary does not
+    /// know is not passed through as itself: it is a body we cannot read, and
+    /// reading it aloud would dress an unknown up as a diagnosis.
+    pub fn from_word(word: &str) -> Option<Wellness> {
+        match word {
+            "starting" => Some(Wellness::Starting),
+            "ok" => Some(Wellness::Ok),
+            "degraded" => Some(Wellness::Degraded),
+            "error" => Some(Wellness::Error),
+            "stopping" => Some(Wellness::Stopping),
+            _ => None,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Wellness::Ok => "ok",
+            Wellness::Starting => "starting",
+            Wellness::Stopping => "stopping",
+            Wellness::Degraded => "degraded",
+            Wellness::Unknown => "unknown",
+            Wellness::Lost => "lost",
+            Wellness::Error => "error",
+        }
+    }
+
+    /// How loudly a state deserves to be read. `ok` is 0 and is the only
+    /// state that is not a finding — which is also what decides the exit
+    /// status, so this ranking IS the answer to "is the machine well".
+    pub fn rank(self) -> u8 {
+        match self {
+            Wellness::Error => 5,
+            Wellness::Lost => 4,
+            Wellness::Unknown => 3,
+            Wellness::Degraded => 2,
+            Wellness::Starting | Wellness::Stopping => 1,
+            Wellness::Ok => 0,
+        }
+    }
+}
+
+/// A heartbeat this reader is willing to believe. Anything rejected at the
+/// door becomes `unknown` instead — see `HealthCheck::trust`.
+#[derive(Debug, Clone)]
+struct Trusted {
+    ts: f64,
+    period_s: f64,
+    state: Wellness,
+    notes: String,
+    metrics: Option<rmpv::Value>,
+}
+
+/// One service's answer at the moment the window closed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Wellbeing {
+    pub service: String,
+    pub state: Wellness,
+    /// The heartbeat's own `notes`, empty when it said none — and always
+    /// empty for a `lost` service, whose notes described a moment that has
+    /// passed.
+    pub notes: String,
+    /// Seconds between the heartbeat and the close of the window, or None
+    /// when the frame carried no readable `ts`.
+    pub age_s: Option<f64>,
+}
+
+/// The `sys.health` stream, collapsed into "is this machine well right now".
+///
+/// Three rules hold it to the truth, the same three the HUD's `HealthState`
+/// is built on (`shell/jv-hud/core/HealthState.qml`) — they are properties of
+/// the topic, not of either reader:
+///
+///   * **The roster is who has spoken.** Nothing on the bus says which
+///     services are SUPPOSED to be running, so a service that never started
+///     is absent from this report, not failed. Absence claims nothing; that
+///     is the honest shape of not knowing, and the footer says how long we
+///     listened so the reader can weigh it.
+///   * **A heartbeat expires.** The schema says missing two consecutive
+///     periods is presumed dead, so a frame speaks for two of its own periods
+///     and no longer. Nothing publishes "jv-brain died".
+///   * **Unreadable is not fine.** A body from a schema version this binary
+///     was not written against, a hedged `conf`, a body naming a service
+///     other than the one that published it, a state word outside the frozen
+///     enum: all `unknown`, all reported, all non-zero exit. The failure that
+///     matters is the quiet one — a clean report over a broken machine.
+#[derive(Default)]
+pub struct HealthCheck {
+    latest: HashMap<String, Option<Trusted>>,
+}
+
+impl HealthCheck {
+    /// Take one `sys.health` frame. Keyed by the envelope's `src`, because
+    /// that is who the broker saw publish it; the body's own `service` is a
+    /// claim, and a claim that disagrees is exactly what `trust` refuses.
+    ///
+    /// The LAST frame from a service wins, including when the last one is
+    /// unreadable: "the newest thing this service said cannot be read" is a
+    /// finding, not a reason to keep quoting an older frame that can.
+    pub fn observe(&mut self, frame: &rmpv::Value) {
+        let Some(src) = get_str(frame, "src").filter(|s| !s.is_empty()) else {
+            // The broker refuses an envelope with no `src`, so this is
+            // unreachable from a real bus — and a frame we cannot attribute
+            // must not be attributed to a service we invent a name for.
+            return;
+        };
+        let trusted = Self::trust(frame, &src);
+        self.latest.insert(src, trusted);
+    }
+
+    /// The frame, or None if it is not one this binary may read.
+    fn trust(frame: &rmpv::Value, src: &str) -> Option<Trusted> {
+        if get(frame, "v").and_then(|v| v.as_u64()) != Some(1) {
+            return None;
+        }
+        if get_f64(frame, "conf") != Some(1.0) {
+            return None;
+        }
+        let ts = get_f64(frame, "ts")?;
+        let body = get(frame, "body").filter(|b| b.is_map())?;
+        if get_str(body, "service").as_deref() != Some(src) {
+            return None;
+        }
+        let period_s = get_f64(body, "period_s").filter(|p| *p > 0.0)?;
+        let state = Wellness::from_word(&get_str(body, "state")?)?;
+        Some(Trusted {
+            ts,
+            period_s,
+            state,
+            notes: get_str(body, "notes").unwrap_or_default(),
+            metrics: get(body, "metrics").filter(|m| m.is_map()).cloned(),
+        })
+    }
+
+    /// Has this heartbeat outlived the two periods the schema grants it?
+    fn lost(t: &Trusted, now: f64) -> bool {
+        now - t.ts > t.period_s * 2.0
+    }
+
+    /// Everyone heard from, worst first, ties broken by name so two equally
+    /// bad findings do not reshuffle between runs.
+    pub fn report(&self, now: f64) -> Vec<Wellbeing> {
+        let mut out: Vec<Wellbeing> = self
+            .latest
+            .iter()
+            .map(|(service, heard)| match heard {
+                None => Wellbeing {
+                    service: service.clone(),
+                    state: Wellness::Unknown,
+                    notes: String::new(),
+                    age_s: None,
+                },
+                Some(t) if Self::lost(t, now) => Wellbeing {
+                    service: service.clone(),
+                    state: Wellness::Lost,
+                    notes: String::new(),
+                    age_s: Some(now - t.ts),
+                },
+                Some(t) => Wellbeing {
+                    service: service.clone(),
+                    state: t.state,
+                    notes: t.notes.clone(),
+                    age_s: Some(now - t.ts),
+                },
+            })
+            .collect();
+        out.sort_by(|a, b| b.state.rank().cmp(&a.state.rank()).then(a.service.cmp(&b.service)));
+        out
+    }
+
+    /// The one number that explains why Jarvis got slow, or None when the
+    /// brain has not said. Never rendered as "gpu" on a guess: a rung we
+    /// cannot read is not a rung we may reassure anyone about.
+    pub fn llm_line(&self, now: f64, brain: &str) -> Option<String> {
+        let t = self.latest.get(brain)?.as_ref()?;
+        if Self::lost(t, now) {
+            return None;
+        }
+        let metrics = t.metrics.as_ref()?;
+        let rung = get_f64(metrics, "llm_rung");
+        let backend = get_f64(metrics, "llm_gpu").map(|g| if g == 1.0 { "gpu" } else { "cpu" });
+        if rung.is_none() && backend.is_none() {
+            return None;
+        }
+        let rung = rung.map(|r| format!("{r:.0}")).unwrap_or_else(|| "?".into());
+        Some(format!("llm rung={rung} backend={}", backend.unwrap_or("?")))
+    }
+}
+
+/// One service's wellbeing as a line. A missing age prints as `?`, never as a
+/// plausible zero.
+pub fn wellbeing_line(w: &Wellbeing) -> String {
+    let age = match w.age_s {
+        Some(a) => format!("age={a:7.1}s"),
+        None => format!("age={:>8}", "?"),
+    };
+    format!("{:<12} {:<9} {age} {}", w.service, w.state.word(), w.notes).trim_end().to_string()
+}
+
+/// The closing line: how many services spoke, over how long, and how many of
+/// them are not well. It states the window because the window is the only
+/// thing that makes "heard from 4 services" mean anything.
+pub fn health_check_footer(report: &[Wellbeing], window_s: f64) -> String {
+    if report.is_empty() {
+        return format!("heard from no service in {window_s:.1}s");
+    }
+    let unwell = report.iter().filter(|w| w.state.rank() > 0).count();
+    let plural = if report.len() == 1 { "" } else { "s" };
+    let verdict = if unwell == 0 {
+        "all well".to_string()
+    } else {
+        format!("{unwell} not well")
+    };
+    format!("heard from {} service{plural} in {window_s:.1}s; {verdict}", report.len())
+}
+
+/// Exit status for `jv health --check`, following the rule `jv act-log`
+/// already set: the status IS the answer. 0 only when at least one service
+/// spoke and every one of them is `ok` — silence is not an all-clear, so a
+/// bus nobody heartbeats on fails, loudly, instead of reading as a calm
+/// machine.
+pub fn health_check_exit(report: &[Wellbeing]) -> i32 {
+    if report.is_empty() || report.iter().any(|w| w.state.rank() > 0) {
+        1
+    } else {
+        0
+    }
+}
+
 // ---------------------------------------------------------------- act-log
 
 /// How long a raw byte-for-byte echo of an unreadable audit line may be. Long
@@ -1155,6 +1415,310 @@ mod tests {
         assert!(line.contains("window.focus"), "{line}");
         assert!(line.contains("confirm=true/voice"), "{line}");
         assert!(line.contains(r#"args={"id":7}"#), "{line}");
+    }
+
+    // ------------------------------------------------------- health check
+
+    /// A heartbeat frame in the shape a service really publishes one.
+    fn beat(src: &str, state: &str, ts: f64) -> rmpv::Value {
+        beat_body(
+            src,
+            ts,
+            1.0,
+            1,
+            map(&[
+                ("service", rmpv::Value::from(src)),
+                ("state", rmpv::Value::from(state)),
+                ("uptime_s", rmpv::Value::from(12.0)),
+                ("period_s", rmpv::Value::from(5.0)),
+            ]),
+        )
+    }
+
+    fn beat_body(src: &str, ts: f64, conf: f64, v: u64, body: rmpv::Value) -> rmpv::Value {
+        map(&[
+            ("topic", rmpv::Value::from("sys.health")),
+            ("ts", rmpv::Value::from(ts)),
+            ("seq", rmpv::Value::from(0u64)),
+            ("src", rmpv::Value::from(src)),
+            ("conf", rmpv::Value::from(conf)),
+            ("v", rmpv::Value::from(v)),
+            ("body", body),
+        ])
+    }
+
+    fn checked(frames: &[rmpv::Value], now: f64) -> Vec<Wellbeing> {
+        let mut hc = HealthCheck::default();
+        for f in frames {
+            hc.observe(f);
+        }
+        hc.report(now)
+    }
+
+    fn words(report: &[Wellbeing]) -> Vec<(String, &'static str)> {
+        report.iter().map(|w| (w.service.clone(), w.state.word())).collect()
+    }
+
+    #[test]
+    fn a_machine_where_everyone_says_ok_is_well() {
+        let report = checked(&[beat("jarvisd", "ok", 100.0), beat("jv-ears", "ok", 100.5)], 101.0);
+        assert_eq!(words(&report), [("jarvisd".into(), "ok"), ("jv-ears".into(), "ok")]);
+        assert_eq!(health_check_exit(&report), 0);
+        assert!(health_check_footer(&report, 6.0).ends_with("in 6.0s; all well"));
+    }
+
+    #[test]
+    fn silence_is_not_an_all_clear() {
+        let report = checked(&[], 101.0);
+        assert!(report.is_empty());
+        assert_eq!(health_check_exit(&report), 1, "a bus nobody heartbeats on is not a well machine");
+        assert_eq!(health_check_footer(&report, 6.0), "heard from no service in 6.0s");
+    }
+
+    #[test]
+    fn findings_come_worst_first_and_ties_break_by_name() {
+        let report = checked(
+            &[
+                beat("jv-voice", "ok", 100.0),
+                beat("jv-ears", "degraded", 100.0),
+                beat("jv-brain", "error", 100.0),
+                beat("jv-act", "starting", 100.0),
+                beat("jv-context", "degraded", 100.0),
+            ],
+            101.0,
+        );
+        assert_eq!(
+            words(&report),
+            [
+                ("jv-brain".into(), "error"),
+                ("jv-context".into(), "degraded"),
+                ("jv-ears".into(), "degraded"),
+                ("jv-act".into(), "starting"),
+                ("jv-voice".into(), "ok"),
+            ]
+        );
+        assert_eq!(health_check_exit(&report), 1);
+        assert!(health_check_footer(&report, 6.0).contains("5 services"), "{report:?}");
+        assert!(health_check_footer(&report, 6.0).ends_with("4 not well"));
+    }
+
+    #[test]
+    fn a_heartbeat_speaks_for_two_of_its_own_periods_and_no_longer() {
+        // period_s is 5, so 10 s is the last moment it still means anything.
+        let fresh = checked(&[beat("jv-ears", "ok", 100.0)], 110.0);
+        assert_eq!(words(&fresh), [("jv-ears".into(), "ok")]);
+        assert_eq!(health_check_exit(&fresh), 0);
+
+        let stale = checked(&[beat("jv-ears", "ok", 100.0)], 110.01);
+        assert_eq!(words(&stale), [("jv-ears".into(), "lost")]);
+        assert_eq!(health_check_exit(&stale), 1);
+    }
+
+    #[test]
+    fn a_lost_service_stops_quoting_notes_about_a_moment_that_has_passed() {
+        let body = map(&[
+            ("service", rmpv::Value::from("jv-brain")),
+            ("state", rmpv::Value::from("degraded")),
+            ("period_s", rmpv::Value::from(5.0)),
+            ("notes", rmpv::Value::from("fell back to CPU")),
+        ]);
+        let frame = beat_body("jv-brain", 100.0, 1.0, 1, body);
+        let now = checked(std::slice::from_ref(&frame), 101.0);
+        assert_eq!(now[0].notes, "fell back to CPU");
+        let later = checked(std::slice::from_ref(&frame), 200.0);
+        assert_eq!(later[0].state, Wellness::Lost);
+        assert_eq!(later[0].notes, "", "a lost service has one true thing left to say");
+    }
+
+    #[test]
+    fn a_heartbeat_this_binary_may_not_read_is_unknown_and_is_reported() {
+        let good = map(&[
+            ("service", rmpv::Value::from("jv-ears")),
+            ("state", rmpv::Value::from("ok")),
+            ("period_s", rmpv::Value::from(5.0)),
+        ]);
+        let cases: Vec<(&str, rmpv::Value)> = vec![
+            ("a body from a version we were not written against", beat_body("jv-ears", 100.0, 1.0, 2, good.clone())),
+            ("a heartbeat hedging its own confidence", beat_body("jv-ears", 100.0, 0.5, 1, good.clone())),
+            (
+                "a body naming a different service than published it",
+                beat_body(
+                    "jv-ears",
+                    100.0,
+                    1.0,
+                    1,
+                    map(&[
+                        ("service", rmpv::Value::from("jv-voice")),
+                        ("state", rmpv::Value::from("ok")),
+                        ("period_s", rmpv::Value::from(5.0)),
+                    ]),
+                ),
+            ),
+            (
+                "no period, so no idea how long to believe it",
+                beat_body(
+                    "jv-ears",
+                    100.0,
+                    1.0,
+                    1,
+                    map(&[("service", rmpv::Value::from("jv-ears")), ("state", rmpv::Value::from("ok"))]),
+                ),
+            ),
+            (
+                "a state word outside the frozen enum",
+                beat_body(
+                    "jv-ears",
+                    100.0,
+                    1.0,
+                    1,
+                    map(&[
+                        ("service", rmpv::Value::from("jv-ears")),
+                        ("state", rmpv::Value::from("fine")),
+                        ("period_s", rmpv::Value::from(5.0)),
+                    ]),
+                ),
+            ),
+            ("no body at all", beat_body("jv-ears", 100.0, 1.0, 1, rmpv::Value::Nil)),
+        ];
+        for (why, frame) in cases {
+            let report = checked(&[frame], 101.0);
+            assert_eq!(words(&report), [("jv-ears".into(), "unknown")], "{why}");
+            assert_eq!(report[0].age_s, None, "{why}: an unreadable frame has no age we may print");
+            assert_eq!(health_check_exit(&report), 1, "{why}");
+        }
+    }
+
+    #[test]
+    fn a_service_not_yet_up_is_not_yet_well() {
+        // The only finding is `starting`. Right after boot that is the whole
+        // answer a caller wants — "not ready yet" is not "ready".
+        for word in ["starting", "stopping"] {
+            let report = checked(&[beat("jarvisd", "ok", 100.0), beat("jv-brain", word, 100.0)], 101.0);
+            assert_eq!(words(&report), [("jv-brain".into(), word), ("jarvisd".into(), "ok")]);
+            assert_eq!(health_check_exit(&report), 1, "{word} is not ok");
+            assert!(health_check_footer(&report, 6.0).ends_with("1 not well"), "{word}");
+        }
+    }
+
+    #[test]
+    fn a_period_of_zero_is_a_body_we_cannot_read_not_a_service_that_went_quiet() {
+        // `period_s` is how long we may believe a heartbeat (schema:
+        // exclusiveMinimum 0). Zero is not "believe it for no time at all" —
+        // it is a body that never said, and calling that `lost` would report
+        // a service as having gone quiet when it is talking perfectly well.
+        for period in [rmpv::Value::from(0.0), rmpv::Value::from(-5.0)] {
+            let frame = beat_body(
+                "jv-ears",
+                100.0,
+                1.0,
+                1,
+                map(&[
+                    ("service", rmpv::Value::from("jv-ears")),
+                    ("state", rmpv::Value::from("ok")),
+                    ("period_s", period.clone()),
+                ]),
+            );
+            let report = checked(&[frame], 101.0);
+            assert_eq!(words(&report), [("jv-ears".into(), "unknown")], "period_s={period:?}");
+            assert_eq!(report[0].age_s, None, "period_s={period:?}");
+        }
+    }
+
+    #[test]
+    fn an_unreadable_frame_outranks_a_service_that_admits_it_is_impaired() {
+        assert!(Wellness::Unknown.rank() > Wellness::Degraded.rank());
+        assert!(Wellness::Lost.rank() > Wellness::Unknown.rank());
+        assert!(Wellness::Error.rank() > Wellness::Lost.rank());
+        assert_eq!(Wellness::Ok.rank(), 0, "ok is the only state that is not a finding");
+    }
+
+    #[test]
+    fn the_newest_thing_a_service_said_wins_even_when_it_cannot_be_read() {
+        let unreadable = beat_body("jv-ears", 101.0, 1.0, 9, map(&[("service", rmpv::Value::from("jv-ears"))]));
+        let report = checked(&[beat("jv-ears", "ok", 100.0), unreadable], 101.5);
+        assert_eq!(words(&report), [("jv-ears".into(), "unknown")]);
+    }
+
+    #[test]
+    fn a_service_that_recovers_is_reported_as_recovered() {
+        let report = checked(&[beat("jv-ears", "error", 100.0), beat("jv-ears", "ok", 101.0)], 101.5);
+        assert_eq!(words(&report), [("jv-ears".into(), "ok")]);
+        assert_eq!(health_check_exit(&report), 0);
+    }
+
+    #[test]
+    fn a_frame_with_no_src_is_attributed_to_nobody() {
+        let mut hc = HealthCheck::default();
+        hc.observe(&map(&[("topic", rmpv::Value::from("sys.health"))]));
+        hc.observe(&beat_body("", 100.0, 1.0, 1, rmpv::Value::Nil));
+        assert!(hc.report(101.0).is_empty(), "a frame we cannot attribute must not invent a service");
+    }
+
+    fn brain_with(metrics: &[(&str, rmpv::Value)], ts: f64) -> rmpv::Value {
+        beat_body(
+            BRAIN,
+            ts,
+            1.0,
+            1,
+            map(&[
+                ("service", rmpv::Value::from(BRAIN)),
+                ("state", rmpv::Value::from("ok")),
+                ("period_s", rmpv::Value::from(5.0)),
+                ("metrics", map(metrics)),
+            ]),
+        )
+    }
+
+    fn llm_of(frames: &[rmpv::Value], now: f64) -> Option<String> {
+        let mut hc = HealthCheck::default();
+        for f in frames {
+            hc.observe(f);
+        }
+        hc.llm_line(now, BRAIN)
+    }
+
+    #[test]
+    fn the_llm_rung_is_read_off_the_brains_own_heartbeat() {
+        let frame = brain_with(&[("llm_rung", 4.into()), ("llm_gpu", 0.into())], 100.0);
+        assert_eq!(llm_of(&[frame], 101.0).as_deref(), Some("llm rung=4 backend=cpu"));
+        let gpu = brain_with(&[("llm_rung", 0.into()), ("llm_gpu", 1.into())], 100.0);
+        assert_eq!(llm_of(&[gpu], 101.0).as_deref(), Some("llm rung=0 backend=gpu"));
+    }
+
+    #[test]
+    fn a_rung_nobody_can_read_is_never_rendered_as_a_gpu() {
+        // No brain at all, a brain with no gauges, and a brain whose
+        // heartbeat is too old to describe the process running now.
+        assert_eq!(llm_of(&[beat("jv-ears", "ok", 100.0)], 101.0), None);
+        assert_eq!(llm_of(&[brain_with(&[], 100.0)], 101.0), None);
+        assert_eq!(llm_of(&[brain_with(&[("queue", 2.into())], 100.0)], 101.0), None);
+        assert_eq!(llm_of(&[brain_with(&[("llm_rung", 4.into()), ("llm_gpu", 1.into())], 100.0)], 200.0), None);
+        // Half known is still said, with the unknown half spelled `?`.
+        assert_eq!(
+            llm_of(&[brain_with(&[("llm_rung", 4.into())], 100.0)], 101.0).as_deref(),
+            Some("llm rung=4 backend=?")
+        );
+    }
+
+    #[test]
+    fn a_wellbeing_line_never_prints_a_missing_age_as_zero() {
+        let line = wellbeing_line(&Wellbeing {
+            service: "jv-ears".into(),
+            state: Wellness::Unknown,
+            notes: String::new(),
+            age_s: None,
+        });
+        assert!(line.starts_with("jv-ears      unknown  "), "{line:?}");
+        assert!(line.contains('?'), "{line:?}");
+        assert!(!line.contains("0.0"), "{line:?}");
+        let aged = wellbeing_line(&Wellbeing {
+            service: "jv-brain".into(),
+            state: Wellness::Degraded,
+            notes: "fell back to CPU".into(),
+            age_s: Some(1.25),
+        });
+        assert!(aged.contains("age=    1.2s"), "{aged:?}");
+        assert!(aged.ends_with("fell back to CPU"), "{aged:?}");
     }
 
     #[test]
