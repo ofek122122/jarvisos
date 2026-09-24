@@ -898,7 +898,11 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       backlog 14 (the game-launch unload). The smallest honest first step is
       not a reaction at all: publish the live figure alongside the rung so
       `jv health` shows both, and let the human decide whether an unload or a
-      relaunch may ever be automatic. Do not build the reaction before that
+      relaunch may ever be automatic. (**B46 made the question visible
+      rather than answering it**: the HUD now draws the card's free VRAM
+      and the ladder's requirement one under the other, so a human can SEE
+      the moment a GPU brain became possible. Nothing reacts to it, and
+      nothing may until this item is decided.) Do not build the reaction before that
       decision — a brain that unloads itself at the wrong moment is worse
       than a slow one. Discovered in B37, halved by B40.
       **Cheaper after B45**: the threshold the live figure would be compared
@@ -929,7 +933,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       jv-brain 109, was 98; 10 mutations, 10 caught.
       **The HUD half is NOT closed — see B46.**)
 
-- [ ] B46. **The other half of B45.** jv-brain now publishes the floor
+- [x] B46. **The other half of B45.** jv-brain now publishes the floor
       (5424 MiB) and the HUD does not read it: `VramState` still draws
       `vram 943 MiB FREE` alone, and the comparison that makes the figure
       actionable — free vs needed — happens in the reader's head or not at
@@ -946,7 +950,23 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       one subtraction from both). Whichever wins, the absent cases stay
       absent: no floor published (brain on the GPU, or no card) must draw
       exactly today's row, never an invented `of 0`. Re-shoot
-      `docs/hud/06-health.png` after. Discovered in B45.
+      `docs/hud/06-health.png` after. Discovered in B45. — 62efed3
+      (TWO rows, not one: `vram 943 MiB FREE` over `llm NEEDS 5424 MiB`.
+      `n / m` beside the word `vram` is the disk-usage idiom and would
+      have been read as *used of total*, and one composed string would be
+      the HUD synthesising a claim out of two services' numbers — so one
+      row per publisher, each attributable, either able to be absent
+      alone. The deficit form was measured and dropped: `4481 MiB SHORT`
+      under `vram` is eighteen characters against the seventeen the 300 px
+      box is measured to, where `NEEDS ` + eight under a three-letter name
+      is seventeen exactly. `HealthState.llmGpuFloorMb` reads the gauge
+      (positive and finite only), `VramState.gpuFloorMb` takes it as an
+      INPUT and never derives it, and `needKnown` gates on `reporting`, so
+      the requirement is never on screen without a reading beside it and
+      an unfed HUD draws exactly what it drew before. Requirements round
+      UP, measurements round to nearest, both through one shared unit
+      ladder. Tests: jv-hud 585, was 569; tools 138, was 137; 11
+      mutations, 11 caught. `docs/hud/06-health.png` re-shot.)
 
 - [ ] B42. jv-brain's heartbeat re-reads the rung file on every beat
       (`_rung()` in `_health`, once per 5 s, plus once per turn for

@@ -6904,3 +6904,98 @@ that cannot go red is not a gate.
   decisions and on a human at ares, and B10/A28 — one live recording of
   one spoken turn — is still the biggest thing a human can hand this
   loop.
+
+## 2026-09-24 — iteration 68 — B46: the other number, next to the first one
+
+B40 put the card's free VRAM under the rung line. B45 got the ladder's
+requirement onto the bus. Neither of them, on its own, tells you
+anything: `943 MiB FREE` is a figure you have to know this machine to
+judge, and a requirement with no reading beside it is a figure you
+cannot check at all. This iteration is the twenty lines that put them on
+the same plate, one under the other, and then stops.
+
+    llm   CPU RUNG 4
+    vram  943 MiB FREE
+    llm   NEEDS 5424 MiB
+
+**Two rows, not one sentence.** The obvious shape was `943 / 5424 MiB`
+on the existing row, and it was wrong twice over. `n / m` next to the
+word `vram` is the disk-usage idiom — most readers would take it as
+*used of total*, and 5424 is not this card's total — and a single string
+would have been the HUD composing a claim out of two services' numbers.
+jv-context measured the first; jv-brain computed the second off a ladder
+the HUD may not read (invariant 1). One row per publisher keeps each
+number attributable, lets either be absent on its own, and costs nothing
+but a line of a plate that is already only on screen when something is
+wrong. The second row is named `llm` and not `vram` for the same reason:
+it is the model's requirement, not a property of the card.
+
+**The requirement never appears alone.** `needKnown` gates on
+`reporting`, which is the reading's own gate — so a HUD that can see
+jv-brain but not jv-context draws exactly what it drew before B46, and
+the pair arrives and leaves together rather than leaving half a
+comparison up. This is jv-brain's own rule for its `notes`, taken
+literally: it quotes the floor only next to a reading it actually took.
+jv-brain also withholds the gauge entirely once the brain is on the card
+and on a machine with no card, so between the two of them there is no
+state in which a reader is shown a number they cannot act on.
+
+**Rounded up, always.** The unit ladder is now shared by both rows
+(`amount(mb, up)`), so they are never in different units and the
+comparison never needs arithmetic — but a measurement rounds to nearest
+and a requirement rounds UP. The one way this row could lie is by
+drawing a fit the ladder would not actually take (`943 MiB FREE` over
+`NEEDS 943 MiB` on a ladder wanting 943.4), and that is worth a branch.
+jv-brain already ceils its own floor, which makes this belt and braces;
+for a number whose entire job is to be compared with another one, belt
+and braces is right.
+
+**And it is still inside the box.** The 300 px surface is measured
+against `jv-compat DEGRADED` — seventeen characters of name plus detail
+— and a test in tst_vramstate has pinned every branch of the reading to
+that since B40. `NEEDS ` is six characters and the quantity is at most
+eight (`9999 MiB`, `99.9 GiB`, `1024 GiB`), which is fourteen under a
+three-letter name: seventeen exactly. The deficit form the plan
+suggested (`4481 MiB SHORT`) is eighteen under `vram` and would have
+been the first row in the HUD to break that line, which is how the
+two-row shape got chosen over it.
+
+- tests: `shell/jv-hud` headless suite **585, was 569** (16 new — 10 in
+  tst_vramstate, 6 in tst_healthstate), plus tools **138, was 137**.
+  **Nine mutations, nine caught**: the requirement standing with no
+  reading beside it, the requirement rounded to nearest, a zero floor
+  treated as a floor, the need row quoting the reading instead of the
+  floor, the reading itself rounded up, any metric value accepted as a
+  floor, a floor read off a heartbeat nobody expired, the plate losing
+  the binding, and the plate drawing the requirement on the reading's
+  gate. Two more against the shot gate (a floor jv-brain would not
+  compute, and a shot that omits it) — both caught.
+- photographed: `docs/hud/06-health.png` re-shot through the real
+  plates. The sheet now shows the whole sentence: the rung, the card,
+  and what the card would have to give back.
+- build: `nix build .#jv-hud` (qmllint -W 0 over every QML file + the
+  headless suite) and `nixos-rebuild build --flake .#ares` both green.
+  Never test/switch. No schema change — `metrics` is free-form by schema
+  and has been since v1. No jv-act, no boot path, no pins.
+- files: shell/jv-hud/core/VramState.qml,
+  shell/jv-hud/core/HealthState.qml, shell/jv-hud/HealthPlate.qml,
+  shell/jv-hud/tests/tst_vramstate.qml,
+  shell/jv-hud/tests/tst_healthstate.qml,
+  tools/hudshots/scene/tst_shots.qml, tools/tests/test_hudshots.py,
+  tools/tests/test_gen_theme_qml.py, docs/hud/README.md,
+  docs/hud/06-health.png
+- commit: 62efed3
+- next: B45/B46 close the VRAM story as far as it can go without a
+  decision. What is left in it is **B44**, and it is still explicitly a
+  human's: the HUD can now see the card move and jv-brain still cannot —
+  it learns its VRAM exactly once, at launch, from its own fork — and
+  the question of whether a brain may ever unload or relaunch itself is
+  a scheduling change, not an arithmetic one. **B43** (is a CPU brain a
+  `degraded` health state?) is the other sentence of judgement waiting.
+  The loop's own next small ones are unchanged: **B42** (the rung file
+  decides a published state and is written non-atomically — one rename)
+  and **B38** (jv-ears, jv-guard and jv-brain still beat on a timer
+  alone, and B35 wrote the shape to copy). Track A remains blocked on
+  decisions and on a human at ares, and **B10/A28** — one live recording
+  of one spoken turn — is still the biggest thing a human can hand this
+  loop.
