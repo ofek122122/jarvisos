@@ -8619,3 +8619,115 @@ iteration could hand a human.
   are one question asked three times; **B62** is B61's two decisions; and
   **B10/A28** — one live recording of one spoken turn on ares — remains the
   biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 85 — B63: the sandbox nobody had ever entered
+
+- built: **invariant 8's confinement, executed for the first time.** It
+does not work, and it has not worked since Phase 2.
+
+Track A is still one human look away from unblocking, so I went looking
+for the claim in this repo with the widest gap between what it promises
+and what holds it. jv-compat has the lowest test-to-source ratio here
+(401 / 278) and it is the service that runs UNTRUSTED Windows binaries.
+`bwrap_args` builds the bubblewrap argv that whole invariant rests on. It
+had two tests. Both stage it on `Path("/prefixes/x")` — a path the code
+cannot produce, because `prefixes_root()` puts every prefix under `$HOME`
+— and both assert that three strings are present in a list. `RealRunner`
+says `TODO(machine)`. So the sandbox had never been entered.
+
+`bwrap` is installed on this machine (`modules/windows-compat.nix` puts it
+there for exactly this service), so entering it is four lines. Two fatal
+failures, neither of them visible in any argv:
+
+  · `--symlink usr/bin /bin` and `--symlink usr/lib /lib64` are an FHS
+    distro's layout. This is NixOS. `/usr` holds exactly one file
+    (`bin/env`), `/bin` is a single symlink to bash, and every binary on
+    the machine — wine's included — is in `/nix/store`. The sandbox
+    therefore had no `/bin/sh`, and bwrap answered
+    `execvp /bin/sh: No such file or directory`. It could not start
+    anything. Ever.
+  · Repair just enough to ask the next question and it answers
+    `PREFIX-GONE`. The prefix was bound at its own host path, and then the
+    app's private home was bound over `$HOME` — which is its PARENT, since
+    prefixes live at `~/.local/share/jarvis/prefixes/<app>`. The second
+    mount hides the first. `$WINEPREFIX` named a path with nothing at it.
+
+A third came from the other side. `install()` puts the installer's HOST
+path in the inner argv, and nothing bound the file — so wine was being
+handed a path to a file that is not in the sandbox. That one survived
+because the only pipeline test uses `MockRunner`, which logs an argv and
+never opens anything in it.
+
+The fix is not three patches; it is one decision. **The sandbox's view is
+fixed and the host's is not.** The prefix goes to `/jarvis/prefix`, the
+installer read-only to `/jarvis/installer/<name>`, and the private home is
+mounted FIRST, so nothing the app needs is ever under it. Wherever this
+machine decides to keep prefixes, the app sees one place — which makes the
+shadowing class impossible rather than merely fixed. The read-only set is
+now what this OS actually has (`/nix`, `/etc`, `/bin`, `/lib64`, `/usr`,
+`/run/current-system/sw`, each bound only if it exists), and the system
+profile is in it because that is what resolves a bare `wine` on PATH.
+
+One more, found by writing the test rather than by running it:
+`home_paths` was joined onto `Path.home()` and bound with no check at all.
+`home_paths = ["."]` mounts the user's entire home over the private one —
+invariant 8 inverted by one line of TOML — and `["../.."]` reaches past it
+altogether. `grant_dest` refuses absolute, empty and `..`-bearing grants.
+Recipes are reviewed like code, which is a reason to catch a mistake, not
+a reason to assume there will not be one. `recipes/README.md` says the
+rule where a recipe author reads it.
+
+`tests/test_sandbox.py` does not model bwrap. It runs a real `/bin/sh`
+inside the real sandbox and asks what it can see, in POSIX builtins only
+(no coreutils, so a sandbox that binds no profile is still measurable):
+the prefix is writable and the writes land in the real prefix on the host;
+the installer is readable at the path the inner argv names and REFUSES to
+be written, because it is the evidence jv-guard hashed; `$HOME` lists the
+prefix's `home/` and not the user's `tax-return.pdf`; a granted
+`Documents/AppSaves` is the user's real folder while its sibling stays
+hidden; and `/proc/net/dev` holds only `lo` when the network is denied and
+exactly the host's interfaces when it is granted — the kernel asked, not a
+string matched. One argv-level whitelist stays, so a bind added later has
+to be argued for in the test: every destination is a read-only system
+path, `/jarvis/*`, or under the private home.
+
+Not added, on purpose, and it is the interesting restraint: `--new-session`
+(bubblewrap's own answer to TIOCSTI injection), `--unshare-ipc` and
+`--unshare-uts` all belong in that argv. None can be OBSERVED from inside
+by this suite — the first needs a pty, the second is only evidence on a
+host that happens to own a SysV segment, the third changes nothing
+readable. This file has just finished paying for a confinement whose
+claims nobody ran; adding three more would be repeating the mistake in the
+same commit. Raised as **B64**, with the pty fixture named as the one worth
+building — and it matters more than it looks, because `jv-compat install`
+is a CLI a human runs FROM a terminal, not only a systemd unit.
+
+- tests: `bash ops/ralph/runtests.sh jv-compat` **27 (was 10)**, all green.
+- graded with **10 mutations, 10 caught**, in two rounds: both original
+  bugs re-introduced (the prefix back at its host path; `/bin` out of the
+  read-only set), the network grant made unconditional, the installer bound
+  writable, the installer not bound, the installer bound at the host's own
+  path, `/home` added to the read-only set, the private home not mounted,
+  and the grant check weakened two different ways. Before the tests, the
+  two real bugs were caught by nothing: the suite was green with a sandbox
+  that could not execvp.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. jv-compat is not jv-act: it proposes an
+  argv, and the only thing it mutates is its own prefix dir.
+- files: services/jv-compat/jv_compat/prefix.py, install.py,
+  services/jv-compat/tests/test_sandbox.py (new), test_compat.py,
+  recipes/README.md
+- commits: 4a9e2f2
+- next: **B65** is the cheapest and it is free TODAY: a grant naming a
+  folder the user does not have yet aborts the install with a raw bwrap
+  error, and the obvious fix — create it — is forbidden, because only
+  jv-act writes outside a service's own state dir. Three options, no
+  recipes committed yet, so deciding it costs nothing and deciding it late
+  costs a recipe. **B64** is the pty fixture. Otherwise unchanged: **Track
+  A is one human look at `docs/hud/` away from unblocking** A47, A55, A62,
+  A63's picture half, A70 and the A21/A22/A25 cluster; **A56** asks whether
+  the shot suites belong in the build gate; **B27** needs one decision
+  between three named options; **B43/B47/B54** are one question asked three
+  times; **B62** is B61's two decisions; and **B10/A28** — one live
+  recording of one spoken turn on ares — remains the biggest thing a human
+  can hand this loop.

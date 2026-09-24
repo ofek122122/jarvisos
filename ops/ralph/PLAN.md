@@ -1506,6 +1506,71 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       to change ACCIDENTALLY, which is what B61's tests are for: whoever
       answers this moves those tests in the same commit. Raised by B61.
 
+- [x] B63. **The sandbox invariant 8 is built on had never been entered
+      once, and it did not work.** — 4a9e2f2
+      (`bwrap_args` has been argv-shaped since Phase 2 and `RealRunner`
+      says `TODO(machine)`, so the confinement had two tests, both
+      built on `Path("/prefixes/x")` — a path the code cannot produce,
+      since `prefixes_root()` puts every prefix under `$HOME` — and both
+      asserting that three strings were present. Running it found two
+      fatal failures, neither of them visible in an argv:
+      `--symlink usr/bin /bin` is an FHS distro's layout and this is
+      NixOS, where `/usr` holds one file and every binary including
+      wine's is in `/nix/store`, so the sandbox had no `/bin/sh` and
+      could not execvp ANYTHING; and the prefix was bound at its own
+      host path before the private home was bound over `$HOME`, which
+      is its parent, so the second mount hid the first and
+      `$WINEPREFIX` named a path that did not exist inside. A third:
+      `install()` put the installer's HOST path in the inner argv and
+      nothing bound the file, so wine was being handed a path to a file
+      the sandbox cannot see — invisible because the only pipeline test
+      uses `MockRunner`, which never opens anything.
+      Fixed by giving the sandbox a view that does not depend on the
+      host: the prefix at `/jarvis/prefix`, the installer read-only at
+      `/jarvis/installer/<name>`, and the private home mounted FIRST so
+      nothing the app needs can be under it. `grant_dest` refuses a
+      `home_paths` entry that is absolute, empty, or contains `..` —
+      `home_paths = ["."]` used to mount the user's whole home over the
+      private one, invariant 8 inverted by one line of TOML.
+      `tests/test_sandbox.py` runs a real `/bin/sh` inside the real
+      sandbox and asks it what it can see, in POSIX builtins only: the
+      prefix is writable and the writes land on the host, the installer
+      is readable and NOT writable, `$HOME` shows the prefix's `home/`
+      and not the user's files, a granted folder is the user's real one
+      while its sibling is hidden, and `/proc/net/dev` holds only `lo`
+      when the network is denied and exactly the host's interfaces when
+      it is granted. 27 tests, was 10. 10 mutations, 10 caught,
+      including both original bugs re-introduced. Tests:
+      `bash ops/ralph/runtests.sh jv-compat`.)
+
+- [ ] B64. `--new-session`, `--unshare-ipc` and `--unshare-uts` belong in
+      that argv and are not in it, deliberately: none can be OBSERVED from
+      inside the sandbox by the suite B63 just built. `--new-session` is
+      bubblewrap's own answer to TIOCSTI terminal injection and needs a pty
+      to test, which matters here because `jv-compat install` is a CLI a
+      human runs FROM a terminal (`main.py`), not only a systemd unit;
+      `--unshare-ipc` shows up as an empty `/proc/sysvipc/shm`, which is
+      only evidence on a host that has a segment; `--unshare-uts` changes
+      nothing observable without writing to the namespace. The whole point
+      of B63 is that this file had just finished paying for claims nobody
+      ran, so each of these lands WITH the thing that watches it or not at
+      all. A pty fixture would answer the first and is the one worth
+      building. Discovered in B63.
+
+- [ ] B65. A grant naming a folder the user does not have yet aborts the
+      whole install with a bwrap error: `--bind` fails on a missing source.
+      The three ways out are not equal and one of them is forbidden —
+      jv-compat must NOT create it, because only `jv-act` writes outside a
+      service's own state dir (invariant 3), and `~/Documents/MyAppSaves`
+      is the user's. So: refuse the recipe at LOAD time with a sentence
+      naming the missing folder (loud, and the recipe author is the one who
+      can fix it), use `--bind-try` and let the app silently find nothing
+      there (quiet, and it is the app that ends up confused), or ask jv-act
+      to create it, which drags a confirmation into an install that already
+      has one. Cheap either way and it should be decided before the first
+      recipe with a grant is committed — there are none today, which is why
+      this is free now. Discovered in B63.
+
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
       both. Nothing has ever looked at that output on a real turn — the
