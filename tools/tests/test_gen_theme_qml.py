@@ -659,3 +659,52 @@ def test_no_qml_file_carries_a_literal_colour():
             if re.search(r'"#[0-9A-Fa-f]{3,8}"', line):
                 offenders.append(f"{qml.relative_to(ROOT)}:{n}: {line.strip()}")
     assert not offenders, "colour belongs in personality/theme.toml:\n" + "\n".join(offenders)
+
+
+def test_no_qml_file_names_a_font_family_of_its_own():
+    """A8, and the same rule as colour: a face is identity, so it lives in
+    personality/theme.toml and reaches QML only through the generated
+    singleton. `font.family: "monospace"` would render in whatever fontconfig
+    picked that day — which is precisely the drift modules/fonts.nix now
+    installs a declared face to prevent, and it would reintroduce it one
+    binding at a time with nothing failing."""
+    offenders = []
+    for qml in sorted((ROOT / "shell").rglob("*.qml")):
+        if qml.name == "Theme.qml":
+            continue  # the generated singleton is where a family may exist
+        for n, line in enumerate(qml.read_text("utf-8").splitlines(), 1):
+            if line.lstrip().startswith("//"):
+                continue
+            if re.search(r"\bfamily\s*:", line) and not re.search(r"\bTheme\.family\w+", line):
+                offenders.append(f"{qml.relative_to(ROOT)}:{n}: {line.strip()}")
+    assert not offenders, (
+        "a font family belongs in personality/theme.toml, reached through "
+        "Theme.familySans / Theme.familyMono:\n" + "\n".join(offenders)
+    )
+
+
+def test_every_face_the_theme_names_is_bound_to_a_package_and_no_other():
+    """A8: theme.toml has named Archivo and JetBrains Mono since A2, and for
+    fifteen iterations nothing installed either — fontconfig found no such
+    family and silently substituted.
+
+    `modules/fonts.nix` reads the names out of theme.toml itself, so the two
+    cannot disagree about WHICH faces are wanted; what it holds of its own is
+    the binding from a name to something that provides it. That binding is
+    checked at eval time by the module (a missing one throws, a spare one
+    fails an assertion) — this is the same check in the one place it can run
+    without nix: the `tools` CI job on a bare checkout, in a second, with a
+    diff instead of a stack trace."""
+    fonts_nix = (ROOT / "modules" / "fonts.nix").read_text("utf-8")
+    block = re.search(r"\n  providerOf = \{\n(.*?)\n  \};\n", fonts_nix, re.S)
+    assert block, "modules/fonts.nix no longer has a providerOf table to check"
+    bound = set(re.findall(r'^\s*"([^"]+)"\s*=', block.group(1), re.M))
+
+    tokens = gen.load_tokens((ROOT / "personality" / "theme.toml").read_text("utf-8"))
+    named = {v for k, v in tokens["type"].items() if k.startswith("family_")}
+    assert named, "theme.toml names no face at all"
+    assert named == bound, (
+        "personality/theme.toml and modules/fonts.nix disagree about which "
+        f"faces this machine has: theme.toml names {sorted(named)}, "
+        f"modules/fonts.nix provides {sorted(bound)}"
+    )

@@ -78,6 +78,34 @@ transparent rectangle at runtime), and a test asserts no QML file outside
 still equals the blueprint's §06 dark tokens, so the theme cannot quietly
 wander away from the design it came from.
 
+## The faces (A8)
+
+`theme.toml`'s `[type] family_sans` / `family_mono` name Archivo and JetBrains
+Mono, and for fifteen iterations nothing on the machine installed either:
+fontconfig found no such family and quietly substituted something else. A
+missing font is the worst shape a missing dependency takes — it does not fail,
+it just renders in a different face.
+
+`modules/fonts.nix` closes that. It reads the family names out of
+`personality/theme.toml` with `builtins.fromTOML` (same source of truth,
+different compiler), binds each to a package, and installs the face it
+*checked*: the join's build runs `fc-scan` and fails unless the package really
+reports the family the theme asked for. Archivo is not in nixpkgs, so
+`pkgs/archivo` pins it upstream — base width only, 18 faces, all verified to
+be family `Archivo`. A face named in the toml with nothing bound to it is an
+eval-time `throw`; a binding the toml does not name fails an assertion; a
+`font.family` in QML that is not a `Theme.family*` fails `runtests.sh tools`.
+
+Only outline formats (`.ttf`/`.otf`/`.ttc`) are installed. jetbrains-mono
+ships every face three times and `fc-match monospace` picked
+`JetBrainsMono-Regular.woff2` against the first version of this module —
+whether a WOFF2 renders depends on how the reader's FreeType was built, which
+is the same silent substitution one layer further in.
+
+**Nobody has seen this on screen yet.** `fc-match` resolving `Archivo` and
+`JetBrains Mono` was verified against the built system closure; the HUD
+actually drawing in them needs a human on ares.
+
 The `qmldir` has no `module` line on purpose. Quickshell synthesizes a qmldir
 per directory and steps aside when it finds one; ours registers the singleton
 in the way a plain directory import (and qmllint) understands. Any future
