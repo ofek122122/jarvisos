@@ -202,6 +202,14 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       no schema change, but it wants care: the turn must still be recorded
       as interrupted rather than silently lost, and a wake with no reply in
       flight must do nothing. Discovered in A16.
+- [ ] B7. jv-ears now has a place to state its tuning (sys.health `metrics`,
+      A14), and two more constants could one day be mirrored by another
+      service the way `wake_timeout_s` was: `wake_refractory_s` and
+      `suppress_tail_ms` (the half-duplex tail, which jv-voice's turn
+      timing is implicitly tuned against). Publish them WHEN something
+      actually reads them, not before — a gauge nobody consumes is noise
+      on the bus and a second thing to keep true. Noted so the next
+      hand-copied constant is recognised as one. Discovered in A14.
 - [ ] B3. More replay-harness fixtures for perception (recorded-session tests).
 
 ## Track C — Creative (within blueprint + invariants)
@@ -248,14 +256,33 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       assertions pin that a turn resumes when the sentence LANDS and ends
       the instant a wake does. No schema change. 17 tests green (was 10),
       11 mutations caught 11. Tests: `bash ops/ralph/runtests.sh jv-voice`.)
-- [ ] A14. The HUD mirrors TWO jv-ears constants by hand — `wakeWindowS`
-      (8 s, ears' `wake_timeout_s`) and `stallS` (1 s, ears'
-      `CaptureMeter.STALL_S`) — because nothing publishes ears'
-      configuration. Both are "keep this at or below what ears is tuned
-      to" comments waiting to rot. ears already publishes free-form
-      `metrics` on sys.health; reporting its own budgets there would let
-      the HUD read them instead of guessing, with no schema change. Small,
-      and it deletes two footguns. Discovered in A4.
+- [x] A14. jv-ears states the budgets it enforces; the HUD reads them
+      instead of mirroring them by hand. — 042438a
+      (`EarsPipeline.budgets()` publishes `wake_timeout_s` off the
+      SAMPLE-CLOCK count the code compares against — not off cfg, same
+      reason CaptureMeter counts what the device delivered — and
+      `CaptureMeter.metrics()` adds `capture_stall_s`, which rides from
+      the first heartbeat because a budget is not a measurement and must
+      not wait for one. Free-form `metrics`, so no schema change.
+      `health_body` takes them as a REQUIRED argument, so a caller that
+      forgets is a TypeError rather than a consumer guessing.
+      `core/EarsBudgets.qml` is the one place that reads them; the plates
+      feed them to SpeechState/MicState. The shipped defaults stay as
+      fallbacks — the HUD must say something before the first heartbeat —
+      but they are PINNED: tools/tests fails the build if a default drifts
+      from the Python, if a mirror is renamed out of the gate's sight, if
+      a ceiling drops to or below ears' tuning, or if a plate stops
+      binding the reported value and quietly runs on the fallback.
+      A reported budget must be a number (`"12"` is not twelve), positive
+      and under a ceiling; refused means fall back, never zero. Budgets
+      deliberately do NOT expire with their heartbeat the way MicState's
+      gauges do — a gauge describes a moment, a budget describes how a
+      service is configured. 35 mutations; the first round missed three,
+      all real: an `isFinite` no input could reach (deleted — the ceiling
+      does that work), a numeric string nothing tested, and a `linkUp`
+      guard BusModel can never exercise. Tests:
+      `bash ops/ralph/qmltest.sh`, `bash ops/ralph/runtests.sh tools`,
+      `bash ops/ralph/runtests.sh jv-ears`.)
 - [x] A15. `shell.qml`'s `visible` is no longer a hand-maintained OR of every
       plate's `shown`/`lit`. — 0dbe844
       (`core/PlateStack.qml` is a Column that asks its own children — `shown`
@@ -304,3 +331,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   so the list that could rot is gone (0dbe844, 2026-09-24)
 - A10 — invariant 10 gets a witness: every HUD surface's safety properties
   pinned, and tools/tests finally run in CI (fe43c88, 2026-09-24)
+- A14 — jv-ears states its own budgets and the HUD stops mirroring them
+  (042438a, 2026-09-24)

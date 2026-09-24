@@ -1194,3 +1194,111 @@ on ares.
   honest bug left in the voice loop). The standing one, unchanged: nobody has
   ever LOOKED at this HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then a real wake
   word.
+
+## 2026-09-24 — iteration 15 — A14: the service states its own budgets
+
+**what and why.** The HUD kept two jv-ears constants in QML by hand:
+`wakeWindowS` (8 s, ears' `wake_timeout_s` — how long a wake word keeps
+meaning `listening`) and `stallS` (1 s, `CaptureMeter.STALL_S` — how long an
+open microphone may go quiet and still read as `live`). Each sat under a
+comment asking whoever retuned the service to remember the HUD. That is not a
+mechanism, it is a hope, and the failure is silent and one-directional: retune
+ears down and the HUD goes on claiming an open microphone after ears has
+disarmed. Invariant 10 says that indicator is not fakeable; a stale copy of
+someone else's configuration is a slow way to fake it.
+
+So jv-ears states what it enforces. `sys.health.metrics` is free-form and
+service-local by schema, which is the same door A4's mic gauges went through —
+no schema change, nothing frozen touched (invariant 2), and the HUD stays a
+pure consumer.
+
+**what ears publishes**: `EarsPipeline.budgets()` → `wake_timeout_s`, read off
+`self._wake_timeout / sample_rate` — the sample-clock count the code actually
+compares against, NOT `cfg.wake_timeout_s`. Same reasoning as CaptureMeter
+counting what the device delivered: what runs is the truth, and today the two
+differ by at most one sample. `CaptureMeter.metrics()` → `capture_stall_s`,
+which rides from the very first heartbeat, before any audio has arrived —
+unlike `capture_age_s`, which is absent until there is one. A budget is not a
+measurement and must not wait for one; a mic that has NEVER delivered is
+exactly when a consumer needs the budget. `health_body` takes `budgets` as a
+REQUIRED argument (a caller that forgets is a TypeError here, not a consumer
+guessing over there) and floats every value on the way out, so a non-numeric
+budget raises in jv-ears instead of riding out as a string the HUD would
+refuse in silence.
+
+**what the HUD does with it**: `core/EarsBudgets.qml`, the one place that
+reads them; StatePlate and MicPlate feed them into SpeechState/MicState, whose
+own properties stay plain inputs (they each decide one thing and take their
+inputs — the A9 rule holds). The shipped defaults remain in QML as fallbacks,
+because the HUD has to say something before the first heartbeat lands and
+because zero would close every window instantly. They are mirrors still — but
+pinned mirrors: `tools/tests` now fails the build if a default drifts from the
+Python that enforces it, if a mirror is renamed out of the gate's sight (the
+"at least two of these exist" assert), if a ceiling drops to or below ears'
+own tuning, or if a plate stops binding the reported value and quietly runs on
+the fallback. That last one is the gate that matters most: it is invisible
+otherwise, because the HUD would go on drawing a perfectly plausible
+indicator.
+
+**the deliberate asymmetry**: budgets do NOT expire with the heartbeat that
+carried them, while MicState's gauges expire after the two periods the schema
+grants them. A gauge describes a moment; a budget describes how a service is
+CONFIGURED and stays true until it says otherwise. jv-ears beats immediately
+on start, so a retuned restart lands within a frame, and a jv-ears too dead to
+beat publishes no wakes for the window to bound anyway. Both directions are
+pinned in tests, including a heartbeat with no numeric `ts` — which MicState
+refuses outright and this accepts, because there is nothing here to age.
+
+**refusing a number**: a reported budget must be a number (`typeof` first —
+`"12" > 0` is true in JavaScript, and a string budget is a jv-ears we do not
+understand), positive, and under a ceiling (60 s wake, 10 s stall). The
+ceiling is not fussiness: the value ends up in a `Timer` interval, and an
+infinite window never closes. Refused means fall back, never zero.
+
+**proving it bites — 35 mutations, and the first round was the useful one.**
+13 against the tools gates (ears retuned in either file, each QML default
+drifted, a mirror renamed, a ceiling dropped below ears' tuning, the budget
+renamed out of config.py, each plate's binding removed or replaced with a
+literal, an EarsBudgets deleted) — all 13 caught. 6 against jv-ears (the
+budget dropped from the meter, made to wait for the first chunk, the merge
+removed, the float() coercion removed, main no longer asking the pipeline, the
+pipeline reporting cfg instead of what it enforces) — all 6 caught. 16 against
+EarsBudgets — 13 the first time, and **3 MISSED**, all three real:
+  · `isFinite(v)` was unreachable. +Infinity already fails the ceiling, and
+    -Infinity/NaN already fail `> 0`. Deleted, and the comment now says the
+    ceiling does that work — dead defensiveness reads like protection.
+  · a numeric STRING would have sailed through: no test used one. Now one does.
+  · the `linkUp` guard could not be reached through BusModel at all, since
+    BusModel drops every frame when the bridge dies. Pinned through a
+    hand-built bus that reports the link down while still holding a frame —
+    the exact case the guard exists for.
+All three re-run and caught afterwards.
+
+- tests: `bash ops/ralph/qmltest.sh` — 228 green (was 202; 26 new);
+  `bash ops/ralph/runtests.sh tools` — 30 (was 28);
+  `bash ops/ralph/runtests.sh jv-ears` — 32 (was 26);
+  `bash ops/ralph/runtests.sh jv-hud-bridge` — 25, unchanged (sys.health was
+  already in DEFAULT_TOPICS; the bridge needed no change at all).
+- build: `nix build .#jv-hud` and `nixos-rebuild build --flake .#ares` both ok.
+  Never test/switch. No schema change, no jv-act, no boot path, no pins.
+- files: services/jv-ears/jv_ears/{audio,main,pipeline}.py,
+  services/jv-ears/tests/{test_capture_meter,test_exit_code,
+  test_pipeline_fixtures}.py, shell/jv-hud/core/EarsBudgets.qml (new),
+  shell/jv-hud/tests/tst_earsbudgets.qml (new), shell/jv-hud/core/{qmldir,
+  MicState,SpeechState}.qml, shell/jv-hud/{StatePlate,MicPlate}.qml,
+  shell/jv-hud/README.md, tools/gen_theme_qml.py,
+  tools/tests/test_gen_theme_qml.py
+- commit: 042438a
+- next: Track A is now entirely blocked on a human or on hardware — **A8**
+  (fonts) is an identity call (invariant 9), **A11** needs proposal R1's
+  schema fields, **A13** needs an eye on ares. So the next iterations are
+  Track B: **B6** is the largest honest bug left in the voice loop (jv-brain
+  has no barge-in path — it keeps streaming an answer nobody is listening to,
+  holds the GPU, and records the abandoned reply as if it had been heard), and
+  **B5** (`jv act-log --since/--failed`) is the small pure one. A quieter
+  follow-up this iteration suggests: jv-ears now has a place to state its
+  tuning, and `wake_refractory_s` / `suppress_tail_ms` are the next two
+  constants another service might otherwise learn to mirror — publish them
+  when something actually needs them, not before. The standing one, unchanged:
+  nobody has ever LOOKED at this HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then
+  a real wake word.
