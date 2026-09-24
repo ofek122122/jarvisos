@@ -121,7 +121,7 @@ QML engine can answer:
 
 - **The HUD renders nothing while nothing changes.** Commits are counted
   on the HUD's own side of the Wayland socket (libwayland's
-  `WAYLAND_DEBUG` log) over **three** six-second windows, all of which
+  `WAYLAND_DEBUG` log) over **four** six-second windows, all of which
   must be **zero**:
 
   1. **quiet** — a live bus carrying a `context.system` snapshot every
@@ -139,11 +139,27 @@ QML engine can answer:
      the snapshot re-evaluates to the same value. A commit here would be a
      re-render on *bookkeeping* — the one way of spending the budget that
      neither window above can see.
+  4. **mic and health** — live and lit again, with the other two plates
+     this harness can hold (A43). One `jv-ears` heartbeat describing a
+     device that is **open and delivering nothing** says two things at
+     once: **MIC NO AUDIO** on `MicState`'s reading, and
+     **jv-ears DEGRADED** in the service's own word for itself. Re-publish
+     that single frame at 1 Hz and both plates sit there. Window 3 cannot
+     reach them, and it cannot see how they fail either: `HealthPlate`
+     renders a *list*, and a roster rebuilt into a fresh array on every
+     heartbeat is a `Repeater` model that changed whether or not a word in
+     it did. Window 3's findings list is empty the whole time, and an empty
+     list rebuilt is still nothing on screen.
 
-  Measured: 0, 0 and 0. The fade-in that put the blind plate there cost 42
-  commits across the three surfaces and then stopped; lighting SPEAKING and
-  then OUTPUT MUTED under it cost 82 across the two steps, and the plate
-  that arrived was 41 px taller than the one above it alone.
+  Measured: 0, 0, 0 and 0. The fade-in that put the blind plate there cost
+  42 commits across the three surfaces and then stopped; lighting SPEAKING
+  and then OUTPUT MUTED under it cost 82 across the two steps, and the
+  plate that arrived was 41 px taller than the one above it alone; lighting
+  MIC and then MIC NO AUDIO with jv-ears DEGRADED under it cost 85, also
+  41 px taller. (84 on an earlier run of the same HUD — a fade's frame
+  count is not a fixture, which is why only the zeros are asserted.) Nothing had to be fixed to get window 4 to zero — the
+  `Repeater` rebuild above is a real thing that happens once a second on a
+  degraded machine, and it costs no commit.
 
   Window 3 was impossible before A40. Every other lit state in this HUD is
   a frame ageing out — a heartbeat speaks for two of its own periods, a
@@ -153,10 +169,11 @@ QML engine can answer:
   of two topics rather than a latch, so it stays true for exactly as long
   as the frames keep coming.
 
-  *Verified that none of the three can go vacuous.* Each is paired with a
+  *Verified that none of the four can go vacuous.* Each is paired with a
   stretch that must contain commits — the HUD being woken by a real
   jv-ears heartbeat, the blind plate arriving, the speaking/muted pair
-  arriving — counted by the same code through the same log. That control
+  arriving, the mic/health pair arriving — counted by the same code
+  through the same log. That control
   is not decoration: it is what caught the first version of this probe,
   whose pattern expected `wl_surface@41` where this libwayland writes
   `wl_surface#41`, and which would otherwise have reported a flawless zero
@@ -176,6 +193,17 @@ QML engine can answer:
   replacing the feed with a plain sleep fails on the box, which had shrunk
   back to SPEAKING alone.*
 
+  Window 4 is lit in two steps for the same reason — a healthy jv-ears
+  with the device open lights `MicPlate` *alone*, and the health line then
+  has to arrive under it — and it carries one guard the other three do
+  not need. A heartbeat speaks for two of its own `period_s` and `jv-ears`
+  declares 5, so those two plates outlive a six-second silence on their
+  own. That is the opposite of window 3, whose feed is life support: here
+  the feed is the *subject*, and a feed that stopped would leave the
+  photograph intact and quietly turn this back into window 2. So the
+  heartbeats published inside the window are counted, and a window that
+  measured fewer than two of them fails rather than reporting its zero.
+
   *Verified that window 3 catches what windows 1 and 2 cannot.* The
   mutation is a "freshness" fade — the dot's opacity bound to the age of
   the snapshot, which is the kind of considerate edit nobody would look at
@@ -188,6 +216,15 @@ QML engine can answer:
   `SequentialAnimation` inside the same plate, by contrast, is caught by
   the lit window too: an animation runs whether or not anyone can see it,
   and that is the failure the first two windows were already built for.
+
+  *Verified that window 4 catches what windows 1–3 cannot.* The same
+  considerate edit, moved to the plate only this window can hold: the mic
+  dot's opacity bound to the age of `jv-ears`' heartbeat. `MicPlate` is
+  dark in every other window — window 2 has no bus and window 3 is
+  holding `SPEAKING` and `OUTPUT MUTED` — so windows 1, 2 and 3 all read
+  **0** while the fourth read **18**, three surfaces times six seconds,
+  under six heartbeats that said the same thing every time. The drawn box
+  never moved and the photographs are identical.
 
   This is invariant 10's cost claim — §06 budgets the ambient scene at
   "under 2 ms of GPU per frame and near-zero when nothing changed", and

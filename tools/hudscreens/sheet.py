@@ -198,6 +198,33 @@ MIC_OPEN = _beat(
 )
 
 
+# The same jv-ears, with the failure that hid for a day (2026-09-15): the
+# device is still open, and no audio has arrived for longer than jv-ears'
+# own stall budget. ONE frame, two plates — MicPlate says MIC NO AUDIO,
+# and jv-ears' own heartbeat says `degraded`, which is a HealthPlate line.
+#
+# That coincidence is what makes it the idle probe's fourth window (A43).
+# Every other way to put those two plates on screen needs two publishers
+# agreeing; this needs one heartbeat, re-published, and both stay true for
+# as long as it keeps arriving.
+#
+# The gauges do NOT move between re-publishes, and on a real machine
+# `capture_age_s` would climb. That is deliberate: the window's question is
+# what a frame ARRIVING costs when nothing it says has changed, so the only
+# things that move are the ones the HUD cannot help — `seq` and `ts`.
+MIC_DEAF = _beat(
+    "jv-ears",
+    state="degraded",
+    metrics={
+        "mic_open": 1,
+        "capture_age_s": 9.4,
+        "captured_s": 1846.4,
+        "capture_stall_s": 2.0,
+    },
+    notes="capture stalled",
+)
+
+
 # An ordinary jv-context snapshot: nothing muted, nothing at zero, so
 # core/OutputState.qml has nothing to say about it. context.system is the
 # only 1 Hz topic the HUD subscribes to (A40) — every other one is an

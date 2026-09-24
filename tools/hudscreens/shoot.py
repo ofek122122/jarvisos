@@ -33,8 +33,9 @@ asked things no QML engine knows:
     idle" was an argument about how Qt Quick works, and the thing that
     breaks it is one ordinary edit — a pulse, a counter, an animation
     left looping. `probe_idle_frames` counts commits on the HUD's own
-    side of the Wayland socket over three windows — quiet, lit, and lit
-    on a bus that never stops talking (A42) — with a control for each.
+    side of the Wayland socket over four windows — quiet, lit, lit on a
+    bus that never stops talking (A42), and the two plates a single
+    re-published heartbeat can hold still (A43) — with a control for each.
 
 Nothing here asserts a pixel COLOUR: a font ships a new version, Qt
 changes its rasteriser, and a byte comparison fails in a way nobody can
@@ -546,7 +547,7 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
     monitors, forever, on a desktop where nothing is happening.
 
     So the frames are counted, from the HUD's own side of the Wayland
-    socket. Three windows, because they are three different claims and the
+    socket. Four windows, because they are four different claims and the
     HUD can fail each one without failing the others:
 
       · QUIET — a live bus CARRYING TRAFFIC the HUD subscribes to and has
@@ -571,15 +572,22 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         the one way of spending §06's budget that neither window above can
         see. It was impossible until A40: OutputState is the first element
         that stays lit on a LIVE bus for as long as it is fed.
+      · MIC AND HEALTH (A43) — live and lit again, with the other two
+        plates this harness can hold: `MIC NO AUDIO` and `jv-ears
+        DEGRADED`, both off one jv-ears heartbeat re-published at 1 Hz.
+        The window above cannot reach them, and it cannot see how they
+        fail either: HealthPlate renders a LIST, and a roster rebuilt into
+        a fresh array on every heartbeat is a `Repeater` model that
+        changed, whether or not a single word in it did.
 
     Each window has a control, because a probe that reads an empty log
     cannot tell "the HUD drew nothing" from "nobody was listening". The
     quiet window is followed by a real frame that lights the mic plate,
-    the lit window is preceded by the blind plate arriving, and the
-    live-lit one by two plates arriving; every one of those stretches MUST
-    contain commits, measured by the same regex, through the same log. If
-    the instrument breaks, it fails there rather than reporting a perfect
-    idle.
+    the lit window is preceded by the blind plate arriving, and the two
+    live-lit ones by two plates arriving; every one of those stretches
+    MUST contain commits, measured by the same regex, through the same
+    log. If the instrument breaks, it fails there rather than reporting a
+    perfect idle.
 
     WHAT THIS IS NOT. Not milliseconds of GPU: this compositor is pixman
     on a headless backend and its timings say nothing about a 1660 SUPER.
@@ -876,6 +884,174 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         log(
             f"  live and lit: {commits} commits in {IDLE_WINDOW_S:.0f}s under "
             f"{snapshots} snapshots, plate still at {after}"
+        )
+    finally:
+        if hud is not None:
+            hud.stop()
+        broker.stop()
+
+    # --- MIC AND HEALTH: the other two plates this harness can hold (A43).
+    #
+    # The window above measures `StatePlate` and `OutputPlate`. That leaves
+    # four plates that have never been watched standing still at all, and
+    # two of them come cheap, because ONE jv-ears heartbeat lights both: a
+    # device that is open and has gone silent is `MIC NO AUDIO` on
+    # core/MicState.qml's reading, and `jv-ears DEGRADED` on jv-ears' own
+    # word for itself. Re-publish that single frame at 1 Hz and both sit
+    # there for as long as the harness cares to feed it.
+    #
+    # It is worth being exact about what the feed is doing here, because it
+    # is NOT what it does above. `OutputState` stops believing a snapshot
+    # after three of jv-context's periods, so the live-lit window's feed is
+    # life support — stop it and the plate leaves. A heartbeat speaks for
+    # two of its own `period_s`, and jv-ears declares 5, so these two plates
+    # would survive a six-second window with no feed at all. The feed is the
+    # SUBJECT, not the life support: a frame arriving every second, with a
+    # plate on screen, and nothing in it that any pixel depends on. What it
+    # does keep true is the run-up — two settles and two waits are well past
+    # ten seconds — so a feed that never ran fails on the box below rather
+    # than reading a vacuous zero.
+    #
+    # And this pair can fail in a way the pair above cannot. `HealthPlate`
+    # renders a LIST: core/HealthState.qml rebuilds its roster on every
+    # heartbeat, and a fresh JS array is a different array even when every
+    # line in it is the same line. A `Repeater` told its model changed
+    # rebuilds its delegates — a frame, on three surfaces, to draw exactly
+    # what was already there. Nothing above could see that: the live-lit
+    # window's findings list is empty the whole time, and an empty list
+    # rebuilt is still nothing on screen.
+    bus_addr = str(stage / "idle-ears.sock")
+    broker = Proc(
+        "jarvisd",
+        [os.environ["JARVISD_BIN"]],
+        stage / "idle-ears-jarvisd.log",
+        dict(os.environ, JARVIS_BUS=bus_addr),
+    )
+    hud = None
+    try:
+        broker.wait_for("jarvisd listening on")
+        hud = Proc(
+            "jv-hud",
+            [os.environ["JV_HUD_BIN"]],
+            stage / "idle-ears-hud.log",
+            dict(os.environ, JARVIS_BUS=bus_addr, WAYLAND_DEBUG="1"),
+        )
+        hud.wait_for("Configuration Loaded")
+        time.sleep(SETTLE_S)
+
+        ppm = stage / "idle-ears.ppm"
+        check_desk_is_bare(ppm, background, "before the mic-and-health window")
+
+        # Lit in two steps, for the same reason the window above is: "the
+        # HUD drew something" is not the claim. A healthy jv-ears with the
+        # device open lights `MicPlate` ALONE — nothing is wrong, so
+        # HealthPlate draws its earned nothing — and then the device goes
+        # silent and the same service reports itself degraded. The drawn
+        # region has to grow DOWNWARDS: that is the health line arriving
+        # under the mic line, measured in pixels. Without it this could be
+        # holding MicPlate still while HealthPlate never appeared, and it
+        # would report exactly the same zero.
+        open_mic = [sheet.MIC_OPEN]
+        deaf = [sheet.MIC_DEAF]
+
+        mark = hud.mark()
+        publish_shot({"frames": open_mic}, bus_addr)
+        wait_for_drawing(
+            ppm,
+            background,
+            bus_addr,
+            open_mic,
+            "jv-ears said the device was open and delivering audio and the "
+            "HUD drew nothing",
+        )
+        # Measured after a settle, never off the first capture that differs:
+        # §06's fade is a real animation and a region read half way through
+        # one is smaller than the plate, which would make the growth check
+        # below a coin flip.
+        feed_snapshots(IDLE_SETTLE_S, open_mic, bus_addr)
+        capture("primary", ppm)
+        mic_box = drawn_box(read_ppm(ppm), background)
+        log(f"  a microphone open and delivering: drawn at {mic_box}")
+
+        publish_shot({"frames": deaf}, bus_addr)
+        wait_for_drawing(
+            ppm,
+            background,
+            bus_addr,
+            deaf,
+            "the device went silent and the HUD neither said MIC NO AUDIO nor "
+            "reported jv-ears degraded",
+            differs_from=mic_box,
+        )
+        lighting, _ = sheet.surface_traffic(hud.since(mark))
+        feed_snapshots(IDLE_SETTLE_S, deaf, bus_addr)
+        capture("primary", ppm)
+        box = drawn_box(read_ppm(ppm), background)
+        if not sheet.grew_downwards(mic_box, box):
+            raise Fail(
+                f"the device going silent changed the drawn region from "
+                f"{mic_box} to {box}, which is not a plate ARRIVING UNDER "
+                "another one at the same top-right corner — the window below "
+                "would be holding MicPlate alone, and HealthPlate would be "
+                "untested"
+            )
+        if not lighting:
+            raise Fail(
+                "two plates reached the screen without a single surface commit "
+                "in the HUD's Wayland log — the log is not the HUD's, and the "
+                "window below would read zero no matter what it drew"
+            )
+        check_corner(
+            f"mic-and-health {sheet.output_by_role('primary')['name']}",
+            read_ppm(ppm),
+            background,
+            True,
+        )
+        log(
+            f"  and then deaf: {box[3] - mic_box[3]} px taller at {box}, the "
+            f"pair costing {lighting} commits"
+        )
+
+        mark = hud.mark()
+        beats = feed_snapshots(IDLE_WINDOW_S, deaf, bus_addr)
+        commits, frames = sheet.surface_traffic(hud.since(mark))
+
+        # The box FIRST, and the commit count quoted in its message: a plate
+        # that left mid-window would have committed the traffic of LEAVING,
+        # and calling that "the shell is animating" would send the next
+        # reader looking for an animation that does not exist.
+        capture("primary", ppm)
+        after = drawn_box(read_ppm(ppm), background)
+        if after != box:
+            raise Fail(
+                f"the HUD drew at {box} before the mic-and-health window and "
+                f"{after} after it ({commits} commits under {beats} "
+                "heartbeats), so the plates changed under the measurement and "
+                "their zero says nothing about stillness"
+            )
+        # The one way this window can go quietly vacuous. Its plates outlive
+        # a six-second silence on their own, so — unlike the window above —
+        # a feed that stopped would leave the picture intact and turn this
+        # back into A34's lit window without failing anything.
+        if beats < 2:
+            raise Fail(
+                f"the mic-and-health window published {beats} heartbeats in "
+                f"{IDLE_WINDOW_S:.0f}s, so nothing arrived while it was "
+                "measuring: this is A34's lit window wearing a different name"
+            )
+        if commits:
+            raise Fail(
+                f"a HUD showing MIC NO AUDIO and jv-ears DEGRADED committed "
+                f"{commits} surface updates ({frames} frame callbacks) in "
+                f"{IDLE_WINDOW_S:.0f}s while receiving {beats} jv-ears "
+                "heartbeats that said exactly what the ones before them said. "
+                "Nothing a user could see changed, so this is a re-render on "
+                "bookkeeping — most likely HealthPlate's list being rebuilt "
+                "because HealthState handed it a new array of the same lines"
+            )
+        log(
+            f"  mic and health: {commits} commits in {IDLE_WINDOW_S:.0f}s "
+            f"under {beats} heartbeats, plates still at {after}"
         )
     finally:
         if hud is not None:

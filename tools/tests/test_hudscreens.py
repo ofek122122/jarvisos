@@ -380,7 +380,7 @@ def test_the_idle_probe_reads_the_huds_own_wayland_log():
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
-    assert probe.count('WAYLAND_DEBUG="1"') == 3, (
+    assert probe.count('WAYLAND_DEBUG="1"') == 4, (
         "every jv-hud the idle probe starts must be started with "
         "WAYLAND_DEBUG=1, or the frames it is counting are not being logged"
     )
@@ -391,24 +391,25 @@ def test_the_idle_probe_reads_the_huds_own_wayland_log():
 
 
 def test_each_idle_window_has_a_control():
-    """Both windows pass on zero, and so does a probe that is reading
+    """Every window passes on zero, and so does a probe that is reading
     nothing at all. Each one is therefore paired with a stretch that MUST
     contain commits, counted the same way through the same log: the HUD
-    being woken by a real frame after the quiet window, and the blind
-    plate arriving before the lit one.
+    being woken by a real frame after the quiet window, the blind plate
+    arriving before the lit one, and a second plate arriving under the
+    first in each of the two live-lit ones.
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
     assert (
         "if not woke:" in probe
         and "if not arriving:" in probe
-        and "if not lighting:" in probe
+        and probe.count("if not lighting:") == 2
     ), (
         "the idle probe no longer insists on SEEING commits somewhere, so a "
         "broken instrument — an unset WAYLAND_DEBUG, a libwayland that "
         "renamed its objects — would report a flawless permanent zero"
     )
-    assert probe.count("sheet.surface_traffic(") == 6, (
+    assert probe.count("sheet.surface_traffic(") == 8, (
         "the controls have to be measured by the same counter as the windows "
         "they vouch for, or they vouch for nothing"
     )
@@ -452,6 +453,27 @@ def test_the_readme_says_what_the_idle_probe_proved_and_what_it_did_not():
 def idle_probe_text() -> str:
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     return shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
+
+
+def idle_window_text(title: str) -> str:
+    """ONE window's source, and not the rest of the probe.
+
+    These gates are greps, and a grep over the whole function is a gate
+    that any other window can satisfy on a window's behalf: A43 added a
+    fourth one that also starts a broker and also calls `feed_snapshots`,
+    and every check written as "somewhere after the words LIVE AND LIT"
+    quietly became true of it instead. The windows announce themselves
+    with a `# --- TITLE:` banner, so slice on that and let a window that
+    lost its banner fail loudly rather than borrow its neighbour's.
+    """
+    for chunk in idle_probe_text().split("\n    # --- ")[1:]:
+        if chunk.startswith(title + ":"):
+            return chunk
+    raise AssertionError(
+        f"the idle probe has no window announcing itself as `# --- {title}:` "
+        "— either it was removed or its banner was renamed, and every gate "
+        "below it was about to grep a different window"
+    )
 
 
 def test_the_live_lit_window_feeds_the_pair_that_actually_keeps_a_plate_lit():
@@ -524,7 +546,7 @@ def test_the_live_lit_window_runs_on_a_real_broker():
     nothing. Without a broker it is A34's window again.
     """
     probe = idle_probe_text()
-    live = probe.split("LIVE AND LIT")[-1]
+    live = idle_window_text("LIVE AND LIT")
     assert "LIVE AND LIT" in probe, (
         "the idle probe no longer has a live-lit window, so '0 fps with a "
         "plate on screen' is once again only measured on a HUD with no bus"
@@ -555,7 +577,7 @@ def test_the_live_lit_window_keeps_feeding_and_proves_the_plate_stayed():
     the drawn box is re-measured afterwards and must be identical.
     """
     probe = idle_probe_text()
-    live = probe.split("LIVE AND LIT")[-1]
+    live = idle_window_text("LIVE AND LIT")
     assert "feed_snapshots(" in live, (
         "the live-lit window no longer publishes for the length of the "
         "window; OutputState stops believing a snapshot after three of "
@@ -588,7 +610,7 @@ def test_the_live_lit_window_proves_it_is_holding_the_output_plate():
     downwards from the same top-left corner. That is a plate arriving
     UNDER another one, measured in pixels.
     """
-    live = idle_probe_text().split("LIVE AND LIT")[-1]
+    live = idle_window_text("LIVE AND LIT")
     assert "sheet.SINK_OK" in live, (
         "the live-lit window no longer lights StatePlate on an audible sink "
         "first, so nothing distinguishes 'OutputPlate arrived' from 'the HUD "
@@ -610,20 +632,185 @@ def test_the_live_lit_window_proves_it_is_holding_the_output_plate():
     )
 
 
-def test_the_readme_says_the_third_window_is_on_a_live_bus():
-    """The distinction is the whole value of the window, and it is the one
-    a reader will otherwise collapse: two of these zeros are from a HUD
-    that could see nothing happening, and one is from a HUD watching a
-    frame arrive every second.
+def test_the_readme_says_which_windows_were_on_a_live_bus():
+    """The distinction is the whole value of those windows, and it is the
+    one a reader will otherwise collapse: two of these zeros are from a HUD
+    that could see nothing happening, and two are from a HUD watching a
+    frame arrive every second. Naming the plates is what makes the
+    difference legible — a zero is a zero either way.
     """
     readme = (SCREENS / "README.md").read_text("utf-8")
-    assert "three" in readme.lower(), (
-        "docs/hud/screens/README.md still describes two idle windows"
+    assert "four" in readme.lower(), (
+        "docs/hud/screens/README.md still describes three idle windows"
     )
     assert "OUTPUT MUTED" in readme, (
         "docs/hud/screens/README.md does not say which plate the live-lit "
         "window held on screen — without it a reader cannot tell whether "
         "the measurement was of a HUD with a bus or without one"
+    )
+    assert "MIC NO AUDIO" in readme, (
+        "docs/hud/screens/README.md does not say which plates A43's window "
+        "held on screen, so a reader cannot tell it apart from the one "
+        "above it"
+    )
+
+
+# ------------------------------------- the fourth window: mic and health (A43)
+#
+# A42's window measures `StatePlate` and `OutputPlate`. Four plates were
+# left that had never been watched standing still at all, and two of them
+# come cheap: ONE jv-ears heartbeat says both `MIC NO AUDIO` (an open
+# device delivering nothing) and `jv-ears DEGRADED` (the service's own word
+# for itself), so re-publishing that single frame holds both.
+#
+# It can go vacuous in a way none of the three above can, which is why
+# there is a gate for it here. Those plates believe a heartbeat for two of
+# its `period_s` — jv-ears declares 5 — so they outlive a six-second
+# silence on their own. A feed that stopped would leave the picture intact
+# and turn this back into A34's lit window without failing anything.
+
+
+def mic_and_health() -> str:
+    return idle_window_text("MIC AND HEALTH")
+
+
+def test_the_mic_and_health_window_runs_on_a_real_broker():
+    """Same claim as the window above and the same way of losing it. With
+    no jarvisd there is nothing arriving, and "a plate on screen and
+    nothing happening" is a measurement A34 already made.
+    """
+    window = mic_and_health()
+    assert "JARVISD_BIN" in window, (
+        "A43's window starts no jarvisd — a HUD with no bus is A34's lit "
+        "window, and the traffic is the thing this one exists to add"
+    )
+    assert "sheet.MIC_DEAF" in window and "sheet.MIC_OPEN" in window, (
+        "A43's window no longer publishes the heartbeats that light the mic "
+        "and health plates, so whatever it measures is not those two plates"
+    )
+
+
+def test_the_two_heartbeats_light_exactly_the_plates_the_window_claims():
+    """The window's whole design rests on one coincidence: a device that is
+    open and silent is a MicPlate line AND a HealthPlate line, off one
+    frame. Both halves are conditions on the body, and either one drifting
+    leaves a window that holds one plate while reporting two.
+    """
+    before = sheet.MIC_OPEN["publish"]["body"]
+    after = sheet.MIC_DEAF["publish"]["body"]
+    assert before["state"] == "ok", (
+        "the first exposure reports jv-ears as something other than ok, so "
+        "HealthPlate is already on screen and there is no arrival to measure"
+    )
+    assert after["state"] == "degraded", (
+        "the second exposure no longer has jv-ears calling itself degraded, "
+        "so HealthPlate draws its earned nothing and the window holds "
+        "MicPlate alone"
+    )
+    # core/MicState.qml: `mic_open` 1 and a capture younger than the stall
+    # budget is `live`; older than it is `stalled`. The budget is jv-ears'
+    # own (core/EarsBudgets.qml reads `capture_stall_s`), so the comparison
+    # has to be made against the number in the same body.
+    for body in (before, after):
+        assert body["metrics"]["mic_open"] == 1, (
+            "an exposure with no microphone open draws no mic plate at all"
+        )
+    assert before["metrics"]["capture_age_s"] <= before["metrics"]["capture_stall_s"], (
+        "the first exposure's device is already stalled, so MicPlate says "
+        "MIC NO AUDIO in both and the growth below is HealthPlate's alone"
+    )
+    assert after["metrics"]["capture_age_s"] > after["metrics"]["capture_stall_s"], (
+        "the second exposure's device is not stalled by jv-ears' own budget, "
+        "so MicPlate still says MIC and the window is measuring one plate"
+    )
+
+
+def test_the_two_exposures_differ_only_in_the_device_going_silent():
+    """Same discipline A44's shot is held to: a growth measurement is only
+    evidence if ONE event separates the two exposures. A pair that also
+    moved the stall budget, or changed publisher, would grow the region for
+    a reason nobody looked at.
+    """
+    before = sheet.MIC_OPEN["publish"]
+    after = sheet.MIC_DEAF["publish"]
+    assert before["topic"] == after["topic"] == "sys.health"
+    assert before["src"] == after["src"] == "jv-ears", (
+        "core/MicState.qml and core/HealthState.qml both ask for jv-ears by "
+        "name and refuse a body naming a service other than its sender"
+    )
+    assert before["body"]["period_s"] == after["body"]["period_s"], (
+        "the two exposures declare different heartbeat periods, which moves "
+        "how long the HUD believes them — a second variable in a two-frame "
+        "measurement"
+    )
+    metrics_moved = [
+        key
+        for key in set(before["body"]["metrics"]) | set(after["body"]["metrics"])
+        if before["body"]["metrics"].get(key) != after["body"]["metrics"].get(key)
+    ]
+    assert metrics_moved == ["capture_age_s"], (
+        f"the two exposures' gauges differ on {sorted(metrics_moved)}, not on "
+        "the one thing that happened: the device stopped delivering audio"
+    )
+
+
+def test_the_mic_deaf_body_is_a_legal_heartbeat():
+    """invariant 2: schemas are law, and a harness publishing an illegal
+    body is measuring a machine that cannot exist. Hand-written, so
+    checked rather than trusted."""
+    import json
+
+    schema = json.loads((ROOT / "schemas" / "sys.health.json").read_text("utf-8"))
+    body = sheet.MIC_DEAF["publish"]["body"]
+    missing = set(schema["required"]) - set(body)
+    assert not missing, f"sys.health: body is missing {sorted(missing)}"
+    extra = set(body) - set(schema["properties"])
+    assert not extra, f"sys.health: body has unknown keys {sorted(extra)}"
+    assert body["state"] in schema["properties"]["state"]["enum"], (
+        "core/HealthState.qml renders only the schema's own state words and "
+        "turns anything else into `unknown` — a different finding entirely"
+    )
+
+
+def test_the_mic_and_health_window_insists_frames_arrived_while_it_measured():
+    """The one way this window can go quietly vacuous, and the reason it
+    needs a guard the other three do not. A heartbeat speaks for two of its
+    own `period_s` and jv-ears declares 5, so both plates survive a
+    six-second silence — a feed that stopped would leave the photograph
+    intact, the box check would pass, and the zero would be A34's.
+    """
+    window = mic_and_health()
+    assert re.search(r"beats = feed_snapshots\(IDLE_WINDOW_S, deaf", window), (
+        "A43's window no longer feeds heartbeats for the length of the "
+        "measured window, so it is a HUD with a plate on screen and nothing "
+        "arriving — which is A34's lit window under a new name"
+    )
+    assert "if beats < 2:" in window, (
+        "A43's window no longer checks that anything arrived while it was "
+        "measuring. Its plates outlive a six-second silence on their own, so "
+        "a dead feed would report a perfect zero about a bus nobody was using"
+    )
+
+
+def test_the_mic_and_health_window_proves_the_health_plate_arrived():
+    """`MicPlate` lights off the first heartbeat alone, so "something is
+    drawn" is not evidence that HealthPlate is on screen. Lit in two steps
+    and measured: the region has to grow DOWNWARDS, which is the health
+    line arriving under the mic line on a stack docked to the top-right.
+    """
+    window = mic_and_health()
+    assert "mic_box" in window, (
+        "A43's window no longer measures the HUD before the device goes "
+        "silent, so there is nothing for the lit one to have grown from"
+    )
+    assert "sheet.grew_downwards(mic_box, box)" in window, (
+        "A43's window no longer insists the drawn region GREW when jv-ears "
+        "reported itself degraded — whatever it holds still for six seconds "
+        "may not include HealthPlate at all"
+    )
+    assert "if after != box:" in window, (
+        "A43's window no longer re-measures the plates after it, so a pair "
+        "that changed under the measurement would go unnoticed"
     )
 
 
@@ -779,8 +966,8 @@ def test_the_growth_rule_is_stated_once():
     looking at.
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
-    assert shoot.count("sheet.grew_downwards(") == 2, (
-        "the idle probe's live-lit window and the shot loop must both ask "
+    assert shoot.count("sheet.grew_downwards(") == 3, (
+        "the idle probe's two live-lit windows and the shot loop must all ask "
         "sheet.grew_downwards — an inline copy of the geometry is one the "
         "unit tests above do not cover"
     )
