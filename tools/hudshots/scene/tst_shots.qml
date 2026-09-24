@@ -249,6 +249,20 @@ Item {
       }, "VRAM pressure: fell back to CPU");
       suite.beat("jv-voice", "ok");
       suite.beat("jv-compat", "degraded", undefined, "wine prefix rebuild pending");
+      // And WHY the brain is on the floor (B40), from jv-context's 1 Hz
+      // snapshot of the card. 943 MiB is not a stand-in: it is what ares
+      // measured, twice in one week, with a healthy 6 GB GTX 1660 SUPER
+      // whose VRAM the desktop and a browser had already spent. Without
+      // this frame the rung line above reads as a fault; with it, it reads
+      // as the ladder in invariant 6 doing its job.
+      suite.send("context.system", "jv-context", {
+        "net_online": true,
+        "load1": 2.4,
+        "mem_used_pct": 41.8,
+        "audio_volume": 0.62,
+        "audio_muted": false,
+        "gpu_vram_free_mb": 943
+      });
     }
 
     // COMPOSED. jv-act reaching into the machine and getting nowhere. The

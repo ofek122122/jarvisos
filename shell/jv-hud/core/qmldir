@@ -15,6 +15,7 @@ LinkState 1.0 LinkState.qml
 HeardState 1.0 HeardState.qml
 ActionState 1.0 ActionState.qml
 OutputState 1.0 OutputState.qml
+VramState 1.0 VramState.qml
 GuardState 1.0 GuardState.qml
 InstallState 1.0 InstallState.qml
 PlateStack 1.0 PlateStack.qml

@@ -98,6 +98,7 @@ CORE = (
     ("HeardState", "HeardState.qml"),  # what did Jarvis hear you say? (A26)
     ("ActionState", "ActionState.qml"),  # did what Jarvis tried to do fail? (A37)
     ("OutputState", "OutputState.qml"),  # can you hear what Jarvis is saying? (A40)
+    ("VramState", "VramState.qml"),  # how much of the card is left? (B40)
     ("GuardState", "GuardState.qml"),  # was a binary refused, and which? (A51)
     ("InstallState", "InstallState.qml"),  # did an install fail, and which? (A52)
     ("PlateStack", "PlateStack.qml"),  # is ANYTHING on screen? (A15)

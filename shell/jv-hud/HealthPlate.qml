@@ -27,6 +27,14 @@
 //     No service calls that a fault, so it is not coloured as one — but
 //     it is the only thing on this machine that explains a Jarvis which
 //     takes thirty seconds to answer.
+//   · `vram 943 MiB FREE` under it, when there is a live figure to put
+//     there (B40). It is the WHY of the line above, and it only ever
+//     appears with it: on ares the card is healthy and 943 MiB of its
+//     6 GB is free, which is the whole reason the brain is on the floor,
+//     and a rung line with no number under it reads as a fault instead of
+//     as the ladder working. Dimmer than the line it explains, because it
+//     is not itself news — and never on screen on its own account, which
+//     is what would make it the all-day gauge §06 refuses.
 //
 // Colour is the severity and nothing else. Ember never appears: ember
 // means Jarvis is doing something (§06), and a service falling over is
@@ -46,6 +54,16 @@ Item {
   // subscribes and can do nothing else.
   readonly property HealthState health: HealthState {
     bus: Bus
+  }
+
+  // How much of the card is left, and whether that is worth saying — which
+  // is only while the brain is on the CPU floor, the one thing on this
+  // machine that is being paid for a full GPU. `HealthState` owns the rung
+  // (it owns jv-brain's heartbeat and its expiry), so the gate is handed
+  // over rather than worked out twice off the same topic.
+  readonly property VramState vram: VramState {
+    bus: Bus
+    brainOnCpu: root.health.llmOnCpu
   }
 
   // How many findings fit before the list becomes a wall. Past this the
@@ -89,6 +107,16 @@ Item {
         "name": "llm",
         "detail": health.llmRung >= 0 ? "CPU RUNG " + health.llmRung : "CPU",
         "tone": Theme.warn
+      });
+    // The reason the line above is not a fault, when jv-context can see the
+    // card. Absent on a machine with no GPU and on one whose jv-context has
+    // gone quiet — in both of which the rung line stands alone, exactly as
+    // it did before this row existed.
+    if (root.vram.reporting)
+      out.push({
+        "name": "vram",
+        "detail": root.vram.line,
+        "tone": Theme.text3
       });
     return out;
   }

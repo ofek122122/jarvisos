@@ -189,6 +189,17 @@ jv-brain's too: `metrics` is free-form by schema, so a key nothing publishes
 is a key `jv health` would never print. The `notes` under them are free text
 and composed.
 
+The dim line under the rung is the *why* (B40), off `context.system`'s
+`gpu_vram_free_mb` — the field jv-context started measuring in B37 and
+nothing read until now. **943 MiB is not a composed number**: it is what ares
+measured, twice in one week, on a healthy 6 GB GTX 1660 SUPER whose VRAM the
+desktop and a browser had already spent. Without it the rung line reads as a
+fault worth chasing; with it, it reads as the ladder in invariant 6 doing
+exactly its job. It appears only under that line — a free-VRAM readout on
+screen all day is the gauge §06 refuses — and on a machine with no GPU there
+is no such field, so the rung line stands alone rather than being explained
+by a shortage that does not exist.
+
 ### 07 — no bus
 
 ![07-no-bus.png](07-no-bus.png)

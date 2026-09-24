@@ -22,7 +22,7 @@ corner, in this order:
 | `ActionPlate` (A37) | the last thing Jarvis did to the machine failed | `intent.action` + `action.result` |
 | `GuardPlate` (A51) | this machine refused to run a program | `guard.verdict` |
 | `MicPlate` (A4) | the microphone is actually open | `sys.health` (jv-ears) |
-| `HealthPlate` (A6) | some service is not well | `sys.health` |
+| `HealthPlate` (A6/B40) | some service is not well — and, under a brain on the CPU floor, how much of the card is left | `sys.health` + `context.system` |
 
 Every one of them reads the bus and nothing else, several take jv-ears' own
 tuning from `core/EarsBudgets.qml` (A14) rather than mirroring it, and every

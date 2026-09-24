@@ -47,7 +47,9 @@
 // minutes and the one the user walks away from; `MicPlate`
 // (A4) — whether the microphone is open, from
 // jv-ears' own capture counters; and `HealthPlate` (A6) — the services
-// that are not well, and the llm rung when the brain is on the CPU floor.
+// that are not well, the llm rung when the brain is on the CPU floor, and
+// (B40) how much VRAM is free under it, which is the one thing that tells
+// that rung apart from a fault.
 // Each one's mapping lives in a tested file under core/, and each draws
 // nothing until a real frame gives it something to say, so the ordinary
 // state of this surface is unmapped. No element in this shell can display

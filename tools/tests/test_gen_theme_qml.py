@@ -599,6 +599,37 @@ def test_the_plates_take_their_budgets_from_jv_ears_not_from_the_fallback():
         )
 
 
+# --- B40: the VRAM row may never be drawn on its own account ---------------
+
+
+def test_the_vram_row_is_gated_on_the_rung_it_explains():
+    """VramState says nothing until something is waiting on the card.
+
+    The gate is an input (`brainOnCpu`), fed from HealthState's reading of
+    jv-brain's own heartbeat, because two files deciding the same fact off the
+    same topic is how they come to disagree. The cost of that shape is that
+    the wiring lives in a plate, and plates cannot be tested headless — they
+    import the Quickshell singletons. A HealthPlate that built a VramState and
+    forgot the binding would be silent, correct-looking, and wrong in exactly
+    one direction: the free-VRAM figure on screen all day, which is the
+    all-day gauge §06 refuses and the reason the gate exists.
+
+    Two claims, because either alone can rot: the gate is bound to the rung,
+    and the row is drawn only while VramState says it is worth drawing.
+    """
+    plate = ROOT / "shell" / "jv-hud" / "HealthPlate.qml"
+    text = strip_qml_comments(plate.read_text("utf-8"))
+    assert "VramState {" in text, "HealthPlate no longer builds a VramState"
+    assert re.search(r"^\s*brainOnCpu\s*:\s*\w+\.\w+\.llmOnCpu\s*$", text, re.M), (
+        "HealthPlate builds a VramState and never binds `brainOnCpu` to the "
+        "rung HealthState read, so the VRAM figure would be on screen all day"
+    )
+    assert re.search(r"if\s*\(\s*\w+\.vram\.reporting\s*\)", text), (
+        "HealthPlate draws its vram row without asking VramState whether there "
+        "is anything worth reporting"
+    )
+
+
 # --- A20: an element cannot read a topic nothing subscribes to -------------
 
 # Every way a core/ element can ask the bus about a topic. Each one takes the
