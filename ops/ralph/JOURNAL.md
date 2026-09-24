@@ -7825,3 +7825,102 @@ grade." One suite run, one abort, exit 2, the sheet in `docs/hud` untouched
   question asked three times, and **B10/A28** — one live recording of one
   spoken turn on ares — remains the biggest thing a human can hand this
   loop.
+
+## 2026-09-25 — iteration 77 — B56: the suite output the harness captured and threw away
+
+Track A is still one human look at `docs/hud/` away from unblocking ten
+items — every remaining A item is either a human decision or carries its
+own "do NOT build this until X is answered" — so this took the follow-on
+the last iteration raised and called small. It was, and it found two
+things in itself on the way, which is the part worth writing down.
+
+The gap: `script_runner` ran a suite with `capture_output=True`, printed
+`(proc.stdout or proc.stderr).splitlines()[-1]`, and dropped the rest with
+the scratch tree. For `--runner tests` that line is a pytest summary and is
+roughly the right line. For `--runner shots` it is whatever the
+comparator's closing paragraph happened to end with, and B53 is the record
+of that being actively wrong at the worst moment. B53 fixed the one abort
+where the loop was misled. What was left is the general shape: a survivor,
+a canary that lived or a red baseline could not be investigated at all
+without re-running the suite by hand — 53 s a run under `shots`.
+
+Each run already had a private scratch directory. It now holds three
+things, and the ordering of two of them is the only interesting decision:
+
+- `suite.log` — the command, the exit code, and BOTH streams in full.
+  Written by `script_runner` and not by `run()`, because only a runner
+  knows whether it has output to keep.
+- `WHAT` — what the run was, written **before** the suite starts. The
+  `INDEX` line is appended after, with `pass`/`fail`, and that is the
+  half a runner that dies takes with it. The run nobody can name is
+  exactly the one being investigated, so the name goes down first.
+- the tree is **kept** on a survivor or an abort and **swept** on a clean
+  sweep. A grading where everything was caught has nothing in it anyone
+  will open, and under `shots` it is a dozen runs of thirteen PNGs. Each
+  abort names the one run that went wrong, not the tree; the CLI prints
+  the tree under the summary, and says to delete it.
+
+The printed line stays ONE line and now carries its run number. It is a
+progress indicator, not the evidence, and keeping those two separate is
+the whole lesson of B53: choosing one line out of a suite's output is a
+guess about which line matters.
+
+**Reproduced end to end on the real case, not reasoned.** With the
+listening dot repainted ember (the same edit B53 used), a real
+`--runner shots` grading aborted, and the printed line was still
+"something drew a different picture than the one in docs/hud." — the
+sentence for the case that was NOT what happened. Four lines above it in
+the now-kept 41-line log: "If you changed the HUD on purpose, this is the
+sheet catching up." Next to it, `run001/shots/` with all thirteen PNGs
+that run drew, which under a surviving PLATE mutation is the only way to
+SEE what the mutant looked like.
+
+**Two things it found in itself.**
+
+1. Keeping trees made the harness's own test suite leak. Dozens of tests
+   drive `run()` to a survivor or an abort deliberately, and each now left
+   a directory in the real `/tmp` forever — **189 of them after twelve
+   suite runs**, which is how it was noticed rather than reasoned about.
+   The harness is right to keep them (the caller is told where the tree is
+   and owns it from there), so the fix belongs in the caller: an autouse
+   fixture points `mkdtemp`'s default parent at pytest's `tmp_path`, and
+   the trees stay real and inspectable while a test runs. A full suite run
+   now leaves **0**. A new guard counts that nothing is created at all
+   before the harness knows it has a file to mutate.
+2. The first grading reported a genuine survivor, and it was a bad
+   assertion rather than missing code: `test_the_cli_says_where_the_logs_
+   were_kept` asserted the path alone, and `summary()`'s survivor line
+   already contains that path as a prefix — so the assertion was satisfied
+   by a different mechanism and graded the CLI's own line immune. `if
+   report.logs is not None:` -> `if False:` survived. It asserts
+   `f"kept: {kept}"` now, and the re-grade caught it.
+
+- tests: `runtests.sh tools` **245 green, was 234** — eleven new, plus two
+  existing ones updated for real behaviour changes (a run dir is no longer
+  empty when the suite gets it — it holds the harness's own `WHAT`, and
+  the test now pins that it holds *nothing else*; and the "the hint said
+  nothing" test splits off the sentence every abort now ends with, so it
+  still holds the strong claim rather than the recognisable one).
+  Graded with the harness on itself: **11 mutations, 11 caught** — the
+  truncated log, the unnamed printed line, the name written after the run
+  instead of before, sweeping on an abort, sweeping a survivor, keeping a
+  clean sweep, an INDEX with no pass/fail, the canary abort losing its
+  run, the survivor losing its run, the CLI keeping the path to itself,
+  and a tree made before the target file is known to exist. Canary red,
+  closing baseline green, tree swept.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins, no production code at all.
+- files: tools/mutate.py, tools/tests/test_mutate.py, ops/ralph/mutate.sh
+- commit: 6b2207b
+- next: no new item raised — B56 closed what it described and the two
+  things it found were fixed in the same commit. **B55** is the remaining
+  harness gap and is a real design question rather than a flag (a canary
+  for a source-READ relation must make the file unMATCHABLE, not
+  unloadable), and there are now four such relations the grader declines
+  to grade. Otherwise unchanged, and now several iterations old: **Track A
+  is one human look at `docs/hud/` away from unblocking ten items** (A47,
+  A55, A62, A63, A68 and the A21/A22/A25 cluster are two questions asked
+  five ways), **B27** needs one decision between three named options,
+  **B43/B47/B54** are one question asked three times, and **B10/A28** —
+  one live recording of one spoken turn on ares — remains the biggest
+  thing a human can hand this loop.

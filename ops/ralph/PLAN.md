@@ -1212,7 +1212,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       in unit tests. Tests: `runtests.sh tools` 234, was 229; 6 mutations on
       the new code, 6 caught.)
 
-- [ ] B56. The harness prints ONE LINE of each suite log and keeps none of it.
+- [x] B56. The harness prints ONE LINE of each suite log and keeps none of it.
       That line is chosen as "the last line of stdout", which is a pytest
       summary for `--runner tests` and, for `--runner shots`, whatever the
       comparator's closing paragraph happened to end with — while closing B53
@@ -1225,7 +1225,31 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       a private scratch directory; writing `run003.log` into it and keeping the
       tree on a nonzero outcome (or just printing the last ~15 lines instead of
       the last 1 when a run is RED) is cheap and would have replaced a 53 s
-      re-run today. Discovered in B53.
+      re-run today. Discovered in B53. — 6b2207b
+      (Each run's private scratch now holds three things: `suite.log` (the
+      command, the exit code and BOTH streams in full, written by
+      `script_runner` because only a runner knows whether it has output to
+      keep), `WHAT` — written BEFORE the suite starts, because the `INDEX`
+      line is appended after and that is the half a runner that dies takes
+      with it, and the run nobody can name is exactly the one being
+      investigated — and, under `--runner shots`, the thirteen PNGs that run
+      drew, which is the only way to SEE a surviving plate mutation. The tree
+      is KEPT on a survivor or an abort and swept on a clean sweep; each abort
+      names the one run that went wrong. The printed line stays ONE line and
+      now carries its run number: it is a progress indicator and not the
+      evidence, which is B53's whole lesson. Reproduced on the real case —
+      a `--runner shots` abort still printed "something drew a different
+      picture than the one in docs/hud.", the sentence for the case that was
+      not what happened, four lines below "this is the sheet catching up" in
+      the now-kept 41-line log. Found two things in itself: the harness's own
+      suite leaked 189 /tmp directories after twelve runs, fixed in the CALLER
+      (an autouse fixture points mkdtemp's default parent at pytest's
+      tmp_path) plus a guard that nothing is made before the target file is
+      known to exist; and its first grading reported a real survivor — the CLI
+      test asserted the path alone, which `summary()`'s survivor line already
+      contains as a prefix, so it was satisfied by a different mechanism and
+      graded the CLI immune. Tests: `runtests.sh tools` 245, was 234; 11
+      mutations, 11 caught.)
 
 - [x] B50. The canary proves the suite executes the FILE and never the
       LINE, which is the honest meaning of a survivor and also its
