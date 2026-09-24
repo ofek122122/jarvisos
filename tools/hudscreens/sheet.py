@@ -305,6 +305,16 @@ VOICE_SPEAKING = {
 }
 
 
+# The id that threads one turn together. `schemas/intent.action.json` says
+# what it is for in as many words — "threads intent.action -> action.confirm
+# -> action.result and the audit log" — so the four frames below carry ONE
+# of them rather than four copies of the same string. A turn whose id drifts
+# between the question and the outcome is a turn core/ActionState.qml would
+# refuse to put a tool name on, which is a different plate and a different
+# box from the one this harness measures.
+TURN_REQUEST_ID = "req-4f21"
+
+
 # jv-act stopping in front of a destructive tool, in its own words, with
 # the window running (A20). COMPOSED — nothing committed has ever recorded
 # jv-act asking — which is why every number in it is jv-act's own: the
@@ -312,6 +322,22 @@ VOICE_SPEAKING = {
 # documents, and not a longer one invented to make a harness convenient. A
 # frame claiming a ten-minute confirmation window would be a picture of a
 # machine that does not exist, and core/ConfirmState.qml would believe it.
+#
+# ONE THING IN IT IS NOT JV-ACT'S OWN, and A49 is where it got written
+# down: `fs.trash` is not in jv-act's registry. `services/jv-act/tools.toml`
+# is v0 — "observe + benign only" — so it holds no destructive tool at all,
+# and the structural rule is that ONLY destructive and privileged tools are
+# confirmed. Asked for `fs.trash` today, the real jv-act would answer
+# `unknown_tool` and never ask anybody anything.
+#
+# The composition is still worth making, and the reason is that the thing
+# under test is the CONFIRMATION MACHINERY, which is built, reviewed and
+# structural: jv-act opens a 15 s window for destructive tools, and the HUD
+# has to be able to show one. Registry v0 says the approved tool mapping is
+# observe+benign for now and that the rest "arrive in later phases with
+# their own review" — so this frame is the machine jv-act IS, carrying a
+# tool it has not yet been granted. What would be dishonest is leaving that
+# unsaid, which is what this paragraph fixes.
 #
 # It lights `ConfirmPlate` and nothing else: the only plate in this HUD
 # that is waiting on YOU, and the only one with an ember border.
@@ -321,7 +347,7 @@ CONFIRM_REQUEST = {
         "src": "jv-act",
         "body": {
             "kind": "request",
-            "request_id": "req-4f21",
+            "request_id": TURN_REQUEST_ID,
             "tool": "fs.trash",
             "summary": "move 14 files in ~/Downloads to the trash — yes or no?",
             "window_s": 15.0,
@@ -357,6 +383,118 @@ HEARD_FINAL = {
             "lang": "en",
             "t0": 0.0,
             "t1": 2.9,
+        },
+    }
+}
+
+
+# --------------------------------------------- and what came of it (A49)
+#
+# The three frames that finish the turn above. Until A49 this harness
+# stopped at the question, and `ActionPlate` was the last plate in the
+# stack that had never been watched standing still — the sixth idle window
+# is those three frames arriving, in the order the schemas say they arrive.
+#
+# They are COMPOSED, and they inherit the one fiction CONFIRM_REQUEST
+# already carries (see the note on `fs.trash` there). Everything else about
+# them is the machine as it is: the id threads, the answer closes the
+# question, the error word is out of the frozen enum, and the failure is
+# the kind jv-act reports when a tool it DID run did not work.
+
+
+# What jv-brain asked for, and the only place the TOOL NAME exists.
+#
+# `action.result` carries a request_id and no name, so core/ActionState.qml
+# will not put a tool on screen unless the intent still on the bus is the
+# one that outcome answers — a name taken on faith is a lie about what
+# touched the machine. Without this frame the failure below is still
+# reported; it is just reported nameless, which is a shorter plate and a
+# different box.
+#
+# `args` is read by nothing, and that is the point of it being here.
+# `services/jv-hud-bridge` calls it "the most sensitive body on this list"
+# — whatever the tool was asked to operate on, a path or a search string or
+# a window title — and forwards the envelope whole because `conf`, `ts` and
+# `seq` are how invariant 4 is honoured. Invariant 7 is what stops it at
+# the bridge: no element reads it, and a tools gate fails the build if one
+# starts to. A frame carrying a real-looking path is the only way this
+# harness exercises that claim at all.
+#
+# `capability` is the brain's CLAIM and not a verdict — the schema says
+# jv-act re-derives it from the registry and rejects a mismatch — so
+# "destructive" here is jv-brain believing something about a tool, which is
+# exactly what the field is for.
+TRASH_INTENT = {
+    "publish": {
+        "topic": "intent.action",
+        "src": "jv-brain",
+        "body": {
+            "request_id": TURN_REQUEST_ID,
+            "tool": "fs.trash",
+            "args": {"path": "~/Downloads"},
+            "capability": "destructive",
+            "needs_confirmation": True,
+            "utterance_id": HEARD_FINAL["publish"]["body"]["utterance_id"],
+        },
+    }
+}
+
+
+# The user said yes.
+#
+# This frame is not decoration and it is not optional: it is what makes the
+# window after it a picture of a machine that could exist. `action.result`
+# arriving while `ConfirmPlate` still stood would be jv-act having run a
+# tool it was still asking permission for, and core/ConfirmState.qml would
+# hold the question up quite happily — it only lets go for an answer naming
+# THIS request_id, or for the 15 s window running out.
+#
+# `answered_by` is `voice` because that is the ordinary path:
+# `services/jv-act/src/service.rs` classifies the transcript itself inside
+# a scoped listen window, which is also why the `src` here is jv-act rather
+# than the CLI.
+CONFIRM_GRANTED = {
+    "publish": {
+        "topic": "action.confirm",
+        "src": "jv-act",
+        "body": {
+            "kind": "answer",
+            "request_id": TURN_REQUEST_ID,
+            "granted": True,
+            "answered_by": "voice",
+        },
+    }
+}
+
+
+# And it did not work. The one category of event a user has the most right
+# to see — something acted on my machine on my behalf, and it failed — and
+# the only thing that lights `ActionPlate` (A37).
+#
+# `execution_failed` rather than any other word in the enum, for two
+# reasons. It is the outcome of a tool jv-act actually RAN, which is the
+# only kind that can follow a granted confirmation; and it is in
+# core/ActionState.qml's `reportableReasons`, which deliberately excludes
+# `denied` and `confirm_timeout` — those are how a confirmation ENDED, A22
+# is an open question for a human about what the screen should do with
+# them, and neither would put a word on this plate.
+#
+# `duration_ms` is required by the schema and is read by no element;
+# `detail` is free text for the audit log and is read by no element either.
+# Both are here because a result frame without them is one jv-act would
+# never send, and the second is the only `detail` this harness has ever
+# published — core/ActionState.qml's header promises it never reaches a
+# screen, and a frame with an empty one would not be testing the promise.
+TRASH_FAILED = {
+    "publish": {
+        "topic": "action.result",
+        "src": "jv-act",
+        "body": {
+            "request_id": TURN_REQUEST_ID,
+            "ok": False,
+            "duration_ms": 412.0,
+            "error": "execution_failed",
+            "detail": "3 of 14 entries could not be moved: Permission denied",
         },
     }
 }

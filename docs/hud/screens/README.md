@@ -121,7 +121,7 @@ QML engine can answer:
 
 - **The HUD renders nothing while nothing changes.** Commits are counted
   on the HUD's own side of the Wayland socket (libwayland's
-  `WAYLAND_DEBUG` log) over **five** six-second windows, all of which
+  `WAYLAND_DEBUG` log) over **six** six-second windows, all of which
   must be **zero**:
 
   1. **quiet** — a live bus carrying a `context.system` snapshot every
@@ -164,18 +164,45 @@ QML engine can answer:
      **CONFIRM** do not move a pixel. A plate that did anything visible
      when its latch was re-taken would be invisible to all four windows
      above.
+  6. **and what came of it** — the same turn as window 5, carried to its
+     end, and `ActionPlate` is the last plate in the stack that had never
+     been watched standing still (A49). The user answers, `jv-act` runs
+     `fs.trash`, and it fails: **HEARD** stays where it is and
+     **ACTION FAILED** arrives under it with the tool and the error word.
+     It is the same broker and the same shell as window 5 — *not* a sixth
+     pair of processes, because a window per plate is how a probe stops
+     being a measurement and becomes a fixture — and that is what makes it
+     the only stretch in this harness where anything has ever **left** the
+     screen. It has to: an outcome landing while `ConfirmPlate` still
+     stood would be jv-act having run a tool it was still asking
+     permission for, and `ConfirmState` would hold that question up quite
+     happily. The arriving frame also does one thing here it does nowhere
+     above. Re-taking `HeardState.transcript` replaces an envelope and
+     re-arms a timer; re-taking `ActionState.failure` does that *and*
+     re-runs `toolFor()`, which reaches back to the `intent.action` still
+     on the bus, compares its `request_id` and re-resolves the tool name
+     from scratch — a binding that reads a **second topic** every time the
+     first one arrives, once a second, while the same three words sit
+     there.
 
-  Measured: 0, 0, 0, 0 and 0. The fade-in that put the blind plate there cost
+  Measured: 0, 0, 0, 0, 0 and 0. The fade-in that put the blind plate there cost
   42 commits across the three surfaces and then stopped; lighting SPEAKING
   and then OUTPUT MUTED under it cost 82 across the two steps, and the
   plate that arrived was 41 px taller than the one above it alone; lighting
-  MIC and then MIC NO AUDIO with jv-ears DEGRADED under it cost 85, also
+  MIC and then MIC NO AUDIO with jv-ears DEGRADED under it cost 84, also
   41 px taller; lighting HEARD and then the question above it cost 77, the
   drawn region growing 94 px to (2284, 16, 2543, 178) as `ConfirmPlate`
-  docked at the top of the stack and pushed the heard line down. (84 on an earlier run of the same HUD — a fade's frame
-  count is not a fixture, which is why only the zeros are asserted.) Nothing had to be fixed to get window 4 to zero — the
+  docked at the top of the stack and pushed the heard line down. (85 and 84
+  on earlier runs of the same HUD — a fade's frame
+  count is not a fixture, which is why only the zeros are asserted.) Then the
+  user answers, the question goes, and the region falls back **94 px to
+  (2284, 16, 2543, 84)** — the very box the heard line occupied before it
+  was asked, to the pixel. ACTION FAILED arriving under it cost 36 commits
+  and grew the region 78 px to (2284, 16, 2543, 162). Nothing had to be fixed to get window 4 to zero — the
   `Repeater` rebuild above is a real thing that happens once a second on a
-  degraded machine, and it costs no commit.
+  degraded machine, and it costs no commit. Nothing had to be fixed for
+  window 6 either, and its `toolFor()` re-resolution is the same kind of
+  thing: a second topic read once a second, arriving at the same string.
 
   Window 3 was impossible before A40. Every other lit state in this HUD is
   a frame ageing out — a heartbeat speaks for two of its own periods, a
@@ -185,11 +212,12 @@ QML engine can answer:
   of two topics rather than a latch, so it stays true for exactly as long
   as the frames keep coming.
 
-  *Verified that none of the five can go vacuous.* Each is paired with a
+  *Verified that none of the six can go vacuous.* Each is paired with a
   stretch that must contain commits — the HUD being woken by a real
   jv-ears heartbeat, the blind plate arriving, the speaking/muted pair
   arriving, the mic/health pair arriving, the question arriving over the
-  transcript — counted by the same code through the same log. That control
+  transcript, the failure arriving under it — counted by the same code
+  through the same log. That control
   is not decoration: it is what caught the first version of this probe,
   whose pattern expected `wl_surface@41` where this libwayland writes
   `wl_surface#41`, and which would otherwise have reported a flawless zero
@@ -233,6 +261,20 @@ QML engine can answer:
   ever send — the same thing A43 refused to do to a heartbeat's
   `period_s`. So the window is jv-act's own 15 s, the re-publishes inside
   the measured window are counted, and fewer than two is a failure.
+
+  Window 6 is lit in three steps, and the middle one is a step nothing
+  else in this harness has ever taken. `HeardPlate` is on screen through
+  the whole of it, so "something is drawn" is evidence of nothing; the
+  region has to **shrink** when the user answers (the same growth rule
+  read with its arguments swapped: the stack with the question on it was
+  taller, at the same top-right corner) and then **grow** when the failure
+  arrives under the heard line. Skipping the answer would have saved a
+  step and produced a picture of jv-act reporting a tool it was still
+  asking permission to run — `ConfirmState` lets go for an answer naming
+  its own `request_id` or for its 15 s, and for nothing else. It needs
+  window 5's counted re-publishes for a blunter version of window 5's
+  reason: BOTH latches here hold 30 s, so a feed that never ran would
+  leave the two plates exactly where they are for the whole window.
 
   *Verified that window 3 catches what windows 1 and 2 cannot.* The
   mutation is a "freshness" fade — the dot's opacity bound to the age of

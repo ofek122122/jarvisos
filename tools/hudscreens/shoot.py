@@ -1242,6 +1242,154 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
             f"  heard and confirm: {commits} commits in {IDLE_WINDOW_S:.0f}s "
             f"under {relatches} re-publishes, plates still at {after}"
         )
+
+        # --- AND WHAT CAME OF IT: the last plate in the stack, and the
+        # third latch (A49).
+        #
+        # `ActionPlate` was the only plate in this HUD that had never been
+        # watched standing still, and the five windows above could not
+        # reach it: nothing in any of them publishes an `action.result` at
+        # all. It is a latch with a 30 s hold, exactly like `HeardState`,
+        # so the mechanism A48 proved applies here unchanged.
+        #
+        # IT IS NOT A SIXTH PROCESS, and that was the decision A49 was
+        # opened to make. A window per plate is how a probe stops being a
+        # measurement and starts being a fixture, and a sixth jarvisd plus
+        # a sixth jv-hud would have bought nothing but a longer run. So
+        # this is the SAME broker, the SAME shell and the SAME turn as the
+        # window above, carried to its end: the user asked for the
+        # downloads folder to be emptied, jv-act stopped in front of the
+        # tool, and now the user answers and the tool fails. The probe
+        # still starts five HUDs, and a test pins that count.
+        #
+        # Which means the story has to run FORWARD, and that costs a step
+        # nothing else in this harness has ever measured: a plate LEAVING.
+        # `action.result` landing while `ConfirmPlate` still stood would be
+        # jv-act having run a tool it was still asking permission for —
+        # core/ConfirmState.qml would hold that question up quite happily,
+        # since it only lets go for an answer naming this request_id — and
+        # the measurement would be of a machine that cannot exist. So the
+        # answer is published, the region has to SHRINK back (the same
+        # `grew_downwards` rule read the other way round: the stack with
+        # the question on it was taller, at the same top-right corner), and
+        # only then does the outcome arrive.
+        #
+        # What the arriving frame does here is a step past A48. Re-taking
+        # `HeardState.transcript` replaces an envelope and re-arms a timer.
+        # Re-taking `ActionState.failure` does that AND re-runs
+        # `toolFor()`, which reaches back to the `intent.action` still on
+        # the bus, compares its request_id, and re-resolves the tool name
+        # from scratch — once a second, forever, while the same three words
+        # sit on screen. No window above has a binding that reads a SECOND
+        # topic every time the first one arrives.
+        answered = [sheet.HEARD_FINAL, sheet.TRASH_INTENT]
+        acted = answered + [sheet.TRASH_FAILED]
+
+        publish_shot({"frames": [sheet.CONFIRM_GRANTED]}, bus_addr)
+        wait_for_drawing(
+            ppm,
+            background,
+            bus_addr,
+            answered,
+            "the user answered jv-act and the question never came off the "
+            "screen",
+            differs_from=box,
+        )
+        feed_snapshots(IDLE_SETTLE_S, answered, bus_addr)
+        capture("primary", ppm)
+        answered_box = drawn_box(read_ppm(ppm), background)
+        if not sheet.grew_downwards(answered_box, box):
+            raise Fail(
+                f"the answer changed the drawn region from {box} to "
+                f"{answered_box}, which is not a plate LEAVING the same "
+                "top-right corner — the outcome below would land on a HUD "
+                "still asking permission for the tool it had already run"
+            )
+        log(
+            f"  the user said yes: {box[3] - answered_box[3]} px shorter at "
+            f"{answered_box}, the question gone"
+        )
+
+        mark = hud.mark()
+        publish_shot({"frames": [sheet.TRASH_FAILED]}, bus_addr)
+        wait_for_drawing(
+            ppm,
+            background,
+            bus_addr,
+            acted,
+            "jv-act ran the tool, it failed, and the HUD said nothing about "
+            "it",
+            differs_from=answered_box,
+        )
+        lighting, _ = sheet.surface_traffic(hud.since(mark))
+        feed_snapshots(IDLE_SETTLE_S, acted, bus_addr)
+        capture("primary", ppm)
+        acted_box = drawn_box(read_ppm(ppm), background)
+        if not sheet.grew_downwards(answered_box, acted_box):
+            raise Fail(
+                f"the failure changed the drawn region from {answered_box} "
+                f"to {acted_box}, which is not a plate ARRIVING at the same "
+                "top-right corner — the window below would be holding "
+                "HeardPlate alone, and ActionPlate would be untested"
+            )
+        if not lighting:
+            raise Fail(
+                "a plate reached the screen without a single surface commit "
+                "in the HUD's Wayland log — the log is not the HUD's, and the "
+                "window below would read zero no matter what it drew"
+            )
+        check_corner(
+            f"and-what-came-of-it {sheet.output_by_role('primary')['name']}",
+            read_ppm(ppm),
+            background,
+            True,
+        )
+        log(
+            f"  and it did not work: {acted_box[3] - answered_box[3]} px "
+            f"taller at {acted_box}, the report costing {lighting} commits"
+        )
+
+        mark = hud.mark()
+        reruns = feed_snapshots(IDLE_WINDOW_S, acted, bus_addr)
+        commits, frames = sheet.surface_traffic(hud.since(mark))
+
+        capture("primary", ppm)
+        after = drawn_box(read_ppm(ppm), background)
+        if after != acted_box:
+            raise Fail(
+                f"the HUD drew at {acted_box} before the outcome window and "
+                f"{after} after it ({commits} commits under {reruns} "
+                "re-publishes), so the plates changed under the measurement "
+                "and their zero says nothing about stillness"
+            )
+        # A48's guard, and needed for the same reason: both latches here
+        # hold for 30 s, so a feed that never ran would leave the two plates
+        # exactly where they are for the whole six seconds and report a
+        # perfect zero about an idle bus.
+        if reruns < 2:
+            raise Fail(
+                f"the outcome window published {reruns} frames in "
+                f"{IDLE_WINDOW_S:.0f}s, so nothing arrived while it was "
+                "measuring: the latches would have held on their own and "
+                "this is A34's lit window wearing a different name"
+            )
+        if commits:
+            raise Fail(
+                f"a HUD showing a transcript and the failure of the tool it "
+                f"led to committed {commits} surface updates ({frames} frame "
+                f"callbacks) in {IDLE_WINDOW_S:.0f}s while receiving "
+                f"{reruns} re-publishes of the same three frames. Nothing a "
+                "user could see changed, so this is a re-render on "
+                "housekeeping — ActionState.failure replaced, its key moved, "
+                "its hold re-armed, and toolFor() re-reading intent.action "
+                "to arrive at the same tool name — and §06 budgets the "
+                "ambient scene for signals, not for bookkeeping"
+            )
+        log(
+            f"  and what came of it: {commits} commits in "
+            f"{IDLE_WINDOW_S:.0f}s under {reruns} re-publishes, plates still "
+            f"at {after}"
+        )
     finally:
         if hud is not None:
             hud.stop()

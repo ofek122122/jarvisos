@@ -18,11 +18,14 @@
 # it claims on EVERY monitor, that a quiet HUD leaves the desktop
 # pixel-identical, that a click over a painted plate reaches an ordinary
 # window underneath it (A32), and that the HUD commits no Wayland frames
-# at all while nothing changes — quiet, with a plate on screen, and three
+# at all while nothing changes — quiet, with a plate on screen, and four
 # times with a plate on screen while a frame arrives every second, for
-# three different pairs of plates — the last of which is the only pair
-# whose words come off a latch the arriving frame re-takes
-# (A34/A42/A43/A48).
+# four different sets of plates, the last two of which are the ones whose
+# words come off a latch the arriving frame re-takes. The last of those
+# four is also the only stretch in which anything has ever LEFT the
+# screen: it is the same turn as the one before it, carried past the
+# answer to the outcome, on the same broker and the same shell
+# (A34/A42/A43/A48/A49).
 # Those were all "verified by construction" for thirty iterations, which
 # is a polite way of saying nobody had tried them.
 #

@@ -396,21 +396,21 @@ def test_each_idle_window_has_a_control():
     nothing at all. Each one is therefore paired with a stretch that MUST
     contain commits, counted the same way through the same log: the HUD
     being woken by a real frame after the quiet window, the blind plate
-    arriving before the lit one, and a second plate arriving under the
-    first in each of the three that are fed.
+    arriving before the lit one, and a plate arriving under the one above
+    it in each of the four that are fed.
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
     assert (
         "if not woke:" in probe
         and "if not arriving:" in probe
-        and probe.count("if not lighting:") == 3
+        and probe.count("if not lighting:") == 4
     ), (
         "the idle probe no longer insists on SEEING commits somewhere, so a "
         "broken instrument — an unset WAYLAND_DEBUG, a libwayland that "
         "renamed its objects — would report a flawless permanent zero"
     )
-    assert probe.count("sheet.surface_traffic(") == 10, (
+    assert probe.count("sheet.surface_traffic(") == 12, (
         "the controls have to be measured by the same counter as the windows "
         "they vouch for, or they vouch for nothing"
     )
@@ -466,8 +466,14 @@ def idle_window_text(title: str) -> str:
     quietly became true of it instead. The windows announce themselves
     with a `# --- TITLE:` banner, so slice on that and let a window that
     lost its banner fail loudly rather than borrow its neighbour's.
+
+    The banner's INDENT is not part of the marker. A49's window runs
+    inside the broker and the shell A48's window already started — one
+    turn carried to its end rather than a sixth pair of processes — so its
+    banner sits a level deeper, and a splitter that insisted on four
+    spaces would have handed every one of its gates the window above it.
     """
-    for chunk in idle_probe_text().split("\n    # --- ")[1:]:
+    for chunk in re.split(r"\n\s*# --- ", idle_probe_text())[1:]:
         if chunk.startswith(title + ":"):
             return chunk
     raise AssertionError(
@@ -639,8 +645,8 @@ def test_the_readme_says_which_windows_were_on_a_live_bus():
     difference legible — a zero is a zero either way.
     """
     readme = (SCREENS / "README.md").read_text("utf-8")
-    assert "five" in readme.lower(), (
-        "docs/hud/screens/README.md still describes four idle windows"
+    assert "six" in readme.lower(), (
+        "docs/hud/screens/README.md still describes five idle windows"
     )
     assert "OUTPUT MUTED" in readme, (
         "docs/hud/screens/README.md does not say which plate the live-lit "
@@ -656,6 +662,11 @@ def test_the_readme_says_which_windows_were_on_a_live_bus():
         "docs/hud/screens/README.md does not say which plates A48's window "
         "held on screen — and that window is the only one whose frames are "
         "re-taken latches rather than re-read readings"
+    )
+    assert "ACTION FAILED" in readme, (
+        "docs/hud/screens/README.md does not say which plate A49's window "
+        "held on screen — it is the last one in the stack, and the only "
+        "window in which anything has ever LEFT the screen"
     )
 
 
@@ -1004,10 +1015,16 @@ def test_the_confirm_frame_is_stated_once():
     passes while the two sheets describe different machines.
     """
     src = (ROOT / "tools" / "hudscreens" / "sheet.py").read_text("utf-8")
-    assert src.count('"topic": "action.confirm"') == 1, (
-        "tools/hudscreens/sheet.py writes the confirmation frame more than "
-        "once; CONFIRM_REQUEST is the one copy both the shot and the idle "
-        "window read"
+    kinds = [f["publish"]["body"]["kind"] for f in (sheet.CONFIRM_REQUEST, sheet.CONFIRM_GRANTED)]
+    assert src.count('"topic": "action.confirm"') == len(kinds), (
+        "tools/hudscreens/sheet.py writes a confirmation frame it did not "
+        "name; the topic carries exactly two of them — the question both "
+        "the shot and A48's window read, and the answer A49's window closes "
+        "it with"
+    )
+    assert kinds == ["request", "answer"], (
+        "the two action.confirm frames are no longer a question and the "
+        "answer to it; ConfirmPlate would either never light or never leave"
     )
     for shot in sheet.SHOTS:
         if shot["file"] == "03-confirm":
@@ -1019,6 +1036,261 @@ def test_the_confirm_frame_is_stated_once():
             break
     else:
         raise AssertionError("the sheet no longer takes 03-confirm")
+
+
+# --------------------------------- the sixth window: and what came of it (A49)
+#
+# `ActionPlate` was the last plate in the stack that had never been watched
+# standing still, and none of the five windows above could reach it: not
+# one of them publishes an `action.result` at all. It is a latch with a
+# 30 s hold, exactly like `HeardState`, so A48's mechanism carries over —
+# but the frame arriving does one thing more here than it does there.
+# Re-taking `ActionState.failure` re-runs `toolFor()`, which reaches back
+# to the `intent.action` still on the bus, compares its request_id and
+# re-resolves the tool name from scratch. No window above has a binding
+# that re-reads a SECOND topic every time the first one arrives.
+#
+# The design decision A49 was opened to make is that this is not a sixth
+# pair of processes. It is the same broker, the same shell and the same
+# turn as the window above, carried to its end — which is what forces the
+# step nothing in this harness had ever measured: a plate LEAVING. An
+# outcome landing while `ConfirmPlate` still stood would be jv-act having
+# run a tool it was still asking permission for.
+
+
+def came_of_it() -> str:
+    return idle_window_text("AND WHAT CAME OF IT")
+
+
+def test_the_outcome_window_adds_no_sixth_process():
+    """The thing that makes this a measurement rather than a fixture. A
+    window per plate ends with a probe whose cost is its plate count and
+    whose staging is its whole content; this one costs a few more seconds
+    of a run that was already happening.
+
+    Pinned through the HUD count rather than through a comment, because
+    `test_the_idle_probe_reads_the_huds_own_wayland_log` already insists
+    every jv-hud the probe starts is started with WAYLAND_DEBUG — so the
+    number of those is the number of shells, and the two tests hold each
+    other up.
+    """
+    window = came_of_it()
+    assert "JARVISD_BIN" not in window and "JV_HUD_BIN" not in window, (
+        "A49's window starts processes of its own. It is meant to be the "
+        "END of the turn the window above begins — same broker, same shell "
+        "— and a sixth pair is the cost this window was designed to refuse"
+    )
+    assert idle_probe_text().count('WAYLAND_DEBUG="1"') == 5, (
+        "the idle probe starts a number of shells that is no longer five, "
+        "so A49's window grew its own after all"
+    )
+
+
+def test_the_outcome_window_publishes_the_turn_it_claims():
+    """Three frames, in the order `schemas/intent.action.json` says they
+    thread. Any of them missing and the window measures something other
+    than what it reports: no intent and the plate is nameless, no answer
+    and the machine in the picture cannot exist, no result and
+    `ActionPlate` never lights at all.
+    """
+    window = came_of_it()
+    for name in ("TRASH_INTENT", "CONFIRM_GRANTED", "TRASH_FAILED"):
+        assert f"sheet.{name}" in window, (
+            f"A49's window no longer publishes {name}, so the turn it says "
+            "it is photographing is not the one on the bus"
+        )
+    says_yes = 'publish_shot({"frames": [sheet.CONFIRM_GRANTED]}'
+    reports = 'publish_shot({"frames": [sheet.TRASH_FAILED]}'
+    assert says_yes in window and reports in window, (
+        "A49's window no longer puts the answer and the outcome on the bus "
+        "as their own publishes, so nothing below can say which came first"
+    )
+    assert window.index(says_yes) < window.index(reports), (
+        "A49's window publishes the outcome before the answer that allowed "
+        "it — jv-act running a tool it is still asking permission for, with "
+        "ConfirmPlate quite happily still on screen"
+    )
+
+
+def test_the_outcome_window_proves_the_question_left_and_the_report_arrived():
+    """Two geometry checks, and the first one is the new one. `HeardPlate`
+    is on screen throughout, so "something is drawn" is evidence of
+    nothing: the region has to SHRINK when the answer lands (the stack with
+    the question on it was taller at the same top-right corner) and then
+    GROW when the failure does.
+    """
+    window = came_of_it()
+    assert "sheet.grew_downwards(answered_box, box)" in window, (
+        "A49's window no longer insists the drawn region shrank back when "
+        "the user answered — ConfirmPlate may still be standing over a tool "
+        "jv-act has already run"
+    )
+    assert "sheet.grew_downwards(answered_box, acted_box)" in window, (
+        "A49's window no longer insists the drawn region GREW when the "
+        "outcome arrived — whatever it holds still for six seconds may not "
+        "include ActionPlate at all"
+    )
+    assert "if after != acted_box:" in window, (
+        "A49's window no longer re-measures the plates after it, so a pair "
+        "that changed under the measurement would go unnoticed"
+    )
+
+
+def test_the_outcome_window_insists_frames_arrived():
+    """A48's way of going vacuous, sharpened. BOTH latches here hold for
+    30 s — `HeardState` for a transcript, `ActionState` for a failure
+    nobody explained — so a feed that never ran would leave the two plates
+    exactly where they are for the whole six seconds and the box check
+    would pass.
+    """
+    window = came_of_it()
+    assert re.search(r"reruns = feed_snapshots\(IDLE_WINDOW_S, acted", window), (
+        "A49's window no longer re-publishes for the length of the measured "
+        "window, and the re-taking of the latch IS its subject"
+    )
+    assert "if reruns < 2:" in window, (
+        "A49's window no longer checks that anything arrived while it was "
+        "measuring. Both latches outlive a six-second silence on their own, "
+        "so a dead feed would report a perfect zero about an idle bus"
+    )
+
+
+def test_the_three_outcome_frames_light_exactly_what_the_window_claims():
+    """core/ActionState.qml is strict on purpose, and every one of these is
+    a condition it imposes. Get any of them wrong and the window measures a
+    HUD holding `HeardPlate` alone while reporting a triumphant zero.
+    """
+    intent = sheet.TRASH_INTENT["publish"]
+    assert intent["topic"] == "intent.action" and intent["src"] == "jv-brain", (
+        "the tool name comes off the brain's own request; a frame under "
+        "another topic or src is not one core/ActionState.qml reads"
+    )
+    result = sheet.TRASH_FAILED["publish"]
+    assert result["topic"] == "action.result" and result["src"] == "jv-act", (
+        "only jv-act reports what it did (invariant 3), and the HUD reads "
+        "the outcome off that topic"
+    )
+    assert result["body"]["ok"] is False, (
+        "A49's window publishes a SUCCESS. core/ActionState.qml shows "
+        "failures only — an action that worked needs no plate — so "
+        "ActionPlate would never light"
+    )
+    assert result["body"]["error"] not in ("denied", "confirm_timeout"), (
+        "A49's window reports how a CONFIRMATION ended, which A22 leaves to "
+        "a human and core/ActionState.qml deliberately passes over: the "
+        "plate would stay dark"
+    )
+    answer = sheet.CONFIRM_GRANTED["publish"]
+    assert answer["body"]["granted"] is True, (
+        "the window answers NO and then reports the tool running anyway — a "
+        "machine that does not exist, and jv-act would have published "
+        "`denied` instead"
+    )
+    ids = {
+        f["publish"]["body"]["request_id"]
+        for f in (
+            sheet.CONFIRM_REQUEST,
+            sheet.TRASH_INTENT,
+            sheet.CONFIRM_GRANTED,
+            sheet.TRASH_FAILED,
+        )
+    }
+    assert ids == {sheet.TURN_REQUEST_ID}, (
+        "the four frames of one turn no longer carry one request_id. "
+        "core/ConfirmState.qml closes only on an answer naming ITS question "
+        "and core/ActionState.qml puts a tool name on screen only when the "
+        "ids match, so a drifted id is a question that never leaves and a "
+        "failure with no name"
+    )
+    assert (
+        sheet.TRASH_INTENT["publish"]["body"]["utterance_id"]
+        == sheet.HEARD_FINAL["publish"]["body"]["utterance_id"]
+    ), (
+        "the intent no longer traces back to the sentence on screen, so the "
+        "window photographs two unrelated turns stacked on one another"
+    )
+
+
+def test_the_reported_error_is_a_word_the_hud_will_actually_draw():
+    """`reason` is drawn verbatim, out of the frozen enum of
+    `schemas/action.result.json`, and core/ActionState.qml refuses any word
+    outside a list of its own — a word the reader cannot look up is one the
+    failure is better reported without. A frame carrying an unrecognised
+    error still lights the plate; it lights it one line shorter, which is a
+    different box from the one this window measures.
+    """
+    word = sheet.TRASH_FAILED["publish"]["body"]["error"]
+    schema = json.loads((ROOT / "schemas" / "action.result.json").read_text("utf-8"))
+    assert word in schema["properties"]["error"]["enum"], (
+        f"'{word}' is not in the frozen enum, so it is a frame no jv-act "
+        "could send"
+    )
+    state = (ROOT / "shell" / "jv-hud" / "core" / "ActionState.qml").read_text("utf-8")
+    reportable = state.split("readonly property var reportableReasons: [")[1].split("]")[0]
+    assert f'"{word}"' in reportable, (
+        f"core/ActionState.qml will not put '{word}' on screen, so the "
+        "window measures a plate one line shorter than the one it describes"
+    )
+
+
+def test_the_three_outcome_frames_are_legal_bodies_for_their_topics():
+    """`schemas/` is bus law (invariant 2) and a harness that publishes an
+    illegal body is measuring a machine that cannot exist. Checked rather
+    than trusted, because all three frames are hand-written.
+    """
+    for frame in (sheet.TRASH_INTENT, sheet.CONFIRM_GRANTED, sheet.TRASH_FAILED):
+        spec = frame["publish"]
+        schema = json.loads(
+            (ROOT / "schemas" / f"{spec['topic']}.json").read_text("utf-8")
+        )
+        body = spec["body"]
+        missing = set(schema["required"]) - set(body)
+        assert not missing, f"{spec['topic']}: body is missing {sorted(missing)}"
+        extra = set(body) - set(schema["properties"])
+        assert not extra, f"{spec['topic']}: body has unknown keys {sorted(extra)}"
+    for topic, field, value in (
+        ("intent.action", "capability", sheet.TRASH_INTENT["publish"]["body"]["capability"]),
+        ("action.confirm", "kind", sheet.CONFIRM_GRANTED["publish"]["body"]["kind"]),
+        ("action.confirm", "answered_by", sheet.CONFIRM_GRANTED["publish"]["body"]["answered_by"]),
+    ):
+        schema = json.loads((ROOT / "schemas" / f"{topic}.json").read_text("utf-8"))
+        assert value in schema["properties"][field]["enum"]
+
+
+def test_the_composed_tool_is_not_in_jv_acts_registry_and_the_sheet_says_so():
+    """The one thing in this turn that is NOT the machine as it is, written
+    down where a reader of the frames will meet it.
+
+    `services/jv-act/tools.toml` is v0 — "observe + benign only" — and the
+    confirmation rule is structural: only destructive and privileged tools
+    are ever confirmed. So there is no tool on this machine today that
+    could produce an `action.confirm`, and asked for `fs.trash` the real
+    jv-act would answer `unknown_tool` and ask nobody anything. The
+    machinery being photographed is real, reviewed and built; the tool it
+    is holding is one the registry has not been granted yet. Both halves
+    have to stay said, and this pins the disclaimer the way A45 pinned the
+    reproducibility one.
+    """
+    tool = sheet.CONFIRM_REQUEST["publish"]["body"]["tool"]
+    assert tool == sheet.TRASH_INTENT["publish"]["body"]["tool"], (
+        "the question and the intent name two different tools, so the plate "
+        "would report a failure of something nobody was asked about"
+    )
+    registry = (ROOT / "services" / "jv-act" / "tools.toml").read_text("utf-8")
+    src = (ROOT / "tools" / "hudscreens" / "sheet.py").read_text("utf-8")
+    if f'name = "{tool}"' in registry:
+        raise AssertionError(
+            f"'{tool}' is in jv-act's registry now, which is good news and "
+            "makes the disclaimer in tools/hudscreens/sheet.py wrong — "
+            "delete the paragraph under CONFIRM_REQUEST that says the tool "
+            "is not registered, and this check with it"
+        )
+    assert "not in jv-act's registry" in src, (
+        "tools/hudscreens/sheet.py no longer says that the tool these "
+        "frames name is one jv-act has never been granted. Every number in "
+        "the confirmation frame is jv-act's own and the tool is not, and a "
+        "reader who is not told reads the whole turn as recorded"
+    )
 
 
 # ------------------------------------------------- the shot that is a reading
@@ -1173,10 +1445,12 @@ def test_the_growth_rule_is_stated_once():
     looking at.
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
-    assert shoot.count("sheet.grew_downwards(") == 4, (
-        "the idle probe's three fed windows and the shot loop must all ask "
+    assert shoot.count("sheet.grew_downwards(") == 6, (
+        "the idle probe's four fed windows and the shot loop must all ask "
         "sheet.grew_downwards — an inline copy of the geometry is one the "
-        "unit tests above do not cover"
+        "unit tests above do not cover. A49's window asks it TWICE, and the "
+        "second one reads the rule backwards: a plate LEAVING is the same "
+        "geometry with the arguments swapped"
     )
     assert "box[3] <= speaking_box[3]" not in shoot, (
         "the live-lit window has an inline growth rule again"
