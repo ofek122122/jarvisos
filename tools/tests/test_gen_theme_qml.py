@@ -333,6 +333,52 @@ def hud_qml_files() -> list[Path]:
     return [q for q in sorted(hud.rglob("*.qml")) if not q.is_relative_to(hud / "tests")]
 
 
+def test_no_qml_file_is_a_file_git_calls_binary():
+    """A source file with a NUL byte in it is a file nobody reviewed.
+
+    git decides text-or-binary by looking for a NUL in the first 8 kB, and a
+    file it calls binary has no diff at all: `GuardPlate.qml | Bin 0 -> 8407
+    bytes`, which is how the entire A51 plate landed — 226 lines of a surface
+    that sits above every window, committed as an opaque blob, with no line
+    for a human to object to. It was not sabotage and it was not noticed: the
+    plate wanted a joiner no attacker-chosen file name could contain, and
+    `"\0"` typed as the byte itself works perfectly at runtime.
+
+    So the escape is the rule, not the byte. The check is deliberately about
+    the FILE and not about QML: it is the same claim for every `.qml` in the
+    tree, including the harness stages, because "its diff is readable" is a
+    property of a text file rather than of a language.
+
+    Only `\t` and `\n` are allowed through. A stray `\r` would not make git
+    call the file binary, but it would make every line of it differ from the
+    one next to it for a reason nobody can see, which is the same failure one
+    notch quieter.
+    """
+    qmls = sorted(
+        q
+        for d in ("shell", "tools", "pkgs", "harness")
+        for q in (ROOT / d).rglob("*.qml")
+    )
+    assert len(qmls) > 20, f"found only {len(qmls)} QML files; the glob is wrong"
+    for qml in qmls:
+        raw = qml.read_bytes()
+        where = qml.relative_to(ROOT)
+        assert b"\x00" not in raw, (
+            f"{where} contains a raw NUL byte, so git calls it binary and "
+            f"commits it with no diff. Write the escape — `\\0` — which is the "
+            f"same string at runtime and a reviewable line in the file."
+        )
+        bad = sorted({b for b in raw if b < 0x20 and b not in (0x09, 0x0A)})
+        assert not bad, (
+            f"{where} contains control bytes {[hex(b) for b in bad]}; a source "
+            f"file is text, and a byte you cannot see is a change nobody can read"
+        )
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError as exc:  # pragma: no cover - a corrupt tree
+            pytest.fail(f"{where} is not valid UTF-8: {exc}")
+
+
 def test_every_hud_surface_pins_the_properties_that_make_it_safe():
     """A10: the last corner of invariant 10 that nothing was watching.
 
