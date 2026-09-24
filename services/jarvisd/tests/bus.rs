@@ -2,49 +2,13 @@
 //! drop-oldest slow-consumer policy, and envelope rejection.
 //! On unix they run over a real Unix socket; elsewhere over loopback TCP.
 
-use jarvisd::broker::{Broker, BusAddr, Config, Listener};
+mod common;
+
+use common::{body, start};
+use jarvisd::broker::Config;
 use jarvisd::client::BusClient;
 use jarvisd::proto::ServerMsg;
-use std::sync::Arc;
 use std::time::Duration;
-
-struct TestBus {
-    addr: BusAddr,
-    _broker: Arc<Broker>,
-    task: tokio::task::JoinHandle<()>,
-    #[cfg(unix)]
-    _tmp: tempfile::TempDir,
-}
-
-impl Drop for TestBus {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-async fn start(cfg: Config) -> TestBus {
-    #[cfg(unix)]
-    {
-        let tmp = tempfile::tempdir().unwrap();
-        let addr = BusAddr::Unix(tmp.path().join("bus.sock"));
-        let (listener, actual) = Listener::bind(&addr).await.unwrap();
-        let broker = Broker::new(cfg);
-        let task = broker.spawn(listener);
-        TestBus { addr: actual, _broker: broker, task, _tmp: tmp }
-    }
-    #[cfg(not(unix))]
-    {
-        let addr = BusAddr::Tcp("127.0.0.1:0".to_string());
-        let (listener, actual) = Listener::bind(&addr).await.unwrap();
-        let broker = Broker::new(cfg);
-        let task = broker.spawn(listener);
-        TestBus { addr: actual, _broker: broker, task }
-    }
-}
-
-fn body(pairs: &[(&str, rmpv::Value)]) -> rmpv::Value {
-    rmpv::Value::Map(pairs.iter().map(|(k, v)| ((*k).into(), v.clone())).collect())
-}
 
 fn topic_of(frame: &rmpv::Value) -> String {
     frame
@@ -159,6 +123,30 @@ async fn broker_health_frame_is_valid_envelope() {
     assert_eq!(topic_of(&f), "sys.health");
 }
 
+/// A heartbeat's contract is its own `period_s`: the first beat is due one
+/// whole period after the broker starts, and not before.
+///
+/// A tokio interval fires its first tick IMMEDIATELY, which used to put a
+/// beat on the bus before the accept loop had taken a single connection — so
+/// it reached nobody on an idle machine, and reached whichever client had
+/// already been accepted on a loaded one. Both readers of `sys.health`
+/// (`core/HealthState.qml` and `jv health --check`) are built on "a heartbeat
+/// speaks for two of its own periods", and a beat whose audience is decided
+/// by the scheduler is the one thing that rule cannot absorb: it is how a
+/// test asking for a silent bus got a heartbeat only when the machine was
+/// busy.
+#[tokio::test]
+async fn the_brokers_first_heartbeat_waits_out_a_whole_period() {
+    let cfg = Config { health_period: Duration::from_millis(600), ..Config::default() };
+    let bus = start(cfg).await;
+    let mut c = BusClient::connect(&bus.addr, "health-watch").await.unwrap();
+    c.subscribe(&["sys.health"]).await.unwrap();
+
+    assert!(recv_frame(&mut c, 250).await.is_none(), "a beat landed before its period was up");
+    // And the beat is delayed, not cancelled.
+    assert!(recv_frame(&mut c, 1200).await.is_some(), "no heartbeat after a full period");
+}
+
 #[tokio::test]
 async fn subscriber_disconnect_leaves_others_running() {
     let bus = start(Config::default()).await;
@@ -262,4 +250,36 @@ async fn invalid_envelope_rejected_broker_survives() {
         .await
         .unwrap();
     assert!(recv_frame(&mut c, 1000).await.is_some());
+}
+
+/// The wire convention goes both ways. `to_value_named` is how every service
+/// puts a generated binding on the bus; `from_value_named` is how a consumer
+/// reads one back, and it has to survive the part the obvious route does not:
+/// the bus spells an enum as its snake_case STRING.
+#[test]
+fn a_schema_binding_round_trips_through_the_wire_convention() {
+    use jarvisd::broker::{from_value_named, to_value_named};
+    use jarvisd::schema::{ActionConfirm, ActionConfirmAnsweredBy, ActionConfirmKind};
+
+    let answer = ActionConfirm {
+        kind: ActionConfirmKind::Answer,
+        request_id: "req-1".into(),
+        tool: None,
+        summary: None,
+        window_s: None,
+        granted: Some(true),
+        answered_by: Some(ActionConfirmAnsweredBy::Cli),
+    };
+    let wire = to_value_named(&answer).unwrap();
+    // The enums really are strings on the wire — that is the thing the rmpv
+    // deserializer chokes on, so assert it rather than trusting it.
+    assert_eq!(jarvisd::cli::get_str(&wire, "kind").as_deref(), Some("answer"));
+    assert_eq!(jarvisd::cli::get_str(&wire, "answered_by").as_deref(), Some("cli"));
+    assert_eq!(from_value_named::<ActionConfirm>(&wire).unwrap(), answer);
+
+    // A body with a field the schema does not have is refused, not ignored:
+    // the bindings are generated with deny_unknown_fields for exactly that.
+    let mut extra = wire.as_map().unwrap().clone();
+    extra.push(("granted_maybe".into(), true.into()));
+    assert!(from_value_named::<ActionConfirm>(&rmpv::Value::Map(extra)).is_err());
 }

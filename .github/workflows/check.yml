@@ -31,6 +31,25 @@ jobs:
       - name: schema bindings drift gate
         run: python3 tools/gen_bindings.py --check
 
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"  # tomllib
+      - run: python -m pip install -q pytest
+      # The build gates that live in Python: the theme has not drifted from
+      # personality/theme.toml (invariant 9), nothing in the HUD animates
+      # around Motion's off switch (§06), every surface the HUD maps still
+      # pins the properties that make it safe (invariant 10), and the
+      # recorded perception sessions the HUD's QML tests replay are still
+      # the ones in harness/fixtures/sessions (B9). These are pure source
+      # checks — no GPU, no disks, no models — and until now they ran only
+      # when somebody remembered to. A gate nobody runs is not a gate.
+      - name: tools tests (theme + session drift, the HUD's source gates)
+        run: python -m pytest tools/tests -q
+
   jarvisd:
     runs-on: ubuntu-latest
     defaults:

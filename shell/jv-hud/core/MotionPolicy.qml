@@ -1,0 +1,69 @@
+// MotionPolicy — the single answer to "is the HUD allowed to move?" (PLAN A7).
+//
+// §06 gives motion four rules, and three of them are about NOT moving:
+//
+//     ease toward target over ~200ms (never raw pose) · full stop when a
+//     window is fullscreen · off on battery · off with prefers-reduced-motion
+//
+// If each element remembered those on its own, one element would eventually
+// forget, and the forgetting would be invisible — a HUD that still breathes
+// after you asked it to stop. So the decision lives here, once, and every
+// animation in the shell is gated on it through the `Motion` singleton next
+// door (which is what binds these inputs to their real sources).
+//
+// This file is the half that is pure QtQuick, so the decision is testable
+// headlessly: given a preference and a machine state, does it animate, and
+// what does it say the reason was? `Motion.qml` is the wiring.
+//
+// On the inputs: `declaredReduced` and `envOverride` have real sources today
+// (personality/theme.toml and the environment). `onBattery` and `fullscreen`
+// do NOT — nothing on the bus reports either one yet (context.system carries
+// `battery_pct`, which says nothing about whether the machine is discharging,
+// and context.window has no fullscreen field). They are inputs rather than
+// TODOs so that wiring them later is one binding and not a redesign; until
+// then they sit at false, which is the truth on ares — a desktop with no
+// battery. Anything that starts feeding them must feed them a real signal.
+import QtQuick
+
+QtObject {
+  id: root
+
+  // The standing preference from personality/theme.toml (Theme.reducedMotion).
+  property bool declaredReduced: false
+
+  // A per-session override, as the environment spells it: "1" forces reduced
+  // motion on, "0" forces it off, and anything else — including unset, which
+  // arrives here as the empty string — defers to the declared preference.
+  // Only those two exact strings count: a machine that reads "true" as true
+  // and "yes" as false is a machine nobody can predict. It is parsed here,
+  // rather than at the env lookup, because here it has tests.
+  property string envOverride: ""
+
+  // A window is fullscreen on the screen this element lives on. No source yet.
+  property bool fullscreen: false
+  // The machine is running on battery. No source yet (ares has none).
+  property bool onBattery: false
+
+  readonly property bool prefersReduced: root.envOverride === "1" ? true : root.envOverride === "0" ? false : root.declaredReduced
+
+  // Why motion is off, or "" when it is on. A reason rather than a bare
+  // bool because "the HUD went still" is a question someone will ask, and
+  // the honest answer is cheap to keep. Order is severity, not preference:
+  // the user's own wish is named first even when the machine also has a say.
+  readonly property string suppressedBy: root.prefersReduced ? "reduced-motion" : root.onBattery ? "battery" : root.fullscreen ? "fullscreen" : ""
+
+  // The one thing elements read: gate `Behavior.enabled` (or an animation's
+  // `running`) on it and stillness costs no frames at all, rather than
+  // running an animation that happens to take zero time.
+  readonly property bool animate: root.suppressedBy === ""
+
+  // A duration token, gated: `base` while motion is allowed, 0 otherwise.
+  // Anything that is not a positive number is 0 as well — a duration is a
+  // length of time, and QML would otherwise happily animate for NaN
+  // milliseconds. (`base` is declared `real`, so a numeric string arrives
+  // here already converted; it is the values that survive conversion as
+  // nonsense that this has to catch.)
+  function ms(base: real): real {
+    return root.animate && base > 0 ? base : 0;
+  }
+}

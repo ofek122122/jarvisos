@@ -118,6 +118,12 @@ let
   ]);
 
   jv-compat = mkLocal "jv-compat" ../services/jv-compat [ jarvis-bus ];
+
+  # The HUD's read-only window onto the bus: QML cannot open a Unix socket
+  # or unpack MessagePack, so this child process does it and writes JSON
+  # lines. jarvis-bus is its only dependency — it subscribes and nothing
+  # else (invariant 1: the HUD is a consumer).
+  jv-hud-bridge = mkLocal "jv-hud-bridge" ../services/jv-hud-bridge [ jarvis-bus ];
 in
 {
   earsEnv = py.withPackages (_: [ jv-ears ]);
@@ -126,6 +132,7 @@ in
   contextEnv = py.withPackages (_: [ jv-context ]);
   guardEnv = py.withPackages (_: [ jv-guard ]);
   compatEnv = py.withPackages (_: [ jv-compat ]);
+  hudBridgeEnv = py.withPackages (_: [ jv-hud-bridge ]);
   # NOTE: jv-act (Rust) is intentionally NOT built into any service env
   # here and NOT given a systemd unit — REVIEW-REQUIRED (invariant 3).
 }

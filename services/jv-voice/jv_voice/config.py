@@ -24,6 +24,15 @@ def default_models_dir() -> Path:
     return REPO / "models-cache"
 
 
+def default_output_device() -> str | None:
+    """The output device jv-voice is told to open, or None for PortAudio's
+    default. Empty/whitespace reads as unset: a unit file that writes the
+    variable unconditionally leaves it empty when nothing is configured,
+    and "pinned to the empty string" is a fact nobody wants published."""
+    name = (os.environ.get("JARVIS_VOICE_OUTPUT_DEVICE") or "").strip()
+    return name or None
+
+
 def default_personality() -> Path:
     if env := os.environ.get("JARVIS_PERSONALITY_DIR"):
         return Path(env)
@@ -46,6 +55,11 @@ class VoiceConfig:
     models_dir: Path = dataclasses.field(default_factory=default_models_dir)
     voice_model: str = "en_US-ryan-high"
     chain: ChainParams = dataclasses.field(default_factory=ChainParams)
+    # Which output device playback opens. None = PortAudio's default, which
+    # is the ONLY case in which the default sink jv-context reports is
+    # provably the one Jarvis speaks into — see player.output_device_pinned
+    # and shell/jv-hud/core/OutputState.qml (PLAN A41).
+    output_device: str | None = dataclasses.field(default_factory=default_output_device)
 
     @classmethod
     def load(cls, personality_dir: Path | None = None) -> "VoiceConfig":

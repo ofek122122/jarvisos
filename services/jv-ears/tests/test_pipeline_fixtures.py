@@ -5,6 +5,7 @@ Requires models: ./models/fetch.sh --only ears (CI caches them).
 Skips (loudly) if models are absent rather than faking a pass.
 """
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -89,3 +90,103 @@ def test_wake_scores_are_confident():
     assert len(wakes) == 1
     assert wakes[0]["score"] >= 0.8
     assert wakes[0]["threshold"] == CFG.wake_threshold
+
+
+def test_the_pipeline_reports_the_wake_window_it_actually_enforces():
+    """The HUD stops calling itself "listening" when ears has disarmed.
+
+    It used to mirror `wake_timeout_s` in QML with a "keep this at or
+    below what ears is tuned to" comment (PLAN A14). Now ears says it,
+    on sys.health.metrics — and says what it ENFORCES, which is the
+    sample-clock count the code compares against, not the number in the
+    config file. Today they agree to within one sample; the day anything
+    here rounds differently, the published value follows the code.
+    """
+    pipe = EarsPipeline(CFG, lambda t, c, v, b: None)
+    reported = pipe.budgets()["wake_timeout_s"]
+    assert reported == pipe._wake_timeout / CFG.sample_rate
+    assert reported == pytest.approx(CFG.wake_timeout_s, abs=1.0 / CFG.sample_rate)
+    assert reported > 0
+
+
+def test_the_pipeline_reports_the_endpoint_hold_it_actually_enforces():
+    """`jv tap --latency` cannot split a turn without this number.
+
+    A voice turn measured from the bus is VAD start -> first spoken word,
+    and most of it is the user talking: the 5.4 s measured on ares on
+    2026-09-15 contained 2-3 s of the user's own voice and could not be
+    compared to the 2.5 s budget at all. The boundary that separates the
+    two is ears' endpoint hold — the silence it deliberately sits through
+    to bridge a mid-sentence pause — and nothing outside this process
+    knew it.
+
+    Published for the same reason `wake_timeout_s` is (PLAN A14, B7):
+    there is now a READER, `jarvisd::cli::ears_endpoint_hold_s`. It
+    refuses rather than falling back, so a gauge that stops being
+    published turns into a `?` in the report instead of a wrong number.
+    Read off the sample count the code compares against, not off cfg.
+    """
+    pipe = EarsPipeline(CFG, lambda t, c, v, b: None)
+    reported = pipe.budgets()["vad_min_silence_s"]
+    assert reported == pipe._min_silence / CFG.sample_rate
+    assert reported == pytest.approx(CFG.vad_min_silence_ms / 1000.0, abs=1.0 / CFG.sample_rate)
+    assert reported > 0
+
+
+# ------------------------------------------------ the committed sessions
+
+# What the live pipeline does here is also committed, frame by frame, in
+# harness/fixtures/sessions — so that everything downstream of ears can be
+# tested on a machine with no model weights (PLAN B3). The recording is
+# only worth having while something re-derives it, and this is that thing:
+# without it a retuned VAD would leave four stale files asserting the old
+# behaviour, and every test built on them would keep passing.
+sys.path.insert(0, str(REPO / "harness"))
+sys.path.insert(0, str(REPO / "harness" / "fixtures" / "sessions"))
+
+import generate_sessions  # noqa: E402
+import session as session_file  # noqa: E402
+
+
+def shape(frames):
+    """What must not change: which frames, when, and in what state.
+
+    Deliberately not `conf` and not the partial texts — a model score is
+    the last digits of a float on the machine that ran it, and a fixture
+    that fails because CI has a different CPU teaches people to regenerate
+    without reading. Segmentation, gating and timing are what these files
+    are for, and all three are here.
+    """
+    out = []
+    for f in frames:
+        b = f["body"]
+        out.append((f["topic"], f["ts"], b.get("event") or b.get("kind")))
+    return out
+
+
+def normalized_final(frames) -> list:
+    """Final transcripts, case- and punctuation-insensitive.
+
+    Only the finals: a partial is whisper's opinion of half a sentence and
+    a word of it moving is not a regression. The final is the sentence
+    jv-brain is handed, so a word of THAT moving is.
+    """
+    out = []
+    for f in frames:
+        if f["topic"] == "audio.transcript" and f["body"]["kind"] == "final":
+            text = f["body"]["text"].lower()
+            keep = "".join(c for c in text if c.isalnum() or c.isspace())
+            out.append(" ".join(keep.split()))
+    return out
+
+
+@pytest.mark.parametrize("wav", generate_sessions.SOURCES)
+def test_the_committed_session_is_what_the_pipeline_still_does(wav):
+    committed = session_file.load(
+        REPO / "harness" / "fixtures" / "sessions" / f"{Path(wav).stem}.jsonl")
+    live = generate_sessions.frames_for(FIXTURES / wav)
+    assert shape(live) == shape(committed.frames), (
+        f"{wav}: perception changed. If that was the point, regenerate with "
+        f"python harness/fixtures/sessions/generate_sessions.py and read the diff."
+    )
+    assert normalized_final(live) == normalized_final(committed.frames)

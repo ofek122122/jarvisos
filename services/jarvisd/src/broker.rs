@@ -139,6 +139,18 @@ pub fn to_value_named<T: serde::Serialize>(v: &T) -> anyhow::Result<rmpv::Value>
     Ok(rmpv::decode::read_value(&mut &bytes[..])?)
 }
 
+/// The inverse of `to_value_named`: read a wire Value back into a schema
+/// binding. Goes through the msgpack bytes rather than `rmpv::ext::from_value`
+/// because the bus convention encodes an enum as its snake_case STRING, and
+/// rmpv's own deserializer only accepts serde's tagged forms — so the direct
+/// route rejects every generated body with an enum in it (`kind`, `state`,
+/// `answered_by`, ...).
+pub fn from_value_named<T: serde::de::DeserializeOwned>(v: &rmpv::Value) -> anyhow::Result<T> {
+    let mut bytes = Vec::new();
+    rmpv::encode::write_value(&mut bytes, v)?;
+    Ok(rmp_serde::from_slice(&bytes)?)
+}
+
 pub struct Broker {
     cfg: Config,
     tx: broadcast::Sender<Arc<Delivery>>,
@@ -230,7 +242,18 @@ impl Broker {
             let health = {
                 let b = broker.clone();
                 tokio::spawn(async move {
-                    let mut iv = tokio::time::interval(b.cfg.health_period);
+                    // The first beat is due one period in, not at t=0. A
+                    // tokio interval's first tick fires IMMEDIATELY, and at
+                    // that moment the accept loop below has taken no
+                    // connection at all — so the beat reaches nobody, unless
+                    // the machine is loaded enough that a client gets
+                    // accepted and subscribed before this task is first
+                    // polled, and then it reaches them. Which clients see a
+                    // heartbeat should not be decided by the scheduler; a
+                    // heartbeat's contract is its own `period_s`.
+                    let period = b.cfg.health_period;
+                    let mut iv =
+                        tokio::time::interval_at(tokio::time::Instant::now() + period, period);
                     iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     loop {
                         iv.tick().await;

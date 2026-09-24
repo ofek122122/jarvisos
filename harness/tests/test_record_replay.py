@@ -3,9 +3,6 @@ back out, with timing preserved (scaled) and the session header intact."""
 
 import asyncio
 import json
-import os
-import socket
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -20,39 +17,6 @@ sys.path.insert(0, str(REPO / "services" / "pylib"))
 import record  # noqa: E402
 import replay  # noqa: E402
 from jarvis_bus import BusClient  # noqa: E402
-
-
-def jarvisd_bin() -> Path:
-    if env := os.environ.get("JARVISD_BIN"):
-        return Path(env)
-    exe = "jarvisd.exe" if sys.platform == "win32" else "jarvisd"
-    for profile in ("debug", "release"):
-        p = REPO / "services" / "jarvisd" / "target" / profile / exe
-        if p.exists():
-            return p
-    pytest.skip("jarvisd binary not built")
-
-
-@pytest.fixture
-async def bus_addr():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        addr = f"127.0.0.1:{s.getsockname()[1]}"
-    proc = subprocess.Popen(
-        [str(jarvisd_bin()), "--bus", addr],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    for _ in range(100):
-        try:
-            _, w = await asyncio.open_connection(*addr.rsplit(":", 1))
-            w.close()
-            break
-        except OSError:
-            await asyncio.sleep(0.05)
-    yield addr
-    proc.kill()
-    proc.wait(timeout=10)
 
 
 async def test_record_then_replay_roundtrip(bus_addr, tmp_path):

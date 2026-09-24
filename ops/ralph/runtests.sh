@@ -7,7 +7,8 @@
 #
 # Usage:  bash ops/ralph/runtests.sh jv-brain
 #         bash ops/ralph/runtests.sh jv-voice
-# Services: jv-brain jv-ears jv-voice jv-context jv-guard jv-compat pylib harness
+# Services: jv-brain jv-ears jv-voice jv-context jv-guard jv-compat
+#           jv-hud-bridge pylib tools harness
 set -euo pipefail
 
 svc="${1:?usage: runtests.sh <service>}"

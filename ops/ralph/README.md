@@ -12,6 +12,18 @@ An autonomous builder that runs for days on branch `ralph/auto`, building Jarvis
 - `JOURNAL.md` — append-only log of every successful iteration.
 - `updates.sh` — "stop and give me updates" — the delta reporter.
 
+## Test runners (the loop's inner loop)
+The gate is always `nixos-rebuild build --flake .#ares`; these run the suites
+against the WORKTREE source, fast, so a red/green loop does not rebuild the
+world. One per language the repo actually has:
+```
+bash ops/ralph/runtests.sh jv-voice   # Python services (+ pylib, tools, harness)
+bash ops/ralph/cargotest.sh jarvisd   # Rust crates
+bash ops/ralph/qmltest.sh             # the HUD's QML, headless
+bash ops/ralph/nixtest.sh             # the flake's own options -> the units ares gets
+bash ops/ralph/hudscreens.sh          # the HUD photographed through a real compositor
+```
+
 ## One-time setup (isolated worktree on its own branch)
 From your normal checkout (`~/jarvisos`, on `main`, clean):
 ```

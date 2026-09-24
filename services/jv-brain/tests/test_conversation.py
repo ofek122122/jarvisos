@@ -67,3 +67,60 @@ def test_turn_cap_is_also_batched():
     head = conv.messages[0]["content"]
     fill(conv, 2, size=10)
     assert conv.messages[0]["content"] == head  # stable until next overflow
+
+
+def test_repair_open_tool_calls_answers_only_the_unanswered():
+    """A turn cancelled mid-tool (barge-in) leaves an assistant tool_calls
+    message whose result never came. A chat template needs one result per
+    call, so the NEXT request would be malformed — the conversation would
+    be poisoned for the rest of the session, by an interruption."""
+    conv = Conversation(cfg())
+    conv.add_raw({"role": "user", "content": "do two things"})
+    conv.add_raw(
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "a", "type": "function",
+                 "function": {"name": "t", "arguments": "{}"}},
+                {"id": "b", "type": "function",
+                 "function": {"name": "t", "arguments": "{}"}},
+            ],
+        }
+    )
+    conv.add_raw({"role": "tool", "tool_call_id": "a", "content": "{}"})
+
+    assert conv.repair_open_tool_calls('{"ok": false, "error": "interrupted"}') == 1
+    last = conv.messages[-1]
+    assert last["role"] == "tool" and last["tool_call_id"] == "b"
+    assert "interrupted" in last["content"]
+    # every call now has exactly one result
+    ids = [m["tool_call_id"] for m in conv.messages if m.get("role") == "tool"]
+    assert sorted(ids) == ["a", "b"]
+
+
+def test_repair_open_tool_calls_is_a_noop_when_every_call_was_answered():
+    conv = Conversation(cfg())
+    conv.add_raw({"role": "user", "content": "one thing"})
+    conv.add_raw(
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "a", "type": "function",
+                 "function": {"name": "t", "arguments": "{}"}}
+            ],
+        }
+    )
+    conv.add_raw({"role": "tool", "tool_call_id": "a", "content": "{}"})
+    before = list(conv.messages)
+    assert conv.repair_open_tool_calls("{}") == 0
+    assert list(conv.messages) == before
+
+
+def test_repair_open_tool_calls_leaves_a_plain_conversation_alone():
+    conv = Conversation(cfg())
+    conv.add_raw({"role": "user", "content": "hello"})
+    conv.add_raw({"role": "assistant", "content": "hi"})
+    assert conv.repair_open_tool_calls("{}") == 0
+    assert len(conv.messages) == 2

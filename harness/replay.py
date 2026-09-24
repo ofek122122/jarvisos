@@ -16,21 +16,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "pylib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import session  # noqa: E402
 from jarvis_bus import BusClient, mono_now  # noqa: E402
-
-
-def load_session(path: Path) -> tuple[dict, list[dict]]:
-    with path.open(encoding="utf-8") as fh:
-        lines = [json.loads(line) for line in fh if line.strip()]
-    if not lines or "boot_id" not in lines[0]:
-        raise ValueError(f"{path}: missing session header (schemas/README.md)")
-    return lines[0], lines[1:]
 
 
 async def replay(
@@ -40,7 +33,7 @@ async def replay(
     instant: bool = False,
     keep_ts: bool = False,
 ) -> int:
-    header, frames = load_session(path)
+    frames = session.load(path).frames
     bus = await BusClient.connect(bus_addr, src="harness-replay")
     sent = 0
     try:

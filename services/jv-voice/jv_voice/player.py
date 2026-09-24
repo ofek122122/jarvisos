@@ -10,6 +10,14 @@ import numpy as np
 
 
 class Player:
+    # Did this player open a device it was TOLD to open, rather than
+    # whatever the audio stack calls default? The HUD's OutputPlate reads
+    # the default sink to say OUTPUT MUTED, which is a true statement about
+    # Jarvis only while this is False — so it is published in jv-voice's
+    # heartbeat as `output_device_pinned` and the plate goes quiet, rather
+    # than confidently wrong, when it turns True (PLAN A41).
+    output_device_pinned: bool = False
+
     async def play(
         self, audio: np.ndarray, rate: int, abort: asyncio.Event
     ) -> bool:  # pragma: no cover - interface
@@ -20,11 +28,19 @@ class Player:
 class SoundDevicePlayer(Player):
     """TODO(machine): exit-checklist items 1 and 3 run through this."""
 
+    def __init__(self, device: str | int | None = None) -> None:
+        # None means "whatever PortAudio calls default", which under
+        # PipeWire is the default sink jv-context reports. Anything else is
+        # a device this process was pointed at, and the HUD must stop
+        # reading the default sink as a statement about Jarvis.
+        self.device = device
+        self.output_device_pinned = device is not None
+
     async def play(self, audio: np.ndarray, rate: int, abort: asyncio.Event) -> bool:
         import sounddevice as sd
 
         loop = asyncio.get_running_loop()
-        sd.play(audio, rate)
+        sd.play(audio, rate, device=self.device)
         # Completion is decided by the STREAM, never by duration arithmetic:
         # the device opens late (PortAudio -> PipeWire), so a wall-clock
         # deadline always expired while the tail was still playing and the
@@ -46,11 +62,13 @@ class SoundDevicePlayer(Player):
 class FakePlayer(Player):
     """Pretends every clip lasts `clip_seconds` — deterministic tests."""
 
-    def __init__(self, clip_seconds: float = 1.0) -> None:
+    def __init__(self, clip_seconds: float = 1.0, pinned: bool = False) -> None:
         self.clip_seconds = clip_seconds
+        self.output_device_pinned = pinned
         self.played: list[int] = []  # sample counts handed to us
         self.aborted = 0
         self.started = asyncio.Event()  # set when playback actually begins
+        self.finished = asyncio.Event()  # set when a clip plays to its end
 
     async def play(self, audio: np.ndarray, rate: int, abort: asyncio.Event) -> bool:
         self.played.append(len(audio))
@@ -62,4 +80,5 @@ class FakePlayer(Player):
                 self.aborted += 1
                 return False
             await asyncio.sleep(0.01)
+        self.finished.set()
         return True

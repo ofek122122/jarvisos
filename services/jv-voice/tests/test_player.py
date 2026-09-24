@@ -14,7 +14,7 @@ import types
 import numpy as np
 import pytest
 
-from jv_voice.player import SoundDevicePlayer
+from jv_voice.player import FakePlayer, SoundDevicePlayer
 
 
 class FakeStream:
@@ -29,12 +29,14 @@ class FakeSD(types.ModuleType):
     def __init__(self, extra_latency_s: float) -> None:
         super().__init__("sounddevice")
         self.stream = FakeStream()
+        self.play_calls: list = []   # the `device` each play() was given
         self.extra_latency_s = extra_latency_s
         self.stopped_while_active = False
         self.stop_calls = 0
         self._finish_task = None
 
-    def play(self, audio, rate) -> None:
+    def play(self, audio, rate, device=None) -> None:
+        self.play_calls.append(device)
         self.stream.active = True
         duration = len(audio) / rate + self.extra_latency_s
 
@@ -86,3 +88,36 @@ async def test_abort_stops_immediately(fake_sd):
     await trip_task
     assert completed is False
     assert fake_sd.stop_calls >= 1
+
+
+# --- which device the samples land on (PLAN A41) -------------------------
+#
+# The HUD's OutputPlate says OUTPUT MUTED by reading the DEFAULT SINK. That
+# is a true statement about what Jarvis is playing into only while nobody
+# has pinned a device here, so what the player did is a fact jv-voice has
+# to be able to state — see service.py's heartbeat and
+# shell/jv-hud/core/OutputState.qml.
+
+
+async def test_the_default_player_takes_portaudios_default(fake_sd):
+    player = SoundDevicePlayer()
+    assert player.output_device_pinned is False
+    audio = np.zeros(int(0.1 * 22050), dtype=np.float32)
+    await player.play(audio, 22050, asyncio.Event())
+    assert fake_sd.play_calls == [None], "a device was passed that nobody configured"
+
+
+async def test_a_configured_device_is_the_one_opened(fake_sd):
+    player = SoundDevicePlayer("alsa_output.usb-Focusrite")
+    assert player.output_device_pinned is True
+    audio = np.zeros(int(0.1 * 22050), dtype=np.float32)
+    await player.play(audio, 22050, asyncio.Event())
+    assert fake_sd.play_calls == ["alsa_output.usb-Focusrite"], (
+        "jv-voice reported a pinned device and then played into the default one"
+    )
+
+
+def test_the_fake_player_is_unpinned_like_the_real_default():
+    """Tests and the HUD's fixtures both lean on this being the ordinary
+    case rather than a special one."""
+    assert FakePlayer().output_device_pinned is False

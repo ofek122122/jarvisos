@@ -66,6 +66,86 @@ install day; anything needing real hardware is mocked and tagged
   jv-voice while the rest generates; decide the measurement anchor
   (VAD end vs start) and re-state the budget accordingly.
 
+  **UPDATE 2026-09-24 (ee96c43): the measurement stops mixing your voice
+  with the machine's time.** `jv tap --latency` no longer prints one
+  number. Each turn is split at the boundaries jv-ears itself publishes —
+  `spoke` (you talking), `hold` (ears' `vad_min_silence_ms`, the silence
+  it deliberately sits through to bridge a mid-sentence pause), `respond`
+  (ASR + brain + bus) — and the summary carries a p50/p95/max per span.
+  The machine's share of a turn is `hold + respond`; `spoke` is yours and
+  no faster machine shortens it. The hold is read off jv-ears'
+  `sys.health` `metrics` (`vad_min_silence_s`, added for this reader, the
+  same free-form section `wake_timeout_s` uses — no schema change); there
+  is NO fallback to its default, so a tap that has not heard a jv-ears
+  heartbeat prints `?` for the spans that need it rather than a number
+  that would look like a reading.
+
+  This does not re-state the budget — **which span the 2.5 s applies to is
+  still an open human decision**, and it is now a decision that can be
+  made against data. Also fixed here: the old anchor took the earliest ts
+  of ANY frame carrying the utterance_id, including an `audio.transcript`
+  partial, which is emitted part-way through the utterance — so a turn
+  whose partial arrived before the vad frame was silently measured short.
+  Boundaries now come only from `audio.vad`, by `event`.
+
+  **UPDATE 2026-09-24: `respond` stops being one number over two
+  services.** The two STILL-OPEN latency chunks below are ASR and the
+  brain, and until now the measurement had them in a single span — so
+  neither could be optimised against it. The frame that divides them was
+  already on the bus: jv-ears runs whisper AFTER publishing `speech_end`
+  and publishes the `audio.transcript` **final** when it is done, so that
+  frame is the seam. `jv tap --latency` now reports `hear` (speech_end ->
+  final transcript: jv-ears' ASR) and `think` (final transcript -> first
+  `speech.say`: jv-brain to its first word, plus a bus hop each way),
+  which partition `respond` exactly. No new publisher, no schema change.
+  A turn with no final (jv-ears publishes none for an utterance its ASR
+  read as empty, and a tap can simply have missed it) prints `?` for both
+  and keeps `respond` whole; a final landing outside the span it would
+  divide refuses both halves rather than publishing a negative. The
+  2.2 s ASR figure and the prefill/generation figures below came from
+  llama-server's own timings and a stopwatch; they are now readable off
+  the bus in the same table as everything else.
+
+  **UPDATE 2026-09-24: `think` stops being one number over the model and
+  everything around it.** `think` was the LLM AND a bus hop each way AND
+  however long the transcript sat in jv-brain's input queue, and the span
+  this file wants to optimise ("prefill fixed, generation not") is the
+  model's alone. Unlike the hear/think seam, no frame on the bus marks the
+  moment the completion request went out — only jv-brain can see it — so
+  jv-brain now states it: `llm_first_say_ms` plus a turn counter
+  `llm_first_says` in its `sys.health` `metrics`, which is free-form and
+  service-local by schema (no schema change). `jv tap --latency` divides
+  `think` into `model` (the completion request -> the first `speech.say`:
+  prefill + generation to the first sentence) and `wait` (the rest: bus
+  hops, the input queue, jv-brain's own work), as two more rows in the
+  table and a second line per turn — the `>>> turn` line itself is
+  deliberately no wider, because nothing has yet read it on a real turn.
+
+  Two honesty rules, both enforced by tests. (1) A turn that ran TOOLS
+  publishes no gauge at all: tool round-trips — including a confirm window —
+  sit inside its `think`, and calling that time "the model" is how a number
+  stops meaning its label. The table then says `think unsplit` and names the
+  gauge it wanted rather than printing a guess. (2) `sys.health` carries no
+  `utterance_id`, so the gauge is bound to its turn by frame ORDER: jv-brain
+  publishes it immediately after the `speech.say` it measures, on the same
+  connection, and the counter is what tells a fresh gauge from the same
+  number re-stated on the next periodic heartbeat. The first count a tap
+  sees is recorded and not consumed — it may describe a turn from before the
+  tap connected, and a measurement may not guess.
+
+  `jv health --check` is now the gauge's SECOND reader: its `llm` line adds
+  `first_say=<ms> turn_age=<s>` beside the rung, so "is generation slow right
+  now?" can be asked without starting a tap and speaking to the machine. The
+  age is the load-bearing half. jv-brain re-states the same number on every
+  periodic heartbeat for the rest of the process's life, so a brain nobody has
+  spoken to since breakfast would otherwise read as one that just took 412 ms.
+  The counter decides: it rose inside the window and the age is a measurement
+  (`turn_age=1.5s`), or it did not and the only honest statement is a lower
+  bound (`turn_age>=6.0s`). A count going BACKWARDS is jv-brain restarted, not
+  a newer turn, and starts the window over. Note the age dates the last
+  DIVISIBLE turn — a turn that ran tools published no gauge — which is why the
+  field is `turn_age` and not "idle".
+
   **UPDATE 2026-09-23 (308e12b): streaming reply — the perceived-latency
   fix.** jv-brain now streams the llama completion and speaks each sentence
   as it closes (SentenceChunker → one speech.say per sentence, shared

@@ -1,0 +1,40 @@
+// Ease — the HUD's one way to make a value move (PLAN A7).
+//
+// §06: "ease toward target over ~200ms (never raw pose)". A HUD that
+// assigns a sensor value straight to a visual property twitches; a HUD
+// whose every element hand-rolls its own Behavior eventually has one that
+// forgot the reduced-motion switch. So there is one component, used as a
+// property interceptor on whatever is allowed to move:
+//
+//     Text { color: Bus.linkUp ? Theme.text2 : Theme.text3
+//            Ease on color {} }
+//
+//     Rectangle { opacity: shown ? 1 : 0
+//                 Ease on opacity { base: Theme.fadeInMs } }
+//
+// It is a PropertyAnimation rather than a NumberAnimation on purpose: the
+// same component then eases colours, which is most of what a HUD settles.
+//
+// The gate cannot be worked around from the outside — `base` is a token in
+// milliseconds, but the duration that reaches the animation is always
+// Motion.ms(base), so a caller can choose how long a move takes and never
+// whether it happens. With motion suppressed the Behavior is disabled
+// outright, so the value is assigned directly and no frame is rendered.
+import QtQuick
+
+Behavior {
+  id: root
+
+  // Which §06 duration this move takes, before gating. Default: the ease.
+  property real base: Theme.easeMs
+
+  enabled: Motion.animate
+
+  animation: PropertyAnimation {
+    duration: Motion.ms(root.base)
+    // Decelerate into the target: the value arrives without overshoot and
+    // without a bounce, which reads as a signal settling rather than as an
+    // effect playing.
+    easing.type: Easing.OutCubic
+  }
+}
