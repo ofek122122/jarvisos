@@ -71,6 +71,10 @@ enum Cmd {
     /// voice), hold (its endpoint wait), respond (ASR + brain + bus) — so
     /// the machine's share can be read apart from your own speaking time.
     /// Spans that were not measured print as `?`, never as a zero.
+    ///
+    /// A turn that ran a TOOL gets a second line saying how much of its
+    /// think jv-act held — the tool's execution and, for a confirming tool,
+    /// the window it waited for your answer in.
     Tap {
         #[arg(long)]
         latency: bool,
@@ -275,6 +279,28 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
                     }
+                    // jv-brain asking jv-act for a tool, and jv-act's
+                    // answer. Both sit INSIDE `think`, threaded by
+                    // request_id, and together they are the one part of a
+                    // tool turn's think that is not jv-brain's
+                    // (cli::Utterances::tool_span). No new publisher and no
+                    // schema change — the same free seam hear/think had.
+                    "intent.action" => {
+                        let (Some(utt), Some(rid)) = (
+                            cli::get_str(body, "utterance_id"),
+                            cli::get_str(body, "request_id"),
+                        ) else {
+                            // `utterance_id` is optional: an action with no
+                            // voice turn behind it belongs to no turn here.
+                            return;
+                        };
+                        utts.acted(&utt, &rid, ts);
+                    }
+                    "action.result" => {
+                        if let Some(rid) = cli::get_str(body, "request_id") {
+                            utts.act_done(&rid, ts);
+                        }
+                    }
                     "speech.say" => {
                         if let Some(id) = cli::get_str(body, "in_reply_to_utterance") {
                             // Only the FIRST reply frame: a streamed reply is
@@ -286,6 +312,12 @@ async fn main() -> anyhow::Result<()> {
                             // number it exists to report.
                             if let Some(turn) = utts.reply(&id, ts, hold_s) {
                                 println!(">>> {}", turn.line(&id));
+                                // Its own line, not a seventh number on the
+                                // one above: that line has to survive a
+                                // terminal, and most turns run no tool.
+                                if let Some(line) = turn.tool_line(&id) {
+                                    println!(">>> {line}");
+                                }
                                 turns.push(&turn, &id);
                             }
                         }

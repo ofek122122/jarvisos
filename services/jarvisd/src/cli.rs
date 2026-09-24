@@ -267,8 +267,31 @@ fn service_metrics<'a>(frame: &'a rmpv::Value, service: &str) -> Option<&'a rmpv
 ///     ~2.2 s; prefill fixed, generation not), and one number over both
 ///     cannot say which one a change moved.
 ///
-/// `think` splits once more, and this one needs a PUBLISHER rather than a
-/// frame that was already there. It contains the LLM AND the bus hop each
+/// `think` splits two ways, and the two are mutually exclusive per turn.
+///
+/// The first needs no new publisher at all. A turn that ran a TOOL spends
+/// part of its `think` inside jv-act, and both ends of that are already on
+/// the bus: jv-brain publishes `intent.action` and jv-act answers
+/// `action.result`, threaded by `request_id`, with the input `utterance_id`
+/// carried on the request. So:
+///
+///   * **tool** — of `think`: the time at least one `intent.action` was
+///     outstanding. jv-act's execution AND, when the tool is a confirming
+///     one, the whole confirmation window — which is 15 s by design and
+///     today looks exactly like the LLM being slow.
+///
+/// It is the UNION of the round trips and not their sum, because two
+/// requests outstanding at once are one moment of jv-act's time; and not
+/// the bracket from the first request to the last result either, because
+/// jv-brain runs a completion between serial calls and that time is not
+/// jv-act's. What it does NOT contain: a tool call that never reached
+/// jv-act — a hallucinated name, unparseable arguments, or one past the
+/// per-turn cap — is answered inside jv-brain and publishes no
+/// `intent.action`, so its time stays in the rest of `think`, where it
+/// belongs.
+///
+/// The second split needs a PUBLISHER rather than a frame that was already
+/// there, and applies to a turn that ran NO tool. It contains the LLM AND the bus hop each
 /// way AND however long the transcript sat in jv-brain's input queue, and
 /// the span PHASE1-STATUS wants to optimise is the model's alone. Nothing on
 /// the bus marks the moment the completion request went out, because only
@@ -279,6 +302,10 @@ fn service_metrics<'a>(frame: &'a rmpv::Value, service: &str) -> Option<&'a rmpv
 ///     LLM's prefill and generation up to the first sentence closing.
 ///   * **wait** — `think` less `model`: the two bus hops, the input queue,
 ///     and jv-brain's own work before the model ran.
+///
+/// A turn that ran tools publishes no such gauge at all (jv-brain states it
+/// only for a first word that came straight out of the first completion), so
+/// `wait`/`model` and `tool` never describe the same turn.
 ///
 /// Those two live on `TurnStats` and not on this type, because the gauge
 /// arrives one frame AFTER the turn is reported — a turn is printed the
@@ -311,6 +338,15 @@ pub struct Turn {
     /// The final `audio.transcript` -> first speech.say: jv-brain to its
     /// first word. The second half of `respond`.
     pub think_ms: Option<f64>,
+    /// Of `think`: how long at least one `intent.action` was outstanding —
+    /// jv-act's share, confirmation window included. None when the turn ran
+    /// no tool, and also when it ran one this tap could not time (see
+    /// `tool_calls`).
+    pub tool_ms: Option<f64>,
+    /// How many `intent.action` frames this tap saw for the turn. Kept
+    /// beside `tool_ms` because "no tool ran" and "a tool ran and could not
+    /// be timed" are different facts and both print `tool=?`.
+    pub tool_calls: usize,
 }
 
 impl Turn {
@@ -343,6 +379,40 @@ impl Turn {
             ms(self.think_ms),
         )
     }
+
+    /// The follow-up line for a turn whose `think` jv-act was inside, or
+    /// None when there is nothing to say.
+    ///
+    /// Its own line rather than a seventh number on `line()`: that line is
+    /// already six numbers wide and has to survive a terminal, and this one
+    /// describes a minority of turns. Same shape as the `wait`/`model` split
+    /// jv-brain's gauge prints, for the same reason.
+    pub fn tool_line(&self, id: &str) -> Option<String> {
+        let (think, tool) = (self.think_ms?, self.tool_ms?);
+        let plural = if self.tool_calls == 1 { "" } else { "s" };
+        Some(format!(
+            "turn {id}: think={think:.0}ms includes tool={tool:.0}ms over {} call{plural} (jv-act)",
+            self.tool_calls
+        ))
+    }
+}
+
+/// How many `intent.action` frames one turn may record before this stops
+/// counting.
+///
+/// jv-brain caps EXECUTIONS at 5 per turn, but its tool loop has no round
+/// cap (optimization backlog #5), so a stuck model can publish requests for
+/// as long as the turn lasts. `jv tap` is meant to be left running for
+/// hours, and a vector that grows with a wedged turn is the one shape it
+/// must not have. Past the cap the turn keeps its count and loses its
+/// measurement: a number we stopped taking is not a short number.
+pub const ACTS_PER_TURN: usize = 32;
+
+/// One `intent.action` and the `action.result` answering it, if it came.
+struct Act {
+    request_id: String,
+    sent: f64,
+    done: Option<f64>,
 }
 
 /// Where one input utterance's boundaries are collected until its reply
@@ -354,6 +424,10 @@ struct Utt {
     end: Option<f64>,
     /// The final `audio.transcript` — the seam between ASR and the brain.
     heard: Option<f64>,
+    /// The tools this turn asked jv-act for, in the order they were asked.
+    acts: Vec<Act>,
+    /// Set when `acts` hit `ACTS_PER_TURN` and recording stopped.
+    acts_overflowed: bool,
     reported: bool,
 }
 
@@ -385,11 +459,20 @@ pub struct Utterances {
     utts: HashMap<String, Utt>,
     order: VecDeque<String>,
     cap: usize,
+    /// `request_id` -> `utterance_id`, because `action.result` carries only
+    /// the former. Swept when its utterance is evicted: it is the one map
+    /// here not keyed by utterance, so nothing else bounds it.
+    reqs: HashMap<String, String>,
 }
 
 impl Utterances {
     pub fn with_capacity(cap: usize) -> Self {
-        Self { utts: HashMap::new(), order: VecDeque::new(), cap: cap.max(1) }
+        Self {
+            utts: HashMap::new(),
+            order: VecDeque::new(),
+            cap: cap.max(1),
+            reqs: HashMap::new(),
+        }
     }
 
     /// `audio.vad` `speech_start` for `id`, at envelope `ts`.
@@ -413,6 +496,62 @@ impl Utterances {
         }
     }
 
+    /// An `intent.action` naming `utterance_id`, at envelope `ts`: jv-brain
+    /// asking jv-act for a tool inside this turn.
+    ///
+    /// Like the ASR seam and unlike the two boundaries, this does NOT create
+    /// an utterance — only `audio.vad` says a turn happened, and an action
+    /// with no turn around it is jv-act serving something that was never a
+    /// voice turn at all (`utterance_id` is optional on the schema for
+    /// exactly that reason).
+    pub fn acted(&mut self, utterance_id: &str, request_id: &str, ts: f64) {
+        // An absent id and an empty one are the same fact — the frame named
+        // nobody — and the guard lives HERE rather than only in the caller
+        // that unwraps the field, so a reader cannot re-introduce it by
+        // defaulting the Option away.
+        if utterance_id.is_empty() || request_id.is_empty() {
+            return;
+        }
+        let Some(u) = self.utts.get_mut(utterance_id) else { return };
+        if let Some(a) = u.acts.iter_mut().find(|a| a.request_id == request_id) {
+            // A re-delivered request is the same moment in the turn, not a
+            // second tool call. The EARLIEST ts, like every other anchor
+            // here: a request is when jv-brain asked, not when this process
+            // got round to the frame.
+            a.sent = a.sent.min(ts);
+            return;
+        }
+        if u.acts.len() >= ACTS_PER_TURN {
+            u.acts_overflowed = true;
+            return;
+        }
+        u.acts.push(Act { request_id: request_id.to_string(), sent: ts, done: None });
+        self.reqs.insert(request_id.to_string(), utterance_id.to_string());
+    }
+
+    /// The `action.result` for `request_id`, at envelope `ts`.
+    ///
+    /// Joined through the `intent.action` that named the utterance, because
+    /// the result frame names none. A result for a request this tap never
+    /// saw belongs to no turn it can name, and is dropped rather than
+    /// attached to whichever turn happens to be open.
+    pub fn act_done(&mut self, request_id: &str, ts: f64) {
+        if request_id.is_empty() {
+            return;
+        }
+        let Some(utt) = self.reqs.get(request_id) else { return };
+        let Some(u) = self.utts.get_mut(utt) else { return };
+        if let Some(a) = u.acts.iter_mut().find(|a| a.request_id == request_id) {
+            Self::keep_earliest(&mut a.done, ts);
+        }
+    }
+
+    /// How many `request_id`s are still joined to a live utterance. Exists
+    /// so a test can assert the sweep, and so the bound is checkable.
+    pub fn pending_requests(&self) -> usize {
+        self.reqs.len()
+    }
+
     /// The EARLIEST ts seen for a boundary, not the first one delivered: the
     /// frames carrying an `utterance_id` need not arrive in ts order, and a
     /// boundary is a moment in the audio rather than a moment in this
@@ -426,12 +565,25 @@ impl Utterances {
 
     fn entry(&mut self, id: &str) -> &mut Utt {
         if !self.utts.contains_key(id) {
-            self.utts
-                .insert(id.to_string(), Utt { start: None, end: None, heard: None, reported: false });
+            self.utts.insert(
+                id.to_string(),
+                Utt {
+                    start: None,
+                    end: None,
+                    heard: None,
+                    acts: Vec::new(),
+                    acts_overflowed: false,
+                    reported: false,
+                },
+            );
             self.order.push_back(id.to_string());
             while self.order.len() > self.cap {
                 if let Some(old) = self.order.pop_front() {
-                    self.utts.remove(&old);
+                    if let Some(u) = self.utts.remove(&old) {
+                        for a in u.acts {
+                            self.reqs.remove(&a.request_id);
+                        }
+                    }
                 }
             }
         }
@@ -470,7 +622,54 @@ impl Utterances {
                 _ => None,
             },
             think_ms: seam.map(|h| (say_ts - h) * 1e3),
+            // `tool` is a share of `think`, so it needs the same seam: a
+            // share of a whole nobody measured is not a share, and the
+            // summary table indents it under the row it divides.
+            tool_ms: seam.and_then(|h| Self::tool_span(&u.acts, u.acts_overflowed, h, say_ts)),
+            tool_calls: u.acts.len(),
         })
+    }
+
+    /// The time at least one of `acts` was outstanding, given the `think`
+    /// span `[lo, hi]` it must lie inside.
+    ///
+    /// None — not zero, and not a partial total — when:
+    ///
+    ///   * **recording stopped** (`overflowed`): we know more tools ran than
+    ///     we kept, so any sum is short by an unknown amount;
+    ///   * **a request is unanswered**: it ran for a length nobody can state,
+    ///     and reporting the answered ones alone would look complete;
+    ///   * **a round trip runs backwards**, or falls outside the `think` it
+    ///     is supposed to be a share of. Same rule as the ASR seam and as
+    ///     jv-brain's own gauge: two frames that disagree about the order
+    ///     the pipeline ran in produce no third number.
+    ///
+    /// Otherwise the UNION of the intervals — overlapping requests are one
+    /// moment of jv-act's time, not two.
+    fn tool_span(acts: &[Act], overflowed: bool, lo: f64, hi: f64) -> Option<f64> {
+        if acts.is_empty() || overflowed {
+            return None;
+        }
+        let mut spans: Vec<(f64, f64)> = Vec::with_capacity(acts.len());
+        for a in acts {
+            let done = a.done?;
+            if !(a.sent <= done && a.sent >= lo && done <= hi) {
+                return None;
+            }
+            spans.push((a.sent, done));
+        }
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut union = 0.0;
+        let (mut open, mut close) = spans[0];
+        for (s, e) in &spans[1..] {
+            if *s > close {
+                union += close - open;
+                (open, close) = (*s, *e);
+            } else if *e > close {
+                close = *e;
+            }
+        }
+        Some((union + close - open) * 1e3)
     }
 
     pub fn len(&self) -> usize {
@@ -506,6 +705,7 @@ pub struct TurnStats {
     think: Vec<f64>,
     wait: Vec<f64>,
     model: Vec<f64>,
+    tool: Vec<f64>,
     respond: Vec<f64>,
     total: Vec<f64>,
     /// The id and `think` of the most recently reported turn, until
@@ -529,6 +729,9 @@ impl TurnStats {
         }
         if let Some(v) = t.think_ms {
             self.think.push(v);
+        }
+        if let Some(v) = t.tool_ms {
+            self.tool.push(v);
         }
         if let Some(v) = t.respond_ms {
             self.respond.push(v);
@@ -583,13 +786,14 @@ impl TurnStats {
             self.turns
         );
         out.push_str(&format!("{:<10} {:<31} {:>4} {:>9} {:>9} {:>9}\n", "span", "whose time it is", "n", "p50", "p95", "max"));
-        let rows: [(&str, &str, &Vec<f64>); 8] = [
+        let rows: [(&str, &str, &Vec<f64>); 9] = [
             ("spoke", "you, talking", &self.spoke),
             ("hold", "jv-ears' endpoint wait", &self.hold),
             ("hear", "jv-ears' ASR", &self.hear),
             ("think", "jv-brain, to its first word", &self.think),
             ("  wait", "of think: before the model ran", &self.wait),
             ("  model", "of think: the LLM itself", &self.model),
+            ("  tool", "of think: jv-act ran the tool", &self.tool),
             ("respond", "hear + think: ASR + brain + bus", &self.respond),
             ("total", "speech start -> first word", &self.total),
         ];
@@ -616,6 +820,11 @@ impl TurnStats {
             out.push_str(&format!(
                 "--- think unsplit: no jv-brain heartbeat carried `{BRAIN_FIRST_SAY_METRIC}` for a\n    reported turn, so `think` stays the model plus the bus hops and the queueing\n    around it. (jv-brain states the gauge only for a turn whose first word came\n    straight out of the first completion — a turn that ran tools has tool time\n    inside `think`, and calling that the model would be a lie.)\n"
             ));
+        }
+        if !self.tool.is_empty() {
+            out.push_str(
+                "--- tool is `intent.action` -> `action.result`: jv-act running it AND, for a\n    confirming tool, the whole window it waited for your answer in — 15 s by\n    design, never spoken, and otherwise indistinguishable from a slow LLM. It\n    is the UNION of the round trips, so overlapping calls count once and the\n    completions jv-brain runs between serial calls are not in it. A call that\n    never reached jv-act (a name it invented, arguments it could not write, or\n    one past its own per-turn cap) publishes no `intent.action`, and that time\n    stays in the rest of `think`, where it was spent.\n",
+            );
         }
         if self.spoke.is_empty() {
             out.push_str(&format!(
@@ -2057,6 +2266,304 @@ mod tests {
         u.started("t", start);
         u.ended("t", end);
         u.reply("t", say, hold_s).expect("a turn")
+    }
+
+
+    /// Build a turn that ran tools, the way `Utterances` would.
+    ///
+    /// `acts` are `(request_id, sent, done)` — the `intent.action` ts and the
+    /// `action.result` ts answering it. `done: None` is a request still
+    /// outstanding when the first word arrived.
+    fn turn_with_tools(
+        start: f64,
+        end: f64,
+        heard: f64,
+        say: f64,
+        acts: &[(&str, f64, Option<f64>)],
+    ) -> Turn {
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", start);
+        u.ended("t", end);
+        u.heard("t", heard);
+        for (rid, sent, done) in acts {
+            u.acted("t", rid, *sent);
+            if let Some(d) = done {
+                u.act_done(rid, *d);
+            }
+        }
+        u.reply("t", say, None).expect("a turn")
+    }
+
+    #[test]
+    fn a_tool_turns_think_is_divided_by_the_round_trip_to_jv_act() {
+        // `think` is the transcript -> the first word, and for a tool turn
+        // it holds two completions with jv-act's work between them. Both
+        // ends of that work are already on the bus: jv-brain publishes
+        // `intent.action` and jv-act answers `action.result`.
+        let t = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(18.0))]);
+        about(t.think_ms, 6000.0);
+        about(t.tool_ms, 3000.0);
+        assert_eq!(t.tool_calls, 1);
+        // The span is INSIDE think, which is what lets it be read as a share.
+        assert!(t.tool_ms.unwrap() <= t.think_ms.unwrap());
+    }
+
+    #[test]
+    fn a_turn_that_ran_no_tool_has_no_tool_span_rather_than_a_zero() {
+        let t = turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5));
+        assert_eq!(t.tool_ms, None, "a span that did not happen is not 0 ms");
+        assert_eq!(t.tool_calls, 0);
+        assert_eq!(t.tool_line("t"), None);
+    }
+
+    #[test]
+    fn two_tool_calls_are_the_time_jv_act_held_and_not_the_gap_between_them() {
+        // jv-brain runs tool calls serially and thinks between them, so the
+        // bracket from the first request to the last result would charge
+        // jv-act for a completion it never saw.
+        let t = turn_with_tools(
+            10.0,
+            13.0,
+            14.0,
+            30.0,
+            &[("r1", 15.0, Some(17.0)), ("r2", 25.0, Some(26.0))],
+        );
+        about(t.think_ms, 16000.0);
+        about(t.tool_ms, 3000.0);
+        assert_eq!(t.tool_calls, 2);
+    }
+
+    #[test]
+    fn overlapping_tool_calls_are_counted_once() {
+        // The union, not the sum: two requests outstanding at the same
+        // moment are one moment of jv-act's time, and summing them could
+        // produce a `tool` larger than the `think` containing it.
+        let t = turn_with_tools(
+            10.0,
+            13.0,
+            14.0,
+            30.0,
+            &[("r1", 15.0, Some(20.0)), ("r2", 16.0, Some(22.0))],
+        );
+        about(t.tool_ms, 7000.0);
+        assert_eq!(t.tool_calls, 2);
+    }
+
+    #[test]
+    fn a_request_seen_twice_is_one_tool_call_at_its_earliest_ts() {
+        for pair in [[15.0, 15.5], [15.5, 15.0]] {
+            let t = turn_with_tools(
+                10.0,
+                13.0,
+                14.0,
+                20.0,
+                &[("r1", pair[0], None), ("r1", pair[1], Some(18.0))],
+            );
+            assert_eq!(t.tool_calls, 1, "one request_id is one call");
+            about(t.tool_ms, 3000.0);
+        }
+    }
+
+    #[test]
+    fn a_request_still_outstanding_when_the_reply_landed_is_refused() {
+        // A tool whose result this tap never saw ran for an unknown length,
+        // and reporting only the answered calls would understate jv-act's
+        // share while looking like a complete measurement.
+        let t = turn_with_tools(
+            10.0,
+            13.0,
+            14.0,
+            30.0,
+            &[("r1", 15.0, Some(17.0)), ("r2", 25.0, None)],
+        );
+        assert_eq!(t.tool_ms, None);
+        assert_eq!(t.tool_calls, 2, "we still know two tools ran");
+        assert_eq!(t.tool_line("t"), None);
+    }
+
+    #[test]
+    fn a_tool_span_outside_the_think_it_divides_is_refused() {
+        // Same rule as the ASR seam and as jv-brain's own gauge: a sub-span
+        // that does not fit inside the span it is a share of means two
+        // clocks disagree, and two numbers that disagree produce no third.
+        let before = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 13.5, Some(18.0))]);
+        assert_eq!(before.tool_ms, None, "jv-act cannot have run before ears finished");
+        let after = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(20.5))]);
+        assert_eq!(after.tool_ms, None, "nor after the first word answering it");
+        // And a result that precedes its own request.
+        let backwards = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 18.0, Some(15.0))]);
+        assert_eq!(backwards.tool_ms, None);
+    }
+
+    #[test]
+    fn a_tool_turn_whose_seam_is_unknown_has_nothing_to_divide() {
+        // No final transcript, so `think` was never measured. The round trip
+        // is still two frames this tap saw, but a share of an unknown whole
+        // is not a share, and the table indents `tool` under `think`.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.acted("t", "r1", 15.0);
+        u.act_done("r1", 18.0);
+        let t = u.reply("t", 20.0, None).expect("a turn");
+        assert_eq!(t.think_ms, None);
+        assert_eq!(t.tool_ms, None);
+    }
+
+    #[test]
+    fn an_action_that_names_no_utterance_belongs_to_no_turn() {
+        // `utterance_id` is optional on `intent.action` — a tool jv-act ran
+        // for the CLI has no voice turn behind it. And like the ASR seam, an
+        // action never CONJURES an utterance: only `audio.vad` says a turn
+        // happened.
+        let mut u = Utterances::with_capacity(4);
+        u.acted("never-bounded", "r1", 15.0);
+        u.act_done("r1", 18.0);
+        assert!(u.is_empty(), "an action must not conjure an utterance");
+        assert!(u.reply("never-bounded", 20.0, None).is_none());
+    }
+
+    #[test]
+    fn a_frame_that_named_nobody_is_refused_even_where_a_turn_answers_to_it() {
+        // An `intent.action` with no `utterance_id` belongs to no turn. The
+        // caller reads the field as an Option and a missing one never gets
+        // here — but a field PRESENT and empty does, and "" must not become
+        // a key that an equally empty `audio.vad` could have created.
+        let mut u = Utterances::with_capacity(4);
+        u.started("", 10.0);
+        u.ended("", 13.0);
+        u.heard("", 14.0);
+        u.acted("", "r1", 15.0);
+        u.act_done("r1", 18.0);
+        let t = u.reply("", 20.0, None).expect("a turn");
+        assert_eq!(t.tool_calls, 0, "an action naming nobody named nobody");
+        assert_eq!(t.tool_ms, None);
+
+        // And the same for a request nothing can be threaded through.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.acted("t", "", 15.0);
+        assert_eq!(u.pending_requests(), 0);
+        assert_eq!(u.reply("t", 20.0, None).expect("a turn").tool_calls, 0);
+    }
+
+    #[test]
+    fn a_result_for_a_request_this_tap_never_saw_is_dropped() {
+        // `action.result` carries only `request_id`, so the join runs
+        // through the `intent.action` that named the utterance. A tap that
+        // started mid-turn sees the result and not the request, and must not
+        // attach it to whatever turn is open.
+        let t = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[]);
+        assert_eq!(t.tool_calls, 0);
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.act_done("orphan", 18.0);
+        let t = u.reply("t", 20.0, None).expect("a turn");
+        assert_eq!(t.tool_calls, 0);
+        assert_eq!(t.tool_ms, None);
+    }
+
+    #[test]
+    fn the_tool_line_names_the_share_and_who_spent_it() {
+        let t = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(18.0))]);
+        let line = t.tool_line("utt-7").expect("a tool line");
+        assert!(line.contains("turn utt-7:"), "{line}");
+        assert!(line.contains("think=6000ms"), "{line}");
+        assert!(line.contains("tool=3000ms"), "{line}");
+        assert!(line.contains("1 call"), "{line}");
+        assert!(!line.contains("1 calls"), "{line}");
+        assert!(line.contains("jv-act"), "{line}");
+        // The `>>> turn` line itself stays the width it already was.
+        assert!(!t.line("utt-7").contains("tool="), "{}", t.line("utt-7"));
+
+        let two = turn_with_tools(10.0, 13.0, 14.0, 30.0, &[("r1", 15.0, Some(17.0)), ("r2", 25.0, Some(26.0))]);
+        assert!(two.tool_line("utt-7").expect("a tool line").contains("2 calls"));
+    }
+
+    #[test]
+    fn a_turn_that_never_stops_calling_tools_stops_being_measured() {
+        // The runaway tool loop is a real, filed failure mode (optimization
+        // backlog #5), and a tap left running for hours cannot grow a vector
+        // per stuck turn. Past the cap we stop recording, and a measurement
+        // we stopped taking is refused rather than reported short.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        for i in 0..(ACTS_PER_TURN + 5) {
+            let rid = format!("r{i}");
+            u.acted("t", &rid, 15.0 + i as f64 * 1e-3);
+            u.act_done(&rid, 15.0 + i as f64 * 1e-3 + 1e-4);
+        }
+        let t = u.reply("t", 20.0, None).expect("a turn");
+        assert_eq!(t.tool_calls, ACTS_PER_TURN, "counting stopped at the cap");
+        assert_eq!(t.tool_ms, None, "and a count that stopped measures nothing");
+    }
+
+    #[test]
+    fn a_requests_join_dies_with_the_utterance_it_belonged_to() {
+        // The request_id -> utterance map is the one structure here that is
+        // not keyed by utterance, so it has to be swept when an utterance is
+        // evicted or `jv tap` grows one entry per tool call, forever.
+        let mut u = Utterances::with_capacity(2);
+        for i in 0..6 {
+            let utt = format!("utt-{i}");
+            u.started(&utt, i as f64);
+            u.acted(&utt, &format!("r{i}"), i as f64 + 0.1);
+        }
+        assert_eq!(u.len(), 2);
+        assert_eq!(u.pending_requests(), 2, "evicted turns take their requests with them");
+    }
+
+    #[test]
+    fn turn_summary_shows_jv_acts_share_of_a_tool_turn() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(18.0))]), "t");
+        let out = s.summary();
+        let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("no {w} row in\n{out}"));
+        assert!(at("think") < at("tool"), "a share is listed under its whole:\n{out}");
+        assert!(at("tool") < at("respond"), "{out}");
+        assert!(out.contains("3000ms"), "{out}");
+        assert!(out.contains("jv-act"), "{out}");
+        // A turn that ran tools publishes no first-say gauge, so the row it
+        // would have filled must not appear instead.
+        assert!(!out.contains("\n  model"), "{out}");
+    }
+
+    #[test]
+    fn every_summary_row_stays_inside_the_columns_it_is_printed_in() {
+        // The table is read in a terminal, and a `whose time it is` longer
+        // than its column silently shoves the three numbers beside it out of
+        // line for that row only — which reads as a broken number rather
+        // than as a long label. This is the check the `tool` row's first
+        // label failed, and it belongs to every row after it.
+        let mut s = TurnStats::default();
+        s.push(&turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(18.0))]), "a");
+        s.push(&turn_with_seam(20.0, 23.0, 24.0, 24.3, Some(1.5)), "b");
+        s.brain_split(210.0);
+        let out = s.summary();
+        let rows: Vec<&str> = out
+            .lines()
+            .filter(|l| !l.starts_with("---") && !l.starts_with("    "))
+            .collect();
+        assert!(rows.len() > 8, "not every row is here:\n{out}");
+        let header = rows[0].len();
+        for r in &rows {
+            assert_eq!(r.len(), header, "row is not the header's width:\n{out}");
+        }
+    }
+
+    #[test]
+    fn a_summary_with_no_tool_turn_in_it_has_no_tool_row() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5)), "t");
+        let out = s.summary();
+        assert!(!out.contains("\n  tool"), "{out}");
+        assert!(!out.contains("jv-act"), "{out}");
     }
 
     #[test]
