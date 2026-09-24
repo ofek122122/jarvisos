@@ -140,6 +140,45 @@ def rung_budget_bytes(rung: Rung) -> int:
     return WEIGHT_BYTES[rung.model_file] + rung.kv_bytes() + COMPUTE_OVERHEAD_BYTES
 
 
+def gpu_floor_bytes(ladder: tuple[Rung, ...] = LADDER) -> Optional[int]:
+    """The least free VRAM at which `pick_rung` would still put Jarvis on
+    the card — the floor under the whole GPU half of the ladder.
+
+    None when the ladder has no GPU rung at all: there is then no figure
+    that would buy a GPU brain, and 0 would read as "any card will do".
+
+    A min() rather than "the last GPU rung", even though a test pins the
+    budgets as strictly decreasing: this number is a threshold someone
+    will act on, and a reordered ladder must not be able to publish a
+    figure that is not the floor.
+
+    This is a statement about the NEXT launch, not about the one that is
+    running — which is why it may be quoted even though `describe_rung`
+    refuses to re-derive the label of a rung another process chose. The
+    label is a fact about a choice already made (and only the launcher
+    that made it may word it); the floor is what jv-llm-launch would
+    require if it were started again now, and it is this ladder — the
+    one in the closure the unit will exec — that would require it.
+    """
+    budgets = [rung_budget_bytes(rung) for rung in ladder if rung.gpu]
+    return min(budgets) + SAFETY_MARGIN_BYTES if budgets else None
+
+
+def gpu_floor_mb(ladder: tuple[Rung, ...] = LADDER) -> Optional[int]:
+    """`gpu_floor_bytes` in whole MiB, rounded UP.
+
+    Whole MiB because that is the unit everything else on the bus counts
+    free VRAM in (`context.system.gpu_vram_free_mb`, nvidia-smi's own),
+    and a threshold in different units from the reading it is compared
+    against is a comparison nobody can make. Up rather than nearest,
+    because rounding down publishes a floor a launch would fall through
+    — a HUD saying "it fits now" about a brain that would land back on
+    the CPU.
+    """
+    floor = gpu_floor_bytes(ladder)
+    return None if floor is None else -(-floor // (1024 * 1024))
+
+
 def pick_rung(free_vram: Optional[int], ladder: tuple[Rung, ...] = LADDER) -> Rung:
     """First rung that fits free VRAM minus the safety margin; the CPU
     rung is the unconditional floor."""

@@ -25,7 +25,15 @@ from jarvis_bus import BusClient
 
 from . import onboarding
 from .config import BrainConfig
-from .launcher import MEASURED, UNREADABLE, RungRecord, describe_rung, read_rung_file
+from .launcher import (
+    ABSENT,
+    MEASURED,
+    UNREADABLE,
+    RungRecord,
+    describe_rung,
+    gpu_floor_mb,
+    read_rung_file,
+)
 from .profile import Profile
 from .tools import load_tools, openai_tool_defs
 
@@ -95,7 +103,16 @@ def rung_finding(rec: RungRecord) -> Optional[str]:
             f": {rec.vram.detail}" if rec.vram.detail else ""
         )
     else:
+        # Both halves of the comparison, because `jv health` prints notes
+        # and not metrics: a reader who is told only "943 MiB free" still
+        # has to know Ofek's ladder to tell a busy card from a free one
+        # nobody has restarted jv-llm against. The requirement is quoted
+        # only here, where there is a reading to put it beside — next to
+        # a blind launch it would be a number with nothing to compare it
+        # with. Unit said once; both figures are MiB.
         why = f"{rec.vram.free_mb} MiB VRAM free at launch"
+        if (floor := gpu_floor_mb()) is not None:
+            why += f", {floor} needed"
     if fell:
         return f"llm on {where} — no GPU layers, replies will be slow; {why}"
     return f"llm on {where}, chosen blind — {why}"
@@ -860,7 +877,22 @@ class BrainService:
         metrics: dict = {}
         if rec.index is not None:
             metrics["llm_rung"] = float(rec.index)  # Ofek: rung visible in jv health
-            metrics["llm_gpu"] = 1.0 if rec.backend == "gpu" else 0.0
+            on_gpu = rec.backend == "gpu"
+            metrics["llm_gpu"] = 1.0 if on_gpu else 0.0
+            # What it would take to get the brain back onto the card (B45).
+            # The HUD can quote free VRAM (B40) and may not know this
+            # ladder (invariant 1), so without this gauge "5 GiB free and
+            # still on the CPU" is a conclusion a reader draws and cannot
+            # check — and on this ladder it is the wrong one, because the
+            # cheapest GPU rung wants 5424 MiB of a 6144 MiB card.
+            # Published only while something is waiting on it: a brain
+            # already on the GPU has met the requirement, and a machine
+            # with no card at all (vram=absent) has no card to free, so a
+            # floor there would send a reader hunting VRAM this machine
+            # has never had.
+            if not on_gpu and rec.vram.source != ABSENT:
+                if (floor := gpu_floor_mb()) is not None:
+                    metrics["llm_gpu_floor_mb"] = float(floor)
         if self._hallucinated_calls:
             metrics["hallucinated_tool_calls"] = float(self._hallucinated_calls)
         if self._barge_ins:

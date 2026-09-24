@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from jv_brain.config import LADDER, BrainConfig
+from jv_brain.config import LADDER, SAFETY_MARGIN_BYTES, BrainConfig
 from jv_brain.launcher import (
     ABSENT,
     MEASURED,
@@ -21,11 +21,15 @@ from jv_brain.launcher import (
     VramReading,
     VramUnreadable,
     describe_rung,
+    gpu_floor_bytes,
+    gpu_floor_mb,
     launch,
     parse_nvidia_smi_vram_mb,
+    pick_rung,
     probe_free_vram_bytes,
     read_rung_file,
     read_vram,
+    rung_budget_bytes,
     write_rung_file,
 )
 
@@ -421,3 +425,144 @@ async def test_a_hand_edited_rung_file_still_reports_the_fall(tmp_path: Path):
     await svc.close()
     _, body = bus.published[-1]
     assert body["state"] == "degraded" and "943" in body["notes"]
+
+
+# --- what a GPU rung would cost --------------------------------------
+#
+# B45. The HUD can quote the free-VRAM figure (B40) and cannot judge it:
+# the ladder's requirements live in this package and invariant 1 says a
+# consumer may not know them. So the one sentence a reader still has to
+# supply — "5 GiB free and STILL on the CPU?" — is the one nobody can
+# check, and on this ladder it is wrong: the cheapest GPU rung needs
+# 5424 MiB, which is 5.3 GiB of a 6 GiB card. Publishing the floor is
+# how the HUD stops guessing.
+
+
+def test_the_floor_is_the_cheapest_gpu_rung_plus_the_margin():
+    """`pick_rung` takes the FIRST rung that fits, so the last GPU rung
+    is the cheapest one — the floor under the whole GPU half of the
+    ladder. Taken as a min() rather than as LADDER[-2], so a reordered
+    ladder cannot silently publish a figure that is not the floor."""
+    cheapest = min(rung_budget_bytes(r) for r in LADDER if r.gpu)
+    assert gpu_floor_bytes() == cheapest + SAFETY_MARGIN_BYTES
+
+
+def test_the_floor_is_the_figure_pick_rung_actually_turns_on():
+    """The number is only worth publishing if it is the same threshold
+    the launcher will apply on the next launch — one byte below it is a
+    CPU brain, and at it the GPU half of the ladder opens."""
+    floor = gpu_floor_bytes()
+    assert floor is not None
+    assert pick_rung(floor).gpu, "at the floor a GPU rung must be reachable"
+    assert not pick_rung(floor - 1).gpu, "below it the ladder falls to the CPU"
+
+
+def test_the_floor_in_mib_rounds_up_and_never_claims_an_early_fit():
+    """jv-context measures free VRAM in whole MiB, so the floor has to
+    be whole MiB too — rounded UP, because a figure rounded down is a
+    HUD saying "it fits now" about a launch that would fall straight
+    back to the CPU."""
+    floor_mb = gpu_floor_mb()
+    assert floor_mb == 5424, "Qwen3-8B Q4_K_S, 2k ctx, q8 KV + overhead + margin"
+    assert pick_rung(floor_mb * MB).gpu
+    assert not pick_rung((floor_mb - 1) * MB).gpu
+
+
+def test_a_ladder_with_no_gpu_rung_has_no_floor():
+    """There is no VRAM figure that would buy a GPU brain, so there is
+    no number to publish — None, never 0, which would read as "any card
+    at all will do"."""
+    cpu_only = tuple(r for r in LADDER if not r.gpu)
+    assert gpu_floor_bytes(cpu_only) is None
+    assert gpu_floor_mb(cpu_only) is None
+
+
+async def test_a_cpu_rung_publishes_what_a_gpu_rung_would_need(tmp_path: Path):
+    """ares: 943 MiB free of 6144, brain on the floor. The heartbeat now
+    carries both halves of the comparison, so the reader (and the HUD)
+    can tell "the card is busy" from "the card is free and nobody has
+    restarted jv-llm"."""
+    bus, svc = brain(
+        tmp_path,
+        "rung=4\nlabel=CPU fallback\nbackend=cpu\nfree_vram_mb=943\nvram=measured\n",
+    )
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert body["metrics"]["llm_gpu"] == 0.0
+    assert body["metrics"]["llm_gpu_floor_mb"] == 5424.0
+
+
+async def test_a_blind_fall_publishes_the_floor_too(tmp_path: Path):
+    """The launch was blind; the card is not. Whatever nvidia-smi would
+    not say at launch, a live reading can be compared with the floor
+    now."""
+    bus, svc = brain(
+        tmp_path,
+        "rung=4\nlabel=CPU fallback\nbackend=cpu\nfree_vram_mb=-1\n"
+        "vram=unreadable\nvram_note=nvidia-smi exited 9\n",
+    )
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert body["metrics"]["llm_gpu_floor_mb"] == 5424.0
+
+
+async def test_a_gpu_rung_publishes_no_floor(tmp_path: Path):
+    """Nothing is waiting on the card. A requirement already met,
+    restated every 5 s, is the all-day gauge nobody reads."""
+    bus, svc = brain(
+        tmp_path, "rung=1\nlabel=KV q8\nbackend=gpu\nfree_vram_mb=5800\nvram=measured\n"
+    )
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert "llm_gpu_floor_mb" not in body["metrics"]
+
+
+async def test_a_machine_with_no_card_publishes_no_floor(tmp_path: Path):
+    """There is no card to free. A floor here would invite a reader to
+    go looking for VRAM that this machine has never had — the same
+    invented shortage VramState refuses to draw (B40)."""
+    bus, svc = brain(tmp_path, "rung=4\nlabel=CPU fallback\nbackend=cpu\nvram=absent\n")
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert "llm_gpu_floor_mb" not in body.get("metrics", {})
+
+
+async def test_a_brain_that_has_read_no_rung_file_publishes_no_floor(tmp_path: Path):
+    """llama-server has not said anything yet. A floor without a rung is
+    a requirement for a launch nobody can describe."""
+    bus, svc = brain(tmp_path, "")
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert "llm_gpu_floor_mb" not in body.get("metrics", {})
+
+
+async def test_the_fall_says_how_much_the_gpu_needed(tmp_path: Path):
+    """`jv health` shows notes and not metrics, so the terminal reader
+    gets the comparison in words or not at all."""
+    bus, svc = brain(
+        tmp_path,
+        "rung=4\nlabel=CPU fallback\nbackend=cpu\nfree_vram_mb=943\nvram=measured\n",
+    )
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert "943 MiB VRAM free at launch, 5424 needed" in body["notes"]
+
+
+async def test_the_blind_note_quotes_no_requirement(tmp_path: Path):
+    """A requirement is only a finding next to a reading, and a blind
+    launch has none to put beside it."""
+    bus, svc = brain(
+        tmp_path,
+        "rung=4\nlabel=CPU fallback\nbackend=cpu\nfree_vram_mb=-1\n"
+        "vram=unreadable\nvram_note=nvidia-smi exited 9\n",
+    )
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert "5424" not in body["notes"], "nothing to compare it with"
