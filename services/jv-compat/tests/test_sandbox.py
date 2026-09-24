@@ -29,14 +29,20 @@ does not bind the system profile is still measurable.
 
 from __future__ import annotations
 
+import ctypes
+import fcntl
 import os
+import pty
+import select
 import shutil
 import subprocess
+import termios
 from pathlib import Path
 
 import pytest
 
 from jv_compat.prefix import (
+    SANDBOX_HOSTNAME,
     SANDBOX_PREFIX,
     bwrap_args,
     create_prefix_layout,
@@ -280,3 +286,207 @@ def test_nothing_is_bound_that_the_confinement_did_not_name(home, tmp_path):
             or any(d == r or d.startswith(r + "/") for r in allowed_roots)
         )
         assert ok, f"{d} is bound into an untrusted app's sandbox and nothing says why"
+
+
+# --------------------------------------------- the terminal, the IPC namespace,
+# --------------------------------------------- and the machine's name
+#
+# B63 left three bubblewrap flags out ON PURPOSE, with the reason written into
+# the argv: they belong in it, and none of them could be OBSERVED by a suite
+# that only knows how to run `/bin/sh` with pipes on both ends. A file that had
+# just finished paying for a confinement whose claims nobody ran was not going
+# to add three more. So each one lands here WITH the thing that watches it, and
+# every claim below is paired with a CONTROL that runs the SAME probe against
+# the SAME argv minus that one flag — because a fixture that cannot see the
+# unsafe behaviour would report the safe one no matter what the code did.
+
+
+def without(argv: list[str], *flags: str) -> list[str]:
+    """The same argv with one confinement flag (and its value) removed.
+
+    This is the control's whole mechanism, and the assertion at the end is
+    load-bearing twice over: it is how a control proves it was really testing
+    the absence of the flag, and it is what fails loudly if the flag ever
+    leaves `bwrap_args`."""
+    takes_a_value = {"--hostname": 1}
+    out, i = [], 0
+    while i < len(argv):
+        if argv[i] in flags:
+            i += 1 + takes_a_value.get(argv[i], 0)
+            continue
+        out.append(argv[i])
+        i += 1
+    assert len(out) < len(argv), f"{flags} is not in the confinement's argv at all"
+    return out
+
+
+def drain(master_fd: int) -> bytes:
+    """Everything that reached the TERMINAL, then hang it up."""
+    seen = b""
+    try:
+        while select.select([master_fd], [], [], 0.2)[0]:
+            chunk = os.read(master_fd, 4096)
+            if not chunk:
+                break
+            seen += chunk
+    except OSError:
+        pass  # EIO once the last slave fd is closed: the terminal is over
+    finally:
+        os.close(master_fd)
+    return seen
+
+
+def sh_on_a_tty(argv_tail: str, recipe_: Recipe, prefix: Path, *, drop=()):
+    """Run the confinement with a REAL terminal on stdin — the way a human
+    runs `jv-compat install`, which is a CLI (`main.py`), not only a unit —
+    and hand back both what the sandbox printed and what reached the terminal.
+
+    The child becomes the session leader and CLAIMS the pty before bwrap
+    starts, so the terminal is genuinely its controlling one; inheriting
+    pytest's (which in a headless run is none) would make the control vacuous.
+    """
+    argv = bwrap_args(recipe_, prefix, ["/bin/sh", "-c", argv_tail])
+    if drop:
+        argv = without(argv, *drop)
+    master, slave = pty.openpty()
+
+    def claim_the_terminal() -> None:  # in the child, before execvp
+        os.setsid()
+        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+    try:
+        proc = subprocess.run(
+            argv,
+            stdin=slave,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            preexec_fn=claim_the_terminal,
+        )
+    finally:
+        os.close(slave)
+    return proc, drain(master)
+
+
+# What a process asks for when it wants the terminal it was started from,
+# whatever that terminal is. Opening it is the capability; TIOCSTI is only the
+# most famous thing to do with it (and is off on this kernel —
+# `/proc/sys/dev/tty/legacy_tiocsti` is a host setting this repo does not own,
+# so the door is what gets measured, not that one burglar).
+REACH_FOR_THE_TERMINAL = (
+    'if echo INJECTED-FROM-THE-SANDBOX > /dev/tty 2>/dev/null;'
+    " then echo REACHED; else echo no-terminal; fi"
+)
+
+
+def test_the_sandbox_cannot_reach_the_terminal_the_install_was_started_from(home):
+    """An untrusted Windows installer must not be able to touch the terminal
+    the human is sitting at. With a controlling terminal it can write to it,
+    and on a host with `legacy_tiocsti` on it can push characters into that
+    terminal's INPUT — a command the user's shell runs after wine exits."""
+    p = create_prefix_layout("demo")
+    proc, terminal = sh_on_a_tty(REACH_FOR_THE_TERMINAL, recipe(), p)
+    assert proc.stdout.strip() == "no-terminal", proc.stderr.strip()
+    assert b"INJECTED" not in terminal, (
+        "the confined process wrote to the human's terminal: " + repr(terminal)
+    )
+
+
+def test_the_terminal_probe_can_see_a_sandbox_that_does_reach_it(home):
+    """The control, and it is the reason the test above means anything: the
+    same probe, the same argv, `--new-session` alone removed — and the bytes
+    arrive at the terminal."""
+    p = create_prefix_layout("demo")
+    proc, terminal = sh_on_a_tty(
+        REACH_FOR_THE_TERMINAL, recipe(), p, drop=("--new-session",)
+    )
+    assert proc.stdout.strip() == "REACHED", proc.stderr.strip()
+    assert b"INJECTED-FROM-THE-SANDBOX" in terminal
+
+
+@pytest.fixture
+def a_sysv_shm_segment():
+    """One SysV shared-memory segment, owned by this test.
+
+    The suite MAKES the thing it looks for rather than hoping the host has
+    one, which is exactly why B63 refused to ship `--unshare-ipc` blind."""
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    IPC_PRIVATE, IPC_CREAT, IPC_RMID = 0, 0o1000, 0
+    shmid = libc.shmget(IPC_PRIVATE, 4096, IPC_CREAT | 0o600)
+    if shmid < 0:
+        pytest.skip("this host would not give the test a SysV segment")
+    try:
+        yield shmid
+    finally:
+        libc.shmctl(shmid, IPC_RMID, None)
+
+
+READ_THE_IPC_TABLE = 'while IFS= read -r l; do echo "$l"; done < /proc/sysvipc/shm'
+
+
+def shm_ids(proc_sysvipc_shm: str) -> set[int]:
+    ids = set()
+    for line in proc_sysvipc_shm.splitlines()[1:]:  # drop the column header
+        fields = line.split()
+        if len(fields) >= 2 and fields[1].lstrip("-").isdigit():
+            ids.add(int(fields[1]))
+    return ids
+
+
+def test_the_app_cannot_see_the_machines_shared_memory(home, a_sysv_shm_segment):
+    """SysV IPC is a namespace, and a shared segment is a two-way channel
+    with whatever else on this machine holds it. Default deny means the app
+    gets its own empty one."""
+    p = create_prefix_layout("demo")
+    r = sh(READ_THE_IPC_TABLE, recipe(), p)
+    assert r.returncode == 0, r.stderr
+    assert a_sysv_shm_segment not in shm_ids(r.stdout)
+
+
+def test_the_ipc_probe_can_see_a_segment_when_the_namespace_is_shared(
+    home, a_sysv_shm_segment
+):
+    """The control: same segment, same reader, `--unshare-ipc` removed."""
+    p = create_prefix_layout("demo")
+    argv = without(bwrap_args(recipe(), p, ["/bin/sh", "-c", READ_THE_IPC_TABLE]),
+                   "--unshare-ipc")
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert a_sysv_shm_segment in shm_ids(r.stdout), (
+        "the probe cannot see a segment it made even with the namespace shared"
+    )
+
+
+READ_THE_HOSTNAME = 'read h < /proc/sys/kernel/hostname; echo "$h"'
+
+
+def test_the_app_does_not_learn_what_this_machine_is_called(home):
+    """Every prefix is cattle (§08) and every app sees the same machine: one
+    constant name, not `ares`. `--unshare-uts` is what makes `--hostname`
+    possible, and the constant is what makes it WORTH doing — a Windows
+    binary's first act is often to write down what it is running on."""
+    p = create_prefix_layout("demo")
+    real = Path("/proc/sys/kernel/hostname").read_text().strip()
+    # Stated as a premise rather than assumed, because the whole claim rests
+    # on it: a constant that HAPPENS to be this machine's name would make the
+    # assertion below true and the confinement pointless.
+    assert SANDBOX_HOSTNAME != real, (
+        f"this machine is called {real!r} — the sandbox's constant must not be"
+    )
+    r = sh(READ_THE_HOSTNAME, recipe(), p)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == SANDBOX_HOSTNAME
+    assert r.stdout.strip() != real
+
+
+def test_the_hostname_probe_reads_the_real_one_without_the_namespace(home):
+    """The control, and the honest half of the claim above: with the UTS
+    namespace shared the same read returns what the host actually calls
+    itself. (If that is already `SANDBOX_HOSTNAME`, this says less — which
+    is a fact about the host, not a hole in the test.)"""
+    p = create_prefix_layout("demo")
+    argv = without(bwrap_args(recipe(), p, ["/bin/sh", "-c", READ_THE_HOSTNAME]),
+                   "--unshare-uts", "--hostname")
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == Path("/proc/sys/kernel/hostname").read_text().strip()

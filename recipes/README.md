@@ -28,3 +28,12 @@ recipe is synthesized (deny network, private home).
 
 Successful installs should end with the recipe committed here — that's
 what makes the app reproducible on a fresh install (blueprint §08).
+
+## What a recipe cannot grant
+
+The rest of the confinement is not a grant and no recipe can widen it:
+the app gets its own PID, IPC and UTS namespaces, no controlling
+terminal (so an installer cannot reach the shell `jv-compat install` was
+typed into), and a fixed machine name — every prefix is told this
+computer is called `jarvis-sandbox`. An app that needs any of those back
+needs a reviewed change to `jv_compat.prefix`, not a line of TOML.

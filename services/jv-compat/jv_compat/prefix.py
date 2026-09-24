@@ -23,6 +23,14 @@ world-readable by design. The read-only set is therefore the store, the
 machine's `/etc`, whatever FHS stubs exist, and the system profile that
 resolves a bare `wine` on `PATH`. Nothing writable is shared except the
 prefix and what a recipe explicitly grants.
+
+WHAT IT DOES NOT GET, BEYOND FILES. Its own PID, IPC and UTS namespaces,
+no network unless granted, and — because a human runs `jv-compat install`
+from a shell — no controlling terminal. Every one of those is executed in
+`tests/test_sandbox.py`, each against a CONTROL that runs the same probe
+with that single flag removed: B63 found two fatal bugs in an argv that
+had been read many times and entered never, so a flag here lands with the
+thing that watches it or does not land.
 """
 
 from __future__ import annotations
@@ -35,6 +43,11 @@ from .recipes import Recipe
 # Where the app sees its own two things, always.
 SANDBOX_PREFIX = PurePosixPath("/jarvis/prefix")
 SANDBOX_INSTALLER_DIR = PurePosixPath("/jarvis/installer")
+
+# What the app thinks this computer is called. One constant for every prefix:
+# a Windows binary that writes down its host writes down the same nothing
+# every time, and `ares` is not an untrusted installer's business.
+SANDBOX_HOSTNAME = "jarvis-sandbox"
 
 # Read-only host paths, bound if they exist. Order is irrelevant — none of
 # them is inside another — but existence is not: `--ro-bind` on a missing
@@ -118,10 +131,21 @@ def bwrap_args(
         "bwrap",
         "--die-with-parent",
         "--unshare-pid",
-        # NOT --new-session / --unshare-ipc / --unshare-uts: they belong here
-        # and none of them can be OBSERVED from inside without a pty or a
-        # host-dependent fixture, and this file has just finished paying for
-        # a confinement whose claims nobody ran (PLAN B64).
+        # The terminal the human started this from is NOT the app's. Without
+        # a session of its own the confined process inherits the controlling
+        # terminal, can write to it, and on a kernel with `legacy_tiocsti` on
+        # can push characters into its INPUT — a command the user's shell
+        # runs the moment wine exits. `jv-compat install` is a CLI a human
+        # runs from a terminal (main.py), so this is not hypothetical. It
+        # costs nothing here because RealRunner pipes both streams and the
+        # install is silent: nothing inside ever wanted a tty.
+        "--new-session",
+        # SysV shared memory is a two-way channel with anything else on this
+        # machine holding a segment. Default deny means an empty table.
+        "--unshare-ipc",
+        # ...and the app is told the same nothing about this computer that
+        # every other prefix is told.
+        "--unshare-uts", "--hostname", SANDBOX_HOSTNAME,
         "--proc", "/proc",
         "--dev", "/dev",
     ]
