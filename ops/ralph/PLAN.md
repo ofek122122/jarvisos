@@ -1409,7 +1409,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       point in this loop's history before d55348b. Running the control for
       real then found B59. tools 266, was 254; 9 mutations, 9 caught.)
 
-- [ ] B59. **What else could the gate not reach?** B58's control was run for
+- [x] B59. **What else could the gate not reach?** B58's control was run for
       real and its first finding was not about the harness: a canary on
       `services/pylib/jarvis_bus/client.py` killed jv-guard's suite (so the
       gate does reach the shared library now), and then BOTH mutations
@@ -1425,7 +1425,42 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the likely shape of the answer is that the file was undertested for
       exactly as long as the gate could not see it. Small, mechanical, and it
       is the one file where a silent survivor costs every service at once.
-      Discovered in B58.
+      Discovered in B58. — 9ad4eb7
+      (Six mutations, one per claim, and the prediction held: FIVE SURVIVED.
+      Only `src` was already held, by the round-trip test. `ts` could be
+      0.0 or a wall clock and route fine — the broker validates it as a
+      NUMBER and nothing more, and every latency figure in this repo
+      subtracts from it. `v` could ignore its caller, which is how a schema
+      migration would begin and the one thing that must not be pinned. A
+      pong could be read as EOF — the Python client has no `ping()`, so
+      that branch was dead code as far as the suite knew, and returning
+      None there reports the bus GONE to every consumer. The length-prefix
+      guard could be a thousand times too generous. `JARVIS_BUS` could be
+      ignored entirely, because every test in the file passes an address.
+      Five tests close them; two need no broker and say so. The frame cap
+      is now pinned to jarvisd's own declaration by READING proto.rs, and
+      that relation was graded the B55 way — move the Rust constant, pylib
+      goes red, and the harness reports "reads it, never runs it". pylib 19,
+      was 13; 10 mutations, 10 caught.)
+
+- [ ] B60. **`client.py` was one of pylib's three modules.** B59 graded it
+      and five of six claims were unheld; `jarvis_bus/health.py` and
+      `jarvis_bus/schema.py` have never been graded at all, and they are
+      the same shape of risk — `HealthBeat` is the clock every service's
+      `sys.health` beat is owed against (d55348b just fixed a real bug in
+      it, found by reading rather than by grading), and `to_body` /
+      `from_body` are how EVERY body on the bus is encoded and decoded, so
+      a silent survivor there is wrong in every service and every topic at
+      once. The method is now routine: probe, then a mutation per claim.
+      Two things `client.py` itself still has no test for, found while
+      writing B59's and deliberately left: `next_event`'s two EOF paths
+      (a short read on the head and on the body both return None, and
+      nothing distinguishes them from a frame that never came), and
+      `connect()`'s address rule — `":" in addr and not addr.startswith("/")`
+      means a RELATIVE unix socket path containing a colon is dialled as
+      TCP. Every real path is absolute so it cannot bite today, and it is
+      a latent trap for the replay rig, which is the one thing that makes
+      up socket paths. Naming it rather than changing it. Discovered in B59.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above

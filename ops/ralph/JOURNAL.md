@@ -8251,3 +8251,86 @@ grade.
   decision between three named options, **B43/B47/B54** are one question
   asked three times, and **B10/A28** — one live recording of one spoken
   turn on ares — remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 81 — B59: the rest of the envelope, and the transport under it
+
+Track A is still one human look at `docs/hud/` away from unblocking ten
+items, and the A items that are NOT waiting on that (A11, A33, A35, A36,
+A56, A59) all say in their own words "worth it the day X happens" or
+"measure it on ares" — so this went to the B track and to the item the
+last iteration raised.
+
+B58 gave the gate its first honest reach into `services/pylib/jarvis_bus/
+client.py` and the first two mutations it ever graded there both survived.
+B59 was the obvious follow-on: ask the same question of the rest of the
+file, which every Python service on the bus imports. Six mutations, one
+per claim.
+
+**Five of six survived.** Only `src` was held, and only because the
+round-trip test happens to assert it. The other five:
+
+- `ts` could be `0.0`. The broker validates the envelope's `ts` as a
+  NUMBER and nothing more, so a wall-clock stamp routed perfectly too —
+  and `ts` is what every latency figure in this repo subtracts from:
+  `jv tap --latency`, HeardState's anchor, HealthState's expiry.
+- `v` could ignore its caller and publish 1 forever. The broker only
+  checks `v >= 1`. A bumped `v` is how a schema migration BEGINS, and a
+  client that pinned it would make one impossible while breaking nothing
+  today.
+- a pong could be returned as EOF. The Python client has no `ping()`, so
+  the skip branch was dead code as far as this suite knew — and a client
+  that reports None there is telling every consumer the bus is GONE.
+- the length-prefix guard could be a thousand times too generous.
+- `JARVIS_BUS` could be ignored entirely, because every test in the file
+  passes an address explicitly.
+
+Five tests close them. Three ride the real broker; two deliberately do
+not and say why. The pong test carries its own control — it pings a
+separate connection first and asserts a pong is a real thing this broker
+really sends — because otherwise it would pass without one ever arriving.
+The prefix test feeds four bytes and then EOF, because the claim is that
+the guard fires on the PREFIX ALONE: `readexactly(n)` allocates first and
+asks later, and that prefix is the one number on the wire that is read
+before anything is known about what follows.
+
+The frame cap is now pinned to jarvisd's own `pub const MAX_FRAME` by
+READING `services/jarvisd/src/proto.rs` — invariant 1 forbids importing
+it. That makes it a B55-style relation, so it was graded as one: move the
+Rust constant, the pylib suite goes red, and the harness reports "the
+suite reads services/jarvisd/src/proto.rs — it never runs it". If the two
+caps ever drift, the smaller silently becomes the real limit and the
+larger one's error message is a lie about why the connection died.
+
+Worth stating plainly, because it is the second iteration in a row to
+find it: the file the gate could not see for this loop's entire history
+is the file that turned out to be least tested. Two iterations of
+grading it have now found seven unheld claims in one 130-line module.
+
+- tests: pylib **19 (was 13)**. Green. Nothing else touched — the change
+  is one test file.
+- graded with `ops/ralph/mutate.sh`: **10 mutations, 10 caught.** Nine on
+  `client.py` (ts zeroed, ts on the wall clock, src constant, v pinned,
+  pong as EOF, the cap constant drifted, the guard comparison widened,
+  the env var ignored, and a set-but-empty env var becoming an address)
+  and one on `proto.rs` (the broker's cap moving while the client's does
+  not). The first grading of the same six, before the tests, was **1/6**.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/pylib/tests/test_client.py
+- commits: 9ad4eb7
+- next: **B60** raised — `client.py` was one of pylib's THREE modules, and
+  `health.py` and `schema.py` have never been graded at all. `to_body` /
+  `from_body` encode and decode every body on the bus, so a survivor
+  there is wrong in every service and every topic at once; `HealthBeat`
+  is the clock d55348b just fixed a real bug in, found by reading rather
+  than by grading. B60 also names two things left deliberately alone in
+  `client.py`: `next_event`'s two indistinguishable EOF paths, and
+  `connect()`'s address rule, under which a RELATIVE unix socket path
+  containing a colon is dialled as TCP — harmless today because every
+  real path is absolute, and a latent trap for the replay rig, which is
+  the one thing that invents socket paths. Otherwise unchanged: **Track A
+  is one human look at `docs/hud/` away from unblocking ten items** (A47,
+  A55, A62, A63, A68 and the A21/A22/A25 cluster), **B27** needs one
+  decision between three named options, **B43/B47/B54** are one question
+  asked three times, and **B10/A28** — one live recording of one spoken
+  turn on ares — remains the biggest thing a human can hand this loop.
