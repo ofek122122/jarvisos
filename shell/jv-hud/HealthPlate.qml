@@ -53,6 +53,11 @@ Item {
   // problems than the HUD's typography.
   property int maxLines: 3
 
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "health"
+
   // On screen exactly while there is something to report.
   readonly property bool shown: root.health.reporting
 

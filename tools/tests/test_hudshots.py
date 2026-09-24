@@ -50,6 +50,23 @@ def scene_text() -> str:
     return SCENE.read_text("utf-8")
 
 
+SHEET_ENTRY = re.compile(
+    r'\{\s*"file":\s*"(?P<file>[^"]+)".*?"plates":\s*\[(?P<plates>[^]]*)\]',
+    re.S,
+)
+
+
+def sheet() -> list[tuple[str, list[str]]]:
+    """The scene's sheet: each shot's file name and the plates it claims are on
+    screen, in the order they are declared (A53)."""
+    out = [
+        (m.group("file"), re.findall(r'"([^"]+)"', m.group("plates")))
+        for m in SHEET_ENTRY.finditer(strip_qml_comments(scene_text()))
+    ]
+    assert out, "found no sheet entries with a `plates` list in the scene"
+    return out
+
+
 def test_the_sheet_stacks_the_same_plates_the_shell_does():
     """The scene is a copy of shell.qml's corner stack, and a copy of a list
     is a list that goes stale. A plate the shell shows and the sheet does not
@@ -162,4 +179,73 @@ def test_the_sheet_says_which_shots_are_recordings_and_which_are_written():
         assert re.search(r"\b(recorded|composed)\b", shown[0].lower()), (
             f"docs/hud/README.md shows {name} without saying whether its frames "
             "are recorded or composed"
+        )
+
+
+def test_every_shot_says_which_plates_are_in_it():
+    """A53. The scene's only per-shot assertion used to be `anyLit` — a single
+    bit that nine of the ten shots answered `true` — so the sheet could prove
+    a picture had SOMETHING in it and never what. An entry without a `plates`
+    list is a shot back in that state, and it would be the one shot nobody
+    notices, because the other nine still pass.
+    """
+    files = re.findall(r'"file":\s*"([^"]+)"', strip_qml_comments(scene_text()))
+    named = [f for f, _ in sheet()]
+    assert files == named, (
+        f"every sheet entry must declare `plates`; {sorted(set(files) - set(named))} "
+        "do not, so those shots are checked only by 'something was drawn'"
+    )
+    assert '"lit"' not in strip_qml_comments(scene_text()), (
+        "the old one-bit `lit` flag is back in the sheet; `plates` supersedes "
+        "it and the two would drift"
+    )
+
+
+def test_every_plate_in_the_shell_is_lit_in_some_shot():
+    """A plate the sheet renders but never LIGHTS is a plate nobody has ever
+    seen a picture of.
+
+    The older gate above proves each plate is in the scene's stack, which is
+    only the claim that it was built — every plate in this HUD draws nothing
+    until a real frame gives it something to say, so a plate can sit in all
+    ten shots and appear in none of them. That is the normal state of most of
+    them, and it is exactly how a new element gets added, rendered, committed
+    and still never looked at.
+    """
+    lit = {name for _, plates in sheet() for name in plates}
+    for child in plate_stack_children((SHELL / "shell.qml").read_text("utf-8")):
+        want = child[: -len("Plate")].lower()
+        assert want in lit, (
+            f"{child} is in the shell's stack and no shot in docs/hud has it on "
+            f"screen, so there is no picture of it. Add a shot that lights it."
+        )
+
+
+def test_the_sheet_tells_the_reader_which_plates_each_shot_shows():
+    """The captions are for a human, and a human is the only thing that has
+    ever been able to tell two of these plates apart in a PNG.
+
+    `HealthPlate` and `ActionPlate` draw the same two lines in the same
+    severity colour in the same corner; `GuardPlate` makes three. So the
+    README's per-shot `**On screen:**` line is read off the scene and checked
+    against it — a prose description can drift into naming the wrong element,
+    and this line cannot.
+    """
+    readme = (SHEET / "README.md").read_text("utf-8")
+    sections = readme.split("\n### ")
+    for name, plates in sheet():
+        shown = [s for s in sections if name in s]
+        assert len(shown) == 1, f"docs/hud/README.md shows {name} in {len(shown)} sections"
+        line = re.search(r"^\*\*On screen:\*\*(.+)$", shown[0], re.M)
+        assert line, f"docs/hud/README.md's {name} section has no `**On screen:**` line"
+        got = re.findall(r"`([^`]+)`", line.group(1))
+        if not plates:
+            assert not got and "nothing" in line.group(1), (
+                f"{name} has no plate on screen, and its line must say so "
+                f"in words rather than name one: {line.group(1).strip()}"
+            )
+            continue
+        assert got == plates, (
+            f"docs/hud/README.md says {name} shows {got}; the scene asserts "
+            f"{plates}. The README is what a reader believes the picture is of."
         )

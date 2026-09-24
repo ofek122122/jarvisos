@@ -58,6 +58,11 @@ Item {
   // the better copy anyway, and the ellipsis says there is more.
   property int maxLines: 3
 
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "confirm"
+
   // On screen exactly while an answer is owed.
   readonly property bool shown: root.confirm.pending
 

@@ -248,6 +248,47 @@ def test_every_plate_in_the_stack_answers_for_itself():
         )
 
 
+def test_every_plate_says_which_plate_it_is():
+    """A53: `anyLit` made "is anything on screen" answerable and left "WHICH
+    plate" to a human with the picture in front of them.
+
+    Five checks across the two shot harnesses measure that the drawn corner
+    got taller or shorter, and not one of them can name the plate that did
+    it — a `HealthPlate` saying `jv-voice lost` and an `ActionPlate` saying an
+    action failed are the same corner, the same two lines, the same severity
+    colour and nearly the same pixels. `core/PlateStack.qml` collects
+    `plateName` from its children so the assertion can be about the caption.
+
+    The name has to be the plate's own claim about itself, and it also has to
+    be impossible for it to lie, so it is pinned HERE to the file name rather
+    than agreed by convention: `GuardPlate.qml` says `"guard"` or this fails.
+    That also keeps `litNames`'s `"?"` branch unreachable in the real shell,
+    the same way the `shown`/`lit` check above keeps `anyLit`'s fail-safe
+    unreachable.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    seen: dict[str, str] = {}
+    for child in plate_stack_children(shell_text()):
+        qml = hud / f"{child}.qml"
+        want = child[: -len("Plate")].lower()
+        got = re.findall(
+            r'^  readonly property string plateName: "([^"]*)"$',
+            qml.read_text("utf-8"),
+            re.M,
+        )
+        assert got == [want], (
+            f'{qml.name} must declare `readonly property string plateName: '
+            f'"{want}"` exactly once — got {got}. The stack reports these as '
+            f"the plates that are on screen, so a name that drifts from the "
+            f"file is a harness confidently naming the wrong element."
+        )
+        assert want not in seen, (
+            f"{qml.name} and {seen[want]} would both report {want!r}; two "
+            f"plates with one name makes the list unreadable"
+        )
+        seen[want] = qml.name
+
+
 # --- A10: invariant 10, asserted rather than assumed ----------------------
 
 # Quickshell's window types. Each one puts a surface on the compositor, and

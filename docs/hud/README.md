@@ -43,9 +43,19 @@ nothing in the repo has ever recorded that part of a turn. The difference
 matters: a composed picture is a picture of an intention, and only a recorded
 one is evidence about the machine. Closing that gap is what B10/A28 ask for.
 
+Each shot also carries an **On screen:** line — the plates that are lit in it,
+top to bottom. That line is not prose: it is read off the harness by
+`tools/tests/test_hudshots.py` and checked against what the plates themselves
+report, because three of them (`health`, `action`, `guard`) draw the same two
+lines in the same severity colour in the same corner, and telling those apart
+in a PNG has always needed a person (PLAN A53).
+
 ### 01 — all quiet
 
 ![01-quiet.png](01-quiet.png)
+
+**On screen:** nothing — the surface is not merely empty, it is unmapped.
+This is the HUD's ordinary state.
 
 `composed` (a bare bus-up line). A HUD that can see the bus and has nothing
 to say. On a real machine the surface is not merely empty, it is *unmapped*:
@@ -56,6 +66,8 @@ ordinary state of the HUD and the one you should judge it by first.
 
 ![02-listening.png](02-listening.png)
 
+**On screen:** `state` · `mic`
+
 `recorded` — `hey-jarvis-clean`, replayed to the wake word at 1.44 s; the
 `MIC` heartbeat under it is composed, because no recorded session carries
 `sys.health` at all. Teal, not ember: `personality/theme.toml` reserves the
@@ -64,6 +76,8 @@ cooler voice for YOUR state, and the open microphone is yours.
 ### 03 — heard
 
 ![03-heard.png](03-heard.png)
+
+**On screen:** `state` · `heard` · `mic`
 
 `recorded` — the same session in full, through jv-ears' final transcript;
 the `brain.request` and the `MIC` heartbeat are composed. The words are what
@@ -77,6 +91,8 @@ wrong answer.
 
 ![04-speaking.png](04-speaking.png)
 
+**On screen:** `state` · `mic`
+
 `composed` — the recording, plus a `speech.state` `speaking` frame written
 by hand. **Nothing committed has ever recorded jv-voice speaking**, so this
 one frame is the boundary between what the repo knows and what it assumes.
@@ -88,6 +104,8 @@ utterance.
 ### 05 — confirm
 
 ![05-confirm.png](05-confirm.png)
+
+**On screen:** `confirm` · `mic`
 
 `composed`. jv-act stopping in front of a destructive tool, in its own words,
 with a 15 s window running. The only thing this HUD ever shows that is
@@ -104,6 +122,8 @@ out all exit the same way (A22).
 
 ![06-health.png](06-health.png)
 
+**On screen:** `mic` · `health`
+
 `composed`. The short list — what is not well, worst first — and the llm rung
 read off jv-brain's own heartbeat, which is the single number that explains
 why Jarvis got slow. On a machine where everything heard from says `ok`, this
@@ -112,6 +132,10 @@ plate is not on screen at all.
 ### 07 — no bus
 
 ![07-no-bus.png](07-no-bus.png)
+
+**On screen:** `link` — and nothing else, which is the point: every plate
+under it gates on the bus whose loss it is reporting, so the open microphone
+from a second ago is gone rather than left up as a stale claim about the room.
 
 `composed`. The HUD saying it has stopped being able to see the machine
 (A23). Every plate here refuses to guess rather than inventing — and a
@@ -123,6 +147,8 @@ machine. It cannot yet say how long it has been blind (A25).
 ### 08 — action failed
 
 ![08-action.png](08-action.png)
+
+**On screen:** `action` · `mic`
 
 `composed`. The end of the story the plates above tell: Jarvis reached into
 the machine and the machine did not move (A37). Invariant 3 gives exactly one
@@ -152,6 +178,8 @@ any element under `shell/jv-hud/core` so much as names them.
 ### 09 — output muted
 
 ![09-muted.png](09-muted.png)
+
+**On screen:** `state` · `output` · `mic`
 
 `composed`. Jarvis answering into a sink nobody can hear (A40). Read it top
 to bottom: SPEAKING is true — jv-voice really did accept the utterance,
@@ -187,6 +215,8 @@ by nothing.
 ### 10 — a binary refused
 
 ![10-guard.png](10-guard.png)
+
+**On screen:** `guard` · `mic`
 
 `composed`. `jv-compat install rct3-setup.exe`, and jv-guard says no.
 Invariant 8 — Windows binaries are untrusted by default — is the rule that

@@ -49,6 +49,11 @@ Item {
     stallS: root.ears.stallS
   }
 
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "mic"
+
   // On screen exactly while the microphone is open — live or stalled.
   // `off` and `unknown` are both silence, for different reasons.
   readonly property bool shown: root.mic.capturing || root.mic.stalled

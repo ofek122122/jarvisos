@@ -57,4 +57,44 @@ Column {
     }
     return false;
   }
+
+  // WHICH plates are on screen, in stack order, in their own words (A53).
+  //
+  // `anyLit` answers the question the surface needs and nothing more: is
+  // there anything here. Everything that watches this HUD from outside —
+  // the contact sheet in tools/hudshots, the screenshots in
+  // tools/hudscreens — could therefore only ever measure that SOMETHING
+  // was drawn. A `HealthPlate` saying `jv-voice lost` and an `ActionPlate`
+  // saying an action failed are the same corner, the same two lines, the
+  // same severity colour and very nearly the same number of pixels, so a
+  // check that a plate arrived was never a check that the RIGHT plate
+  // arrived; only a human looking at the picture could tell, which is fine
+  // for a sheet meant to be looked at and not fine for an assertion.
+  //
+  // Each plate says its own name, so this list is what the plates claim
+  // about themselves rather than what the harness that built them assumed.
+  // A child that cannot be asked contributes `"?"` rather than being
+  // skipped — the same fail-safe direction `anyLit` takes, for the same
+  // reason: the surface counts it as drawing, so the list has to admit
+  // something is there. tools/tests/test_gen_theme_qml.py pins every
+  // plate's name to its file name and keeps that branch unreachable in the
+  // real shell.
+  //
+  // This is NOT what maps the surface. `anyLit` stays a separate, cheap
+  // answer to the only question that is safety-critical, and a test holds
+  // the two to agreeing in every case — two implementations of "is
+  // anything on screen" that must never disagree.
+  readonly property var litNames: {
+    const names = [];
+    const kids = stack.children;
+    for (let i = 0; i < kids.length; i++) {
+      const kid = kids[i];
+      const askable = kid.shown !== undefined || kid.lit !== undefined;
+      if (askable && !(kid.shown || kid.lit))
+        continue;
+      const name = kid.plateName;
+      names.push(name === undefined || name.length === 0 ? "?" : name);
+    }
+    return names;
+  }
 }

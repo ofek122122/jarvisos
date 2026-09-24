@@ -10,13 +10,19 @@
 //
 // This is not a test in the usual sense. It builds the real plates, over
 // the real Theme, driven through the real core/BusModel, and writes what
-// they draw to PNG. It asserts almost nothing: an assertion about pixels
-// is a thing that breaks when a font ships a new version, and the point
-// here is a picture a person can look at, not a comparison a machine can
-// make. What it DOES assert is that every shot drew something (except the
-// one whose whole subject is drawing nothing) — because a contact sheet of
-// seven empty rectangles would look like a HUD with earned emptiness and
-// would actually be a broken harness.
+// they draw to PNG. It asserts nothing about PIXELS: that is a thing that
+// breaks when a font ships a new version, and the point here is a picture
+// a person can look at, not a comparison a machine can make.
+//
+// What it DOES assert is the caption — which plates are on screen in each
+// shot, in reading order, as the plates themselves report it (A53). That
+// used to be one bit per shot (`anyLit`: something is drawn), which nine
+// of the ten shots answered identically, so a harness that fed a plate
+// something it refused and photographed a DIFFERENT plate instead would
+// have gone green with a sheet that misnames its own contents. Two plates
+// in this stack draw the same two lines, in the same severity colour, in
+// the same corner; a picture is the only thing that has ever told them
+// apart, and a picture needs a human.
 //
 // Honest about what it is NOT:
 //   · not the compositor. Layer-shell, the empty input mask, the zero
@@ -348,20 +354,36 @@ Item {
 
     // name -> builder, in reading order. The file names carry the order so
     // a directory listing is the sheet.
+    //
+    // `plates` is the CAPTION, asserted (A53). Until it existed the only
+    // check here was `stack.anyLit` — something is on screen — and every
+    // shot but the first one says `true`, so nine of the ten shots were
+    // checked by exactly the same claim. Two plates in this stack draw the
+    // same two lines in the same severity colour in the same corner, so a
+    // wiring mistake that photographed the wrong one would have produced a
+    // green run and a sheet whose README lies in a way only a person
+    // looking at the picture could catch. These lists are read off the
+    // plates themselves, in stack order, so the sheet now proves what it
+    // is a picture OF and not merely that it is a picture of something.
     readonly property var sheet: [
-      { "file": "01-quiet.png", "build": suite.shot_quiet, "lit": false },
-      { "file": "02-listening.png", "build": suite.shot_listening, "lit": true },
-      { "file": "03-heard.png", "build": suite.shot_heard, "lit": true },
-      { "file": "04-speaking.png", "build": suite.shot_speaking, "lit": true },
-      { "file": "05-confirm.png", "build": suite.shot_confirm, "lit": true },
-      { "file": "06-health.png", "build": suite.shot_health, "lit": true },
+      { "file": "01-quiet.png", "build": suite.shot_quiet, "plates": [] },
+      { "file": "02-listening.png", "build": suite.shot_listening, "plates": ["state", "mic"] },
+      { "file": "03-heard.png", "build": suite.shot_heard, "plates": ["state", "heard", "mic"] },
+      { "file": "04-speaking.png", "build": suite.shot_speaking, "plates": ["state", "mic"] },
+      { "file": "05-confirm.png", "build": suite.shot_confirm, "plates": ["confirm", "mic"] },
+      { "file": "06-health.png", "build": suite.shot_health, "plates": ["mic", "health"] },
       // LinkState holds a 5 s grace before it will call the HUD blind — a
       // reconnecting bridge is not a lost machine — so this one settles
       // past that rather than photographing the silence in between.
-      { "file": "07-no-bus.png", "build": suite.shot_nobus, "lit": true, "settleMs": 6500 },
-      { "file": "08-action.png", "build": suite.shot_action, "lit": true },
-      { "file": "09-muted.png", "build": suite.shot_muted, "lit": true },
-      { "file": "10-guard.png", "build": suite.shot_guard, "lit": true }
+      // `link` ALONE: every plate under it gates on the same bus it is
+      // reporting the loss of, so the open microphone from a moment ago is
+      // gone from the corner rather than left there as a stale claim about
+      // the room. That is the whole argument of A23, and it was never
+      // checked — only looked at.
+      { "file": "07-no-bus.png", "build": suite.shot_nobus, "plates": ["link"], "settleMs": 6500 },
+      { "file": "08-action.png", "build": suite.shot_action, "plates": ["action", "mic"] },
+      { "file": "09-muted.png", "build": suite.shot_muted, "plates": ["state", "output", "mic"] },
+      { "file": "10-guard.png", "build": suite.shot_guard, "plates": ["guard", "mic"] }
     ]
 
     function test_the_sheet() {
@@ -378,11 +400,19 @@ Item {
         // the only reason this file takes a visible moment to run.
         wait(shot.settleMs === undefined ? Theme.pulseMs + Theme.easeMs : shot.settleMs);
 
-        // A surface with nothing lit is unmapped on a real machine, so a
-        // plate stack that lit nothing is either the quiet shot or a
-        // harness that fed the plates something they refused. Both look
-        // identical in a PNG; only this line tells them apart.
-        compare(stack.anyLit, shot.lit, shot.file + ": stack.anyLit");
+        // WHICH plates are in this picture, in reading order, as the
+        // plates themselves report it (A53). A surface with nothing lit is
+        // unmapped on a real machine, so a stack that lit nothing is
+        // either the quiet shot or a harness that fed the plates something
+        // they refused — and a stack that lit the WRONG plate looks, in a
+        // PNG, almost exactly like one that lit the right one. Only this
+        // line tells any of them apart.
+        compare(stack.litNames.join(" "), shot.plates.join(" "),
+                shot.file + ": the plates on screen");
+        // And the property that actually maps the surface, which is a
+        // second, cheaper implementation of the same fact. They agree here
+        // or one of them is wrong.
+        compare(stack.anyLit, shot.plates.length > 0, shot.file + ": stack.anyLit");
 
         const img = grabImage(root);
         compare(img.width, root.width, shot.file + ": width");

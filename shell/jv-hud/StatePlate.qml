@@ -46,6 +46,11 @@ Item {
     wakeWindowS: root.ears.wakeWindowS
   }
 
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "state"
+
   // Is there something to show? Unknown means we cannot see, idle means
   // nothing is happening — both draw nothing at all.
   readonly property bool shown: root.voice.known && !root.voice.idle

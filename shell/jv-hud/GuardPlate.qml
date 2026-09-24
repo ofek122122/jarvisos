@@ -64,6 +64,11 @@ Item {
   // cap on what is carried at all.
   property int maxTextPx: 240
 
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "guard"
+
   // On screen exactly while the last binary screened was refused and the
   // news is still current.
   readonly property bool shown: root.guard.refused
