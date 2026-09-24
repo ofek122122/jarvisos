@@ -681,23 +681,56 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       focus event define it) is defensible and is two lines to revert.
       Discovered in B29.
 
-- [ ] B31. `context.window` has a `workspace` field and a `monitor`
-      field and the niri backend has never populated either — so
-      `window.move_workspace` in jv-act's registry acts on a topic that
-      cannot say which workspace anything is on, and the multi-monitor
-      questions the A track keeps asking (A13/A27/A38: three copies of a
-      plate on three screens) have no bus data behind them either.
-      Not a schema change — both fields are already frozen in. The
-      obstacle is a real mismatch: niri's `Window` carries
-      `workspace_id`, an integer, and the schema wants a NAME, which
-      lives in `WorkspacesChanged` — the event immediately above
-      `WindowsChanged` on the same socket and also unread. So this is
-      B29's shape one level out: track the workspace list, resolve the
-      id, and leave the field ABSENT rather than guessing when the id
-      resolves to nothing. `monitor` is in the same event (a workspace
-      names its output). Wants the same read-only capture on ares that
-      B29 used, this time of `WorkspacesChanged`'s own fields.
-      Discovered in B29.
+- [x] B31. `context.window` has a `workspace` field and a `monitor`
+      field and the niri backend has never populated either. — 752a834
+      (`WorkspacesChanged` is the line ABOVE `WindowsChanged` on connect
+      — field-verified on ares — and it is what turns a window's
+      `workspace_id` into a name and an output. Tracked like the window
+      list: authoritative, replaced wholesale, publishing no frame of its
+      own, and resolved at PUBLISH time so a monitor unplugged mid-session
+      cannot leave a frame pointing at a screen that is gone. The
+      asymmetry is the design: on ares EVERY workspace is unnamed and
+      every one has an output, so an unnamed workspace still reports its
+      monitor and `workspace` stays ABSENT rather than being filled with
+      `idx`, which is per-OUTPUT — three of the four live workspaces were
+      `idx: 1`. Tests: `runtests.sh jv-context` 59, was 41; twelve
+      mutations, twelve caught. Verified through the BUILT closure against
+      the live compositor: the first frame it publishes now says
+      `monitor: HDMI-A-1` and no workspace.)
+
+- [ ] B32. **Human decision, and it is the reason B31 publishes half of
+      what it could.** Every workspace on ares is unnamed, so `workspace`
+      will be absent on every frame this machine ever produces — and
+      jv-act's `window.move_workspace` requires a `workspace` STRING that
+      nothing on the bus can now supply. Three ways out and they are not
+      equal: (a) name the workspaces in the niri config, one line each,
+      and the field fills itself (a human's config, not the loop's); (b)
+      the schema gains a `workspace_id` or per-output index pair — a
+      FROZEN schema change and therefore human review, and it would let
+      jv-act target the same workspace niri does; (c) leave it and accept
+      that "move this to workspace 2" is unanswerable until (a). Do not
+      build (b). Discovered in B31.
+
+- [ ] B33. A `WorkspacesChanged` that MOVES a workspace to another output
+      — which is what unplugging a monitor does — publishes no frame, so
+      every consumer keeps the old `monitor` until the next window event
+      touches that window. The frame is correct when it comes and the
+      table is right immediately; what is stale is the bus's last word.
+      The fix is the same shape as B30 and wants the same answer: publish
+      a `focus_changed` restating where the focused window now is, which
+      is a frame reporting a STATE rather than a transition. Cheap either
+      way, and it should be decided together with B30. Discovered in B31.
+
+- [ ] B34. The A track's multi-monitor questions (A13/A27/A38 — one
+      plate drawn on all three screens) have had no bus data behind them
+      and now have some: `context.window` says which output the focused
+      window is on. That is not the whole answer (the HUD would have to
+      subscribe, and "the screen you are looking at" is not the same
+      claim as "the screen the focused window is on" — the Leap and the
+      camera are the senses that could say the former, and neither is
+      wired). But it turns "there is nothing to drive it" into a design
+      question a human can actually answer, and it should be answered
+      with A13 rather than before it. Discovered in B31.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above

@@ -6160,3 +6160,103 @@ here because seeding the cache is what made that path reachable at all.
   thing a human can hand this loop. Though today's session is a reminder
   that the loop IS on ares now: read-only field verification against the
   live machine is available and was worth more than any test I wrote.
+
+## 2026-09-24 — iteration 61 — B31: the two fields that said where a
+window is, empty since the schema was frozen
+
+B29 (last iteration) ended by pointing at this and calling it the bigger
+find. It is: `schemas/context.window.json` has carried a `workspace`
+field and a `monitor` field since v1, frozen, documented — and **no
+publisher has ever put a value in either**. Two things fall out of that
+emptiness. jv-act's registry has a `window.move_workspace` tool whose
+`workspace` argument is a REQUIRED string, and nothing on the bus could
+supply one. And the A track has asked three times (A13/A27/A38) what a
+HUD with three monitors should do, always concluding there is no bus
+data behind the question — there wasn't.
+
+Not a schema change: both fields are already frozen in, and the generated
+binding already had them. The obstacle was a real mismatch. niri's
+`struct Window` carries a `workspace_id` — an integer — and the schema
+wants a NAME. The name lives in `Event::WorkspacesChanged`, which is
+B29's shape one level out: a list, authoritative, unread.
+
+**Field-verified on ares first, read-only** (connect, request, read,
+disconnect — no `niri msg action`, nothing printed but structure). What
+the live compositor answered decided the design:
+
+  * `WorkspacesChanged` is line TWO — `Ok`, then it, then
+    `WindowsChanged`. So the workspace table is populated BEFORE the
+    first window is ever listed, and the very first frame jv-context
+    publishes can already say where that window is. No deferral, no
+    second pass, no frame that has to be corrected later.
+  * `struct Workspace` carries `active_window_id, id, idx, is_active,
+    is_focused, is_urgent, name, output`. Four workspaces were up.
+  * **`output` was a connector string on every one** (`DP-1`, `DP-2`,
+    `HDMI-A-1` twice — the three monitors in CLAUDE.md).
+  * **`name` was null on every one.** Ofek has never named a workspace.
+  * **`idx` is per-OUTPUT.** Three of the four were `idx: 1`.
+
+That last pair is the whole design decision. The tempting move —
+"unnamed? publish the index" — would name three different workspaces
+"1" at the same instant, and that string is exactly what
+`window.move_workspace` would act on. So: the name is published when
+niri reports one and the field is ABSENT when it does not, and the
+monitor is published either way. An unnamed workspace still says which
+screen it is on, which is the half this machine can actually answer.
+A test says the index is never used, and it says why.
+
+The rest follows B29's rules deliberately. The workspace table is
+authoritative and replaced wholesale (unplugging a monitor moves
+workspaces between outputs and niri restates the list; a merge would
+keep publishing a window on a screen that is no longer there). It
+publishes NO frame of its own — no window did anything, and
+`context.window` has no vocabulary for "a workspace moved". And every
+frame is placed at PUBLISH time through one door (`_frame`), against the
+table as it stands now, so a close and a focus — events that carry an id
+and nothing else — say where the window was just as accurately as a
+resync does. The window cache became a record with a `workspace_id` on
+it, which is what makes that possible.
+
+- tests: `bash ops/ralph/runtests.sh jv-context` — **59 (was 41)**.
+  **Twelve mutations, all twelve caught**: `WorkspacesChanged` not
+  handled at all, the table merged instead of replaced, `idx` used as a
+  name, an absent name suppressing the monitor too, an unknown id
+  resolving to empty strings instead of absence, a close built without
+  its record, the window record dropping its workspace, a moved window
+  keeping its old one, an empty name published as a name, the table
+  keyed by `idx`, `monitor` never published, and `monitor` published
+  under niri's own field name (`output`) instead of the schema's. One
+  test reads the two field names off the GENERATED binding rather than
+  spelling them, and asserts both are optional there — absence has to be
+  legal for any of this to be honest.
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change, no jv-act, no boot path, no
+  NVIDIA/kernel/flake pin.
+- **verified through the BUILT closure against the live compositor**:
+  the shipped `jv_context` (from
+  `/nix/store/...python3-3.14.7-env/.../jv_context/compositor.py`, not
+  the worktree) was run against the real niri socket, and the workspace
+  table came back `{2: (None,'DP-1'), 3: (None,'DP-2'),
+  4: (None,'HDMI-A-1'), 1: (None,'HDMI-A-1')}` with the first published
+  frame reading `focus_changed / monitor: HDMI-A-1` and **no
+  `workspace`** — which is the truth about this desktop and not a
+  shortcut. Only structure and connector names were read; no window
+  title or app_id was printed, kept or committed.
+- files: services/jv-context/jv_context/compositor.py,
+  services/jv-context/jv_context/service.py,
+  services/jv-context/tests/test_niri_events.py
+- commit: 752a834
+- next: **B32 is the one to read first and it is a human's**: `workspace`
+  will be absent on every frame this machine produces until a workspace
+  is NAMED, and `window.move_workspace` needs that string — one line in
+  a niri config fixes it, or the schema grows an id (frozen, so review).
+  B33 is small and shares B30's question exactly (a frame that reports a
+  state rather than a transition — here, restating where the focused
+  window is after a monitor is unplugged); decide the two together.
+  B34 is the interesting one: A13/A27/A38 now have SOME data behind them,
+  though "the screen the focused window is on" is not "the screen you are
+  looking at" and the senses that could say the latter are unwired.
+  Otherwise unchanged: A blocked on A62/A65/A68/A47/A56/A50/A60
+  (decisions) and A13/A21/A22/A25/A27/A31/A38/A39 (a human at ares),
+  B27/B28 share one decision, and B10/A28 — one live recording of one
+  spoken turn — is still the biggest thing a human can hand this loop.
