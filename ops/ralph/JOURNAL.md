@@ -2014,3 +2014,137 @@ did. The two halves are not redundant.
   tests still ends in "thinking" and times out, and nothing in the repo has
   ever contained a `speaking` frame or a `sys.health` one. Without (3) the
   next UI iteration is testing against half a conversation.
+
+## 2026-09-24 — iteration 23 — A20: the question you could only hear
+
+jv-act stops in front of every destructive tool and asks (invariant 3). It
+publishes `action.confirm{kind=request}` with the question, opens a window it
+declares in the frame — 15 s — and jv-voice speaks it. Inside that window
+silence is a no. Everything about that handshake was audible and nothing
+about it was visible, which makes it fragile in the most ordinary way there
+is: music playing, headphones off, one sentence half heard, and a question
+you did not know was asked gets answered by a timeout you did not know was
+running. The one moment invariant 3 hands the user a veto was the one moment
+the HUD had nothing to say.
+
+`ConfirmPlate` is the readable copy. jv-act's words verbatim, the tool id
+underneath, on screen for exactly as long as the question can still be
+answered.
+
+**It cannot answer, and that is structural rather than a decision made in
+this file.** The HUD surface has an empty input region and takes no keyboard
+(invariant 10, and tools/tests pins both on every Quickshell window in the
+directory), so there is no path from these pixels to an authorization at all.
+A clickable YES would make the HUD a second actuator, which invariant 3 has
+no word for. Answering stays where it was: your voice, or `jv confirm`.
+
+**The request has to be latched, and the bus is what forces it.** `latest()`
+keeps exactly one frame per topic, and the ANSWER lands on the same topic as
+the request — so the instant anything answers, the question is gone from the
+bus. Derived, "is something pending" would see the question only in the
+moment it arrived and be blind to it for the rest of its life. This is the
+third latch in the HUD for the same reason (`heardAnswer`, `abandoned`), and
+the rule they share is worth stating once: latch an observation the bus no
+longer carries, never one it still does.
+
+A latch has to be let go of, and each of the three ways is a rule about
+somebody else's authority:
+
+1. **An answer naming THIS `request_id`** — not any answer. jv-act reserves a
+   single outstanding confirm slot today, so in practice there is only ever
+   one; but the HUD is not the thing that enforces that, and closing on
+   somebody else's answer would blank a live question. The answer also does
+   not always come from the service that asked: `jv confirm` publishes it
+   itself, which is exactly why this reads the topic and not a publisher on
+   it.
+2. **The link dropping.** A question latched from a bus we can no longer see
+   describes a machine we can no longer see — and the window has very likely
+   closed while we were not looking. A link that comes back does not bring it
+   back with it, which is its own test.
+3. **The window running out**, as the backstop for a jv-act that died
+   mid-question and will never publish the answer that normally ends this.
+   The window is the one jv-act DECLARED in the request (A14's rule: the
+   service that enforces a budget states it and the HUD reads it rather than
+   keeping a copy that drifts). `windowFallbackS` is only for a request that
+   declares none, and mirrors no service's constant on purpose.
+
+And the rule that is not about letting go: **refusing to read a frame is
+never the same as being answered.** A malformed `action.confirm` — a body
+from a schema version we were not written against, a hedged `conf`, no
+`request_id` — leaves a pending question exactly where it was. Every other
+element in the HUD can treat "unreadable" as "nothing known" because nothing
+known is drawn as nothing; here, nothing known would blank the one plate the
+user has to act on.
+
+The mutation pass found a real one. The words — `summary`, `tool`,
+`requestId` — were gated on the latch still being HELD, not on the question
+still being OPEN, and the latch deliberately outlives the window (it has to,
+or a second request could not tell whether it replaced one). So an expired
+question stayed readable and answerable-looking through the element's own
+API. The plate's visibility hid it completely, which is what made it worth a
+test of its own: this element will get a second reader.
+
+**A new build gate, and it is not about this element.** The HUD only ever
+sees what jv-hud-bridge subscribed to. An element that reads a topic missing
+from `DEFAULT_TOPICS` is not broken in any way anything notices: it builds,
+it lints, its own tests pass — they hand it frames directly — and on the
+machine it draws nothing, forever, on a surface that is unmapped by design.
+That is the A15 failure mode arriving through the other end of the pipe, so
+tools/tests now reads every `latest(...)`/`latestFrom(...)`/`publishersOf(...)`
+in `core/` and fails if the bridge does not subscribe to it. One direction
+only: the bridge may subscribe ahead of the element that will read a topic,
+it may not fall behind one that already does. VERIFIED it bites — dropping
+`action.confirm` from the list fails the gate.
+
+`action.confirm` is also the first topic whose BODY the HUD renders. The
+bridge already carried `brain.request`/`brain.response`, whose bodies hold
+conversation text, under a comment saying no element reads those words and
+that an element which wants them should be a deliberate choice rather than a
+thing that happened. This is that choice, and it is the narrow one: a
+confirmation you cannot read is one you answer by guessing. Nothing leaves
+the machine; this is one local process writing to another (invariant 7).
+
+What the question does NOT say is which file. `summary` is jv-act's static
+per-tool description plus " — yes or no?", so it reads "empty the trash —
+yes or no?" whether the trash holds one file or four hundred. That is a
+jv-act change and jv-act is human-review-only, so it is written up as
+proposal **R4** rather than worked around: the plate shows the summary
+verbatim and the tool id, and the day the summary gets better the plate gets
+better with no HUD change at all.
+
+- tests: `bash ops/ralph/qmltest.sh` — 284 green (was 250), 34 new. 15
+  mutations, 15 caught (one only after the test the survivor earned): the
+  window forgotten; any answer closing any question; an unreadable frame
+  closing one; the link dropping without forgetting; jv-act's declared
+  window ignored; a late frame given a whole window; any schema version
+  readable; a hedged confirmation believed; a question with no id held; any
+  `kind` treated as a request; the words outliving the question; a negative
+  window believed; the first question winning over the newest; an unarmable
+  window never expiring. `bash ops/ralph/runtests.sh tools` — 57 (was 56);
+  `... jv-hud-bridge` — 25 green.
+- build: `nix build .#jv-hud` ok (qmllint -W 0 clean, 284 QML tests in the
+  checkPhase), `nixos-rebuild build --flake .#ares` ok, `nix flake check
+  --no-build` ok. Never test/switch. No schema change, no jv-act change, no
+  boot path, no NVIDIA/kernel/flake pin touched.
+- files: shell/jv-hud/core/ConfirmState.qml (new),
+  shell/jv-hud/ConfirmPlate.qml (new),
+  shell/jv-hud/tests/tst_confirmstate.qml (new), shell/jv-hud/shell.qml,
+  shell/jv-hud/qmldir + core/qmldir (generated), tools/gen_theme_qml.py,
+  tools/tests/test_gen_theme_qml.py,
+  services/jv-hud-bridge/jv_hud_bridge/bridge.py,
+  docs/optimization-backlog.md (R4), ops/ralph/PLAN.md
+- commit: 6779708
+- next: **A21** (how much of the window is left — the only thing in this HUD
+  that would animate continuously, so it wants a human eye before it is
+  built) and **A22** (granted, denied and timed out all exit the same way,
+  and "it went away" reads the same as "it expired while I was reading it").
+  Both are judgement calls about a plate nobody has seen yet, which is the
+  standing ask, now TWENTY-THREE iterations old and unchanged in shape: one
+  sitting at ares to (1) look at the HUD — `JV_HUD_SELFTEST=1 jv-hud`, a
+  real wake word, and now `jv act-log`-worthy: ask Jarvis to do something
+  destructive and watch the corner; (2) say whether the labels are JetBrains
+  Mono; (3) **B10** — record one real spoken turn off the live bus
+  (`harness/record.py`). Every replayed trajectory still ends in "thinking"
+  and times out, and nothing in the repo has ever contained a `speaking`
+  frame, a `sys.health` one, or — as of today — an `action.confirm` one, so
+  three of the HUD's four plates cannot be replayed at all.

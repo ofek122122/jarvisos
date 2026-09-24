@@ -468,6 +468,56 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       have caught the regression this item was about. 12 mutations, 12
       caught. Tests: `bash ops/ralph/runtests.sh tools`.)
 
+- [x] A20. The confirmation you can only HEAR gets a readable copy. — 6779708
+      (`core/ConfirmState.qml` decides — 34 QML tests, 15 mutations run
+      through them — and `ConfirmPlate.qml` draws jv-act's question, its
+      words verbatim, with the tool id underneath. jv-act stops in front of
+      every destructive tool (invariant 3), speaks the question and opens a
+      15 s window in which silence is a no; until now nothing about that
+      handshake was visible, so a question you did not hear was answered by
+      a timeout you never knew was running. The plate cannot ANSWER, and
+      that is structural rather than a decision: the surface has an empty
+      input region and takes no keyboard (invariant 10, pinned by a tools
+      test), so there is no path from these pixels to an authorization —
+      answering stays where invariant 3 put it, your voice or `jv confirm`.
+      The request has to be LATCHED, and the bus forces it: `bus.latest()`
+      keeps one frame per topic and the ANSWER lands on the SAME topic as
+      the request, so a derived "something is pending" would see the
+      question only in the instant it arrived. Three ways to let go — an
+      answer naming THIS `request_id` (not any answer: jv-act keeps a
+      single outstanding slot, but the HUD is not what enforces that), the
+      link dropping, and the window jv-act DECLARED in the frame running
+      out (A14's rule; `windowFallbackS` is for a request that declares
+      none and mirrors no service's constant). Refusing to read a frame is
+      never the same as being answered: an unreadable frame leaves a
+      pending question exactly where it was. A mutation found a real one —
+      the words are gated on the question still being OPEN, not on the
+      latch still being held, or an expired question stays readable and
+      answerable-looking. New build gate: every topic a `core/` element
+      reads must be one jv-hud-bridge subscribes to — an element reading an
+      unsubscribed topic builds, lints, passes its own tests and draws
+      nothing forever on a surface that is unmapped by design. Tests:
+      `bash ops/ralph/qmltest.sh`, `bash ops/ralph/runtests.sh tools`,
+      `... jv-hud-bridge`.)
+
+- [ ] A21. `ConfirmPlate` shows that a window is open and never how much of
+      it is left. The window closing is a real signal and §06 would let it
+      move a pixel — a hairline that shortens, say — but it would be the
+      only thing in this HUD that animates continuously, and it has to go
+      through `Motion`, which means the one user who asked for no motion
+      would get the one indicator with no sense of time. Whether that reads
+      as urgency or as a nag is a question for a human eye on ares, so it
+      was deliberately not built blind. Discovered in A20.
+
+- [ ] A22. The plate simply vanishes when the question is answered — the
+      same exit for granted, denied and timed out. Those are three
+      different facts and the user saw none of them; "it went away" is
+      indistinguishable from "it expired while I was reading it". A brief,
+      quiet outcome (the word, then gone) is the obvious answer and is also
+      the first thing in this HUD that would be on screen for a fixed time
+      rather than for as long as its signal is true — a new rule, worth
+      deciding deliberately rather than as a side effect. Discovered in A20.
+
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
       right (you see it wherever you look) or noise. Needs a human eye on
@@ -515,6 +565,9 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   that was silently a web font does not (5e5ef8d, 2026-09-24)
 - B5 — `jv act-log` can be asked a question: --since/--failed/--outcome, and
   a filter that never hides what it could not evaluate (da134b9, 2026-09-24)
+- A20 — the confirmation stops being only audible: ConfirmState/ConfirmPlate,
+  jv-act's question on screen for exactly as long as it can be answered
+  (6779708, 2026-09-24)
 - A19 — the font module stops promising and starts proving: fc-match run
   against the system's own fontconfig config, every build (be1b264,
   2026-09-24)
