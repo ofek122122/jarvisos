@@ -771,22 +771,67 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       packet, so it is proposal **R8** in `docs/optimization-backlog.md`
       and **human review, not a build**. Discovered in B35.
 
-- [ ] B37. `gpu_vram_free_mb` has never once been on the bus on ares.
-      `nvidia-smi` is not in jv-context's closure and was not on its unit
-      PATH — measured under the BUILT unit's own PATH in B35, where the
-      snapshot came back without the field. The probe already degrades to
-      absent (the schema makes the field optional), so nothing is broken
-      and nothing is lying; it is simply that invariant 6 — "6 GB VRAM is
-      a scheduling problem" — has no number behind it, and the field's
-      own description says it "feeds the brain's own situational
-      awareness". The fix is the same one line B35 wrote for wireplumber,
-      pointing at `config.hardware.nvidia.package.bin` from
-      `modules/jarvis-services.nix` — which READS the NVIDIA option and
-      does not touch `modules/gpu-nvidia.nix` or its pin, so it is the
-      loop's to take. Worth pairing with backlog item 14 (nvidia-smi is
-      forked once per second, forever, for this one field), because the
-      day it starts working is the day that cost starts being paid.
-      Discovered in B35.
+- [x] B37. `gpu_vram_free_mb` has never once been on the bus on ares. — befd1da
+      (`nvidia-smi` lives in the NVIDIA driver's `bin` output, not in
+      jv-context's closure, and nothing put it on the unit PATH — so every
+      1 Hz snapshot since v1 raised FileNotFoundError and dropped the one
+      number behind invariant 6's "6 GB VRAM is a scheduling problem".
+      Nothing was lying: the schema makes the field optional and the probe
+      degraded to absent. It was simply never measured. The unit now names
+      `config.hardware.nvidia.package.bin` the way `jv-llm` already did —
+      READING hardware.nvidia, never setting it, so gpu-nvidia.nix and its
+      pin are untouched. **Verified through the BUILT closure on ares: the
+      shipped jv_context read 943 MiB free of 6144 off the GTX 1660 SUPER,
+      cross-checked against nvidia-smi itself.**
+      The probe was rewritten around the fact that an OPTIONAL field's
+      absence is a CLAIM — the schema says "free VRAM if a GPU is present",
+      so absent has to mean "no GPU", not "the reading did not work out".
+      `GpuProbe` therefore answers three ways: `None` (no card, not a
+      fault), a float, or `ProbeUnavailable` (there IS a driver and it went
+      quiet — which now reaches `sys.health` as `degraded` with a note,
+      while `context.system` keeps flowing, because one optional field must
+      never cost the four required ones). `parse_nvidia_smi_vram` rejects
+      what `float()` would have swallowed: `[N/A]`, `[Not Supported]`, NVML
+      init errors on stdout, `nan`/`inf`, negatives, and a number printed
+      alongside a non-zero exit. A missing binary LATCHES the probe off —
+      the PATH is a store path fixed at unit start, so it cannot grow an
+      nvidia-smi later, and that is half of backlog 14 gone without
+      touching the cadence decision that is the human's.
+      Tests: `runtests.sh jv-context` 105, was 82; eleven mutations,
+      eleven caught.)
+
+- [ ] B39. **jv-brain's VRAM guard has the same probe, with none of the
+      fixes, and it is the one that actually decides.**
+      `jv_brain/launcher.py:probe_free_vram_bytes` shells out to the same
+      nvidia-smi query and returns `None` on EVERY failure — OSError,
+      timeout, non-zero exit, and `int()` choking on `[N/A]` — and `None`
+      goes straight into `pick_rung`, which reads it as "no usable GPU"
+      and drops Jarvis to the CPU rung for the life of that llama-server.
+      So a driver hiccup at launch is indistinguishable from a machine
+      with no card, and the only trace is a stdout line in the unit's
+      journal: nothing on the bus, no heartbeat note, and the rung file
+      says `free_vram_mb=-1` for both. Its unit DOES have the driver on
+      its path (`modules/jarvis-services.nix` jv-llm), so this is not
+      B37's bug — it is B37's second half, which B37 deliberately did not
+      widen into. The shape to copy is the one jv-context now has: a
+      strict parse, and "could not read" told apart from "not there".
+      Note it runs ONCE per launch, so backlog 14's fork cost does not
+      apply and neither does the latch. Discovered in B37.
+
+- [ ] B40. Nothing reads `context.system.gpu_vram_free_mb`, and as of
+      B37 there is finally something to read. The field's own schema
+      description says it "feeds the brain's own situational awareness",
+      and jv-brain currently learns about VRAM exactly once, at launch,
+      from its own fork — it cannot see the number move when a game
+      starts, which is the moment invariant 6 exists for. The HUD is the
+      other candidate and the more honest one to build first (a plate
+      that says how much of the 6 GB is left is a real signal, and the
+      measurement at the time of writing was 943 MiB free, which is
+      itself the interesting case: the 8B Q4 brain would not fit right
+      now). Both want a decision about WHO acts on it before either is
+      built — a HUD that displays it is the loop's; a brain that reacts
+      to it is a scheduling change and pairs with backlog 14. Discovered
+      in B37.
 
 - [ ] B38. jv-context is now the only service that beats immediately on
       a state change; `schemas/sys.health.json` asks EVERY service for it

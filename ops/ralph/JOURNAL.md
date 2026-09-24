@@ -6376,3 +6376,118 @@ was reaching it only by inheritance from the session; it now names
   human at ares), B27/B28 share one decision, B30/B33 share another, and
   B10/A28 — one live recording of one spoken turn — is still the biggest
   thing a human can hand this loop.
+
+## 2026-09-24 — iteration 63 — B37: the number invariant 6 is named after
+
+CLAUDE.md invariant 6 is titled "6 GB VRAM is a scheduling problem". The
+schema field that carries the number, `context.system.gpu_vram_free_mb`,
+describes itself as feeding "the brain's own situational awareness". It
+has been absent from every frame ares has ever published.
+
+Nothing was lying, which is why nobody caught it: the field is optional,
+the probe degraded to absent, and every consumer that would have read it
+was correct to see a machine with no reading. `nvidia-smi` ships in the
+NVIDIA driver's `bin` output rather than in jv-context's closure, nothing
+named it on the unit path, and so the 1 Hz snapshot raised
+FileNotFoundError about 86,000 times a day to learn the same thing. B35
+found this by measuring under the BUILT unit's own PATH, which is the
+only place the difference between "inherited from my shell" and "what the
+service actually gets" is visible — and it is the second time that exact
+measurement has found a missing binary in three iterations.
+
+One line of Nix, named the way `jv-llm` already names it: the unit path
+gains `config.hardware.nvidia.package.bin`. That READS `hardware.nvidia`;
+`modules/gpu-nvidia.nix` and the driver pin are untouched. I first wrote
+it with an `lib.elem "nvidia" videoDrivers` guard, then dropped the guard
+— jv-llm pulls the same package unconditionally two units down, so the
+guard bought nothing and cost the file's coherence. The rebuilt closure
+came out at the identical store path either way, which is the cheapest
+possible proof that the simplification changed nothing.
+
+The larger half was the probe. `gpu_vram_free_mb` is optional, and I
+think the lesson here is that an optional field's ABSENCE is a claim like
+any other: the schema says "free VRAM if a GPU is present", so absent has
+to mean *there is no GPU*, not *the reading did not work out*. The old
+probe returned `None` for both, which is the B35 pathology one level
+down — a machine that has a card and lost sight of it looked exactly like
+a machine that never had one, and invariant 6's ladder would be flying
+blind with nothing anywhere saying so.
+
+So `GpuProbe` answers three ways instead of two: `None` (no card, not a
+fault), a float, or `ProbeUnavailable` (there IS a driver and it went
+quiet). The third reaches `sys.health` as `degraded` with a note naming
+the field — while `context.system` keeps flowing, because the mirror
+image of B35 is the point: the mixer feeds a REQUIRED field, so its
+failure costs the whole frame; the GPU feeds an optional one, so its
+failure must cost exactly that field and never the other four. That
+asymmetry is now two tests that would each fail if the other's rule were
+applied.
+
+`parse_nvidia_smi_vram` rejects what `float()` would have taken happily:
+`[N/A]` and `[Not Supported]` (what nvidia-smi prints when a device
+cannot answer), NVML init errors, which arrive on stdout the way wpctl's
+do, `nan` and `inf`, negatives, and — the case my first test missed — a
+real number printed alongside a NON-ZERO exit, which is what a multi-GPU
+box does when one card answers and another does not. That mutation
+survived the first round precisely because my fake had also returned
+empty stdout; the check I thought I was testing was being made by the
+parser. Fixed the fake, not the code.
+
+A missing binary LATCHES the probe off. The PATH is a store path fixed
+when the unit started, so "there is no driver here" cannot stop being
+true while the process lives, and re-forking once a second to re-learn it
+is the pure-waste half of backlog item 14 — gone without touching the
+cadence question (how fast should the ladder see a game-launch spike?)
+or the pynvml question (a flake dependency), both of which remain the
+human's. Backlog 14 is updated to say so, and to say that its cost is no
+longer theoretical: as of today the fork returns a number.
+
+- tests: `bash ops/ralph/runtests.sh jv-context` — **105 (was 82)**.
+  **Eleven mutations, all eleven caught**: the latch removed (forks
+  again), a missing binary raised as a fault, the gpu note dropped, the
+  gpu failure allowed to take the whole frame, the finite/negative guard
+  dropped, the exit code ignored, empty output read as `0.0`, the service
+  ignoring the note, a GPU-less machine reported as degraded, and
+  OSError/timeout left uncaught. `pylib` (4) and `tools` (136) green too,
+  since `snapshot()` changed shape.
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change, no jv-act, no boot path, no
+  NVIDIA/kernel/flake pin — `gpu-nvidia.nix` is read, not written.
+- **verified through the BUILT closure on ares**: the shipped
+  `jv_context` (from `/nix/store/...python3-3.14.7-env/.../jv_context/
+  system.py`) read **943 MiB free of 6144** off the GTX 1660 SUPER under
+  the built unit's own `PATH=`, cross-checked against nvidia-smi's own
+  `name,memory.total,memory.free`. The same binary with nvidia-smi gone
+  answered `None` and latched, publishing a whole frame with no note. The
+  generated unit file now carries `nvidia-x11-595.91.07-bin/bin` on its
+  PATH. Only a free-VRAM integer was read; no process list, no device
+  serial, nothing kept.
+- files: services/jv-context/jv_context/system.py,
+  services/jv-context/jv_context/service.py,
+  services/jv-context/jv_context/main.py,
+  services/jv-context/tests/test_context.py,
+  modules/jarvis-services.nix, docs/optimization-backlog.md
+- commit: befd1da
+- next: **B39, and it is the sharper half of what B37 uncovered.**
+  `jv_brain/launcher.py:probe_free_vram_bytes` runs the same nvidia-smi
+  query with none of these fixes and, unlike jv-context's, its answer
+  DECIDES something: `None` on any failure — OSError, timeout, non-zero
+  exit, `int()` choking on `[N/A]` — goes straight into `pick_rung`,
+  which reads it as "no usable GPU" and drops Jarvis to the CPU rung for
+  the life of that llama-server. A driver hiccup at launch is
+  indistinguishable from a machine with no card, and the only trace is a
+  journal line: nothing on the bus, no heartbeat note, and the rung file
+  writes `free_vram_mb=-1` for both. Its unit already has the driver on
+  its path, so this is not B37's bug — it is B37's second half, and the
+  shape to copy now exists. **B40** is the consumer question: the field
+  is finally on the bus and nothing reads it. 943 MiB free is itself the
+  interesting case — the 8B Q4 brain would not fit right now — and a HUD
+  plate showing it is the loop's to build, while a brain that REACTS to
+  it is a scheduling change that pairs with backlog 14. **B38** is
+  unchanged and still small: jv-ears, jv-guard and jv-brain beat on a
+  timer alone, and `_set_fault` + an Event is the shape to copy. **B36
+  is a human's** (proposal R8). Otherwise unchanged: A is blocked on
+  A62/A65/A68/A47/A56/A50/A60 (decisions) and A13/A21/A22/A25/A27/A31/
+  A38/A39 (a human at ares), B27/B28 share one decision, B30/B33 share
+  another, and B10/A28 — one live recording of one spoken turn — is
+  still the biggest thing a human can hand this loop.
