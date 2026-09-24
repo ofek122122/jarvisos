@@ -347,6 +347,17 @@ pub struct Turn {
     /// beside `tool_ms` because "no tool ran" and "a tool ran and could not
     /// be timed" are different facts and both print `tool=?`.
     pub tool_calls: usize,
+    /// Of `tool`: how long at least one `action.confirm` question was open —
+    /// YOUR time, not the machine's. None when no confirming tool ran, when
+    /// one ran that this tap could not time (see `confirm_waits`), and when
+    /// `tool` itself is unmeasured: a share of a whole nobody measured is
+    /// not a share.
+    pub confirm_ms: Option<f64>,
+    /// How many `action.confirm` questions this tap saw opened for the turn.
+    /// Beside `confirm_ms` for the same reason `tool_calls` is beside
+    /// `tool_ms`: "you were never asked" and "you were asked and the wait
+    /// could not be timed" are different facts.
+    pub confirm_waits: usize,
 }
 
 impl Turn {
@@ -380,6 +391,22 @@ impl Turn {
         )
     }
 
+    /// Of `tool`: jv-act's OWN work, the confirmation window taken out.
+    ///
+    /// The half a faster machine could shorten. Its complement, `confirm_ms`,
+    /// is 15 s by design and is you — which is the whole reason the two are
+    /// worth separating, exactly as `spoke` is separated from `hold` one
+    /// level up.
+    ///
+    /// The subtraction always fits and nothing here has to check that it
+    /// does: `confirm_span` refuses a window that is not nested inside its
+    /// own call's round trip, so the union of the windows is a subset of the
+    /// union of the calls. Pinned by
+    /// `a_confirmation_window_outside_its_own_round_trip_is_refused`.
+    pub fn ran_ms(&self) -> Option<f64> {
+        Some(self.tool_ms? - self.confirm_ms?)
+    }
+
     /// The follow-up line for a turn whose `think` jv-act was inside, or
     /// None when there is nothing to say.
     ///
@@ -395,6 +422,21 @@ impl Turn {
             self.tool_calls
         ))
     }
+
+    /// The follow-up line for a turn where jv-act stopped and asked you, or
+    /// None when no confirmation was opened or none could be timed.
+    ///
+    /// Its own line again, under the `tool` line it divides, for the reason
+    /// that line is its own: the widths have to survive a terminal, and this
+    /// describes a minority of the minority of turns that ran a tool at all.
+    pub fn confirm_line(&self, id: &str) -> Option<String> {
+        let (tool, you, ran) = (self.tool_ms?, self.confirm_ms?, self.ran_ms()?);
+        let plural = if self.confirm_waits == 1 { "" } else { "s" };
+        Some(format!(
+            "turn {id}: tool={tool:.0}ms is you={you:.0}ms + ran={ran:.0}ms over {} confirmation{plural}",
+            self.confirm_waits
+        ))
+    }
 }
 
 /// How many `intent.action` frames one turn may record before this stops
@@ -408,11 +450,18 @@ impl Turn {
 /// measurement: a number we stopped taking is not a short number.
 pub const ACTS_PER_TURN: usize = 32;
 
-/// One `intent.action` and the `action.result` answering it, if it came.
+/// One `intent.action` and the `action.result` answering it, if it came,
+/// plus the `action.confirm` question inside it for a tool that needed one.
 struct Act {
     request_id: String,
     sent: f64,
     done: Option<f64>,
+    /// `action.confirm` kind=request: the moment jv-act asked YOU. None for
+    /// a tool whose capability needs no confirmation, which is most of them.
+    asked: Option<f64>,
+    /// `action.confirm` kind=answer: the moment the question stopped being
+    /// open, by an answer or by the window expiring.
+    answered: Option<f64>,
 }
 
 /// Where one input utterance's boundaries are collected until its reply
@@ -525,7 +574,13 @@ impl Utterances {
             u.acts_overflowed = true;
             return;
         }
-        u.acts.push(Act { request_id: request_id.to_string(), sent: ts, done: None });
+        u.acts.push(Act {
+            request_id: request_id.to_string(),
+            sent: ts,
+            done: None,
+            asked: None,
+            answered: None,
+        });
         self.reqs.insert(request_id.to_string(), utterance_id.to_string());
     }
 
@@ -536,14 +591,46 @@ impl Utterances {
     /// saw belongs to no turn it can name, and is dropped rather than
     /// attached to whichever turn happens to be open.
     pub fn act_done(&mut self, request_id: &str, ts: f64) {
-        if request_id.is_empty() {
-            return;
-        }
-        let Some(utt) = self.reqs.get(request_id) else { return };
-        let Some(u) = self.utts.get_mut(utt) else { return };
-        if let Some(a) = u.acts.iter_mut().find(|a| a.request_id == request_id) {
+        if let Some(a) = self.act_mut(request_id) {
             Self::keep_earliest(&mut a.done, ts);
         }
+    }
+
+    /// The `action.confirm` kind=request for `request_id`, at envelope `ts`:
+    /// jv-act stopped and asked the user, and everything until the answer is
+    /// the user's time and not the machine's.
+    ///
+    /// Joined through the `intent.action` that named the utterance, like
+    /// `action.result` and for the same reason — `action.confirm` carries a
+    /// `request_id` and no `utterance_id`. A question for a request this tap
+    /// never saw belongs to no turn it can name.
+    pub fn confirm_asked(&mut self, request_id: &str, ts: f64) {
+        if let Some(a) = self.act_mut(request_id) {
+            Self::keep_earliest(&mut a.asked, ts);
+        }
+    }
+
+    /// The `action.confirm` kind=answer for `request_id`, at envelope `ts`.
+    ///
+    /// The EARLIEST, and that matters here more than anywhere else: jv-act
+    /// ECHOES the answer it acted on onto the same topic the `jv confirm`
+    /// CLI publishes its answer on, so one decision produces two frames.
+    /// The user stopped deciding at the first of them.
+    pub fn confirm_answered(&mut self, request_id: &str, ts: f64) {
+        if let Some(a) = self.act_mut(request_id) {
+            Self::keep_earliest(&mut a.answered, ts);
+        }
+    }
+
+    /// The recorded call for `request_id`, through the utterance the
+    /// `intent.action` named. None for a request this tap never saw.
+    fn act_mut(&mut self, request_id: &str) -> Option<&mut Act> {
+        if request_id.is_empty() {
+            return None;
+        }
+        let utt = self.reqs.get(request_id)?;
+        let u = self.utts.get_mut(utt)?;
+        u.acts.iter_mut().find(|a| a.request_id == request_id)
     }
 
     /// How many `request_id`s are still joined to a live utterance. Exists
@@ -609,6 +696,7 @@ impl Utterances {
         let seam = u
             .heard
             .filter(|h| *h <= say_ts && u.end.map_or(true, |t1| *h >= t1));
+        let tool = seam.and_then(|h| Self::tool_span(&u.acts, u.acts_overflowed, h, say_ts));
         Some(Turn {
             total_ms: u.start.map(|t0| (say_ts - t0) * 1e3),
             speech_ms: match (u.start, u.end) {
@@ -625,8 +713,13 @@ impl Utterances {
             // `tool` is a share of `think`, so it needs the same seam: a
             // share of a whole nobody measured is not a share, and the
             // summary table indents it under the row it divides.
-            tool_ms: seam.and_then(|h| Self::tool_span(&u.acts, u.acts_overflowed, h, say_ts)),
+            tool_ms: tool,
             tool_calls: u.acts.len(),
+            // And `confirm` is a share of `tool` by exactly the same rule,
+            // one level further down: without a `tool` there is no whole for
+            // the user's half to be a half OF.
+            confirm_ms: tool.and(Self::confirm_span(&u.acts, u.acts_overflowed)),
+            confirm_waits: u.acts.iter().filter(|a| a.asked.is_some()).count(),
         })
     }
 
@@ -658,6 +751,50 @@ impl Utterances {
             }
             spans.push((a.sent, done));
         }
+        Some(Self::union_ms(spans))
+    }
+
+    /// Of `tool`: the time at least one `action.confirm` question was open —
+    /// the part of jv-act's span that was the USER deciding.
+    ///
+    /// None — not zero — when:
+    ///
+    ///   * **no question was asked**: most tools are benign and confirm
+    ///     nothing, and a window that never opened is not a 0 ms window;
+    ///   * **recording stopped** (`overflowed`), for the same reason `tool`
+    ///     refuses: we know more calls ran than we kept;
+    ///   * **a question is still open**, or its call never came back: it was
+    ///     open for a length nobody can state;
+    ///   * **the window does not NEST inside its own call's round trip**.
+    ///     A question asked before jv-brain requested the tool, or answered
+    ///     after jv-act reported it done, means two frames disagree about
+    ///     the order the pipeline ran in. That nesting is also what makes
+    ///     this a genuine SHARE — it is what guarantees the union of the
+    ///     windows cannot exceed the union of the calls, so `ran_ms` needs
+    ///     no fit check of its own.
+    ///
+    /// Otherwise the UNION, like the calls around it: jv-act holds one
+    /// confirmation open at a time today, but that is its rule and not this
+    /// reader's, and two questions open at once are one moment of your time.
+    fn confirm_span(acts: &[Act], overflowed: bool) -> Option<f64> {
+        if overflowed {
+            return None;
+        }
+        let mut spans: Vec<(f64, f64)> = Vec::new();
+        for a in acts {
+            let Some(asked) = a.asked else { continue };
+            let (answered, done) = (a.answered?, a.done?);
+            if !(a.sent <= asked && asked <= answered && answered <= done) {
+                return None;
+            }
+            spans.push((asked, answered));
+        }
+        (!spans.is_empty()).then(|| Self::union_ms(spans))
+    }
+
+    /// The total length covered by `spans`, in ms, counting overlap once.
+    /// Panics on an empty slice; both callers check.
+    fn union_ms(mut spans: Vec<(f64, f64)>) -> f64 {
         spans.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut union = 0.0;
         let (mut open, mut close) = spans[0];
@@ -669,7 +806,7 @@ impl Utterances {
                 close = *e;
             }
         }
-        Some((union + close - open) * 1e3)
+        (union + close - open) * 1e3
     }
 
     pub fn len(&self) -> usize {
@@ -706,6 +843,13 @@ pub struct TurnStats {
     wait: Vec<f64>,
     model: Vec<f64>,
     tool: Vec<f64>,
+    /// Two halves of one subtraction, and unlike `spoke`/`hold` they cannot
+    /// come apart: `ran` IS `tool - you`, so it exists exactly when `you`
+    /// does. The pair is pushed in one statement to say so, not to enforce
+    /// it — the enforcement is `Turn::ran_ms`, which cannot answer without a
+    /// `confirm_ms` to subtract.
+    you: Vec<f64>,
+    ran: Vec<f64>,
     respond: Vec<f64>,
     total: Vec<f64>,
     /// The id and `think` of the most recently reported turn, until
@@ -732,6 +876,10 @@ impl TurnStats {
         }
         if let Some(v) = t.tool_ms {
             self.tool.push(v);
+        }
+        if let (Some(you), Some(ran)) = (t.confirm_ms, t.ran_ms()) {
+            self.you.push(you);
+            self.ran.push(ran);
         }
         if let Some(v) = t.respond_ms {
             self.respond.push(v);
@@ -786,7 +934,7 @@ impl TurnStats {
             self.turns
         );
         out.push_str(&format!("{:<10} {:<31} {:>4} {:>9} {:>9} {:>9}\n", "span", "whose time it is", "n", "p50", "p95", "max"));
-        let rows: [(&str, &str, &Vec<f64>); 9] = [
+        let rows: [(&str, &str, &Vec<f64>); 11] = [
             ("spoke", "you, talking", &self.spoke),
             ("hold", "jv-ears' endpoint wait", &self.hold),
             ("hear", "jv-ears' ASR", &self.hear),
@@ -794,6 +942,8 @@ impl TurnStats {
             ("  wait", "of think: before the model ran", &self.wait),
             ("  model", "of think: the LLM itself", &self.model),
             ("  tool", "of think: jv-act ran the tool", &self.tool),
+            ("    you", "of tool: you, deciding", &self.you),
+            ("    ran", "of tool: jv-act's own work", &self.ran),
             ("respond", "hear + think: ASR + brain + bus", &self.respond),
             ("total", "speech start -> first word", &self.total),
         ];
@@ -823,7 +973,12 @@ impl TurnStats {
         }
         if !self.tool.is_empty() {
             out.push_str(
-                "--- tool is `intent.action` -> `action.result`: jv-act running it AND, for a\n    confirming tool, the whole window it waited for your answer in — 15 s by\n    design, never spoken, and otherwise indistinguishable from a slow LLM. It\n    is the UNION of the round trips, so overlapping calls count once and the\n    completions jv-brain runs between serial calls are not in it. A call that\n    never reached jv-act (a name it invented, arguments it could not write, or\n    one past its own per-turn cap) publishes no `intent.action`, and that time\n    stays in the rest of `think`, where it was spent.\n",
+                "--- tool is `intent.action` -> `action.result`: jv-act running it AND, for a\n    confirming tool, the whole window it waited for your answer in — 15 s by\n    design and never spoken — which is why the `you`/`ran` rows sit under it.\n    It is the UNION of the round trips, so overlapping calls count once and the\n    completions jv-brain runs between serial calls are not in it. A call that\n    never reached jv-act (a name it invented, arguments it could not write, or\n    one past its own per-turn cap) publishes no `intent.action`, and that time\n    stays in the rest of `think`, where it was spent.\n",
+            );
+        }
+        if !self.you.is_empty() {
+            out.push_str(
+                "--- of a confirming tool's `tool`, `you` is the window jv-act held open waiting\n    for your answer — `action.confirm` request -> answer, both already on the\n    bus — and `ran` is the rest. `you` is the half no faster machine shortens,\n    and a 15 s window inside `tool` is why the undivided number could not be\n    argued about against a budget. Both are refused rather than guessed when a\n    question was still open, so a tool row with no split under it is a turn\n    where nothing was asked or nothing could be timed.\n",
             );
         }
         if self.spoke.is_empty() {
@@ -2519,6 +2674,244 @@ mod tests {
         assert_eq!(u.pending_requests(), 2, "evicted turns take their requests with them");
     }
 
+    /// Build a turn that ran ONE confirming tool, the way `Utterances` would.
+    ///
+    /// `sent`/`done` bracket the `intent.action` -> `action.result` round
+    /// trip; `window` is the `action.confirm` request -> answer pair inside
+    /// it, or None for a tool that needed no confirmation.
+    fn turn_with_confirm(
+        say: f64,
+        sent: f64,
+        done: Option<f64>,
+        window: Option<(f64, Option<f64>)>,
+    ) -> Turn {
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.acted("t", "r1", sent);
+        if let Some((asked, answered)) = window {
+            u.confirm_asked("r1", asked);
+            if let Some(a) = answered {
+                u.confirm_answered("r1", a);
+            }
+        }
+        if let Some(d) = done {
+            u.act_done("r1", d);
+        }
+        u.reply("t", say, None).expect("a turn")
+    }
+
+    #[test]
+    fn the_half_of_a_tool_that_was_you_deciding_separates_from_the_half_it_ran() {
+        // `tool` is jv-act's span, and for a destructive tool most of it is
+        // the 15 s window jv-act holds open waiting for an answer. No faster
+        // machine shortens that half, so a number mixing it with execution
+        // cannot be argued about against a budget — the same complaint
+        // `spoke` answers one level up. Both ends are already on the bus:
+        // `action.confirm` kind=request and kind=answer, threaded by the
+        // request_id `intent.action` already named.
+        let t = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2))));
+        about(t.tool_ms, 16000.0);
+        about(t.confirm_ms, 15000.0);
+        about(t.ran_ms(), 1000.0);
+        assert_eq!(t.confirm_waits, 1);
+    }
+
+    #[test]
+    fn a_tool_that_asked_you_nothing_has_no_confirmation_to_subtract() {
+        // Most tools are benign and never confirm. "No window" is not a 0 ms
+        // window, and the split simply is not printed for them.
+        let t = turn_with_confirm(20.0, 15.0, Some(18.0), None);
+        about(t.tool_ms, 3000.0);
+        assert_eq!(t.confirm_ms, None, "a window that did not open is not 0 ms");
+        assert_eq!(t.confirm_waits, 0);
+        assert_eq!(t.ran_ms(), None, "and there is nothing to split");
+        assert_eq!(t.confirm_line("t"), None);
+    }
+
+    #[test]
+    fn a_confirmation_still_open_when_the_reply_landed_is_not_timed() {
+        // Same rule as an unanswered `intent.action`: a window whose close
+        // this tap never saw lasted a length nobody can state. We still know
+        // one was asked for, which is a different fact from none.
+        let t = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, None)));
+        assert_eq!(t.confirm_ms, None);
+        assert_eq!(t.confirm_waits, 1, "we still know you were asked");
+        assert_eq!(t.ran_ms(), None);
+        assert_eq!(t.confirm_line("t"), None);
+    }
+
+    #[test]
+    fn the_answer_that_counts_is_the_first_one_you_gave() {
+        // jv-act ECHOES the answer it acted on (`kind=answer`,
+        // answered_by=voice/cli/timeout) on the same topic the `jv confirm`
+        // CLI publishes its answer on, so one decision can produce two
+        // frames. The user stopped deciding at the FIRST of them; charging
+        // them for jv-act's echo would inflate the half that is theirs.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.acted("t", "r1", 15.0);
+        u.confirm_asked("r1", 15.2);
+        u.confirm_answered("r1", 20.2); // the CLI's answer
+        u.confirm_answered("r1", 20.4); // jv-act's echo of it
+        u.act_done("r1", 21.0);
+        let t = u.reply("t", 40.0, None).expect("a turn");
+        about(t.confirm_ms, 5000.0);
+    }
+
+    #[test]
+    fn a_confirmation_window_outside_its_own_round_trip_is_refused() {
+        // The window is a share of ONE tool call, so it has to sit inside
+        // that call's own brackets. A window opening before jv-brain asked,
+        // or closing after jv-act answered, means two frames disagree about
+        // the order the pipeline ran in — and this nesting is also what
+        // guarantees `confirm` can never exceed the `tool` it is part of.
+        let before = turn_with_confirm(40.0, 15.0, Some(31.0), Some((14.9, Some(30.2))));
+        assert_eq!(before.confirm_ms, None, "asked before jv-brain requested the tool");
+        let after = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(31.1))));
+        assert_eq!(after.confirm_ms, None, "answered after jv-act was done");
+        let backwards = turn_with_confirm(40.0, 15.0, Some(31.0), Some((20.0, Some(16.0))));
+        assert_eq!(backwards.confirm_ms, None, "answered before it was asked");
+    }
+
+    #[test]
+    fn two_confirmations_in_one_turn_are_the_union_like_the_calls_around_them() {
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        for (rid, sent, asked, answered, done) in [
+            ("r1", 15.0, 15.2, 20.2, 21.0),
+            ("r2", 25.0, 25.2, 27.2, 28.0),
+        ] {
+            u.acted("t", rid, sent);
+            u.confirm_asked(rid, asked);
+            u.confirm_answered(rid, answered);
+            u.act_done(rid, done);
+        }
+        let t = u.reply("t", 40.0, None).expect("a turn");
+        about(t.tool_ms, 9000.0);
+        about(t.confirm_ms, 7000.0);
+        about(t.ran_ms(), 2000.0);
+        assert_eq!(t.confirm_waits, 2);
+    }
+
+    #[test]
+    fn two_questions_open_at_once_are_one_moment_of_your_time() {
+        // The UNION and not the sum. jv-act holds one confirmation open at a
+        // time — that is ITS rule, enforced in its own single-outstanding
+        // slot, and not something this reader is entitled to assume. Summing
+        // two overlapping windows could produce a `you` larger than the
+        // `tool` it is supposed to be part of.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        for (rid, sent, asked, answered, done) in [
+            ("r1", 15.0, 15.2, 25.2, 26.0),
+            ("r2", 16.0, 20.2, 30.2, 31.0),
+        ] {
+            u.acted("t", rid, sent);
+            u.confirm_asked(rid, asked);
+            u.confirm_answered(rid, answered);
+            u.act_done(rid, done);
+        }
+        let t = u.reply("t", 40.0, None).expect("a turn");
+        about(t.tool_ms, 16000.0);
+        about(t.confirm_ms, 15000.0);
+        about(t.ran_ms(), 1000.0);
+    }
+
+    #[test]
+    fn a_confirmation_for_a_request_this_tap_never_saw_belongs_to_no_turn() {
+        // `action.confirm` carries a request_id and no utterance_id, so the
+        // join runs through the `intent.action` that named one — exactly as
+        // `action.result` does. A tap that started mid-turn sees the
+        // question and not the request behind it.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.confirm_asked("orphan", 15.2);
+        u.confirm_answered("orphan", 30.2);
+        u.acted("t", "r1", 15.0);
+        u.act_done("r1", 18.0);
+        let t = u.reply("t", 20.0, None).expect("a turn");
+        assert_eq!(t.confirm_waits, 0);
+        assert_eq!(t.confirm_ms, None);
+        about(t.tool_ms, 3000.0);
+    }
+
+    #[test]
+    fn a_confirmation_inside_a_tool_span_nobody_could_time_is_not_reported() {
+        // `confirm` is a share of `tool` the way `tool` is a share of
+        // `think`: a share of a whole nobody measured is not a share. Here
+        // the window itself is perfectly well formed and the round trip
+        // around it falls outside the `think` it claims to divide.
+        let t = turn_with_confirm(20.0, 13.5, Some(18.0), Some((14.5, Some(17.0))));
+        assert_eq!(t.tool_ms, None, "the round trip started before jv-ears finished");
+        assert_eq!(t.confirm_ms, None, "so its share is not a share of anything");
+        assert_eq!(t.confirm_waits, 1, "we still know you were asked");
+    }
+
+    #[test]
+    fn the_confirm_line_names_the_half_no_machine_can_shorten() {
+        let t = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2))));
+        let line = t.confirm_line("utt-7").expect("a confirm line");
+        assert!(line.contains("turn utt-7:"), "{line}");
+        assert!(line.contains("tool=16000ms"), "{line}");
+        assert!(line.contains("you=15000ms"), "{line}");
+        assert!(line.contains("ran=1000ms"), "{line}");
+        assert!(line.contains("1 confirmation"), "{line}");
+        assert!(!line.contains("1 confirmations"), "{line}");
+        // Its own line, like the `tool` split above it: the `>>> turn` line
+        // stays six numbers wide and the `tool` line keeps its own shape.
+        assert!(!t.line("utt-7").contains("you="), "{}", t.line("utt-7"));
+        assert!(!t.tool_line("utt-7").expect("a tool line").contains("you="), "{line}");
+    }
+
+    #[test]
+    fn turn_summary_splits_a_confirming_tool_into_you_and_jv_act() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2)))), "t");
+        let out = s.summary();
+        let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("no {w} row in\n{out}"));
+        assert!(at("  tool") < at("    you"), "the halves sit under their whole:\n{out}");
+        assert!(at("    you") < at("    ran"), "{out}");
+        assert!(at("    ran") < at("respond"), "{out}");
+        assert!(out.contains("15000ms"), "{out}");
+        assert!(out.contains("action.confirm"), "and say where the number came from:\n{out}");
+    }
+
+    #[test]
+    fn a_confirmation_nobody_could_time_leaves_neither_half_of_it() {
+        // A `ran` row standing on turns a `you` row does not would be an
+        // average over turns measured two different ways. It cannot happen
+        // here — `ran_ms` is the subtraction and refuses without both — and
+        // this is the turn that would expose it if it ever did: a question
+        // this tap saw opened and never saw closed, inside a `tool` that was
+        // measured perfectly well.
+        let mut s = TurnStats::default();
+        s.push(&turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, None))), "t");
+        let out = s.summary();
+        assert!(!out.contains("\n    you"), "{out}");
+        assert!(!out.contains("\n    ran"), "{out}");
+        assert!(out.contains("\n  tool"), "tool is still measured:\n{out}");
+    }
+
+    #[test]
+    fn a_summary_with_no_confirmation_in_it_has_no_confirmation_rows() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_confirm(20.0, 15.0, Some(18.0), None), "t");
+        let out = s.summary();
+        assert!(!out.contains("\n    you"), "{out}");
+        assert!(!out.contains("\n    ran"), "{out}");
+        assert!(!out.contains("action.confirm"), "{out}");
+    }
+
     #[test]
     fn turn_summary_shows_jv_acts_share_of_a_tool_turn() {
         let mut s = TurnStats::default();
@@ -2545,10 +2938,17 @@ mod tests {
         s.push(&turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(18.0))]), "a");
         s.push(&turn_with_seam(20.0, 23.0, 24.0, 24.3, Some(1.5)), "b");
         s.brain_split(210.0);
+        s.push(&turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2)))), "c");
         let out = s.summary();
+        // The header and every row under it, stopping at the first footnote.
+        // NOT "every line that is not indented": the deepest rows ARE
+        // indented, by the same four spaces a footnote's continuation lines
+        // use, and a filter that skipped them would exempt the rows most
+        // likely to overflow from the check written for them.
         let rows: Vec<&str> = out
             .lines()
-            .filter(|l| !l.starts_with("---") && !l.starts_with("    "))
+            .skip_while(|l| !l.starts_with("span "))
+            .take_while(|l| !l.starts_with("---"))
             .collect();
         assert!(rows.len() > 8, "not every row is here:\n{out}");
         let header = rows[0].len();

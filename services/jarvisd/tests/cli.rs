@@ -584,6 +584,89 @@ fn pump_tool_turns(bus: &TestBus, hold_ms: u64) -> tokio::task::JoinHandle<()> {
     })
 }
 
+/// How long the confirmation question in `pump_confirm_turns` stays open,
+/// and how long jv-act then takes to run the tool. The window is the bigger
+/// of the two on purpose: it is what the real 15 s looks like beside a tool
+/// that runs in a moment, and it is what makes an undivided `tool` unarguable.
+const CONFIRM_WINDOW_MS: u64 = 200;
+const CONFIRM_RUN_MS: u64 = 60;
+
+/// One turn that ran a CONFIRMING tool, as the four frames put it on the bus.
+///
+/// The real order, from `services/jv-act/src/service.rs`: jv-brain publishes
+/// `intent.action`; jv-act answers with `action.confirm{kind=request}` and
+/// waits; the answer arrives (here as the CLI's `kind=answer`, which jv-act
+/// then ECHOES — both frames are published, as they are live); jv-act runs
+/// the tool and publishes `action.result`.
+fn pump_confirm_turns(bus: &TestBus) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut ears = BusClient::connect(&addr, "jv-ears").await.expect("ears connect");
+        let mut brain = BusClient::connect(&addr, "jv-brain").await.expect("brain connect");
+        let mut act = BusClient::connect(&addr, "jv-act").await.expect("act connect");
+        let mut cli = BusClient::connect(&addr, "jv-cli").await.expect("cli connect");
+        let mut n = 0u32;
+        loop {
+            n += 1;
+            let utt = format!("utt-confirm-{n}");
+            let rid = format!("req-{n}");
+            for (_, topic, b) in whole_turn(&utt) {
+                if ears.publish(topic, 1.0, 1, b).await.is_err() {
+                    return;
+                }
+            }
+            let req = body(&[
+                ("request_id", rid.as_str().into()),
+                ("tool", "fs.delete".into()),
+                ("args", body(&[]).into()),
+                ("capability", "destructive".into()),
+                ("utterance_id", utt.as_str().into()),
+            ]);
+            if brain.publish("intent.action", 1.0, 1, req).await.is_err() {
+                return;
+            }
+            let ask = body(&[
+                ("kind", "request".into()),
+                ("request_id", rid.as_str().into()),
+                ("tool", "fs.delete".into()),
+                ("summary", "Delete 3 files — yes or no?".into()),
+                ("window_s", 15.0.into()),
+            ]);
+            if act.publish("action.confirm", 1.0, 1, ask).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(CONFIRM_WINDOW_MS)).await;
+            let answer = body(&[
+                ("kind", "answer".into()),
+                ("request_id", rid.as_str().into()),
+                ("granted", true.into()),
+                ("answered_by", "cli".into()),
+            ]);
+            if cli.publish("action.confirm", 1.0, 1, answer.clone()).await.is_err() {
+                return;
+            }
+            // jv-act echoes the answer it acted on, on the same topic.
+            if act.publish("action.confirm", 1.0, 1, answer).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(CONFIRM_RUN_MS)).await;
+            let res = body(&[
+                ("request_id", rid.as_str().into()),
+                ("ok", true.into()),
+                ("duration_ms", ((CONFIRM_WINDOW_MS + CONFIRM_RUN_MS) as f64).into()),
+            ]);
+            if act.publish("action.result", 1.0, 1, res).await.is_err() {
+                return;
+            }
+            let say = body(&[("text", "done".into()), ("in_reply_to_utterance", utt.as_str().into())]);
+            if brain.publish("speech.say", 1.0, 1, say).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+}
+
 /// Every `>>> turn` line the child printed.
 fn turn_lines(out: &Out) -> Vec<&str> {
     out.stdout.lines().filter(|l| l.starts_with(">>> turn ")).collect()
@@ -865,6 +948,44 @@ async fn a_tool_turn_says_how_much_of_its_think_was_jv_act() {
     // A turn that ran tools publishes no first-say gauge, so the OTHER split
     // of think must not appear standing on these turns.
     assert!(!s.contains("\n  model "), "{s}");
+}
+
+#[tokio::test]
+async fn a_confirming_tool_says_which_half_of_its_span_was_you() {
+    let bus = start(Config::default()).await;
+    let p = pump_confirm_turns(&bus);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.5"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let split: Vec<&str> = out.stdout.lines().filter(|l| l.contains("you=")).collect();
+    assert!(!split.is_empty(), "no confirmation split was reported:\n{}", out.stdout);
+    assert!(split[0].contains("1 confirmation"), "{:?}", split[0]);
+
+    // tool = you + ran, each measured off the frames that bracket it. The
+    // window we held is the bulk of it, which is the whole point: undivided,
+    // this turn reads as a slow machine.
+    let ns = numbers_in(split[0]);
+    assert_eq!(ns.len(), 3, "tool, you and ran: {:?}", split[0]);
+    let (tool, you, ran) = (ns[0], ns[1], ns[2]);
+    assert!((tool - (you + ran)).abs() < 1.0, "the halves must add up: {:?}", split[0]);
+    assert!(you >= CONFIRM_WINDOW_MS as f64, "{you}ms < the {CONFIRM_WINDOW_MS}ms we held");
+    assert!(you < CONFIRM_WINDOW_MS as f64 + 400.0, "{you}ms is not the window: {:?}", split[0]);
+    assert!(ran < you, "the machine's half must be the smaller one here: {:?}", split[0]);
+
+    // Its own line, under the `tool` line, under the `>>> turn` line — none
+    // of the three grew a number.
+    let lines = turn_lines(&out);
+    assert!(lines[0].starts_with(">>> turn utt-confirm-"), "{:?}", lines[0]);
+    assert!(!lines[0].contains("you="), "{:?}", lines[0]);
+    assert!(lines[1].contains("includes tool="), "{:?}", lines[1]);
+    assert!(!lines[1].contains("you="), "{:?}", lines[1]);
+
+    let s = &out.stdout;
+    assert!(s.contains("\n    you "), "the summary must carry the row:\n{s}");
+    assert!(s.contains("\n    ran "), "and its other half:\n{s}");
+    assert!(s.contains("action.confirm"), "and say where the number came from:\n{s}");
 }
 
 #[tokio::test]

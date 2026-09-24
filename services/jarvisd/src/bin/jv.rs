@@ -301,6 +301,21 @@ async fn main() -> anyhow::Result<()> {
                             utts.act_done(&rid, ts);
                         }
                     }
+                    // jv-act stopping to ask YOU, and the answer closing the
+                    // question. The window between them is the part of the
+                    // round trip above that no faster machine shortens — 15 s
+                    // by design — so it is subtracted out of `tool` and named
+                    // (cli::Utterances::confirm_span). Threaded by the same
+                    // request_id, because `action.confirm` names no utterance
+                    // either. Still no new publisher and no schema change.
+                    "action.confirm" => {
+                        let Some(rid) = cli::get_str(body, "request_id") else { return };
+                        match cli::get_str(body, "kind").as_deref() {
+                            Some("request") => utts.confirm_asked(&rid, ts),
+                            Some("answer") => utts.confirm_answered(&rid, ts),
+                            _ => {}
+                        }
+                    }
                     "speech.say" => {
                         if let Some(id) = cli::get_str(body, "in_reply_to_utterance") {
                             // Only the FIRST reply frame: a streamed reply is
@@ -316,6 +331,12 @@ async fn main() -> anyhow::Result<()> {
                                 // one above: that line has to survive a
                                 // terminal, and most turns run no tool.
                                 if let Some(line) = turn.tool_line(&id) {
+                                    println!(">>> {line}");
+                                }
+                                // And under THAT, for the rarer turn where
+                                // jv-act stopped and asked: which half of it
+                                // was the machine and which half was you.
+                                if let Some(line) = turn.confirm_line(&id) {
                                     println!(">>> {line}");
                                 }
                                 turns.push(&turn, &id);
