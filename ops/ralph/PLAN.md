@@ -310,19 +310,38 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       again. 11 new QML tests, 9 mutations run through them, 5 more through the
       gates. Tests: `bash ops/ralph/qmltest.sh`,
       `bash ops/ralph/runtests.sh tools`.)
-- [ ] A17. After a barge-in followed by SILENCE, the HUD can read
-      `thinking` for up to 30 s. A12 ends thinking on `brain.response`,
-      the first `speaking` after it, or a 30 s floor — and since B6 an
-      interrupted turn publishes no `brain.response` at all (the frozen
-      enum has no word for it). Normally the user's next utterance starts
-      an honest new thinking period, so this only shows when they wake
-      Jarvis and then say nothing. The honest rule: a wake NEWER than the
-      thinking latch ENDS it — the user abandoned that prompt. Must be a
-      latch comparison, not a binding, for the same reason A12's
-      "already speaking" fact is: a wake PRECEDES the prompt in the normal
-      flow, so a wake older than the latch must not clear it. Lands in
-      `core/SpeechState.qml` + tests; no schema change, no new topic (the
-      HUD already reads `audio.wake`). Discovered in B6.
+- [x] A17. A wake newer than the open prompt ends the thinking window:
+      the user abandoned that question. — b0c8262
+      (Narrower than this item was written, and the tests narrowed it. The
+      VOICE path was never broken: `utteranceEnded` requires
+      `vad.ts >= wake.ts`, so a newer wake disqualifies the speech_end that
+      WAS the prompt and the window closes by arithmetic nobody planned —
+      that test passed before the fix existed and is kept as its pin. The
+      real hole was `brain.request`, whose frame stays readable and stays
+      the prompt: the CLI, the harness, later the HUD. Only a SPOKEN turn
+      is abandoned, because only a spoken turn is what jv-brain cancels —
+      `body.speak !== false`, the schema's own default. Latched, not
+      derived (`bus.latest()` keeps one frame per topic, so the wake that
+      ended the window is gone the moment the next detection lands), and
+      checked on the WAKE edge only: a prompt arriving AFTER a wake is a
+      new question, not an abandoned one. 9 new QML tests, 14 mutations,
+      14 caught; two first-round survivors were real — a topic check that
+      could not change an answer (deleted), and the null-wake guard, which
+      only shows up as a log line and now has a `failOnWarning(/TypeError/)`
+      test. Tests: `bash ops/ralph/qmltest.sh`,
+      `bash ops/ralph/runtests.sh tools`.)
+
+- [ ] A18. The voice path's immunity to A17's bug is ACCIDENTAL. Nothing
+      in `core/SpeechState.qml` says "a newer wake ends a spoken prompt";
+      it falls out of `prompt` being the audio.vad frame and
+      `utteranceEnded` comparing that frame against the wake. It is
+      pinned by a test, so it cannot break silently — but if the spoken
+      prompt ever stops being the vad frame (say jv-brain one day
+      publishes something that means "I accepted this", which is the
+      thing A12 wanted and could not have), the bug returns and the
+      abandon latch would then be the only thing standing. Either make
+      the rule explicit there or leave this note as the warning. Small,
+      and worth doing the day that topic appears. Discovered in A17.
 
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
@@ -359,3 +378,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   (042438a, 2026-09-24)
 - B6 — the brain stops generating when the user barges in, and the turn it
   lost is recorded as interrupted (4d05900, 2026-09-24)
+- A17 — the question you gave up on stops reading "thinking" (b0c8262,
+  2026-09-24)

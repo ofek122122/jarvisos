@@ -1401,3 +1401,83 @@ tool calls left open, the record forgetting it was cut. Missed:
   **B5** (`jv act-log --since/--failed`) is the small pure one. The standing
   item, unchanged: nobody has ever LOOKED at this HUD on ares.
   `JV_HUD_SELFTEST=1 jv-hud`, then a real wake word.
+
+---
+
+## 2026-09-24 — iteration 17 — A17: the question you gave up on stops reading "thinking"
+
+**what.** `core/SpeechState.qml` now ends its thinking window when a wake
+arrives NEWER than the open prompt. B6 (last iteration) made a wake cancel the
+answer in flight, and an interrupted turn publishes no `brain.response` at all
+— the frozen `finish_reason` enum has no word for "the user stopped me"
+(proposal R3). That quietly removed the one frame that could close a thinking
+window for a prompt nobody will ever answer, so the plate could claim a
+working brain for the whole 30 s floor.
+
+**the item was wider than the bug, and the tests are what found that out.**
+A17 was written expecting the VOICE path to be broken. It was not: `prompt`
+for a spoken turn is the audio.vad speech_end frame, and `utteranceEnded`
+requires `vad.ts >= wake.ts` — so a newer wake disqualifies the very frame
+that was the prompt, and the window closes by arithmetic nobody planned. The
+test written for that scenario passed before a line of the fix existed; it is
+kept, as the pin for a property that is currently accidental.
+
+The real hole was `brain.request` — the CLI, the replay harness, and later the
+HUD itself. Its frame stays readable and stays the prompt, so nothing ended
+the window. Three of the seven new tests failed before the fix, all of them on
+that path.
+
+**only a spoken turn is abandoned.** jv-brain refuses to cancel a silent turn
+(`_stream_reply`: a wake says the user is talking to Jarvis, not that the CLI
+stopped wanting the answer it asked for). So a `brain.request` with
+`speak: false` is still genuinely being worked on, and calling it abandoned
+would be the same lie pointing the other way. One field decides it for both
+topics: `body.speak !== false` — the schema's own default, and audio.vad has
+no such field.
+
+**latched, not derived**, for the reason `heardAnswer` is: `bus.latest()` holds
+one frame per topic, so the wake that ended the window is gone the moment the
+next detection lands, and a detection we refuse to believe leaves nothing to
+compare against — derived, the abandoned question would come back to life.
+Checked on the WAKE edge only, unlike `heardAnswer` which is also re-checked
+when the prompt changes: a prompt arriving AFTER a wake is a NEW question, not
+an abandoned one, because jv-brain saw that wake first and had nothing to
+cancel. `onPromptKeyChanged` clears the latch for exactly that reason.
+
+**proving it bites — 14 mutations, 14 caught.** Two survived the first round
+and both were real:
+  · a `topic !== "brain.request"` check in front of `speak !== false` that
+    could not change an answer, since audio.vad's frozen body has no `speak`.
+    Deleted — dead defensiveness reads like protection (the A14 and B6 lesson,
+    a third time).
+  · the null-wake guard, which no assertion could distinguish: a TypeError in
+    a signal handler is a warning, not a test failure. There is now a test for
+    the one path where the wake goes from a frame to NOTHING with a question
+    still open and unabandoned, and it declares `failOnWarning(/TypeError/)`
+    so the guard cannot be deleted quietly. First use of `failOnWarning` in
+    this suite; worth reaching for wherever a guard only shows up as a log line.
+  A third mutation (`>=` -> `>`) survived until a tie-break test was added: two
+  frames stamped identically cannot be ordered, so the file's existing
+  convention ("same instant" counts as "after", as in `answered`,
+  `utteranceEnded`, `repliedOnBus`) is pinned rather than left to drift. Ending
+  the window is also the under-claiming direction — "thinking" is the
+  assertion, so dropping it says less.
+
+- tests: `bash ops/ralph/qmltest.sh` — 237 green (was 228: 9 new);
+  `bash ops/ralph/runtests.sh tools` — 30 green.
+- build: `nix build .#jv-hud` ok (qmllint + the same tests in checkPhase);
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no new topic, no jv-act, no boot path, no pins.
+- files: shell/jv-hud/core/SpeechState.qml,
+  shell/jv-hud/tests/tst_speechstate.qml
+- commit: b0c8262
+- next: Track A's remaining items are human-blocked (A8 wants a font decision
+  that is identity, A11 wants two frozen-schema fields, A13 wants an eye on
+  ares), so the next one is **B5** — `jv act-log --since/--failed`, small and
+  pure, entirely inside `cli::act_log_render`. Discovered here and logged as
+  **A18**: the voice path's immunity to this bug is accidental, a consequence
+  of `utteranceEnded` rather than of anything that says so; if the prompt for
+  a spoken turn ever stops being the vad frame it silently regains the bug.
+  The standing item, unchanged and now seventeen iterations old: nobody has
+  ever LOOKED at this HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then a real
+  wake word.
