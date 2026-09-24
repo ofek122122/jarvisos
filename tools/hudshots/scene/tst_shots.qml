@@ -198,14 +198,41 @@ Item {
     // COMPOSED. jv-act stopping in front of a destructive tool, in its own
     // words, with the 15 s window running. This is the one thing the HUD
     // shows that is waiting on YOU — and until A20 it was only ever spoken.
+    //
+    // ITS OWN WORDS, LITERALLY (A67). jv-act does not compose a sentence
+    // about the invocation. It sends
+    // `format!("{} — yes or no?", spec.description)` — the REGISTRY
+    // description of the tool and a fixed tail — so the question it asks
+    // is generic by construction, and the older frame here ("move 14
+    // files in ~/Downloads to the trash") was a picture of a machine that
+    // says what it is about to touch. It does not, and A21's reader
+    // deserves to be judging the question that will really be on screen.
+    // The window and `kind` are jv-act's too; tools/tests/test_hudshots.py
+    // reads all three out of services/jv-act/src/service.rs.
+    //
+    // ONE THING IN IT IS NOT JV-ACT'S OWN, the same thing A49 wrote down
+    // for the other sheet: `fs.trash` is not in jv-act's registry.
+    // services/jv-act/tools.toml is v0 — "observe + benign only" — so it
+    // holds no destructive tool at all, and the confirmation rule is
+    // structural: ONLY destructive and privileged tools are ever
+    // confirmed. Asked for `fs.trash` today the real jv-act would answer
+    // `unknown_tool` and ask nobody anything. The machinery being
+    // photographed is built and reviewed; the tool it is holding is one
+    // the registry has not been granted yet, and the description below is
+    // therefore the one composed string in the frame — written in the
+    // registry's own voice ("Launch an application", "Close a window").
+    //
+    // The request id is jv-brain's uuid4 (service.py mints it and jv-act
+    // echoes it back); it reaches no pixel and is here because a frame
+    // with `req-4f21` in it is a frame nothing on this machine produces.
     function shot_confirm() {
       Bus.ingest('{"t":"link","up":true}');
       suite.micOpen();
       suite.send("action.confirm", "jv-act", {
         "kind": "request",
-        "request_id": "req-4f21",
+        "request_id": "4f21a6c8-2b7d-4e15-9a03-6c5d8e1b47f0",
         "tool": "fs.trash",
-        "summary": "move 14 files in ~/Downloads to the trash — yes or no?",
+        "summary": "Move files to the trash — yes or no?",
         "window_s": 15.0
       });
     }
@@ -231,23 +258,46 @@ Item {
     // two ids match. `denied` and `confirm_timeout` are deliberately NOT
     // photographed here — they are how a confirmation ended, which is
     // A22's open question and not this plate's to answer.
+    //
+    // Every field here that is vocabulary rather than prose is now held
+    // to its producer (A67), and three of them were wrong before anyone
+    // looked: the intent passed `args.name` where the registry declares
+    // `app` (jv-act would have answered `invalid_args`), it omitted the
+    // `needs_confirmation` jv-brain always derives from the capability,
+    // and the ids were short stand-ins where jv-brain mints uuid4s.
+    //
+    // The detail was the interesting one. `exec: "obsidian": executable
+    // file not found in $PATH` is a Go runtime's sentence about execing a
+    // binary directly, and jv-act is Rust and does not exec the
+    // application at all: `app.launch` plans `gtk-launch -- <app>`, and a
+    // failure's detail is THAT program's stderr. The line below is
+    // gtk-launch's own message for a desktop id it cannot find. It is
+    // still composed — no gtk-launch has ever run in this sandbox — so
+    // what the gate pins is the program it names, which is the part that
+    // was a lie about how this machine launches things.
+    //
+    // Neither `args` nor `detail` reaches a pixel, and a tools gate keeps
+    // it that way (invariant 7). They are in the frame because the bridge
+    // forwards whole envelopes and the sheet should show what the HUD is
+    // really handed.
     function shot_action() {
       Bus.ingest('{"t":"link","up":true}');
       suite.micOpen();
       suite.send("intent.action", "jv-brain", {
-        "request_id": "req-9c07",
+        "request_id": "9c07b3e1-5f84-42da-8b6e-01c7a9d25384",
         "tool": "app.launch",
         "args": {
-          "name": "obsidian"
+          "app": "obsidian"
         },
-        "capability": "benign"
+        "capability": "benign",
+        "needs_confirmation": false
       });
       suite.send("action.result", "jv-act", {
-        "request_id": "req-9c07",
+        "request_id": "9c07b3e1-5f84-42da-8b6e-01c7a9d25384",
         "ok": false,
         "duration_ms": 214,
         "error": "execution_failed",
-        "detail": "exec: \"obsidian\": executable file not found in $PATH"
+        "detail": "gtk-launch: no such application obsidian"
       });
     }
 

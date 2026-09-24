@@ -13,11 +13,13 @@ that no longer exists. Nothing errors. These are the gates that make that
 loud instead.
 """
 
+import ast
 import hashlib
 import json
 import re
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 # One parser for the HUD's QML, not two: the theme gates already had to read
@@ -394,4 +396,516 @@ def test_the_suspicious_shot_photographs_a_verdict_jv_guard_can_produce():
         "the reasons in 13-suspicious.png are not the sentences jv-guard "
         "produces for a packed binary any more. Update the scene's frame and "
         "re-run bash ops/ralph/hudshots.sh."
+    )
+
+
+# ------------------------------------------- the words other services say
+#
+# A67. The gate above is the sheet's first: a composed frame held to what
+# the service it quotes would really publish. It is not the only frame
+# here that quotes one. `05-confirm.png` carries a question jv-act asks,
+# `06-health.png` carries jv-brain's rung, `08-action.png` carries a tool
+# call and one of jv-act's error words, `11-install.png` and
+# `12-guard-install.png` carry jv-compat's lifecycle. Every one of those
+# was typed by hand into a QML file and nothing checked that the named
+# producer could emit it.
+#
+# It is worth checking because a composed frame is a CLAIM about this
+# machine — the README says "composed" per shot and that is a claim about
+# provenance, not about plausibility. A picture of jv-compat publishing an
+# event jv-compat does not have is not a picture of an intention; it is a
+# picture of a machine that does not exist, and a reader has no way to
+# tell it from the rest of the sheet.
+#
+# What these gates do NOT do is run a service. They read a producer the
+# way the gates above read `shell.qml`: jv-compat's installer and
+# jv-brain's ladder are imported or parsed, jv-act's registry is TOML, and
+# jv-act's Rust is read for the literals it sends. Free text stays free
+# text — an installer's stderr and a service's `notes` are composed and
+# say so in docs/hud/README.md.
+
+BRAIN = ROOT / "services" / "jv-brain"
+COMPAT = ROOT / "services" / "jv-compat"
+ACT = ROOT / "services" / "jv-act"
+
+sys.path[:0] = [str(BRAIN), str(COMPAT)]
+from jv_brain.config import LADDER  # noqa: E402
+from jv_compat import fingerprint as compat_fingerprint  # noqa: E402
+
+BRACKETS = {"(": ")", "[": "]", "{": "}"}
+
+
+def skip_literal(text: str, i: int) -> int:
+    """The index just past the string literal that starts at `text[i]`.
+
+    Brackets and commas live inside these frames' strings — a reason with
+    a parenthetical, a path, an installer's stderr — so every scan below
+    steps over literals rather than counting the characters in them.
+    """
+    quote = text[i]
+    i += 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == quote:
+            return i + 1
+        i += 1
+    raise AssertionError("unterminated string literal")
+
+
+def bracketed(text: str, start: int) -> str:
+    """The bracketed run beginning at `text[start]`, literals ignored."""
+    assert text[start] in BRACKETS, f"no bracket at {start}"
+    depth, i = 0, start
+    while i < len(text):
+        c = text[i]
+        if c in "\"'":
+            i = skip_literal(text, i)
+            continue
+        if c in BRACKETS:
+            depth += 1
+        elif c in BRACKETS.values():
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+        i += 1
+    raise AssertionError("unbalanced brackets")
+
+
+def call_args(text: str, open_paren: int) -> list[str]:
+    """The top-level argument sources of the call whose `(` is at
+    `open_paren`. Used on QML and on Python: both write a call the same
+    way, and neither is being interpreted here — only split."""
+    inner = bracketed(text, open_paren)[1:-1]
+    args, depth, start, i = [], 0, 0, 0
+    while i < len(inner):
+        c = inner[i]
+        if c in "\"'":
+            i = skip_literal(inner, i)
+            continue
+        if c in BRACKETS:
+            depth += 1
+        elif c in BRACKETS.values():
+            depth -= 1
+        elif c == "," and depth == 0:
+            args.append(inner[start:i])
+            start = i + 1
+        i += 1
+    args.append(inner[start:])
+    return [a.strip() for a in args if a.strip()]
+
+
+def shot_source(name: str) -> str:
+    """The body of `function shot_<name>()`, comments stripped."""
+    scene = strip_qml_comments(scene_text())
+    m = re.search(r"function\s+shot_" + name + r"\s*\(\s*\)", scene)
+    assert m, f"the scene no longer takes a `{name}` shot"
+    return bracketed(scene, scene.index("{", m.end()))
+
+
+def frames_in(shot: str) -> list[tuple[str, str, dict]]:
+    """Every `suite.send()` in a shot, as (topic, src, body).
+
+    The bodies are plain double-quoted QML object literals, which are
+    JSON. `shot_guard_install` binds the two sha256s to consts and uses
+    them in four frames each, so those are substituted back in first —
+    the alternative is a gate that silently skips the one shot with two
+    stories in it.
+    """
+    src = shot_source(shot)
+    for name, value in re.findall(r'const\s+(\w+)\s*=\s*"([^"]*)"', src):
+        src = re.sub(r":\s*" + name + r"\b", ': "' + value + '"', src)
+    out = []
+    for m in re.finditer(r"suite\.send\s*\(", src):
+        args = call_args(src, m.end() - 1)
+        out.append((json.loads(args[0]), json.loads(args[1]), json.loads(args[2])))
+    return out
+
+
+def beats_in(shot: str) -> list[tuple[str, str, dict]]:
+    """Every `suite.beat()` in a shot, as (service, state, metrics)."""
+    src = shot_source(shot)
+    out = []
+    for m in re.finditer(r"suite\.beat\s*\(", src):
+        args = call_args(src, m.end() - 1)
+        metrics = json.loads(args[2]) if len(args) > 2 and args[2].startswith("{") else {}
+        out.append((json.loads(args[0]), json.loads(args[1]), metrics))
+    return out
+
+
+def compat_event_shapes() -> dict[str, list[frozenset]]:
+    """Every `compat.install` event jv-compat's installer publishes, and
+    the extra fields it carries at each call site.
+
+    Read out of `install.py` rather than imported: `_event` is a method on
+    an installer that wants a bus and a runner, and what is wanted here is
+    its vocabulary, which is the six literals it passes.
+    """
+    src = (COMPAT / "jv_compat" / "install.py").read_text("utf-8")
+    out: dict[str, list[frozenset]] = {}
+    for m in re.finditer(r"self\._event\s*\(", src):
+        args = call_args(src, m.end() - 1)
+        # _event(event, app, sha256, **extra): three positional, then the
+        # keywords that become the rest of the body.
+        out.setdefault(json.loads(args[0]), []).append(
+            frozenset(a.split("=", 1)[0].strip() for a in args[3:])
+        )
+    assert out, "found no compat.install publishes in jv-compat's installer"
+    return out
+
+
+def compat_fingerprint_words() -> tuple[set[str], set[str]]:
+    """The installer frameworks and architectures jv-compat can report.
+
+    The arch table is imported, private name and all, because it IS the
+    mapping — a sheet naming an arch that no PE machine word produces
+    would be a picture of a fingerprinter this machine does not have.
+    """
+    src = (COMPAT / "jv_compat" / "fingerprint.py").read_text("utf-8")
+    installers = set(re.findall(r'installer\s*=\s*"(\w+)"', src))
+    arches = set(re.findall(r'arch\s*=\s*"(\w+)"', src))
+    arches |= set(compat_fingerprint._MACHINES.values())
+    assert installers and arches, "jv-compat's fingerprinter names nothing"
+    return installers, arches
+
+
+def compat_stderr_tail() -> int:
+    """How much of a failing installer's stderr jv-compat forwards."""
+    src = (COMPAT / "jv_compat" / "install.py").read_text("utf-8")
+    m = re.search(r"detail\[-(\d+):\]", src)
+    assert m, "jv-compat no longer truncates the installer's stderr"
+    return int(m.group(1))
+
+
+def compat_refusals(verdict: dict) -> set[str]:
+    """What jv-compat would say on `compat.install` about this verdict.
+
+    Not a restatement of its rule — jv-compat's OWN expressions, lifted
+    out of `install.py` by `ast` and evaluated over the photographed
+    verdict. There are three refusals in that file (no screening, a
+    blocked verdict, a suspicious one) and only one of them composes
+    nothing of its own, which is the entire point: a hand-typed refusal
+    that reads like a sentence jv-compat wrote is a frame the real
+    service would never send. Restating "it joins the reasons with '; '"
+    here instead would be a copy of the rule, and a copy that stayed
+    green when jv-compat reworded the sentence is exactly the drift every
+    other gate in this file exists to catch.
+    """
+    src = (COMPAT / "jv_compat" / "install.py").read_text("utf-8")
+    out = set()
+    for node in ast.walk(ast.parse(src)):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if not (isinstance(fn, ast.Attribute) and fn.attr == "_event"):
+            continue
+        if not (node.args and getattr(node.args[0], "value", None) == "blocked"):
+            continue
+        for kw in node.keywords:
+            if kw.arg == "error":
+                out.add(eval(ast.unparse(kw.value), {"__builtins__": {}}, {"verdict": verdict}))
+    assert out, "jv-compat's installer no longer refuses anything"
+    return out
+
+
+def test_the_install_shots_photograph_events_jv_compat_publishes():
+    """A67. Two shots are made of `compat.install` frames — the failed
+    install and the pair of overlapping ones — and between them they
+    claim five of jv-compat's six lifecycle events.
+
+    An event name is a vocabulary, so it is checkable; so is the SHAPE,
+    because `_event` takes three positional fields and whatever keywords
+    the call site adds. A `prefix_created` carrying an `error`, or a
+    `failed` carrying a `recipe`, would be a frame `core/InstallState.qml`
+    reads perfectly well and jv-compat would never send.
+
+    The `blocked` in the overlapping shot gets the strongest check here,
+    and it is the one that matters most: jv-compat does not compose that
+    sentence, it joins the refusing verdict's own reasons. So the two
+    frames in that picture — jv-guard's refusal and jv-compat's word for
+    it — have to agree, which is a thing a hand-typed pair drifts out of
+    the first time either is edited.
+
+    Not checked: a `failed` error, which is the installer's last 500 bytes
+    of stderr — free text from the one thing invariant 8 calls untrusted
+    outright. Only its length, which install.py does fix.
+    """
+    shapes = compat_event_shapes()
+    installers, arches = compat_fingerprint_words()
+    seen = 0
+    for shot in ("install", "guard_install"):
+        frames = frames_in(shot)
+        verdicts = {
+            b["sha256"]: b for t, _, b in frames if t == "guard.verdict"
+        }
+        for topic, src, body in frames:
+            if topic != "compat.install":
+                continue
+            seen += 1
+            where = f"{shot}/{body.get('event')}"
+            assert src == "jv-compat", f"{where}: only jv-compat publishes this topic"
+            assert body["event"] in shapes, (
+                f"{where}: jv-compat's installer publishes {sorted(shapes)} and "
+                "nothing else, so this frame is of a lifecycle it does not have"
+            )
+            extras = frozenset(body) - {"event", "app", "sha256"}
+            assert extras in shapes[body["event"]], (
+                f"{where}: jv-compat sends this event with "
+                f"{[sorted(s) for s in shapes[body['event']]]} beyond the three "
+                f"fixed fields; the frame carries {sorted(extras)}"
+            )
+            if "installer" in body:
+                assert body["installer"] in installers, (
+                    f"{where}: jv-compat's fingerprinter reports {sorted(installers)}"
+                )
+            if "arch" in body:
+                assert body["arch"] in arches, (
+                    f"{where}: jv-compat's fingerprinter reports {sorted(arches)}"
+                )
+            if body["event"] == "failed":
+                assert len(body["error"]) <= compat_stderr_tail(), (
+                    f"{where}: jv-compat sends the installer's last "
+                    f"{compat_stderr_tail()} bytes and no more"
+                )
+            verdict = verdicts.get(body["sha256"])
+            if body["event"] == "blocked" and verdict:
+                said = compat_refusals(verdict)
+                assert body["error"] in said, (
+                    f"{where}: jv-compat writes one of {sorted(said)} when it "
+                    "refuses — it does not compose a sentence, it joins the "
+                    f"verdict's own reasons. The picture shows jv-guard saying "
+                    f"{verdict['reasons']} and jv-compat reporting "
+                    f"{body['error']!r}, which no refusal of it produces."
+                )
+    assert seen >= 6, f"only {seen} compat.install frames in the sheet; the shots changed"
+
+
+def test_the_health_shot_photographs_a_rung_jv_brain_can_report():
+    """A67. `06-health.png` says the brain is on rung 4 and off the GPU,
+    which is the one number in the shot that explains the slowness rather
+    than merely reporting it.
+
+    The ladder is five rungs in `jv_brain/config.py` and the CPU floor is
+    the last of them, so both halves are checkable: the rung has to be one
+    that exists, and `llm_gpu` has to agree with whether that rung runs on
+    the GPU. A frame saying rung 4 on the GPU would be a picture of a
+    fallback that did not happen, and the plate would draw it without
+    complaint.
+
+    The pairing is jv-brain's too: `_health` writes both metrics or
+    neither, from the same rung file. And the metric NAMES are read off
+    jv-brain, because `metrics` is free-form by schema — a service-local
+    key nobody publishes is a key `jv health` will never print.
+
+    Not checked: `notes`. It is free text, and "VRAM pressure: fell back
+    to CPU" is a composed sentence in a composed frame.
+    """
+    brain = (BRAIN / "jv_brain" / "service.py").read_text("utf-8")
+    known = set(re.findall(r'metrics\["(\w+)"\]', brain))
+    assert "llm_rung" in known, "jv-brain no longer reports a rung on sys.health"
+    rungs = {r.index: r for r in LADDER}
+    saw = 0
+    for service, state, metrics in beats_in("health"):
+        if service != "jv-brain":
+            assert not metrics, (
+                f"{service} publishes its own metrics; this gate only knows "
+                "jv-brain's, so a frame claiming one needs its own check"
+            )
+            continue
+        unknown = set(metrics) - known
+        assert not unknown, (
+            f"jv-brain's heartbeat never carries {sorted(unknown)} — `metrics` is "
+            "free-form by schema, so an invented key is one nothing can read"
+        )
+        if "llm_rung" not in metrics:
+            continue
+        saw += 1
+        rung = rungs.get(metrics["llm_rung"])
+        assert rung is not None, (
+            f"rung {metrics['llm_rung']} is not on jv-brain's ladder "
+            f"({sorted(rungs)}), so this picture is of a fallback it cannot take"
+        )
+        assert "llm_gpu" in metrics, (
+            "jv-brain writes llm_rung and llm_gpu together or not at all"
+        )
+        assert metrics["llm_gpu"] == (1.0 if rung.gpu else 0.0), (
+            f"rung {rung.index} is {rung.label!r}, which runs "
+            f"{'on the GPU' if rung.gpu else 'on the CPU'}; the frame says "
+            f"llm_gpu={metrics['llm_gpu']}"
+        )
+    assert saw == 1, f"{saw} rungs in the health shot; it photographs exactly one"
+
+
+def act_registry() -> dict[str, dict]:
+    """jv-act's tool registry — data, reviewed like code (invariant 3)."""
+    data = tomllib.loads((ACT / "tools.toml").read_text("utf-8"))
+    return {t["name"]: t for t in data["tool"]}
+
+
+def act_error_words() -> set[str]:
+    """Every word jv-act puts in `action.result.error`.
+
+    Read out of the Rust, not out of `schemas/action.result.json`: the
+    schema is the law and the question here is what the service says. The
+    two agree today and the gate would be worth less if it asked the
+    document instead of the producer.
+    """
+    src = (ACT / "src" / "service.rs").read_text("utf-8")
+    words = set(re.findall(r'"error":\s*"(\w+)"', src))
+    # The confirmation's two outcomes are chosen into a variable first.
+    for pair in re.findall(r'let error = if .*?"(\w+)".*?"(\w+)"', src):
+        words |= set(pair)
+    assert "execution_failed" in words, "jv-act's error vocabulary moved"
+    return words
+
+
+def test_the_action_shot_photographs_a_call_and_a_failure_jv_act_can_produce():
+    """A67. `08-action.png` is two composed frames: jv-brain asking for a
+    tool and jv-act reporting that it did not work.
+
+    Both are checkable against things that are not prose. The tool is a
+    REGISTRY name — the plate draws it verbatim on the argument that what
+    you read is what you can grep for in the audit log — so it has to be
+    in the registry, its args have to be the args that tool declares, and
+    the capability has to be the one the registry gives it rather than the
+    requester's opinion of it. `needs_confirmation` is jv-brain's own rule
+    (`capability in ("destructive", "privileged")`) and is derived here
+    the same way.
+
+    The error word is jv-act's, out of its Rust. `detail` is not: it is
+    the failing command's stderr, so all that can be pinned is WHICH
+    command — jv-act runs `gtk-launch` for `app.launch` and never the
+    application itself, and a detail quoting a shell's or another
+    language's not-found message would be a picture of a machine that
+    execs the app directly.
+    """
+    registry = act_registry()
+    errors = act_error_words()
+    frames = {topic: body for topic, _, body in frames_in("action")}
+    intent = frames["intent.action"]
+    result = frames["action.result"]
+
+    spec = registry.get(intent["tool"])
+    assert spec is not None, (
+        f"{intent['tool']} is not in jv-act's registry ({sorted(registry)}), so "
+        "the real jv-act would answer `unknown_tool` and never run anything"
+    )
+    declared = spec.get("args", {})
+    assert set(intent["args"]) <= set(declared), (
+        f"{intent['tool']} declares {sorted(declared)}; the frame passes "
+        f"{sorted(intent['args'])}, which jv-act would reject as invalid_args"
+    )
+    required = {k for k, v in declared.items() if v.get("required")}
+    assert required <= set(intent["args"]), (
+        f"{intent['tool']} requires {sorted(required)} and the frame omits "
+        f"{sorted(required - set(intent['args']))}"
+    )
+    assert intent["capability"] == spec["capability"], (
+        f"the registry calls {intent['tool']} {spec['capability']!r}"
+    )
+    assert intent["needs_confirmation"] == (
+        spec["capability"] in ("destructive", "privileged")
+    ), "jv-brain derives needs_confirmation from the capability; this frame does not"
+
+    assert result["request_id"] == intent["request_id"], (
+        "the ids must match or core/ActionState.qml draws the failure with no "
+        "tool name, which is not the picture this shot is of"
+    )
+    assert result["error"] in errors, (
+        f"jv-act sends {sorted(errors)} and not {result['error']!r}"
+    )
+    # The argv head jv-act plans for this tool: the program whose stderr a
+    # `detail` would be.
+    exec_src = (ACT / "src" / "exec.rs").read_text("utf-8")
+    arm = re.search(
+        r'"' + re.escape(intent["tool"]) + r'"\s*=>.*?s\("([^"]+)"\)', exec_src, re.S
+    )
+    assert arm, f"jv-act's executor no longer plans a command for {intent['tool']}"
+    assert result["detail"].startswith(arm.group(1) + ":"), (
+        f"jv-act runs {arm.group(1)!r} for {intent['tool']}, so a failure's "
+        f"detail is that program's stderr; the frame quotes {result['detail']!r}"
+    )
+
+
+def test_the_confirm_shot_photographs_a_question_jv_act_could_ask():
+    """A67, and the half of it that could not be closed.
+
+    `05-confirm.png` is the only picture of the one thing this HUD shows
+    that is waiting on YOU, and the numbers in it are jv-act's own: the
+    window is the 15 s `service.rs` opens, and `kind` is the literal it
+    sends. Both are read out of the Rust here.
+
+    So is the SHAPE of the question, which is the part that was wrong
+    until A67 looked. jv-act does not compose a sentence about the
+    invocation — it sends `format!("{} — yes or no?", spec.description)`,
+    the tool's registry description and a fixed tail. A summary naming
+    fourteen files in a directory was a picture of a machine that explains
+    what it is about to do, and this one cannot; the question it asks is
+    generic, and A21's reader deserves to be judging the real one.
+
+    What stays composed, and is said in docs/hud/README.md: the
+    description itself. `fs.trash` is not in jv-act's registry — v0 is
+    "observe + benign only" and the confirmation rule is structural, so
+    there is no tool on this machine today that could produce an
+    `action.confirm` at all. The machinery is real, built and reviewed;
+    the tool it is holding is one the registry has not been granted. This
+    pins that disclaimer the way `tools/hudscreens/sheet.py` pins its own.
+    """
+    src_rs = (ACT / "src" / "service.rs").read_text("utf-8")
+    frames = {topic: body for topic, _, body in frames_in("confirm")}
+    confirm = frames["action.confirm"]
+
+    window = re.search(r"confirm_window_s:\s*([\d.]+)", src_rs)
+    assert window, "jv-act no longer declares a default confirmation window"
+    assert confirm["window_s"] == float(window.group(1)), (
+        f"jv-act opens a {window.group(1)} s window; the frame says "
+        f"{confirm['window_s']} and core/ConfirmState.qml would believe it"
+    )
+    kinds = re.search(r'"kind":\s*"(\w+)",\s*"request_id"', src_rs)
+    assert kinds and confirm["kind"] == kinds.group(1), (
+        f"jv-act asks with kind={kinds.group(1) if kinds else '?'!r}"
+    )
+
+    summary = re.search(r'"summary":\s*format!\("([^"]*)",\s*([\w.]+)\)', src_rs)
+    assert summary, "jv-act no longer formats the summary from one value"
+    template, source = summary.group(1), summary.group(2)
+    assert template.count("{}") == 1 and source == "spec.description", (
+        f"jv-act now composes the question out of {source} — the frame in the "
+        "scene is a registry description plus a fixed tail, which was all it "
+        "could say when this shot was taken. Re-take it: bash ops/ralph/hudshots.sh"
+    )
+    tail = template.split("{}", 1)[1]
+    assert confirm["summary"].endswith(tail), (
+        f"jv-act's question ends {tail!r}; the frame says "
+        f"{confirm['summary']!r}"
+    )
+    described = confirm["summary"][: -len(tail)]
+
+    registry = act_registry()
+    tool = confirm["tool"]
+    if tool in registry:
+        raise AssertionError(
+            f"'{tool}' is in jv-act's registry now, which is good news and makes "
+            "the scene's disclaimer wrong: replace the composed description with "
+            f"{registry[tool].get('description')!r}, delete the paragraph in "
+            "tools/hudshots/scene/tst_shots.qml that says the tool is not "
+            "registered, and this branch with it"
+        )
+    assert "not in jv-act's registry" in scene_text(), (
+        "the scene no longer says that the tool this shot names is one jv-act "
+        "has never been granted. Every number in the frame is jv-act's and the "
+        "tool is not, and a reader who is not told reads the picture as a "
+        "machine that has it"
+    )
+    assert all(
+        t["capability"] in ("observe", "benign") for t in registry.values()
+    ), (
+        "the registry has a destructive or privileged tool now, so a REAL "
+        "confirmation is photographable — take that shot instead of this one"
+    )
+    styles = {t["description"] for t in registry.values()}
+    assert described and described[0].isupper() and not described.endswith("."), (
+        f"jv-act would put a registry description here, and every one of them "
+        f"reads like {sorted(styles)[0]!r}; the frame says {described!r}"
     )

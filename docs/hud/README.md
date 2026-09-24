@@ -54,6 +54,24 @@ nothing in the repo has ever recorded that part of a turn. The difference
 matters: a composed picture is a picture of an intention, and only a recorded
 one is evidence about the machine. Closing that gap is what B10/A28 ask for.
 
+**A composed frame still quotes somebody.** Nine of these thirteen frames
+put words in another service's mouth — jv-guard's verdict, jv-compat's
+lifecycle, jv-act's error, jv-brain's rung, the question jv-act asks — and
+"composed" says only that nobody recorded it, not that the named service
+could ever have said it. Where the producer can be read without running it,
+those words are now pinned to it: `tools/tests/test_hudshots.py` imports
+jv-guard's scanner and jv-brain's ladder, parses jv-compat's installer,
+evaluates jv-compat's own refusal expression over the verdict in the
+picture, and reads jv-act's registry and Rust for the tool names, argument
+names, error words, confirmation window and question format (PLAN A66, A67).
+Three frames were wrong when that gate first ran, and shot 08 says which.
+
+**What stays only plausible**, and is called out in the shot that carries
+it: free text. An installer's stderr (shot 11), a service's `notes` (shot
+06), a tool's registry description (shot 05) and gtk-launch's not-found
+message (shot 08) are composed sentences that no reviewed source in this
+repo fixes. They are shaped like the real thing and are not the real thing.
+
 Each shot also carries an **On screen:** line — the plates that are lit in it,
 top to bottom. That line is not prose: it is read off the harness by
 `tools/tests/test_hudshots.py` and checked against what the plates themselves
@@ -125,9 +143,32 @@ was a confirmation you answered by guessing. The plate takes no input at all
 (the surface's input region is empty): answering stays with your voice and
 `jv confirm`.
 
+**In its own words, and they are generic.** This picture used to read *move
+14 files in ~/Downloads to the trash* — a machine that tells you what it is
+about to touch. jv-act is not that machine: it sends
+`format!("{} — yes or no?", spec.description)`, which is the tool's REGISTRY
+description and a fixed tail, the same sentence for every invocation of that
+tool. A67 found it and this is the question that will really be on screen.
+The window and the `kind` are jv-act's own, read out of its source by the
+same gate.
+
+**One thing here is not jv-act's: `fs.trash` is not in its registry.**
+`services/jv-act/tools.toml` is v0 — "observe + benign only" — so it holds
+no destructive tool at all, and the confirmation rule is structural: only
+destructive and privileged tools are ever confirmed. Asked for `fs.trash`
+today the real jv-act would answer `unknown_tool` and ask nobody anything.
+The machinery in this picture is built and reviewed; the tool it is holding
+is one the registry has not been granted yet, and the description in the
+question is therefore composed — written in the registry's own voice
+("Launch an application", "Close a window"). A test fails if that stops
+being said, and also if the registry ever gains the tool and makes it wrong.
+
 Two open questions are about this picture: the window closing is a real
 signal and nothing on screen encodes it (A21), and granted / denied / timed
-out all exit the same way (A22).
+out all exit the same way (A22). A third arrived with the sentence above: a
+question that cannot name its object is a question a user may not be able to
+answer, and whether that is jv-act's summary to widen or the HUD's args to
+draw is a decision for a human (PLAN A68).
 
 ### 06 — health
 
@@ -139,6 +180,14 @@ out all exit the same way (A22).
 read off jv-brain's own heartbeat, which is the single number that explains
 why Jarvis got slow. On a machine where everything heard from says `ok`, this
 plate is not on screen at all.
+
+Rung 4 is the CPU floor of the five-rung ladder in `jv_brain/config.py`, and
+`llm_gpu: 0` is what jv-brain writes for a rung that is not on the GPU —
+both checked against that ladder, so a frame claiming rung 4 *on* the GPU
+would be a picture of a fallback that did not happen. The metric names are
+jv-brain's too: `metrics` is free-form by schema, so a key nothing publishes
+is a key `jv health` would never print. The `notes` under them are free text
+and composed.
 
 ### 07 — no bus
 
@@ -181,10 +230,23 @@ report that it was done (the HealthPlate argument). And `denied` /
 `confirm_timeout` — those are how a *confirmation* ended, which is A22's open
 question and not this plate's to answer as a side effect.
 
-The composed frames behind it also carry `args` (`{"name": "obsidian"}`) and
-`detail` (the exec error), which is the point: the bridge forwards whole
-envelopes, and neither field is on screen. A tools gate fails the build if
-any element under `shell/jv-hud/core` so much as names them.
+The composed frames behind it also carry `args` (`{"app": "obsidian"}`) and
+`detail` (gtk-launch's not-found message), which is the point: the bridge
+forwards whole envelopes, and neither field is on screen. A tools gate fails
+the build if any element under `shell/jv-hud/core` so much as names them.
+
+**Three of those fields were wrong until A67 asked the producers.** The
+intent passed `args.name` where jv-act's registry declares `app` — the real
+jv-act would have answered `invalid_args` and never reached an executor. It
+omitted the `needs_confirmation` jv-brain always derives from the
+capability. And the detail read `exec: "obsidian": executable file not found
+in $PATH`, which is a Go runtime's sentence about execing a binary directly:
+jv-act is Rust, and `app.launch` plans `gtk-launch -- <app>` and never execs
+the application at all. None of the three reaches a pixel, which is exactly
+why nothing had ever caught them — the picture was right and the machine
+behind it was fiction. The tool name, its arguments, the capability and the
+error word are now read out of `tools.toml` and `service.rs`; the sentence
+gtk-launch prints is still composed, because nothing here has ever run it.
 
 ### 09 — output muted
 
@@ -297,7 +359,14 @@ and it reaches no pixel. On a `failed` frame that field is the last 500
 bytes of the confined Windows binary's stdout — free text written by the one
 thing invariant 8 calls untrusted outright, likely carrying paths out of
 this filesystem. `core/InstallState.qml` does not expose it at all, so no
-plate can draw it; asking *why* is what your voice is for.
+plate can draw it; asking *why* is what your voice is for. The 500 bytes are
+jv-compat's own truncation and are checked; the Wine sentence inside them is
+composed, and is the one part of these two install shots that no source in
+this repo fixes. Everything else about them is: the event words, the fields
+each event carries, the installer framework and the architecture all come
+out of `jv_compat/install.py` and `jv_compat/fingerprint.py`, and in shot 12
+the refusal jv-compat reports is evaluated from jv-compat's own expression
+over the verdict jv-guard is shown giving (A67).
 
 **And one thing that is not visible in this picture:** the slug is checked
 rather than trusted. jv-compat builds it out of the installer's file name,
