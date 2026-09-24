@@ -71,6 +71,7 @@ COMPONENTS = (
     ("MicPlate", "MicPlate.qml"),  # the live-microphone indicator (A4)
     ("HealthPlate", "HealthPlate.qml"),  # what is wrong, when anything is (A6)
     ("ConfirmPlate", "ConfirmPlate.qml"),  # the question awaiting a yes/no (A20)
+    ("LinkPlate", "LinkPlate.qml"),  # the HUD saying it cannot see the bus (A23)
 )
 
 # shell/jv-hud/core — the Quickshell-free half of the HUD. Importing a
@@ -88,6 +89,7 @@ CORE = (
     ("MicState", "MicState.qml"),  # is the microphone open? (A4)
     ("HealthState", "HealthState.qml"),  # is anything wrong with Jarvis? (A6)
     ("ConfirmState", "ConfirmState.qml"),  # is Jarvis waiting on a yes/no? (A20)
+    ("LinkState", "LinkState.qml"),  # can the HUD see the bus at all? (A23)
     ("PlateStack", "PlateStack.qml"),  # is ANYTHING on screen? (A15)
     ("EarsBudgets", "EarsBudgets.qml"),  # how is jv-ears tuned? (A14)
 )

@@ -556,6 +556,57 @@ def test_every_topic_the_hud_reads_is_one_the_bridge_subscribes_to():
     )
 
 
+# --- A23: the blind-HUD warning must outlast every ordinary reconnect ------
+
+# The two cadences that decide how long a healthy machine can be off the bus.
+# Neither lives anywhere near LinkState, and each one is free to grow for a
+# reason that has nothing to do with the HUD.
+RECONNECT_CADENCES = (
+    (
+        "jv-hud-bridge's first retry after a link that worked dropped",
+        Path("services/jv-hud-bridge/jv_hud_bridge/bridge.py"),
+        re.compile(r"^FIRST_BACKOFF_S = ([\d.]+)", re.M),
+        1.0,  # seconds, as written
+    ),
+    (
+        "Bus.qml respawning the bridge process after it died",
+        Path("shell/jv-hud/Bus.qml"),
+        re.compile(r"^\s*id: respawn\s*\n\s*interval:\s*(\d+)", re.M),
+        0.001,  # milliseconds, as written
+    ),
+)
+
+
+def test_the_blind_warning_waits_longer_than_a_reconnect_takes():
+    """A23: LinkPlate says the HUD has lost sight of the bus.
+
+    Its whole value is that it is rare. A down link is ordinary — the bridge
+    retries a fraction of a second after jarvisd restarts, and Quickshell
+    respawns the bridge itself a couple of seconds after it crashes — so a
+    warning that appeared during either would blink on every rebuild, and a
+    warning that blinks is one nobody reads on the day it is real.
+
+    The grace is therefore only correct RELATIVE to two numbers in two other
+    files, neither of which has any reason to think about the HUD. Pinning
+    the relation is the only way a future retune of either shows up as a
+    failure here rather than as a plate that cries wolf.
+    """
+    link = (ROOT / "shell" / "jv-hud" / "core" / "LinkState.qml").read_text("utf-8")
+    m = re.search(r"^\s*property real graceS:\s*([\d.]+)\s*$", strip_qml_comments(link), re.M)
+    assert m, "cannot find `graceS` in core/LinkState.qml — a renamed grace is invisible here"
+    grace = float(m.group(1))
+
+    for label, source, pattern, scale in RECONNECT_CADENCES:
+        found = pattern.search((ROOT / source).read_text("utf-8"))
+        assert found, f"cannot find {label} in {source} — did it move or get renamed?"
+        cadence = float(found.group(1)) * scale
+        assert grace > cadence, (
+            f"the HUD waits {grace}s before reporting a blind link, but {label} "
+            f"takes {cadence}s — so an ordinary reconnect would put the warning "
+            "on screen, which is how a real one gets ignored"
+        )
+
+
 def test_core_qmldir_registers_every_component_and_no_module_name():
     qmldir = gen.render_core_qmldir()
     assert "BusModel 1.0 BusModel.qml" in qmldir

@@ -28,7 +28,10 @@
 // reduced-motion switch — so stillness is one setting, not a promise every
 // element has to keep on its own.
 //
-// What it shows today, top to bottom: `ConfirmPlate` (A20) — the
+// What it shows today, top to bottom: `LinkPlate` (A23) — the HUD saying
+// it has lost sight of the bus, which is the one thing the plates below
+// cannot say for themselves (each refuses to guess, and a refusal draws the
+// same nothing a calm machine does); `ConfirmPlate` (A20) — the
 // destructive action jv-act has stopped in front of, in jv-act's own
 // words, readable rather than only audible; `StatePlate` (A3) — what
 // jv-voice and jv-ears actually published, idle / listening / speaking /
@@ -99,8 +102,13 @@ ShellRoot {
       // whose question wraps to three 13 px lines above a tool id; its
       // width is capped below this box on purpose (`maxTextPx`), so a long
       // sentence wraps rather than reaching for the middle of the screen.
+      // It grew again for LinkPlate (A23), which in practice can never
+      // share the surface — every other plate gates on the same link it
+      // reports on — but a box sized by an argument about how OTHER
+      // elements behave is a box that clips the day one of them changes,
+      // and the thing it would clip is the HUD admitting it is blind.
       implicitWidth: 300
-      implicitHeight: 380
+      implicitHeight: 460
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
@@ -128,6 +136,15 @@ ShellRoot {
         anchors.topMargin: Theme.insetPx
         anchors.rightMargin: Theme.insetPx
         spacing: Theme.gapPx
+
+        // Whether this HUD can see the bus at all. First in the stack
+        // because it qualifies everything under it: when it is here, the
+        // plates below have gone quiet for lack of information rather than
+        // for lack of anything happening, and they cannot say so
+        // themselves — a refusal and a calm machine draw the same nothing.
+        LinkPlate {
+          anchors.right: parent.right
+        }
 
         // The question Jarvis is waiting on, from jv-act's own
         // action.confirm. First in the stack because it is the only thing
