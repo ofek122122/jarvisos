@@ -133,6 +133,19 @@ install day; anything needing real hardware is mocked and tagged
   sees is recorded and not consumed — it may describe a turn from before the
   tap connected, and a measurement may not guess.
 
+  `jv health --check` is now the gauge's SECOND reader: its `llm` line adds
+  `first_say=<ms> turn_age=<s>` beside the rung, so "is generation slow right
+  now?" can be asked without starting a tap and speaking to the machine. The
+  age is the load-bearing half. jv-brain re-states the same number on every
+  periodic heartbeat for the rest of the process's life, so a brain nobody has
+  spoken to since breakfast would otherwise read as one that just took 412 ms.
+  The counter decides: it rose inside the window and the age is a measurement
+  (`turn_age=1.5s`), or it did not and the only honest statement is a lower
+  bound (`turn_age>=6.0s`). A count going BACKWARDS is jv-brain restarted, not
+  a newer turn, and starts the window over. Note the age dates the last
+  DIVISIBLE turn — a turn that ran tools published no gauge — which is why the
+  field is `turn_age` and not "idle".
+
   **UPDATE 2026-09-23 (308e12b): streaming reply — the perceived-latency
   fix.** jv-brain now streams the llama completion and speaks each sentence
   as it closes (SentenceChunker → one speech.say per sentence, shared

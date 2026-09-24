@@ -293,6 +293,78 @@ async fn health_check_prints_the_rung_the_brain_reports() {
     assert_eq!(lines[1], "llm rung=4 backend=cpu");
 }
 
+/// jv-brain heartbeating with a first-say gauge whose turn counter rises
+/// exactly once, `rise_after` beats in — the only shape from which `--check`
+/// may date the turn the number measures.
+///
+/// The steady beats before the rise are not padding. `--check` records the
+/// FIRST count it reads and never treats it as fresh, because that gauge may
+/// describe a turn from before it connected; the rise has to land while it is
+/// listening or there is nothing to date. Starting the pump and the reader at
+/// the same moment proves the opposite of what this test wants.
+fn pump_brain_measuring_a_turn(
+    bus: &TestBus,
+    every_ms: u64,
+    rise_after: u32,
+) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut c = BusClient::connect(&addr, "jv-brain").await.expect("pump connect");
+        let mut beats = 0u32;
+        loop {
+            let count = if beats < rise_after { 1 } else { 2 };
+            if c.publish("sys.health", 1.0, 1, brain_heartbeat(count, 412.0)).await.is_err() {
+                return;
+            }
+            beats += 1;
+            tokio::time::sleep(Duration::from_millis(every_ms)).await;
+        }
+    })
+}
+
+#[tokio::test]
+async fn health_check_dates_the_turn_it_watched_the_brain_measure() {
+    let bus = start(silent_broker()).await;
+    // The counter rises 0.6 s in, comfortably after the reader has connected
+    // and comfortably before its 1.2 s window closes.
+    let brain = pump_brain_measuring_a_turn(&bus, 50, 12);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["health", "--check", "--for", "1.2"]), 8.0).await;
+    brain.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(
+        lines[1].starts_with("llm rung=1 backend=? first_say=412ms turn_age="),
+        "the counter rose while we listened, so the age is a measurement: {:?}",
+        lines[1]
+    );
+    assert!(!lines[1].contains(">="), "and not a bound: {:?}", lines[1]);
+}
+
+#[tokio::test]
+async fn health_check_will_not_pass_a_restated_gauge_off_as_a_current_condition() {
+    // The same counter on every beat: jv-brain has measured a turn at some
+    // point and has not measured one since we connected. The number is still
+    // worth printing; presenting it as how long generation is taking RIGHT
+    // NOW is not, so the age comes out as a lower bound.
+    let bus = start(silent_broker()).await;
+    let brain = pump_as(&bus, "jv-brain", vec![("sys.health", brain_heartbeat(3, 412.0))], 50);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["health", "--check", "--for", "0.6"]), 8.0).await;
+    brain.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(
+        lines[1].starts_with("llm rung=1 backend=? first_say=412ms turn_age>="),
+        "{:?}",
+        lines[1]
+    );
+}
+
 #[tokio::test]
 async fn check_and_count_are_two_different_questions_and_cannot_both_be_asked() {
     let bus = start(silent_broker()).await;

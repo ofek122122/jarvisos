@@ -184,7 +184,15 @@ pub const BRAIN_FIRST_SAYS_METRIC: &str = "llm_first_says";
 /// least 1: a turn counter with a fraction in it is a frame disagreeing with
 /// itself, and there is no reading of it that makes the pair trustworthy.
 pub fn brain_first_say(frame: &rmpv::Value) -> Option<(u64, f64)> {
-    let metrics = service_metrics(frame, BRAIN)?;
+    first_say(frame, BRAIN)
+}
+
+/// The same reading, off any service's own heartbeat. `HealthCheck::observe`
+/// takes frames from every service and only learns whose the brain's is from
+/// the envelope, so it asks by `src`; `brain_first_say` is this with the
+/// question already answered.
+fn first_say(frame: &rmpv::Value, service: &str) -> Option<(u64, f64)> {
+    let metrics = service_metrics(frame, service)?;
     let ms = get_f64(metrics, BRAIN_FIRST_SAY_METRIC).filter(|v| v.is_finite() && *v >= 0.0)?;
     let count = get_f64(metrics, BRAIN_FIRST_SAYS_METRIC)
         .filter(|c| c.is_finite() && *c >= 1.0 && c.fract() == 0.0)?;
@@ -747,6 +755,75 @@ struct Trusted {
     metrics: Option<rmpv::Value>,
 }
 
+/// jv-brain's `llm_first_say_ms` as a `--check` window saw it — the number
+/// AND when the turn it measures happened.
+///
+/// The gauge is bound to a TURN, not to the heartbeat carrying it: jv-brain
+/// states it once and then re-states the same number on every periodic beat
+/// for the rest of the process's life. A reader that printed the number alone
+/// would answer "is generation slow right now?" with a measurement that may
+/// be an hour old — a brain nobody has spoken to since breakfast reading as
+/// one that just took 412 ms. That is a number quietly stopping meaning what
+/// its label says, which is the failure this whole CLI is written against.
+///
+/// What a window CAN establish is the age, and it establishes it from the
+/// COUNT (`llm_first_says`), which rises once per measured turn:
+///
+///   * the count ROSE while we listened — the turn is the frame that raised
+///     it, and its age is a measurement;
+///   * the count never moved — the turn predates the first brain heartbeat we
+///     read, and the only honest statement is a LOWER BOUND.
+///
+/// So the first count seen is recorded and never treated as fresh, which is
+/// the same rule the tap loop follows (`brain_first_say`) for the same
+/// reason: it may describe a turn from before this process connected.
+///
+/// One thing the age does NOT say: a turn that ran tools publishes no gauge
+/// at all (jv-brain's `TurnTiming`), so "the last measured turn" can be older
+/// than the last turn. That is why the field is `turn_age` and not `idle`.
+#[derive(Debug, Clone)]
+struct SayGauge {
+    ms: f64,
+    count: u64,
+    /// `ts` of the first heartbeat this window read the gauge off.
+    first_ts: f64,
+    /// `ts` of the heartbeat that RAISED the count, once one has.
+    raised_ts: Option<f64>,
+}
+
+impl SayGauge {
+    fn seen(ts: f64, count: u64, ms: f64) -> Self {
+        SayGauge { ms, count, first_ts: ts, raised_ts: None }
+    }
+
+    /// Fold a later reading in. A count that went BACKWARDS is jv-brain
+    /// restarted — the counter begins at 1 again — so the window starts over
+    /// on it rather than reading a smaller number as a newer turn.
+    fn update(&mut self, ts: f64, count: u64, ms: f64) {
+        if count < self.count {
+            *self = SayGauge::seen(ts, count, ms);
+            return;
+        }
+        if count > self.count {
+            self.raised_ts = Some(ts);
+        }
+        self.count = count;
+        self.ms = ms;
+    }
+
+    /// `first_say=412ms turn_age=1.5s` when the window watched the turn
+    /// happen, `turn_age>=6.0s` when it did not. The `>=` is the whole point:
+    /// it is the difference between a reading and a bound, and the reader
+    /// deciding whether the number describes right now needs to see which
+    /// one this is.
+    fn phrase(&self, now: f64) -> String {
+        match self.raised_ts {
+            Some(ts) => format!("first_say={:.0}ms turn_age={:.1}s", self.ms, now - ts),
+            None => format!("first_say={:.0}ms turn_age>={:.1}s", self.ms, now - self.first_ts),
+        }
+    }
+}
+
 /// One service's answer at the moment the window closed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Wellbeing {
@@ -783,6 +860,10 @@ pub struct Wellbeing {
 #[derive(Default)]
 pub struct HealthCheck {
     latest: HashMap<String, Option<Trusted>>,
+    /// Per service, the first-say gauge across the whole window rather than
+    /// off the latest frame alone — the only way to date the turn it
+    /// measures. In practice only jv-brain ever fills this in.
+    says: HashMap<String, SayGauge>,
 }
 
 impl HealthCheck {
@@ -801,6 +882,24 @@ impl HealthCheck {
             return;
         };
         let trusted = Self::trust(frame, &src);
+        if let Some(t) = &trusted {
+            match first_say(frame, &src) {
+                Some((count, ms)) => {
+                    self.says
+                        .entry(src.clone())
+                        .and_modify(|g| g.update(t.ts, count, ms))
+                        .or_insert_with(|| SayGauge::seen(t.ts, count, ms));
+                }
+                // A readable heartbeat that carries no gauge is the newest
+                // thing this service said, and it says nothing about a turn.
+                // Keeping the older reading alive would be this reader
+                // quoting a frame that has been superseded — the same rule
+                // the report follows when the newest frame is unreadable.
+                None => {
+                    self.says.remove(&src);
+                }
+            }
+        }
         self.latest.insert(src, trusted);
     }
 
@@ -864,9 +963,15 @@ impl HealthCheck {
         out
     }
 
-    /// The one number that explains why Jarvis got slow, or None when the
-    /// brain has not said. Never rendered as "gpu" on a guess: a rung we
-    /// cannot read is not a rung we may reassure anyone about.
+    /// What the brain has said about its own generation: which rung of the
+    /// VRAM ladder it is on, and how long its last divisible turn took to
+    /// the first word. None when it has said neither.
+    ///
+    /// Never rendered as "gpu" on a guess — a rung we cannot read is not a
+    /// rung we may reassure anyone about — and never rendered at all off a
+    /// heartbeat that has outlived the two periods the schema grants it: a
+    /// gauge that outlived its own heartbeat is the stalest reading there
+    /// is. `SayGauge` carries the rest of the care the timing half needs.
     pub fn llm_line(&self, now: f64, brain: &str) -> Option<String> {
         let t = self.latest.get(brain)?.as_ref()?;
         if Self::lost(t, now) {
@@ -875,11 +980,17 @@ impl HealthCheck {
         let metrics = t.metrics.as_ref()?;
         let rung = get_f64(metrics, "llm_rung");
         let backend = get_f64(metrics, "llm_gpu").map(|g| if g == 1.0 { "gpu" } else { "cpu" });
-        if rung.is_none() && backend.is_none() {
+        let say = self.says.get(brain).map(|g| g.phrase(now));
+        if rung.is_none() && backend.is_none() && say.is_none() {
             return None;
         }
         let rung = rung.map(|r| format!("{r:.0}")).unwrap_or_else(|| "?".into());
-        Some(format!("llm rung={rung} backend={}", backend.unwrap_or("?")))
+        let mut line = format!("llm rung={rung} backend={}", backend.unwrap_or("?"));
+        if let Some(say) = say {
+            line.push(' ');
+            line.push_str(&say);
+        }
+        Some(line)
     }
 }
 
@@ -2572,6 +2683,121 @@ mod tests {
             llm_of(&[brain_with(&[("llm_rung", 4.into())], 100.0)], 101.0).as_deref(),
             Some("llm rung=4 backend=?")
         );
+    }
+
+    /// A brain heartbeat carrying the rung AND the first-say gauge — the
+    /// shape jv-brain actually publishes once a divisible turn has run.
+    fn brain_saying(count: i64, ms: f64, ts: f64) -> rmpv::Value {
+        brain_with(
+            &[
+                ("llm_rung", 4.into()),
+                ("llm_gpu", 1.into()),
+                (BRAIN_FIRST_SAY_METRIC, ms.into()),
+                (BRAIN_FIRST_SAYS_METRIC, (count as f64).into()),
+            ],
+            ts,
+        )
+    }
+
+    #[test]
+    fn a_turn_the_window_watched_happen_is_dated_exactly() {
+        // The count rose between two heartbeats, so the turn IS the frame
+        // that raised it and its age is a measurement, not a guess.
+        let line = llm_of(&[brain_saying(3, 900.0, 100.0), brain_saying(4, 412.0, 103.0)], 104.5);
+        assert_eq!(line.as_deref(), Some("llm rung=4 backend=gpu first_say=412ms turn_age=1.5s"));
+    }
+
+    #[test]
+    fn a_gauge_that_never_moved_is_only_ever_at_least_that_old() {
+        // jv-brain re-states the same number on every periodic beat for the
+        // rest of the process's life, so a count that did not move says the
+        // turn predates the first heartbeat we read — and nothing more. A
+        // brain idle since breakfast must not read as one that just took
+        // 412 ms.
+        let line = llm_of(&[brain_saying(4, 412.0, 100.0), brain_saying(4, 412.0, 105.0)], 106.0);
+        assert_eq!(line.as_deref(), Some("llm rung=4 backend=gpu first_say=412ms turn_age>=6.0s"));
+    }
+
+    #[test]
+    fn the_first_count_a_window_sees_is_never_treated_as_fresh() {
+        // One heartbeat is one reading. The gauge on it may describe a turn
+        // from long before `--check` connected, and there is no second
+        // count to tell those apart.
+        let line = llm_of(&[brain_saying(9, 412.0, 100.0)], 101.0);
+        assert_eq!(line.as_deref(), Some("llm rung=4 backend=gpu first_say=412ms turn_age>=1.0s"));
+    }
+
+    #[test]
+    fn a_brain_that_restarted_mid_window_stops_dating_the_turn() {
+        // The counter starts at 1 again, so a count that went BACKWARDS is a
+        // new process, not a new turn. The window starts over on it rather
+        // than reporting a turn it never watched happen as fresh.
+        let line = llm_of(
+            &[brain_saying(9, 900.0, 100.0), brain_saying(2, 412.0, 103.0)],
+            104.5,
+        );
+        assert_eq!(line.as_deref(), Some("llm rung=4 backend=gpu first_say=412ms turn_age>=1.5s"));
+    }
+
+    #[test]
+    fn a_heartbeat_that_stopped_carrying_the_gauge_takes_the_number_with_it() {
+        // The newest thing a service said wins here exactly as it does in
+        // the report: a beat with no gauge says nothing about a turn, and
+        // quoting the superseded frame would be this reader inventing a
+        // measurement that is no longer on the wire.
+        let quiet = brain_with(&[("llm_rung", 4.into()), ("llm_gpu", 1.into())], 103.0);
+        assert_eq!(
+            llm_of(&[brain_saying(4, 412.0, 100.0), quiet], 104.0).as_deref(),
+            Some("llm rung=4 backend=gpu")
+        );
+    }
+
+    #[test]
+    fn a_gauge_the_reader_may_not_believe_never_reaches_the_line() {
+        // One spot-check per half of the pair; `brain_first_say` owns the
+        // full refusal list and is tested against it above.
+        let fractional = brain_with(
+            &[
+                ("llm_rung", 4.into()),
+                ("llm_gpu", 1.into()),
+                (BRAIN_FIRST_SAY_METRIC, 412.0.into()),
+                (BRAIN_FIRST_SAYS_METRIC, 2.5.into()),
+            ],
+            100.0,
+        );
+        assert_eq!(llm_of(&[fractional], 101.0).as_deref(), Some("llm rung=4 backend=gpu"));
+        let negative = brain_with(
+            &[
+                ("llm_rung", 4.into()),
+                ("llm_gpu", 1.into()),
+                (BRAIN_FIRST_SAY_METRIC, (-1.0).into()),
+                (BRAIN_FIRST_SAYS_METRIC, 2.0.into()),
+            ],
+            100.0,
+        );
+        assert_eq!(llm_of(&[negative], 101.0).as_deref(), Some("llm rung=4 backend=gpu"));
+    }
+
+    #[test]
+    fn the_gauge_is_worth_a_line_on_its_own_and_a_lost_brain_is_worth_none() {
+        // A brain that has not said which rung it picked has still said how
+        // long its last divisible turn took, and that number answers a
+        // question by itself.
+        let only_say = brain_with(
+            &[
+                (BRAIN_FIRST_SAY_METRIC, 412.0.into()),
+                (BRAIN_FIRST_SAYS_METRIC, 2.0.into()),
+            ],
+            100.0,
+        );
+        assert_eq!(
+            llm_of(&[only_say.clone()], 101.0).as_deref(),
+            Some("llm rung=? backend=? first_say=412ms turn_age>=1.0s")
+        );
+        // ... but only while the heartbeat still speaks for the process
+        // running now. A gauge outliving its heartbeat is the stalest
+        // reading there is.
+        assert_eq!(llm_of(&[only_say], 200.0), None);
     }
 
     #[test]
