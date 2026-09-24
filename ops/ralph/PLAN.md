@@ -732,6 +732,75 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       question a human can actually answer, and it should be answered
       with A13 rather than before it. Discovered in B31.
 
+- [x] B35. The 1 Hz system snapshot could invent a reading, and could
+      stop entirely while the heartbeat went on saying `ok`. — dc04e77
+      (`WpctlProbe` returned `(0.0, False)` for an unreadable mixer —
+      wpctl missing, exiting non-zero, or printing its own error text on
+      stdout — and the HUD's `OutputState` reads `audio_volume <= 0`
+      during an utterance as YOU CANNOT HEAR THIS. A plate about a mixer
+      nobody managed to read is the fakeable indicator invariant 10
+      forbids. Unparseable output was worse than wrong: it raised
+      `ValueError` out of `_pump_system`, killing the snapshot task for
+      the life of the process, while jv-context stayed alive pumping
+      window events — so `Restart=on-failure` never fired and
+      `_pump_health` kept publishing `ok` about a service that had
+      stopped doing half its job. Now: `ProbeUnavailable` instead of a
+      number, a failed tick publishes NOTHING (every field a probe feeds
+      is required by the frozen schema, so there is no legal partial
+      frame, and a substituted number or a restated old one both say
+      more than was measured — the bus's last word ages out, which
+      consumers already handle), and the failure MOVES to the heartbeat
+      as `degraded` with a note. The beat is immediate on the
+      transition, which is what `schemas/sys.health.json` asks every
+      service for and what jv-context never did — and only on the
+      transition, so a steadily-blind probe does not put 1 Hz onto a
+      quiet topic. The unit now names `wireplumber` on its `path` the
+      way jv-act does, since `wpctl` is not in this service's closure.
+      Tests: `runtests.sh jv-context` 82, was 59; thirteen mutations,
+      thirteen caught. Verified through the BUILT closure: the real sink
+      reads on ares, and the same binary with wpctl gone says
+      `ProbeUnavailable` instead of zero.)
+
+- [ ] B36. `context.system.net_online` is documented as "default route
+      exists and resolves" and published as "any non-loopback interface
+      is up" — so a cable into a dead switch, or a lone `docker0`, reads
+      as online, and the field can only go false when every interface on
+      the machine is down. Nothing reads it yet, which is exactly why it
+      is cheap now. The fix starts by rewording a FROZEN schema's
+      description down to what can be measured without emitting a
+      packet, so it is proposal **R8** in `docs/optimization-backlog.md`
+      and **human review, not a build**. Discovered in B35.
+
+- [ ] B37. `gpu_vram_free_mb` has never once been on the bus on ares.
+      `nvidia-smi` is not in jv-context's closure and was not on its unit
+      PATH — measured under the BUILT unit's own PATH in B35, where the
+      snapshot came back without the field. The probe already degrades to
+      absent (the schema makes the field optional), so nothing is broken
+      and nothing is lying; it is simply that invariant 6 — "6 GB VRAM is
+      a scheduling problem" — has no number behind it, and the field's
+      own description says it "feeds the brain's own situational
+      awareness". The fix is the same one line B35 wrote for wireplumber,
+      pointing at `config.hardware.nvidia.package.bin` from
+      `modules/jarvis-services.nix` — which READS the NVIDIA option and
+      does not touch `modules/gpu-nvidia.nix` or its pin, so it is the
+      loop's to take. Worth pairing with backlog item 14 (nvidia-smi is
+      forked once per second, forever, for this one field), because the
+      day it starts working is the day that cost starts being paid.
+      Discovered in B35.
+
+- [ ] B38. jv-context is now the only service that beats immediately on
+      a state change; `schemas/sys.health.json` asks EVERY service for it
+      ("every fixed period, and immediately on state change"). jv-ears,
+      jv-guard and jv-brain publish on a timer alone, so jv-ears going
+      degraded (`microphone open but no audio`) is up to its full period
+      of silence — and `jv health --check` defaults to a 6 s window,
+      which is one nominal period plus a margin, so a state change that
+      lands just after a beat is a state change that check can miss.
+      jv-voice already does it for the error case and not the others.
+      Small and mechanical per service, and B35 wrote the shape to copy
+      (`_set_fault` + an `asyncio.Event` the health pump waits on with a
+      timeout). Discovered in B35.
+
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
       both. Nothing has ever looked at that output on a real turn — the

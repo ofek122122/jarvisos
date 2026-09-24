@@ -6260,3 +6260,119 @@ it, which is what makes that possible.
   (decisions) and A13/A21/A22/A25/A27/A31/A38/A39 (a human at ares),
   B27/B28 share one decision, and B10/A28 — one live recording of one
   spoken turn — is still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 62 — B35: the mixer reading nobody took, and the pump that died saying `ok`
+
+The A track is blocked end to end (A62/A65/A68/A47/A56/A50/A60 want
+decisions, A13/A21/A22/A25/A27/A31/A38/A39 want a human at ares) and so
+is the front of the B track (B27/B28/B30/B32/B33/B34 are all somebody
+else's call), so I went looking in the one publisher the HUD depends on
+that nothing had audited: jv-context's 1 Hz system snapshot. Two defects,
+both reproduced before a line was written.
+
+**It could invent a reading.** `WpctlProbe.volume()` ended in
+`float(parts[1]) if len(parts) >= 2 else 0.0`, so an unreadable sink —
+wpctl missing from the closure, wpctl exiting non-zero, wpctl printing
+its own error text on stdout, which it does — published
+`audio_volume: 0.0, audio_muted: false`. That is not a harmless
+placeholder anywhere, and on this machine it is specifically a lie the
+HUD repeats: `core/OutputState.qml` reads `audio_volume <= 0` during an
+utterance as YOU CANNOT HEAR THIS and lights a plate. A40 built that
+plate for the worst-evidenced failure this assistant has, and A41 went to
+real trouble making sure it never speaks about a sink jv-voice does not
+use — and underneath both, the number itself could be something nobody
+measured. Invariant 10 forbids exactly that.
+
+**And it could stop, silently, forever.** `"no such id 42"` is two tokens,
+so it passed the length check and `float("such")` raised `ValueError`
+straight out of `_pump_system`. That task was never awaited: it died, the
+process lived on pumping window events, `Restart=on-failure` never fired,
+and `_pump_health` kept publishing `state: "ok"` about a jv-context that
+had not published `context.system` since. A service that has stopped
+doing half its job and says it is well is the failure mode `jv health`
+exists to end.
+
+The three rules, each with a test that dies without it:
+
+- **A probe raises, it does not substitute.** `ProbeUnavailable` for a
+  missing binary, a timeout, a non-zero exit, output that is not
+  `Volume: <n>`, and a number that is not one — `nan` and `inf` parse as
+  floats and are not measurements, and a negative is below the schema's
+  own minimum. A real 0.0 still reads as zero; that distinction is the
+  whole point.
+- **A failed tick publishes NOTHING.** Every field a probe feeds is
+  required by `schemas/context.system.json`, so there is no legal partial
+  frame — and the two ways of filling the gap both say more than was
+  measured: a substituted number is a reading nobody took, and restating
+  the last good snapshot dates it NOW. The bus's last word simply ages
+  out, which consumers already handle (the HUD stops believing a snapshot
+  after three periods, and that clock was written for exactly this).
+- **The failure moves to the heartbeat.** `degraded` with a note naming
+  the exception, and IMMEDIATELY on the transition — which
+  `schemas/sys.health.json` asks every service for ("every fixed period,
+  and immediately on state change") and which jv-context had never done;
+  on a 5 s beat a service that had just gone blind was up to 5 s of
+  silence about itself. Only on the transition, though: a probe failing
+  the same way sixteen times running is not news, and a beat per failed
+  tick would put jv-context's 1 Hz onto a topic that is meant to be quiet
+  (invariant 5). A test pins that the 0.8 s blind window produces exactly
+  two beats, `ok` then `degraded`.
+
+The `except Exception` in the pump is deliberate and is the substance of
+the fix rather than a shortcut: the property being bought is that no
+probe, present or future, can end that loop. What makes a broad catch bad
+is silence, and this one is the opposite — every failure ends up on the
+bus named by its exception type.
+
+One line of Nix went with it. The unit had no `path` at all, so `wpctl`
+was reaching it only by inheritance from the session; it now names
+`wireplumber` the way `jv-act` already names the things it shells out to.
+
+- tests: `bash ops/ralph/runtests.sh jv-context` — **82 (was 59)**.
+  **Thirteen mutations, all thirteen caught**: an unreadable mixer
+  reading as `(0.0, False)`, the `Volume:` word check dropped, the
+  nan/negative guard dropped, `OSError` and the timeout uncaught, the
+  exit code ignored, `snapshot()` substituting, the pump re-raising (the
+  old behaviour), the heartbeat always `ok`, `degraded` with no note, no
+  immediate beat on change, a beat per failed tick, the fault never
+  cleared when the probe recovers, and a fabricated frame published
+  anyway.
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change, no jv-act, no boot path, no
+  NVIDIA/kernel/flake pin.
+- **verified through the BUILT closure on ares**: the shipped
+  `jv_context` (from `/nix/store/...python3-3.14.7-env/.../jv_context/
+  system.py`, not the worktree) read the live sink through the built
+  unit's own `PATH=`, and the same binary with wpctl gone answered
+  `ProbeUnavailable: wpctl did not run` instead of zero. A run under
+  `env -i` with the unit PATH also produced `wpctl exited 2` — an
+  artifact of stripping `XDG_RUNTIME_DIR`, which a systemd *user* unit
+  has, and an accidental live demonstration of the new failure path. Only
+  a volume float and a mute bool were read; no device name, nothing kept.
+- files: services/jv-context/jv_context/system.py,
+  services/jv-context/jv_context/service.py,
+  services/jv-context/tests/test_context.py,
+  modules/jarvis-services.nix, docs/optimization-backlog.md
+- commit: dc04e77
+- next: **B37 is the one I would take next and it is the loop's own.**
+  `gpu_vram_free_mb` has never once been on the bus on ares — measured
+  under the built unit's own PATH, where the snapshot came back without
+  the field, because `nvidia-smi` is not in the closure either. Nothing
+  is lying (the schema makes it optional and the probe already degrades
+  to absent), but invariant 6 — "6 GB VRAM is a scheduling problem" —
+  has no number behind it, and the fix is the same one line I wrote for
+  wireplumber, reading `config.hardware.nvidia.package.bin` from
+  `modules/jarvis-services.nix` without touching `gpu-nvidia.nix` or its
+  pin. Pair it with backlog item 14, because the day it starts working is
+  the day that fork-per-second starts being paid. **B38** is the same
+  shape spread over three services: jv-ears, jv-guard and jv-brain still
+  beat on a timer alone, so jv-ears' `microphone open but no audio` is up
+  to a full period late and `jv health --check`'s 6 s window can miss it;
+  `_set_fault` + an Event is the shape to copy. **B36 is a human's** —
+  `net_online` is documented as one measurement and published as a much
+  weaker one, and fixing it starts by rewording a frozen schema
+  (proposal **R8**). Otherwise unchanged: A is blocked on A62/A65/A68/
+  A47/A56/A50/A60 (decisions) and A13/A21/A22/A25/A27/A31/A38/A39 (a
+  human at ares), B27/B28 share one decision, B30/B33 share another, and
+  B10/A28 — one live recording of one spoken turn — is still the biggest
+  thing a human can hand this loop.
