@@ -326,17 +326,15 @@ async fn main() -> anyhow::Result<()> {
                             // frame ts, and a busy tap must not inflate the
                             // number it exists to report.
                             if let Some(turn) = utts.reply(&id, ts, hold_s) {
-                                println!(">>> {}", turn.line(&id));
-                                // Its own line, not a seventh number on the
-                                // one above: that line has to survive a
-                                // terminal, and most turns run no tool.
-                                if let Some(line) = turn.tool_line(&id) {
-                                    println!(">>> {line}");
-                                }
-                                // And under THAT, for the rarer turn where
-                                // jv-act stopped and asked: which half of it
-                                // was the machine and which half was you.
-                                if let Some(line) = turn.confirm_line(&id) {
+                                // A ladder, each rung naming a span the rung
+                                // above it valued: the turn, the machine's
+                                // half of it, jv-act's share of that, and
+                                // your own share of jv-act's. `Turn::lines`
+                                // decides which rungs exist and in what
+                                // order, so none of them can be printed
+                                // pointing at a name nobody printed — and so
+                                // that every one of them fits a terminal.
+                                for line in turn.lines(&id) {
                                     println!(">>> {line}");
                                 }
                                 turns.push(&turn, &id);

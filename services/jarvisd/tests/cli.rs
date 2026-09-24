@@ -608,7 +608,11 @@ fn pump_confirm_turns(bus: &TestBus) -> tokio::task::JoinHandle<()> {
         let mut n = 0u32;
         loop {
             n += 1;
-            let utt = format!("utt-confirm-{n}");
+            // jv-ears stamps `uuid.uuid4()` on every utterance
+            // (`jv_ears/pipeline.py`), and this is the widest ladder any
+            // turn prints, so the live id shape belongs here: four lines,
+            // each carrying an id `short_id` has to cut down.
+            let utt = format!("{n:08x}-6d1e-4b7a-9c05-8ef23a41d9b7");
             let rid = format!("req-{n}");
             for (_, topic, b) in whole_turn(&utt) {
                 if ears.publish(topic, 1.0, 1, b).await.is_err() {
@@ -672,6 +676,42 @@ fn turn_lines(out: &Out) -> Vec<&str> {
     out.stdout.lines().filter(|l| l.starts_with(">>> turn ")).collect()
 }
 
+/// Those lines gathered per turn, in the order the turns were reported.
+///
+/// A turn is a LADDER of lines now and not one line (B22): the turn, the
+/// machine's half of it, jv-act's share, your share of jv-act's — and the
+/// `think` split, which arrives later off jv-brain's next heartbeat and is
+/// not adjacent to the rest. The id every line carries is what ties them
+/// together, which is also why it is on every line.
+fn turn_ladders(out: &Out) -> Vec<Vec<&str>> {
+    let mut order: Vec<&str> = Vec::new();
+    let mut by_id: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+    for l in turn_lines(out) {
+        let id = l.split_whitespace().nth(2).unwrap_or_default().trim_end_matches(':');
+        if !by_id.contains_key(id) {
+            order.push(id);
+        }
+        by_id.entry(id).or_default().push(l);
+    }
+    order.into_iter().map(|id| by_id.remove(id).expect("an id we just recorded")).collect()
+}
+
+/// Every column `jv tap` may use for a line it writes as a REPORT.
+///
+/// `cli::TAP_COLUMNS`, restated here because a test that imported the number
+/// it is checking would pass on any number at all.
+const TERMINAL_COLUMNS: usize = 80;
+
+/// Every `>>> ` line in this output, at a real terminal's width.
+fn every_reported_line_fits(out: &Out) {
+    let reported: Vec<&str> = out.stdout.lines().filter(|l| l.starts_with(">>> ")).collect();
+    assert!(!reported.is_empty(), "nothing was reported:\n{}", out.stdout);
+    for l in reported {
+        let w = l.chars().count();
+        assert!(w <= TERMINAL_COLUMNS, "{w} columns, {} too many: {l}", w - TERMINAL_COLUMNS);
+    }
+}
+
 #[tokio::test]
 async fn a_streamed_reply_reports_its_turn_exactly_once() {
     let bus = start(Config::default()).await;
@@ -681,15 +721,16 @@ async fn a_streamed_reply_reports_its_turn_exactly_once() {
     p.abort();
 
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
-    let lines = turn_lines(&out);
-    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
+    let ladders = turn_ladders(&out);
+    assert!(!ladders.is_empty(), "no turn was reported:\n{}", out.stdout);
     // Three speech.say frames per utterance, one report each: only the first
-    // sentence is time-to-first-word.
-    let mut ids: Vec<&str> = lines.iter().filter_map(|l| l.split_whitespace().nth(2)).collect();
-    let before = ids.len();
-    ids.sort_unstable();
-    ids.dedup();
-    assert_eq!(ids.len(), before, "a turn was reported more than once: {lines:?}");
+    // sentence is time-to-first-word. A turn reported twice would put two
+    // headlines under one id.
+    for l in &ladders {
+        let heads = l.iter().filter(|x| x.contains("total=")).count();
+        assert_eq!(heads, 1, "a turn was reported more than once: {l:?}");
+    }
+    every_reported_line_fits(&out);
 }
 
 #[tokio::test]
@@ -705,9 +746,13 @@ async fn a_turn_is_reported_split_at_the_boundaries_jv_ears_published() {
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     // At least one turn measured every span: the hold was read off jv-ears'
     // heartbeat, not assumed.
-    let full: Vec<&str> = turn_lines(&out).into_iter().filter(|l| !l.contains('?')).collect();
+    let full: Vec<Vec<&str>> = turn_ladders(&out)
+        .into_iter()
+        .filter(|l| !l.iter().any(|x| x.contains('?')))
+        .collect();
     assert!(!full.is_empty(), "no fully-measured turn:\n{}", out.stdout);
-    assert!(full[0].contains("hold=20ms"), "the hold must be the one ears published: {:?}", full[0]);
+    let (head, respond_line) = (full[0][0], full[0][1]);
+    assert!(head.contains("hold=20ms"), "the hold must be the one ears published: {head:?}");
 
     let s = &out.stdout;
     assert!(s.contains("--- turn latency:"), "{s}");
@@ -717,18 +762,20 @@ async fn a_turn_is_reported_split_at_the_boundaries_jv_ears_published() {
     assert!(s.contains("hold+respond"), "the machine's share must be named:\n{s}");
     // hear and think are a PARTITION of respond, measured on real frames
     // through a real broker: the two halves must add up to the whole.
-    let n = numbers_in(full[0]);
-    let (respond, hear, think) = (n[3], n[4], n[5]);
+    let n = numbers_in(respond_line);
+    let (respond, hear, think) = (n[0], n[1], n[2]);
     assert!(
         (hear + think - respond).abs() <= 1.0,
-        "hear {hear} + think {think} != respond {respond} in {:?}",
-        full[0]
+        "hear {hear} + think {think} != respond {respond} in {respond_line:?}"
     );
     // Cross-process CLOCK_MONOTONIC: every number is a small positive latency,
     // not a negative or a wall-clock-sized nonsense.
-    for ms in numbers_in(full[0]) {
-        assert!((0.0..10_000.0).contains(&ms), "implausible {ms}ms in {:?}", full[0]);
+    for line in &full[0] {
+        for ms in numbers_in(line) {
+            assert!((0.0..10_000.0).contains(&ms), "implausible {ms}ms in {line:?}");
+        }
     }
+    every_reported_line_fits(&out);
 }
 
 #[tokio::test]
@@ -808,10 +855,14 @@ async fn without_jv_ears_own_budget_the_spoken_share_is_a_question_mark() {
     p.abort();
 
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
-    let lines = turn_lines(&out);
-    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
-    assert!(lines[0].contains("spoke=? hold=?"), "{:?}", lines[0]);
-    assert!(lines[0].contains("respond="), "what WAS measured is still printed: {:?}", lines[0]);
+    let ladders = turn_ladders(&out);
+    assert!(!ladders.is_empty(), "no turn was reported:\n{}", out.stdout);
+    assert!(ladders[0][0].contains("spoke=? hold=?"), "{:?}", ladders[0][0]);
+    assert!(
+        ladders[0][1].contains("respond="),
+        "what WAS measured is still printed: {:?}",
+        ladders[0][1]
+    );
 
     let s = &out.stdout;
     // The two spans that need the gauge are absent from the table, and the
@@ -876,10 +927,11 @@ async fn a_partial_transcript_is_not_the_seam_even_where_the_seam_would_be() {
     p.abort();
 
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
-    let lines = turn_lines(&out);
-    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
-    assert!(lines[0].contains("hear=? think=?"), "{:?}", lines[0]);
-    assert!(!lines[0].contains("respond=?"), "the whole is still measured: {:?}", lines[0]);
+    let ladders = turn_ladders(&out);
+    assert!(!ladders.is_empty(), "no turn was reported:\n{}", out.stdout);
+    let respond_line = ladders[0][1];
+    assert!(respond_line.contains("hear=? + think=?"), "{respond_line:?}");
+    assert!(!respond_line.contains("respond=?"), "the whole is still measured: {respond_line:?}");
 
     let s = &out.stdout;
     assert!(s.contains("\nrespond   "), "{s}");
@@ -925,8 +977,7 @@ async fn a_tool_turn_says_how_much_of_its_think_was_jv_act() {
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     let tool: Vec<&str> = out.stdout.lines().filter(|l| l.contains("tool=")).collect();
     assert!(!tool.is_empty(), "no tool split was reported:\n{}", out.stdout);
-    assert!(tool[0].contains("1 call"), "{:?}", tool[0]);
-    assert!(tool[0].contains("jv-act"), "{:?}", tool[0]);
+    assert!(tool[0].contains("(1 jv-act call)"), "{:?}", tool[0]);
 
     // The round trip we made jv-act hold, measured off the two frames that
     // bracket it — not the sleep, but within reach of it from above.
@@ -937,10 +988,12 @@ async fn a_tool_turn_says_how_much_of_its_think_was_jv_act() {
     assert!(held < TOOL_HOLD_MS as f64 + 400.0, "{held}ms is not a round trip: {:?}", tool[0]);
     assert!(held <= think, "a share cannot exceed its whole: {:?}", tool[0]);
 
-    // The line it follows is the width it always was.
-    let lines = turn_lines(&out);
-    assert!(lines[0].starts_with(">>> turn utt-tool-"), "{:?}", lines[0]);
-    assert!(!lines[0].contains("tool="), "{:?}", lines[0]);
+    // Neither of the two lines it follows grew a number.
+    let l = &turn_ladders(&out)[0];
+    assert!(l[0].starts_with(">>> turn utt-tool-"), "{:?}", l[0]);
+    assert!(!l[0].contains("tool="), "{:?}", l[0]);
+    assert!(!l[1].contains("tool="), "{:?}", l[1]);
+    every_reported_line_fits(&out);
 
     let s = &out.stdout;
     assert!(s.contains("\n  tool "), "the summary must carry the row:\n{s}");
@@ -959,28 +1012,49 @@ async fn a_confirming_tool_says_which_half_of_its_span_was_you() {
     p.abort();
 
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
-    let split: Vec<&str> = out.stdout.lines().filter(|l| l.contains("you=")).collect();
-    assert!(!split.is_empty(), "no confirmation split was reported:\n{}", out.stdout);
-    assert!(split[0].contains("1 confirmation"), "{:?}", split[0]);
+    // The whole ladder, on the id shape jv-ears really stamps: four lines,
+    // each one dividing a span the line above it valued.
+    let full: Vec<Vec<&str>> = turn_ladders(&out).into_iter().filter(|l| l.len() == 4).collect();
+    assert!(!full.is_empty(), "no confirmation split was reported:\n{}", out.stdout);
+    let (head, tool_line, split) = (full[0][0], full[0][2], full[0][3]);
+    assert!(split.contains("(1 confirmation)"), "{split:?}");
 
     // tool = you + ran, each measured off the frames that bracket it. The
     // window we held is the bulk of it, which is the whole point: undivided,
     // this turn reads as a slow machine.
-    let ns = numbers_in(split[0]);
-    assert_eq!(ns.len(), 3, "tool, you and ran: {:?}", split[0]);
-    let (tool, you, ran) = (ns[0], ns[1], ns[2]);
-    assert!((tool - (you + ran)).abs() < 1.0, "the halves must add up: {:?}", split[0]);
+    let ns = numbers_in(split);
+    assert_eq!(ns.len(), 2, "you and ran: {split:?}");
+    let (you, ran) = (ns[0], ns[1]);
+    let tool = numbers_in(tool_line)[1];
+    // `<=` and not `<`: `ran` IS `tool - you` to the float, but the three
+    // are rounded to whole milliseconds INDEPENDENTLY for printing, so the
+    // two halves of a 262.4 ms tool can print as 202 + 61. One is the whole
+    // of the error and anything larger is a real disagreement. (This has
+    // always been true of these three numbers; the tolerance was `<` and
+    // the test flaked about one run in three under load.)
+    assert!((tool - (you + ran)).abs() <= 1.0, "the halves must add up: {:?}", full[0]);
     assert!(you >= CONFIRM_WINDOW_MS as f64, "{you}ms < the {CONFIRM_WINDOW_MS}ms we held");
-    assert!(you < CONFIRM_WINDOW_MS as f64 + 400.0, "{you}ms is not the window: {:?}", split[0]);
-    assert!(ran < you, "the machine's half must be the smaller one here: {:?}", split[0]);
+    assert!(you < CONFIRM_WINDOW_MS as f64 + 400.0, "{you}ms is not the window: {split:?}");
+    assert!(ran < you, "the machine's half must be the smaller one here: {split:?}");
 
-    // Its own line, under the `tool` line, under the `>>> turn` line — none
-    // of the three grew a number.
-    let lines = turn_lines(&out);
-    assert!(lines[0].starts_with(">>> turn utt-confirm-"), "{:?}", lines[0]);
-    assert!(!lines[0].contains("you="), "{:?}", lines[0]);
-    assert!(lines[1].contains("includes tool="), "{:?}", lines[1]);
-    assert!(!lines[1].contains("you="), "{:?}", lines[1]);
+    // Its own line, under the `tool` line, under the two the turn always
+    // prints — and none of the ones above it grew a number.
+    assert!(!head.contains("you="), "{head:?}");
+    assert!(!full[0][1].contains("you="), "{:?}", full[0][1]);
+    assert!(tool_line.contains("includes tool="), "{tool_line:?}");
+    assert!(!tool_line.contains("you="), "{tool_line:?}");
+
+    // The live utterance id is a UUID and no line carries one: every rung
+    // shows the same abbreviated id, and every rung fits a terminal. This
+    // is B22 on real output rather than on a constructed `Turn`.
+    let shown = head.split_whitespace().nth(2).expect("an id").trim_end_matches(':');
+    assert_eq!(shown.chars().count(), 11, "the id is not the width it is capped at: {shown}");
+    assert!(shown.ends_with("..."), "an abbreviated id must say so: {shown}");
+    for l in &full[0] {
+        assert!(l.contains(shown), "a rung carries a different id: {l:?}");
+        assert!(!l.contains("-6d1e-"), "the whole uuid reached a turn line: {l:?}");
+    }
+    every_reported_line_fits(&out);
 
     let s = &out.stdout;
     assert!(s.contains("\n    you "), "the summary must carry the row:\n{s}");

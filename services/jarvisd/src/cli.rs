@@ -360,6 +360,51 @@ pub struct Turn {
     pub confirm_waits: usize,
 }
 
+/// Every line `jv tap` prints ABOUT a turn fits this many columns.
+///
+/// Not the frames — those are raw data and are as wide as they are — but
+/// every line the tap writes as a REPORT: the `turn` ladder, the hop table,
+/// and the latency summary. 80 because it is the floor every terminal has,
+/// and because the summary table was already built to it.
+///
+/// Nothing enforces this at runtime; `every_line_a_turn_prints_fits_eighty
+/// _columns` enforces it at the widest input that can reach these lines,
+/// and names the one bound it assumes rather than enforces.
+pub const TAP_COLUMNS: usize = 80;
+
+/// The widest an utterance id may print inside one of those lines.
+///
+/// jv-ears stamps a `uuid.uuid4()` on every utterance, so the live id is 36
+/// characters — three of them on one line is the whole of the width problem
+/// (`jv_ears/pipeline.py`). Eight characters of a UUID is 4.3e9 and this tap
+/// holds a handful of turns at a time, so the prefix identifies the turn for
+/// as long as anyone is reading; the `...` says out loud that it is a prefix
+/// and not the id, and the frames printed alongside carry the whole thing.
+pub const ID_COLUMNS: usize = 11;
+
+/// An utterance id as a turn line carries it: verbatim when it already fits,
+/// otherwise its first characters and `...` to say what happened.
+///
+/// Short ids are never touched, so an id that fits is never made longer by
+/// being abbreviated — the same shape `echo_raw` uses for audit lines.
+pub fn short_id(id: &str) -> String {
+    if id.chars().count() <= ID_COLUMNS {
+        return id.to_string();
+    }
+    let mut s: String = id.chars().take(ID_COLUMNS - 3).collect();
+    s.push_str("...");
+    s
+}
+
+/// A span as every one of these lines prints it. None is `?` and is never a
+/// plausible zero.
+fn ms(v: Option<f64>) -> String {
+    match v {
+        Some(v) => format!("{v:.0}ms"),
+        None => "?".to_string(),
+    }
+}
+
 impl Turn {
     /// The user's own speaking time: the segment less the silence ears sat
     /// through at the end of it.
@@ -374,21 +419,48 @@ impl Turn {
         (speech >= hold).then_some(speech - hold)
     }
 
-    /// The live one-line report, printed as each turn completes.
+    /// The turn's own line: what the user waited, and their two shares of it.
+    ///
+    /// `total` is `spoke + hold + respond`, and the third term lives on
+    /// `respond_line` — the six numbers this line used to carry came to 133
+    /// columns on a live utterance id and wrapped, which is worse than the
+    /// one number they replaced (B17). See `TAP_COLUMNS`.
     pub fn line(&self, id: &str) -> String {
-        let ms = |v: Option<f64>| match v {
-            Some(v) => format!("{v:.0}ms"),
-            None => "?".to_string(),
-        };
         format!(
-            "turn {id}: total={} spoke={} hold={} respond={} (hear={} think={})",
+            "turn {}: total={} spoke={} hold={}",
+            short_id(id),
             ms(self.total_ms),
             ms(self.spoke_ms()),
             ms(self.hold_ms),
+        )
+    }
+
+    /// The machine's half, split where jv-ears hands over to jv-brain.
+    ///
+    /// `X is A + B` for an exact partition, the same grammar
+    /// `TurnStats::brain_split` and `confirm_line` use; `X includes Y` when
+    /// the parts do not account for the whole.
+    pub fn respond_line(&self, id: &str) -> String {
+        format!(
+            "turn {}: respond={} is hear={} + think={}",
+            short_id(id),
             ms(self.respond_ms),
             ms(self.hear_ms),
             ms(self.think_ms),
         )
+    }
+
+    /// Every line this turn has to say, in the order `jv tap` prints them.
+    ///
+    /// The ladder is why this is one method and not four calls at the call
+    /// site: each line after the first names a span the line above it gave a
+    /// value for, so printing one without the ones over it would leave a
+    /// name pointing at nothing.
+    pub fn lines(&self, id: &str) -> Vec<String> {
+        let mut out = vec![self.line(id), self.respond_line(id)];
+        out.extend(self.tool_line(id));
+        out.extend(self.confirm_line(id));
+        out
     }
 
     /// Of `tool`: jv-act's OWN work, the confirmation window taken out.
@@ -418,7 +490,8 @@ impl Turn {
         let (think, tool) = (self.think_ms?, self.tool_ms?);
         let plural = if self.tool_calls == 1 { "" } else { "s" };
         Some(format!(
-            "turn {id}: think={think:.0}ms includes tool={tool:.0}ms over {} call{plural} (jv-act)",
+            "turn {}: think={think:.0}ms includes tool={tool:.0}ms ({} jv-act call{plural})",
+            short_id(id),
             self.tool_calls
         ))
     }
@@ -430,10 +503,16 @@ impl Turn {
     /// that line is its own: the widths have to survive a terminal, and this
     /// describes a minority of the minority of turns that ran a tool at all.
     pub fn confirm_line(&self, id: &str) -> Option<String> {
-        let (tool, you, ran) = (self.tool_ms?, self.confirm_ms?, self.ran_ms()?);
+        // `think` is required for nothing this line prints, and required
+        // anyway: without it there is no `tool_line`, and this line names
+        // `tool` without restating its value. A name whose value was never
+        // printed is worse than a longer line.
+        let _think = self.think_ms?;
+        let (you, ran) = (self.confirm_ms?, self.ran_ms()?);
         let plural = if self.confirm_waits == 1 { "" } else { "s" };
         Some(format!(
-            "turn {id}: tool={tool:.0}ms is you={you:.0}ms + ran={ran:.0}ms over {} confirmation{plural}",
+            "turn {}: tool is you={you:.0}ms + ran={ran:.0}ms ({} confirmation{plural})",
+            short_id(id),
             self.confirm_waits
         ))
     }
@@ -916,7 +995,8 @@ impl TurnStats {
         self.model.push(model_ms);
         self.wait.push(wait);
         Some(format!(
-            "turn {id}: think={think:.0}ms is wait={wait:.0}ms + model={model_ms:.0}ms"
+            "turn {}: think={think:.0}ms is wait={wait:.0}ms + model={model_ms:.0}ms",
+            short_id(&id)
         ))
     }
 
@@ -2250,7 +2330,7 @@ mod tests {
         about(t.respond_ms, 1200.0);
         assert_eq!(t.hear_ms, None);
         assert_eq!(t.think_ms, None);
-        let line = t.line("utt-1");
+        let line = t.respond_line("utt-1");
         assert!(line.contains("hear=?"), "{line}");
         assert!(line.contains("think=?"), "{line}");
     }
@@ -2629,14 +2709,13 @@ mod tests {
         assert!(line.contains("turn utt-7:"), "{line}");
         assert!(line.contains("think=6000ms"), "{line}");
         assert!(line.contains("tool=3000ms"), "{line}");
-        assert!(line.contains("1 call"), "{line}");
-        assert!(!line.contains("1 calls"), "{line}");
-        assert!(line.contains("jv-act"), "{line}");
-        // The `>>> turn` line itself stays the width it already was.
+        assert!(line.contains("(1 jv-act call)"), "{line}");
+        // Neither of the two lines over it grew a number.
         assert!(!t.line("utt-7").contains("tool="), "{}", t.line("utt-7"));
+        assert!(!t.respond_line("utt-7").contains("tool="), "{}", t.respond_line("utt-7"));
 
         let two = turn_with_tools(10.0, 13.0, 14.0, 30.0, &[("r1", 15.0, Some(17.0)), ("r2", 25.0, Some(26.0))]);
-        assert!(two.tool_line("utt-7").expect("a tool line").contains("2 calls"));
+        assert!(two.tool_line("utt-7").expect("a tool line").contains("(2 jv-act calls)"));
     }
 
     #[test]
@@ -2862,15 +2941,150 @@ mod tests {
         let t = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2))));
         let line = t.confirm_line("utt-7").expect("a confirm line");
         assert!(line.contains("turn utt-7:"), "{line}");
-        assert!(line.contains("tool=16000ms"), "{line}");
         assert!(line.contains("you=15000ms"), "{line}");
         assert!(line.contains("ran=1000ms"), "{line}");
-        assert!(line.contains("1 confirmation"), "{line}");
-        assert!(!line.contains("1 confirmations"), "{line}");
-        // Its own line, like the `tool` split above it: the `>>> turn` line
-        // stays six numbers wide and the `tool` line keeps its own shape.
+        assert!(line.contains("(1 confirmation)"), "{line}");
+        // It names `tool` and does not restate it, because the line printed
+        // directly above it gives the number — and `lines()` is what makes
+        // "directly above" true rather than hopeful.
+        assert!(line.contains("tool is you="), "{line}");
+        let all = t.lines("utt-7");
+        assert_eq!(all.len(), 4, "{all:?}");
+        assert_eq!(all[3], line);
+        assert!(all[2].contains("tool=16000ms"), "{:?}", all[2]);
+        // Its own line, like the `tool` split above it: nothing over it grew
+        // a number.
         assert!(!t.line("utt-7").contains("you="), "{}", t.line("utt-7"));
         assert!(!t.tool_line("utt-7").expect("a tool line").contains("you="), "{line}");
+
+        let two = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2))));
+        let mut two = two;
+        two.confirm_waits = 2;
+        assert!(two.confirm_line("utt-7").expect("a line").contains("(2 confirmations)"));
+    }
+
+    /// The worst case every turn line has to survive, built once.
+    ///
+    /// `jv_ears.pipeline` stamps `uuid.uuid4()` on every utterance, so a
+    /// 36-character id is the LIVE case and not a pathological one.
+    fn widest_turn() -> Turn {
+        Turn {
+            total_ms: Some(999_999.0),
+            speech_ms: Some(999_999.0),
+            respond_ms: Some(999_999.0),
+            hold_ms: Some(0.0),
+            hear_ms: Some(999_999.0),
+            think_ms: Some(999_999.0),
+            tool_ms: Some(999_999.0),
+            tool_calls: ACTS_PER_TURN,
+            confirm_ms: Some(999_999.0),
+            confirm_waits: ACTS_PER_TURN,
+        }
+    }
+
+    const WIDEST_ID: &str = "3f2a91c4-6d1e-4b7a-9c05-8ef23a41d9b7";
+
+    /// Every line `jv tap` writes about a turn, at the widest it can be.
+    ///
+    /// Three of the four bounds this rests on are enforced somewhere else
+    /// and one is not, which is the point of writing them down here:
+    ///
+    ///   * **the id** is capped by `short_id` at `ID_COLUMNS`, so no id can
+    ///     break this line however long it is — the test below proves that
+    ///     on an id twenty times too long;
+    ///   * **both counts** are two digits because `ACTS_PER_TURN` stops the
+    ///     recording at 32, and a confirmation cannot exist without an act;
+    ///   * **every span is six digits**, and THIS is the bound that is
+    ///     assumed rather than enforced. 999999 ms is 16.7 minutes — longer
+    ///     than any turn that ends with somebody still listening — and a
+    ///     seventh digit would add a column to four of these five lines.
+    ///     Nothing stops a span that long from being measured; this test is
+    ///     what would notice.
+    #[test]
+    fn every_line_a_turn_prints_fits_eighty_columns() {
+        let t = widest_turn();
+        let mut lines = t.lines(WIDEST_ID);
+        // The `think` split arrives a frame later, off jv-brain's gauge, and
+        // is the fifth line the same turn can produce.
+        let mut stats = TurnStats::default();
+        stats.push(&t, WIDEST_ID);
+        lines.push(stats.brain_split(1.0).expect("a think split"));
+
+        assert_eq!(lines.len(), 5, "the widest turn stopped producing every line: {lines:?}");
+        for line in &lines {
+            let w = line.chars().count() + ">>> ".len();
+            assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+            // The control: if a line came out far under the budget, this
+            // test stopped building the worst case and stopped proving
+            // anything. Every one of these is between 65 and 77 today.
+            assert!(w >= 60, "{w} columns is not a worst case: {line}");
+            // And every one of them carries the abbreviated id, so a line
+            // added later cannot quietly print the raw one.
+            assert!(line.contains("3f2a91c4..."), "the id is not abbreviated: {line}");
+            assert!(!line.contains(WIDEST_ID), "the whole id reached a turn line: {line}");
+        }
+    }
+
+    #[test]
+    fn an_id_no_line_could_carry_is_abbreviated_rather_than_left_to_wrap() {
+        assert_eq!(short_id("utt-7"), "utt-7", "an id that fits is never touched");
+        assert_eq!(short_id(&"x".repeat(ID_COLUMNS)), "x".repeat(ID_COLUMNS));
+        // One character past the cap is where abbreviating starts SAVING
+        // something; abbreviating before that would make the id longer.
+        let over = "x".repeat(ID_COLUMNS + 1);
+        assert_eq!(short_id(&over).chars().count(), ID_COLUMNS);
+        assert!(short_id(&over).ends_with("..."));
+        // Twenty times too long, and a multi-byte id, which `chars` counts
+        // and `len` would not: the cap is columns, not bytes.
+        assert_eq!(short_id(&"é".repeat(220)).chars().count(), ID_COLUMNS);
+        let t = widest_turn();
+        for line in t.lines(&"z".repeat(220)) {
+            assert!(line.chars().count() + 4 <= TAP_COLUMNS, "{line}");
+        }
+    }
+
+    #[test]
+    fn two_ids_that_start_alike_print_alike_and_that_is_the_price() {
+        // The cost of abbreviating, written down where somebody looking for
+        // it will find it: `jv tap` is read by a human watching turns go by,
+        // and the whole id is on the frames printed beside these lines.
+        let a = "3f2a91c4-6d1e-4b7a-9c05-8ef23a41d9b7";
+        let b = "3f2a91c4-0000-0000-0000-000000000000";
+        assert_ne!(a, b);
+        assert_eq!(short_id(a), short_id(b));
+    }
+
+    #[test]
+    fn no_line_names_a_span_whose_value_no_line_printed() {
+        // The ladder's one rule: `tool_line` says `tool=` and `confirm_line`
+        // says `tool` without restating it, so a confirm line printed
+        // without a tool line above it would point at nothing. `reply`
+        // cannot build that turn — `confirm_ms` is gated on `tool_ms` which
+        // is gated on the seam — but the fields are public and this is the
+        // guard that makes it true of the TYPE and not just of one caller.
+        let mut t = widest_turn();
+        t.think_ms = None;
+        assert!(t.tool_line("t").is_none());
+        assert!(t.confirm_line("t").is_none(), "a confirm line with no tool line over it");
+        assert_eq!(t.lines("t").len(), 2, "the two lines every turn prints");
+    }
+
+    #[test]
+    fn the_summary_table_and_the_hop_table_fit_the_same_eighty_columns() {
+        // The turn lines are not the only thing `jv tap` prints as a report,
+        // and a table that wraps is worse than a line that does: its columns
+        // stop lining up with each other, which is the whole of its value.
+        let mut stats = TurnStats::default();
+        stats.push(&widest_turn(), WIDEST_ID);
+        stats.brain_split(1.0);
+        let mut hops = HopStats::default();
+        // The widest real topic on the bus, and a hop that overflows the
+        // column it is formatted into.
+        hops.hop("context.window.changed", 999_999.99);
+        for line in stats.summary().lines().chain(hops.summary().lines()) {
+            let w = line.chars().count();
+            assert!(w <= TAP_COLUMNS, "{w} columns: {line}");
+        }
     }
 
     #[test]
