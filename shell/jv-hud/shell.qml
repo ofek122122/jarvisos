@@ -17,12 +17,16 @@
 // reduced-motion switch — so stillness is one setting, not a promise every
 // element has to keep on its own.
 //
-// What it shows today: `StatePlate` (A3), which is what jv-voice and
-// jv-ears actually published — idle / listening / speaking / interrupted,
-// or nothing at all when the bus is quiet or unreachable. The mapping is
-// in core/SpeechState.qml, where it is tested; no element in this shell
-// can display a state that did not come off the bus. The mic and camera
-// indicators (A4) and the sys.health glance (A6) come next.
+// What it shows today, top to bottom: `StatePlate` (A3) — what jv-voice
+// and jv-ears actually published, idle / listening / speaking /
+// interrupted; `MicPlate` (A4) — whether the microphone is open, from
+// jv-ears' own capture counters; and `HealthPlate` (A6) — the services
+// that are not well, and the llm rung when the brain is on the CPU floor.
+// Each one's mapping lives in a tested file under core/, and each draws
+// nothing until a real frame gives it something to say, so the ordinary
+// state of this surface is unmapped. No element in this shell can display
+// a state that did not come off the bus. The camera indicator waits for a
+// vision-phase signal to be honest about.
 //
 // The HUD is a live bus consumer as of A3, so `Bus` is constructed on load
 // and its read-only bridge child runs for as long as the shell does. That
@@ -71,17 +75,19 @@ ShellRoot {
       // `margins`: quickshell's `margins` grouped property has no
       // resolvable type in its qmltypes, and a clean qmllint is worth more
       // than two pixels of layout sugar. The box is the stack of plates
-      // plus its inset, with room for the longest word any of them draws —
-      // a surface no bigger than what it may ever draw.
-      implicitWidth: 260
-      implicitHeight: 120
+      // plus its inset, with room for the longest line any of them draws —
+      // `jv-compat DEGRADED` at 11 px mono — and for the health plate's
+      // four rows sitting under the other two. A surface no bigger than
+      // what it may ever draw.
+      implicitWidth: 300
+      implicitHeight: 260
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
       // Mapped only while something is genuinely on screen — including
       // while a plate is fading out, or the exit would be a surface
       // vanishing out from under it rather than an element evaporating.
-      visible: surface.selfTest || statePlate.shown || statePlate.lit || micPlate.shown || micPlate.lit
+      visible: surface.selfTest || statePlate.shown || statePlate.lit || micPlate.shown || micPlate.lit || healthPlate.shown || healthPlate.lit
 
       // The corner stack. Every plate in it draws nothing until it has
       // something true to say, and a Column skips children that are not
@@ -112,6 +118,18 @@ ShellRoot {
 
           anchors.right: parent.right
           visible: micPlate.lit
+        }
+
+        // What is wrong with the machine, when anything is. Last in the
+        // stack because it is the one you go and look for rather than the
+        // one that catches your eye: the two plates above are about this
+        // moment, and this one is about the state of things. On a well
+        // machine it is never here at all.
+        HealthPlate {
+          id: healthPlate
+
+          anchors.right: parent.right
+          visible: healthPlate.lit
         }
       }
 

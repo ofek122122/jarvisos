@@ -63,6 +63,25 @@ QtObject {
     return env === undefined ? null : env;
   }
 
+  // Every `src` heard on `topic`, sorted, or an empty list. This is the
+  // only honest roster the HUD has: `sys.health` has one publisher per
+  // service and nothing anywhere announces which services are SUPPOSED to
+  // be running, so "who has spoken" is what can be known. A service that
+  // never started is therefore absent rather than dead — the HUD does not
+  // get to report on a machine it has not heard.
+  //
+  // Sorted because the rendered order should be a fact about the machine,
+  // not about which service happened to heartbeat first after boot.
+  function publishersOf(topic: string): var {
+    const prefix = topic + "|";
+    let out = [];
+    for (const key in root.sourced)
+      if (key.startsWith(prefix))
+        out.push(key.slice(prefix.length));
+    out.sort();
+    return out;
+  }
+
   // Seconds since a frame was captured, or Infinity when that is not
   // knowable yet. An element uses this to stop showing input that went
   // stale instead of pretending it is current (invariant 4).

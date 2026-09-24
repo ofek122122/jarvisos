@@ -55,6 +55,13 @@ Singleton {
     return model.latestFrom(topic, src);
   }
 
+  // Every `src` heard on `topic`, sorted, or an empty list. The HUD's
+  // only roster: nothing on the bus announces which services are meant to
+  // be running, so "who has spoken" is the whole of what can be known.
+  function publishersOf(topic: string): var {
+    return model.publishersOf(topic);
+  }
+
   // Seconds since a frame was captured, or Infinity when that is not
   // knowable yet — before the first frame, or for a frame with no `ts`.
   function ageOf(envelope: var): real {

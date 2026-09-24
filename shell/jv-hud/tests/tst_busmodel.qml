@@ -393,4 +393,65 @@ TestCase {
     verify(m.latest("sys.health") !== null);
     compare(m.latestFrom("sys.health", "undefined"), null, "it is nobody's frame");
   }
+
+  // --- the roster: who has spoken on a topic at all -------------------
+
+  function test_publishers_of_an_unheard_topic_is_empty() {
+    // Not null and not a guess at the service list: the HUD knows about a
+    // service exactly when that service has said something.
+    const m = makeModel(true);
+    compare(m.publishersOf("sys.health").length, 0);
+  }
+
+  function test_publishers_of_lists_every_source_sorted() {
+    // Sorted so the rendered order is a property of the machine, not of
+    // which service happened to heartbeat first after the HUD started.
+    const m = makeModel(true);
+    for (const src of ["jv-voice", "jv-brain", "jv-ears"])
+      m.ingest(frameLine("sys.health", {
+        "src": src
+      }));
+    compare(m.publishersOf("sys.health"), ["jv-brain", "jv-ears", "jv-voice"]);
+  }
+
+  function test_publishers_of_does_not_leak_across_topics() {
+    // The cache is keyed "topic|src", so a topic that is a prefix of
+    // another must not collect its publishers.
+    const m = makeModel(true);
+    m.ingest(frameLine("audio.vad", {
+      "src": "jv-ears"
+    }));
+    m.ingest(frameLine("audio.wake", {
+      "src": "jv-wake"
+    }));
+    compare(m.publishersOf("audio.vad"), ["jv-ears"]);
+    compare(m.publishersOf("audio"), []);
+  }
+
+  function test_publishers_of_counts_a_source_once_however_often_it_speaks() {
+    const m = makeModel(true);
+    for (const seq of [1, 2, 3])
+      m.ingest(frameLine("sys.health", {
+        "src": "jv-ears",
+        "seq": seq
+      }));
+    compare(m.publishersOf("sys.health"), ["jv-ears"]);
+  }
+
+  function test_publishers_of_omits_a_frame_that_named_nobody() {
+    const m = makeModel(true);
+    m.ingest('{"t":"frame","frame":{"topic":"sys.health","ts":100,"seq":1,"conf":1,"v":1,"body":{}}}');
+    compare(m.publishersOf("sys.health").length, 0, "an unattributed frame has no publisher");
+  }
+
+  function test_link_down_empties_the_roster() {
+    const m = makeModel(true);
+    m.ingest('{"t":"link","up":true}');
+    m.ingest(frameLine("sys.health", {
+      "src": "jv-ears"
+    }));
+    compare(m.publishersOf("sys.health"), ["jv-ears"]);
+    m.ingest('{"t":"link","up":false,"err":"gone"}');
+    compare(m.publishersOf("sys.health").length, 0, "a bus we cannot see has no services on it");
+  }
 }

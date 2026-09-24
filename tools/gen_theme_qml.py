@@ -69,6 +69,7 @@ COMPONENTS = (
     ("Ease", "Ease.qml"),  # the one gated Behavior every moving value uses
     ("StatePlate", "StatePlate.qml"),  # what Jarvis is doing, on screen (A3)
     ("MicPlate", "MicPlate.qml"),  # the live-microphone indicator (A4)
+    ("HealthPlate", "HealthPlate.qml"),  # what is wrong, when anything is (A6)
 )
 
 # shell/jv-hud/core — the Quickshell-free half of the HUD. Importing a
@@ -84,6 +85,7 @@ CORE = (
     ("MotionPolicy", "MotionPolicy.qml"),  # is the HUD allowed to move? (§06)
     ("SpeechState", "SpeechState.qml"),  # what is Jarvis doing? (A3)
     ("MicState", "MicState.qml"),  # is the microphone open? (A4)
+    ("HealthState", "HealthState.qml"),  # is anything wrong with Jarvis? (A6)
 )
 
 HEX = re.compile(r"^#[0-9A-F]{6}$")
