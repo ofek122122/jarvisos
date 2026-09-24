@@ -243,10 +243,17 @@ class FakeSuite:
         self.path = path
         self.catches = catches
         self.envs: list[dict[str, str]] = []
+        self.scratches: list[Path] = []
+        self.scratch_fresh: list[bool] = []
         self.seen: list[str] = []
 
-    def __call__(self, env: dict[str, str]) -> bool:
+    def __call__(self, env: dict[str, str], scratch: Path) -> bool:
         self.envs.append(dict(env))
+        # Checked HERE and not afterwards: the whole scratch tree is thrown
+        # away when the run ends, so "it was a fresh empty directory" is only
+        # answerable while the suite is being handed it.
+        self.scratches.append(scratch)
+        self.scratch_fresh.append(scratch.is_dir() and not list(scratch.iterdir()))
         text = self.path.read_text(encoding="utf-8")
         self.seen.append(text)
         if mutate.CANARY_MARK in text:
@@ -312,7 +319,7 @@ def test_a_red_baseline_aborts_before_anything_is_touched(tree):
     root, src = tree
     before = src.read_bytes()
     with pytest.raises(mutate.HarnessError, match="baseline"):
-        mutate.run(mutate.parse_spec(SPEC), lambda env: False, root=root)
+        mutate.run(mutate.parse_spec(SPEC), lambda env, scratch: False, root=root)
     assert src.read_bytes() == before
 
 
@@ -322,7 +329,7 @@ def test_a_canary_the_suite_survives_aborts_the_whole_run(tree):
     root, src = tree
     runs: list[str] = []
 
-    def blind(env: dict[str, str]) -> bool:
+    def blind(env: dict[str, str], scratch: Path) -> bool:
         runs.append(src.read_text(encoding="utf-8"))
         return True  # green no matter what the file says
 
@@ -345,7 +352,7 @@ def test_the_file_is_restored_when_the_suite_raises(tree):
     root, src = tree
     before = src.read_bytes()
 
-    def boom(env: dict[str, str]) -> bool:
+    def boom(env: dict[str, str], scratch: Path) -> bool:
         if "MUTANT" in src.read_text(encoding="utf-8"):
             raise RuntimeError("the runner died")
         return mutate.CANARY_MARK not in src.read_text(encoding="utf-8")
@@ -362,7 +369,7 @@ def test_a_tree_still_red_after_the_last_restore_is_an_error(tree):
     root, src = tree
     state = {"n": 0}
 
-    def flaky(env: dict[str, str]) -> bool:
+    def flaky(env: dict[str, str], scratch: Path) -> bool:
         state["n"] += 1
         text = src.read_text(encoding="utf-8")
         if mutate.CANARY_MARK in text:
@@ -380,14 +387,14 @@ def test_a_missing_target_file_is_an_error_before_the_baseline(tree):
     spec = mutate.parse_spec("@ nope\nsvc/absent.py\n- x = 1\n+ x = 2\n")
     calls: list[str] = []
     with pytest.raises(mutate.HarnessError, match="absent.py"):
-        mutate.run(spec, lambda env: calls.append("ran") or True, root=root)
+        mutate.run(spec, lambda env, scratch: calls.append("ran") or True, root=root)
     assert calls == []
 
 
 def test_an_empty_spec_is_an_error_rather_than_a_perfect_score(tree):
     root, _ = tree
     with pytest.raises(mutate.HarnessError, match="no mutations"):
-        mutate.run([], lambda env: True, root=root)
+        mutate.run([], lambda env, scratch: True, root=root)
 
 
 # ------------------------------------------------------------- the exit code
@@ -602,7 +609,7 @@ def test_the_run_never_writes_an_mtime_older_than_what_it_started_with(tree):
     os.utime(src, (2_000_000_000, 2_000_000_000))  # a source from the future
     seen: list[float] = []
 
-    def watch(env: dict[str, str]) -> bool:
+    def watch(env: dict[str, str], scratch: Path) -> bool:
         seen.append(src.stat().st_mtime)
         text = src.read_text(encoding="utf-8")
         return mutate.CANARY_MARK not in text and "MUTANT" not in text
@@ -639,7 +646,7 @@ def test_the_wrong_grader_is_refused_before_any_suite_runs(tmp_path):
     spec = mutate.parse_spec("@ x\nshell/X.qml\n- a: 1\n+ a: 2\n")
     calls: list[str] = []
     with pytest.raises(mutate.HarnessError, match="wrong grader"):
-        mutate.run(spec, lambda env: calls.append("ran") or True, root=tmp_path, lang=mutate.PYTHON)
+        mutate.run(spec, lambda env, scratch: calls.append("ran") or True, root=tmp_path, lang=mutate.PYTHON)
     assert calls == []
 
 
@@ -651,10 +658,114 @@ def test_every_language_names_a_runner_script_the_loop_actually_has():
         assert (ROOT / "ops" / "ralph" / lang.script).is_file(), lang.runner
 
 
-def test_the_qml_runner_takes_no_target_and_the_other_two_do():
-    assert mutate.QML.command(ROOT, "hud")[-1].endswith("qmltest.sh")
-    assert mutate.PYTHON.command(ROOT, "jv-ears")[-1] == "jv-ears"
-    assert mutate.CARGO.command(ROOT, "jarvisd")[-1] == "jarvisd"
+def test_the_two_hud_runners_take_no_target_and_the_other_two_do(tmp_path):
+    assert mutate.QML.command(ROOT, "hud", tmp_path)[-1].endswith("qmltest.sh")
+    assert mutate.PYTHON.command(ROOT, "jv-ears", tmp_path)[-1] == "jv-ears"
+    assert mutate.CARGO.command(ROOT, "jarvisd", tmp_path)[-1] == "jarvisd"
+    assert "hud" not in mutate.SHOTS.command(ROOT, "hud", tmp_path)
+
+
+# ------------------------------------------------- the shots runner (B51)
+#
+# The fourth runner, and the only one that can grade a PLATE. B49 measured
+# what `qmltest.sh` covers and the answer was `shell/jv-hud/core/` and
+# nothing else: the tests import "../core", so a canary on StatePlate.qml
+# LIVES and the harness refuses the file. `hudshots.sh` stages the whole
+# shell — every plate, the generated Theme, the two Quickshell singletons
+# substituted — and drives the real plates through tst_shots.qml and
+# tst_sequence.qml, which is the only place in this repo a plate is
+# instantiated at all.
+#
+# It needed one thing the other three did not: somewhere to put its output.
+# It writes thirteen PNGs and DEFAULTS to docs/hud — the committed contact
+# sheet — so an ungoverned grading run would rewrite the sheet a dozen
+# times over, half of those from a mutant, and the loop would commit
+# whichever one the last run happened to leave behind.
+
+
+def test_the_shots_runner_writes_into_the_runs_own_scratch_and_never_the_sheet(tmp_path):
+    cmd = mutate.SHOTS.command(ROOT, "hud", tmp_path)
+    assert cmd[-1] == str(tmp_path / "shots")
+    assert not any(str(ROOT / "docs") in part for part in cmd)
+
+
+def test_only_the_shots_runner_asks_for_a_scratch_output_dir(tmp_path):
+    assert [l.runner for l in mutate.LANGUAGES.values() if l.scratch_out] == ["shots"]
+    for lang in (mutate.PYTHON, mutate.QML, mutate.CARGO):
+        assert lang.command(ROOT, "x", tmp_path) == lang.command(ROOT, "x", tmp_path / "other")
+
+
+def test_every_shots_run_is_handed_a_scratch_dir_no_run_has_used_before(tree):
+    """The same guarantee the cache dirs get, for the same reason: a sheet
+    written by the mutant run must not be what the next run finds."""
+    root, src = tree
+    suite = FakeSuite(src)
+    mutate.run(mutate.parse_spec(SPEC), suite, root=root)
+    assert len(suite.scratches) == len(set(suite.scratches)) >= 4
+    assert all(suite.scratch_fresh)
+
+
+def test_shots_env_disables_the_disk_cache_the_script_does_not(tmp_path):
+    """Not a copy of qml_env: hudshots.sh exports its own XDG_CACHE_HOME
+    inside its mktemp stage, so setting that here would be overwritten and
+    would read as a control that is not one. QML_DISABLE_DISK_CACHE is not
+    set anywhere in that script, so it survives and is real."""
+    env = mutate.SHOTS.env(tmp_path)
+    assert env == {"QML_DISABLE_DISK_CACHE": "1"}
+    script = (ROOT / "ops" / "ralph" / "hudshots.sh").read_text()
+    assert "XDG_CACHE_HOME" in script          # it gives itself a fresh one
+    assert "QML_DISABLE_DISK_CACHE" not in script
+
+
+def test_the_shots_runner_grades_qml_and_nothing_else():
+    (py,) = mutate.parse_spec("@ x\nsvc/thing.py\n- A = 1\n+ A = 2\n")
+    with pytest.raises(mutate.HarnessError, match="wrong grader"):
+        mutate.check_language(py, mutate.SHOTS)
+    (qml,) = mutate.parse_spec("@ x\nshell/jv-hud/StatePlate.qml\n- a: 1\n+ a: 2\n")
+    mutate.check_language(qml, mutate.SHOTS)
+
+
+def test_a_canary_that_lived_under_the_core_runner_names_the_one_that_would_run_it(tmp_path):
+    """The abort a plate mutation hits, and it used to end at "check the
+    runner, the target...". The answer is now a fact about this repo and
+    worth printing: qmltest.sh cannot run a plate, hudshots.sh can."""
+    (tmp_path / "shell").mkdir()
+    (tmp_path / "shell" / "P.qml").write_text("import QtQuick\nQtObject { property int a: 1 }\n")
+    spec = mutate.parse_spec("@ x\nshell/P.qml\n- a: 1\n+ a: 2\n")
+    with pytest.raises(mutate.HarnessError, match="--runner shots"):
+        mutate.run(spec, lambda env, scratch: True, root=tmp_path, lang=mutate.QML)
+
+
+def test_the_shots_abort_names_the_two_things_its_stage_drops(tmp_path):
+    """Proved by running it: `--runner shots` on shell/jv-hud/shell.qml
+    aborts with exit 2 after two suite runs, because hudshots.sh copies the
+    shell and then removes shell.qml and tests/. That is the right answer —
+    no runner in this harness can grade shell.qml, and the abort should say
+    so rather than leave the reader checking a target that is correct."""
+    assert "shell.qml" in mutate.SHOTS.canary_hint
+    assert "tests/" in mutate.SHOTS.canary_hint
+    script = (ROOT / "ops" / "ralph" / "hudshots.sh").read_text()
+    assert 'rm -f "$stage/shell.qml"' in script
+    assert 'rm -rf "$stage/tests"' in script
+
+
+def test_a_target_the_shots_runner_does_not_grade_exits_two(spec_file, monkeypatch):
+    monkeypatch.setattr(mutate, "run", lambda *a, **k: pytest.fail("ran on a bad target"))
+    assert mutate.main(["--runner", "shots", "jv-ears", spec_file]) == 2
+
+
+def test_the_run_count_is_printed_before_a_fifty_second_suite_starts(spec_file, monkeypatch, capsys):
+    """The shots runner costs ~53 s a run on this machine, so a three-mutation
+    grading is five minutes. Knowing the count before it starts is the
+    difference between sending fewer mutations and abandoning a grading half
+    way through."""
+    two_files = "@ a\nsvc/thing.py\n- A = 1\n+ A = 2\n@ b\nsvc/other.py\n- B = 1\n+ B = 2\n"
+    assert mutate.suite_runs(mutate.parse_spec(two_files)) == 6     # 1 + 2 files + 2 + 1
+    two_in_one = "@ a\nsvc/thing.py\n- A = 1\n+ A = 2\n@ b\nsvc/thing.py\n- B = 1\n+ B = 2\n"
+    assert mutate.suite_runs(mutate.parse_spec(two_in_one)) == 5    # one canary, not two
+    monkeypatch.setattr(mutate, "run", lambda *a, **k: _report("caught"))
+    mutate.main(["tools", spec_file])
+    assert "4 suite runs" in capsys.readouterr().out
 
 
 def test_a_canary_planted_by_the_qml_language_is_the_qml_one(tmp_path):

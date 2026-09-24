@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The Ralph loop's mutation harness — PLAN B48, extended to three languages
-by B49.
+by B49 and to the HUD's plates by B51.
 
 Every iteration of this loop writes a sentence like "six mutations, six
 caught". The sentence is the loop's only evidence that the tests it just
@@ -79,6 +79,25 @@ Usage (spec on stdin is the ergonomic path — no scratch file to clean up):
     - if frame.seq <= last { return Err(...) }
     + if false { return Err(...) }
     EOF
+
+    bash ops/ralph/mutate.sh --runner shots hud <<'EOF'
+    @ the state plate lit while idle
+    shell/jv-hud/StatePlate.qml
+    - readonly property bool shown: root.voice.known && !root.voice.idle
+    + readonly property bool shown: root.voice.known
+    EOF
+
+B51 added that fourth runner, and it is the only one that can grade a PLATE.
+`qmltest.sh` imports `"../core"` and never a top-level plate, so a canary on
+one LIVES and the harness refuses the file — which is what B49 discovered and
+what left ten plates ungradeable. `hudshots.sh` stages the whole shell,
+substitutes the two Quickshell-bound singletons and drives the real plates
+through `tst_shots.qml` and `tst_sequence.qml`. Two things had to be true
+before it could be a runner: it must not write its thirteen PNGs over the
+COMMITTED contact sheet (it takes an output directory, and `scratch_out`
+hands it one inside this run's own scratch), and its cost had to be measured
+rather than promised — it is ~53 s a run on this machine, against ~14 s for
+`qmltest.sh`, so `main` prints the run count before a grading starts.
 
 `@ label` opens a block, the next bare line is the repo-relative file, and
 the `-`/`+` lines are the hunk (joined in order, indentation kept verbatim).
@@ -171,7 +190,27 @@ def python_canary(text: str) -> str:
 def qml_canary(text: str) -> str:
     """A QML file that cannot be parsed. `*** ... ***` is a syntax error
     wherever it lands, so the component becomes `Type X unavailable` and
-    every test that instantiates it fails to compile."""
+    every test that instantiates it fails to compile.
+
+    It means two different things to the two QML runners, and the weaker
+    one is measured rather than assumed. Under `--runner qml` it is the
+    strong claim: `qmltest.sh` only ever fails on a file it INSTANTIATES,
+    so a canary that dies there means the suite really ran this component.
+    Under `--runner shots` it is the Rust claim: `hudshots.sh` runs
+    `qmllint` over the whole staged shell before either driver starts, and
+    a syntax error is a lint failure, so the run goes red whether or not a
+    driver ever builds the type. Verified by planting one on
+    `StatePlate.qml`: exit 255 out of qmllint, no driver reached.
+
+    That is still worth having — the stage DROPS `shell.qml` and `tests/`,
+    so a canary in either lives and the harness refuses to grade them,
+    which is exactly the file an A-track iteration is most likely to mutate
+    by mistake. What it does not prove is that a driver instantiates the
+    plate, and nothing here should be read as proving it. The gate that
+    does prove it is `test_every_plate_in_the_shell_is_lit_in_some_shot`
+    in tools/tests/test_hudshots.py, next to the one that pins Corner.qml's
+    membership and order to shell.qml's.
+    """
     return _appended(text, f"*** {CANARY_MARK} ***")
 
 
@@ -216,6 +255,16 @@ def cargo_env(cache_dir: Path) -> dict[str, str]:
     return {}
 
 
+def shots_env(cache_dir: Path) -> dict[str, str]:
+    """`hudshots.sh` already gives itself a fresh `XDG_CACHE_HOME` inside its
+    own `mktemp` stage and exports it over whatever it was handed, so the
+    empty-cache half is free here and setting it would be theatre. What is
+    NOT free is the second half: nothing in that script disables the disk
+    cache, so this is a real control and not a copy of `qml_env`'s — it
+    survives the script's own export."""
+    return {"QML_DISABLE_DISK_CACHE": "1"}
+
+
 @dataclasses.dataclass(frozen=True)
 class Language:
     """A suite this harness knows how to run, and what a canary means in it."""
@@ -227,11 +276,23 @@ class Language:
     env: Callable[[Path], Mapping[str, str]]
     targets: tuple[str, ...] | None    # None = the script validates the name
     pass_target: bool                  # does the script take the target as argv?
+    # A suite that WRITES something the repo keeps needs telling where to put
+    # it instead. hudshots.sh defaults to docs/hud/ — the committed contact
+    # sheet — and a grading run rewrites it a dozen times, half of those from
+    # a mutant. So it is handed a directory inside this run's own scratch,
+    # which is thrown away with the rest of it.
+    scratch_out: bool = False
+    # Appended to the canary-lived abort: the runner that WOULD execute this
+    # file, when there is one. A generic "check the runner" is no help to a
+    # loop that has just been told its plate numbers mean nothing.
+    canary_hint: str = ""
 
-    def command(self, root: Path, target: str) -> list[str]:
+    def command(self, root: Path, target: str, scratch: Path) -> list[str]:
         cmd = ["bash", str(root / "ops" / "ralph" / self.script)]
         if self.pass_target:
             cmd.append(target)
+        if self.scratch_out:
+            cmd.append(str(scratch / "shots"))
         return cmd
 
 
@@ -255,6 +316,11 @@ QML = Language(
     # so the name exists only to be typed and checked.
     targets=("hud",),
     pass_target=False,
+    canary_hint=(
+        "qmltest.sh imports \"../core\" and never a plate, so a canary on a "
+        "top-level plate always lives (B49). Regrade it with --runner shots, "
+        "which stages the whole shell and drives the real plates."
+    ),
 )
 
 CARGO = Language(
@@ -267,7 +333,29 @@ CARGO = Language(
     pass_target=True,
 )
 
-LANGUAGES: dict[str, Language] = {lang.runner: lang for lang in (PYTHON, QML, CARGO)}
+SHOTS = Language(
+    runner="shots",
+    script="hudshots.sh",
+    suffixes=(".qml",),
+    canary=qml_canary,
+    env=shots_env,
+    # hudshots.sh stages the whole shell and runs both drivers over it; the
+    # only argument it takes is where to write the PNGs, which `scratch_out`
+    # supplies. There is nothing else to name.
+    targets=("hud",),
+    pass_target=False,
+    scratch_out=True,
+    canary_hint=(
+        "hudshots.sh stages the shell but DROPS shell.qml and tests/, so a "
+        "canary in either lives. shell.qml is the Quickshell half no other "
+        "engine can load, and no runner here can grade it: what it claims is "
+        "gated by tools/tests/test_hudshots.py, which READS it."
+    ),
+)
+
+LANGUAGES: dict[str, Language] = {
+    lang.runner: lang for lang in (PYTHON, QML, CARGO, SHOTS)
+}
 
 
 # --------------------------------------------------------------------- spec
@@ -403,7 +491,7 @@ class Stamps:
 
 # --------------------------------------------------------------------- run
 
-Runner = Callable[[Mapping[str, str]], bool]
+Runner = Callable[[Mapping[str, str], Path], bool]
 
 
 def run(
@@ -413,8 +501,10 @@ def run(
     root: Path,
     lang: Language = PYTHON,
 ) -> Report:
-    """Grade `mutations`. `runner(env)` runs the suite and returns True if it
-    passed; `env` carries this run's private cache directory.
+    """Grade `mutations`. `runner(env, scratch)` runs the suite and returns
+    True if it passed; `env` carries this run's private cache settings and
+    `scratch` is a private empty directory the suite may write into (which is
+    how `hudshots.sh` is kept off the committed contact sheet).
 
     Order: baseline (must be green) -> one canary per file (each must be red)
     -> the mutations -> baseline again (must be green).
@@ -444,7 +534,7 @@ def run(
         state["n"] += 1
         cache = base / f"run{state['n']:03d}"
         cache.mkdir()
-        return bool(runner(lang.env(cache)))
+        return bool(runner(lang.env(cache), cache))
 
     def swapped(rel: str, text: str) -> bool:
         """Run the suite with `rel` holding `text`, then put it back."""
@@ -470,6 +560,7 @@ def run(
                     f"file. Nothing this harness could report about it would "
                     f"mean anything — check the runner, the target, and that "
                     f"the tests read the worktree and not an installed copy."
+                    + (f" {lang.canary_hint}" if lang.canary_hint else "")
                 )
 
         outcomes: list[Outcome] = []
@@ -497,13 +588,19 @@ def run(
 # --------------------------------------------------------------------- cli
 
 
+def suite_runs(mutations: Sequence[Mutation]) -> int:
+    """How many times `run` will invoke the suite for this spec: the opening
+    baseline, one canary per distinct FILE, one per mutation, and the closing
+    baseline."""
+    return 2 + len({m.path for m in mutations}) + len(mutations)
+
+
 def script_runner(root: Path, lang: Language, target: str, *, quiet: bool = False) -> Runner:
     """The real runner: one of the loop's own `ops/ralph/*.sh` suites."""
-    cmd = lang.command(root, target)
 
-    def go(env: Mapping[str, str]) -> bool:
+    def go(env: Mapping[str, str], scratch: Path) -> bool:
         proc = subprocess.run(
-            cmd,
+            lang.command(root, target, scratch),
             cwd=root,
             env={**os.environ, **env},
             capture_output=True,
@@ -523,8 +620,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--runner",
         choices=sorted(LANGUAGES),
         default="tests",
-        help="tests = a Python service (runtests.sh), qml = the HUD "
-        "(qmltest.sh), cargo = a Rust crate (cargotest.sh)",
+        help="tests = a Python service (runtests.sh), qml = the HUD's core "
+        "(qmltest.sh), cargo = a Rust crate (cargotest.sh), shots = the HUD's "
+        "PLATES through the staged shell (hudshots.sh, ~53 s a run)",
     )
     ap.add_argument("target", help="the service, `hud`, or the crate to grade")
     ap.add_argument("spec", nargs="?", default="-", help="spec file, or - for stdin")
@@ -558,6 +656,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"{len(muts)} mutation(s) against {args.target} ({lang.runner})", flush=True)
     for m in muts:
         print(f"  @ {m.label}  ({m.path})", flush=True)
+    # Said out loud because one of the four runners costs ~53 s a run: the
+    # grading is a baseline, a canary per file, the mutations, and a baseline
+    # again, and a loop that knows the count before it starts can decide to
+    # send fewer mutations rather than abandon a run half way through.
+    print(f"  {suite_runs(muts)} suite runs", flush=True)
     try:
         report = run(muts, script_runner(root, lang, args.target), root=root, lang=lang)
     except HarnessError as exc:

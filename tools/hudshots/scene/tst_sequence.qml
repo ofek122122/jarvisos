@@ -197,6 +197,40 @@ Item {
       compare(stack.anyLit, true);
     }
 
+    // `idle` is not something to say, and it is the first decision this HUD
+    // ever made (§06's earned emptiness, A3: `idle` and `unknown` both draw
+    // NOTHING, so the surface is unmapped unless a frame earns it).
+    //
+    // Written because B51's new `--runner shots` graded it a SURVIVOR on its
+    // first honest run: `shown: root.voice.known && !root.voice.idle` lost
+    // its second half and every shot, every trajectory and all thirteen
+    // photographs came out exactly as before. Nothing in the recordings ever
+    // produces a KNOWN idle — jv-voice is in none of them (B10/A28), so the
+    // one frame that says "nothing is happening, and I can see that" had
+    // never reached a plate. `unknown` is well covered and is a different
+    // claim: it is the HUD unable to see, not the machine at rest.
+    //
+    // Hand-written, and it has to be: the frame does not exist in any
+    // recording. One frame, from the service that owns the topic, fresh at
+    // its own ts — the cheapest thing that can possibly be on screen.
+    function test_a_fresh_idle_from_jv_voice_still_draws_nothing() {
+      Bus.deliver({
+        "topic": "speech.state",
+        "ts": 1.0,
+        "seq": 1,
+        "src": "jv-voice",
+        "conf": 1.0,
+        "v": 1,
+        "body": {
+          "state": "idle"
+        }
+      });
+      const voice = suite.plateNamed("state");
+      compare(voice.voice.state, "idle", "the frame did not read as idle at all");
+      compare(suite.names(), "",
+              "a fresh idle lit the corner; idle draws nothing (A3)");
+    }
+
     // --- a real turn, from the first frame to the last --------------------
 
     function test_a_real_question_puts_up_two_plates_and_nothing_else() {

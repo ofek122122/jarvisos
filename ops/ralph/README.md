@@ -46,18 +46,28 @@ only whether a source is newer than what it built — so an equal-length edit is
 otherwise graded without ever running. Exit 0 all caught, 1 a survivor, 2 the
 harness will not make a claim. See `tools/mutate.py`.
 
-Three languages (B49), each with its own canary:
+Four runners (B49, B51), each with its own canary:
 ```
 bash ops/ralph/mutate.sh <service>              # .py   via runtests.sh
-bash ops/ralph/mutate.sh --runner qml hud       # .qml  via qmltest.sh
+bash ops/ralph/mutate.sh --runner qml hud       # .qml  via qmltest.sh   (core/)
 bash ops/ralph/mutate.sh --runner cargo jarvisd # .rs   via cargotest.sh
+bash ops/ralph/mutate.sh --runner shots hud     # .qml  via hudshots.sh  (plates)
 ```
 `--runner qml` grades `shell/jv-hud/core/` only — measured, not assumed: the
 canary LIVES on every top-level plate, because `qmltest.sh` imports `"../core"`
-and never a plate. The harness refuses those rather than reporting them immune.
-The Rust canary is the weakest of the three and says so in its docstring: a
+and never a plate. The harness refuses those and names the runner that can:
+`--runner shots` stages the whole shell the way `hudshots.sh` does and drives
+the real plates, writing its PNGs into the run's own scratch so the committed
+contact sheet in `docs/hud/` is never touched. It costs ~53 s a suite run
+against qmltest.sh's ~14 s, so the run count (baseline + one canary per file +
+one per mutation + baseline) is printed before the first one starts.
+The Rust canary is the weakest of the four and says so in its docstring: a
 `compile_error!` proves the file is compiled into the crate, not that a test
-exercises it.
+exercises it. The `shots` canary shares that limit for a different reason —
+`hudshots.sh` lints the stage before either driver runs, so a syntax error is
+a lint failure — and what it DOES catch is a file the stage drops entirely
+(`shell.qml`, `tests/`). That a plate is instantiated and lit at all is gated
+elsewhere, by `test_every_plate_in_the_shell_is_lit_in_some_shot`.
 
 ## One-time setup (isolated worktree on its own branch)
 From your normal checkout (`~/jarvisos`, on `main`, clean):
