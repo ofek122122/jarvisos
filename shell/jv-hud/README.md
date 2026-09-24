@@ -170,6 +170,46 @@ singletons are registered in `SINGLETONS`.
 
 The tests are a build gate, not shipped QML — `installPhase` drops them.
 
+## Tested on real perception (B9)
+
+Hand-written frames have one flaw: the input and the expectation have the
+same author, so a misunderstanding about what jv-ears actually publishes
+gets written into both. `harness/fixtures/sessions/` holds four recordings
+of what the **real** pipeline published while listening to the fixture WAVs
+(B3), and `tests/tst_sessionreplay.qml` replays them through
+`core/BusModel` + `core/SpeechState`:
+
+| recording | what the HUD does with it |
+|---|---|
+| `hey-jarvis-clean` | `unknown` → `listening@1.44` → `thinking@3.76` |
+| `hey-jarvis-music` | the same, 0.4 s longer; a noisier wake is not a weaker claim |
+| `hey-jarvis-pause` | 1.2 s of real silence mid-sentence and **no flicker**: one entry, one exit, 5.28 s apart |
+| `speech-no-wake` | real speech nobody addressed to Jarvis — `unknown` throughout, start to finish |
+
+Those seconds are facts about the recordings, so a flicker or an early
+blank shows up as an extra transition rather than as a judgement call. Two
+of the assertions are about the coupling to jv-ears rather than about the
+HUD: the real wake frames must clear SpeechState's "a frame that disagrees
+with itself is not a detection" bar (they carry openWakeWord's own `score`
+and `conf`), and the longest recorded utterance must still fit inside
+`wakeWindowS` — lower `wake_timeout_s` below what a person actually says
+and the HUD would drop `listening` while ears was still recording.
+
+QML cannot read a file out of the repository, so the recordings are
+compiled into `tests/Sessions.qml`, verbatim, by a generator that knows
+nothing about schemas (`harness/session.py` is the format's only reader):
+
+```sh
+python tools/gen_sessions_qml.py          # regenerate tests/Sessions.qml
+python tools/gen_sessions_qml.py --check  # exit 1 if it drifted — runs in the build
+bash ops/ralph/runtests.sh tools          # the generator's own tests
+```
+
+Same shape as the theme, for the same reason: re-record perception and
+`nix build .#jv-hud` fails until the fixture is regenerated — at which
+point the trajectories above change too, and the diff is the answer to
+"what did that retune do to the room?".
+
 ## Motion (A7)
 
 §06 gives motion four rules, and three are about *not* moving: **off with

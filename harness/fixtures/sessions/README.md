@@ -44,15 +44,32 @@ borrowing a boot_id that would.
 from run to run. Nothing compares them across recordings; what is checked
 is that every transcript threads an utterance the VAD opened.
 
+## Who reads them
+
+- `harness/tests/test_sessions.py` — the requirements `REVIEW-ears.md`
+  states, asserted on every machine, with no weights installed.
+- `services/jv-ears/tests/test_pipeline_fixtures.py` — re-records each WAV
+  when the models ARE installed and compares, so these cannot rot quietly.
+- **the HUD** (`shell/jv-hud/tests/tst_sessionreplay.qml`, PLAN B9) — the
+  first consumer downstream of perception. Its QML tests used to hand-type
+  the frames they asserted on; now they replay these and assert the state
+  the HUD shows at each real second. A QML engine cannot read a file out of
+  the repo, so `tools/gen_sessions_qml.py` compiles these lines verbatim
+  into `shell/jv-hud/tests/Sessions.qml`, and `nix build .#jv-hud` runs it
+  with `--check`.
+
 ## Regenerating
 
 ```sh
 ./models/fetch.sh --only ears          # once
 python harness/fixtures/sessions/generate_sessions.py
+python tools/gen_sessions_qml.py       # the HUD's compiled copy (or its build fails)
 ```
 
 Then **read the diff before committing it**. A fixture that changed without
-anyone intending it is the finding, not the chore.
+anyone intending it is the finding, not the chore — and the HUD's replay
+test is the second half of that answer: it says, in seconds, what the retune
+did to what the user would have seen.
 
 Nothing lets them rot quietly: when the models are installed,
 `test_the_committed_session_is_what_the_pipeline_still_does` re-records

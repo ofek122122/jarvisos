@@ -40,6 +40,17 @@ stdenvNoCC.mkDerivation {
   themeToml = ../../personality/theme.toml;
   themeGen = ../../tools/gen_theme_qml.py;
 
+  # The recorded perception sessions the QML tests replay (PLAN B9). A QML
+  # engine cannot read a file out of the repository, so the recordings are
+  # compiled into tests/Sessions.qml — and that generated file is only worth
+  # having while it is still the recording, which is what the --check below
+  # proves. Re-record perception without regenerating and this build fails,
+  # rather than the HUD's tests quietly asserting against last week's room.
+  # Only the *.jsonl are inputs: the generator's own directory also holds a
+  # README and the script that writes them, and neither changes the fixture.
+  sessions = lib.sources.sourceFilesBySuffices ../../harness/fixtures/sessions [ ".jsonl" ];
+  sessionsGen = ../../tools/gen_sessions_qml.py;
+
   dontConfigure = true;
   dontBuild = true;
   # qtdeclarative is here only for qmllint; nothing in this package is a Qt
@@ -55,6 +66,7 @@ stdenvNoCC.mkDerivation {
   checkPhase = ''
     runHook preCheck
     python3 $themeGen --check --theme $themeToml --out-dir .
+    python3 $sessionsGen --check --sessions $sessions --out-dir ./tests
     qmllint -W 0 --uncreatable-type disable \
       -I ${quickshell}/lib/qt-6/qml \
       -I ${qt6.qtdeclarative}/lib/qt-6/qml \
