@@ -5,6 +5,7 @@ blocking an EICAR-style file."""
 
 import asyncio
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -164,12 +165,18 @@ async def test_clean_install_pipeline(bus_addr, tmp_path):
     await watcher.close()
 
 
-async def test_fail_closed_when_no_verdict(bus_addr, tmp_path):
+async def test_fail_closed_when_no_verdict(bus_addr, tmp_path, monkeypatch):
     """No guard on the bus -> no verdict -> compat blocks. This is the
-    invariant-8 guarantee; we shorten the timeout via monkeypatch."""
+    invariant-8 guarantee; we shorten the timeout so the test is not the
+    real wait.
+
+    The shortening is a monkeypatch and not an assignment: the module global
+    was rewritten in place here and never put back, so every test after this
+    one silently ran with a one-second screening window and the suite's
+    result depended on its own order (PLAN B50)."""
     import jv_compat.install as inst_mod
 
-    inst_mod.VERDICT_TIMEOUT_S = 1.0
+    monkeypatch.setattr(inst_mod, "VERDICT_TIMEOUT_S", 1.0)
     installer_file = tmp_path / "app.exe"
     installer_file.write_bytes((FIX / "plain-x64.exe").read_bytes())
 
@@ -219,3 +226,53 @@ async def test_blocked_verdict_refuses(bus_addr, tmp_path):
     await guard.close()
     await compat_bus.close()
     await watcher.close()
+
+
+# ------------------------------------- B50: the wait, not just its effect
+
+
+def test_the_wait_for_a_verdict_outlasts_the_scan_it_is_waiting_for():
+    """`VERDICT_TIMEOUT_S` had no claim on it anywhere.
+
+    The one test that names it REPLACES it (a screening window of one second,
+    so fail-closed does not cost the suite a minute), so the shipped number
+    was never exercised by anything: mutated 60.0 -> 300.0 against this
+    suite, it survived (PLAN B50).
+
+    Asking what the number has to be true FOR found a real disagreement
+    between two services that never read each other. jv-compat stops
+    listening for `guard.verdict` after this long and then fails closed
+    (invariant 8, approved 2026-08-22); jv-guard's `ClamAVScanner` gives
+    clamscan 120 s before it gives up. At the shipped 60 s, an installer
+    whose scan ran 70 s was refused with "screening unavailable — refusing to
+    install" while the only authoritative engine on this machine was still
+    scanning it and about to publish `clean` onto a topic nobody was reading.
+    That is not the fail-closed guarantee working; it is a clean binary
+    refused for a reason that was not true.
+
+    Read out of jv-guard's source rather than imported: services never import
+    each other (invariant 1), and this is the same shape
+    `RECONNECT_CADENCES` uses in tools/tests/test_gen_theme_qml.py for the
+    two cadences `LinkState.qml` depends on.
+    """
+    import jv_compat.install as inst_mod
+
+    scan_py = (REPO / "services" / "jv-guard" / "jv_guard" / "scan.py").read_text("utf-8")
+    m = re.search(
+        r"\[\"clamscan\".*?timeout=(\d+)", scan_py, re.S
+    )
+    assert m, (
+        "cannot find clamscan's timeout in jv-guard/scan.py — if it moved or "
+        "was renamed, this relation is unchecked, which is how it drifted"
+    )
+    scan_budget = float(m.group(1))
+
+    assert inst_mod.VERDICT_TIMEOUT_S > scan_budget, (
+        f"jv-compat gives up after {inst_mod.VERDICT_TIMEOUT_S}s but jv-guard "
+        f"lets a scan run {scan_budget}s — a verdict published in between is "
+        "thrown away and a clean installer is refused as unscreened"
+    )
+    # And the wait is not unbounded: past a few minutes the install has
+    # stopped looking like a machine working and started looking like one
+    # that hung, with nothing on `compat.install` since `fingerprinted`.
+    assert inst_mod.VERDICT_TIMEOUT_S <= 300.0

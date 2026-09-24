@@ -282,3 +282,35 @@ async def test_output_is_flushed_per_line_so_the_hud_sees_state_immediately():
 
 async def _noop(_):
     pass
+
+
+# --- B50: the cadence itself, and not only the shape of it -----------------
+
+
+async def test_the_reconnect_cadence_stays_inside_what_it_promises_the_hud():
+    """Every other claim about the backoff in this file is spelled WITH it.
+
+    `slept == [br.FIRST_BACKOFF_S]` and `max(slept) <= br.MAX_BACKOFF_S`
+    check the SHAPE — the first sleep is the first backoff, the sequence
+    rises and then stops rising — and a retune moves the code and those
+    assertions together, so they go green for any pair of numbers at all,
+    including a pair that leaves the HUD blind for a minute after jarvisd
+    has come back. Measured, not argued: both constants were mutated (0.5 ->
+    2.0, 8.0 -> 30.0) against this suite and both survived (PLAN B50).
+
+    These are the properties the two numbers exist to satisfy, in absolute
+    seconds so that a retune past them fails HERE:
+
+    - the first retry is well under a second, because it has to land inside
+      the grace `core/LinkState.qml` waits out before it puts NO BUS on
+      screen. That relation is pinned across the two files in
+      tools/tests/test_gen_theme_qml.py (RECONNECT_CADENCES); this end of it
+      is the claim that keeps the comparison worth making.
+    - and it is not zero, because spinning on connect() is the thing a
+      backoff exists to prevent.
+    - the ceiling is under ten seconds, because it is the worst-case age of
+      everything on the HUD after the bus returns, and a HUD that is stale
+      for longer than a glance is one that lies for that long (invariant 10).
+    """
+    assert 0.1 <= br.FIRST_BACKOFF_S < 1.0
+    assert br.FIRST_BACKOFF_S < br.MAX_BACKOFF_S <= 10.0

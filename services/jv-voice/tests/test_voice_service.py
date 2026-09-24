@@ -480,3 +480,32 @@ async def test_a_degraded_heartbeat_carries_it_too(bus_addr, synth):
     task.cancel()
     await watcher.close()
     await svc_bus.close()
+
+
+# --- B50: the gap itself, and not only what it is longer or shorter than ---
+
+
+def test_the_inter_sentence_gap_is_bounded_by_the_thing_it_bridges():
+    """The two live claims about this constant are `< TURN_GAP_S / 2`.
+
+    Both say a turn ended sooner than the budget, and both are spelled with
+    the budget, so widening it widens the thing they are measured against
+    and they stay green — measured, not argued: TURN_GAP_S was mutated from
+    0.5 to 2.0 against this suite and survived (PLAN B50). Two seconds of
+    silence in the middle of a spoken reply is a turn every listener would
+    call over, and nothing here would have noticed.
+
+    The bounds are the constant's own docstring, made checkable. It bridges
+    THE BUS — the sentence jv-brain published as the previous one ended and
+    that is still in flight — and deliberately not the brain:
+
+    - below ~50 ms it stops bridging even that, and a reply still streaming
+      gets declared finished mid-answer;
+    - past ~0.75 s it is no longer a bus hop, it is waiting on the model,
+      which is the job this constant says it does not do — and the user
+      hears it as dead air with `speech.state` still claiming `speaking`.
+
+    Deliberately looser than the shipped 0.5 s in both directions: this is
+    the promise, not a second copy of the tuning.
+    """
+    assert 0.05 <= TURN_GAP_S <= 0.75

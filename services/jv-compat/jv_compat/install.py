@@ -27,7 +27,15 @@ from .fingerprint import fingerprint, silent_args
 from .prefix import bwrap_args, create_prefix_layout
 from .recipes import Recipe, find_recipe, load_recipes
 
-VERDICT_TIMEOUT_S = 60.0
+# How long we wait for jv-guard's verdict before failing closed. It must
+# OUTLAST jv-guard's own worst case, because the screening we give up on is
+# still running: ClamAVScanner gives clamscan 120 s, and a verdict published
+# after we stopped listening is a clean binary refused with "screening
+# unavailable" while the engine that cleared it was working the whole time.
+# The slack on top covers the re-hash of a large installer and jv-guard's
+# 0.1 s poll of `compat.install`. Pinned against that number by
+# `test_the_wait_for_a_verdict_outlasts_the_scan_it_is_waiting_for`.
+VERDICT_TIMEOUT_S = 180.0
 
 
 def sha256_file(path: Path) -> str:
