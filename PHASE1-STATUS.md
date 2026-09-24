@@ -66,6 +66,28 @@ install day; anything needing real hardware is mocked and tagged
   jv-voice while the rest generates; decide the measurement anchor
   (VAD end vs start) and re-state the budget accordingly.
 
+  **UPDATE 2026-09-24 (PLAN B13): the measurement stops mixing your voice
+  with the machine's time.** `jv tap --latency` no longer prints one
+  number. Each turn is split at the boundaries jv-ears itself publishes —
+  `spoke` (you talking), `hold` (ears' `vad_min_silence_ms`, the silence
+  it deliberately sits through to bridge a mid-sentence pause), `respond`
+  (ASR + brain + bus) — and the summary carries a p50/p95/max per span.
+  The machine's share of a turn is `hold + respond`; `spoke` is yours and
+  no faster machine shortens it. The hold is read off jv-ears'
+  `sys.health` `metrics` (`vad_min_silence_s`, added for this reader, the
+  same free-form section `wake_timeout_s` uses — no schema change); there
+  is NO fallback to its default, so a tap that has not heard a jv-ears
+  heartbeat prints `?` for the spans that need it rather than a number
+  that would look like a reading.
+
+  This does not re-state the budget — **which span the 2.5 s applies to is
+  still an open human decision**, and it is now a decision that can be
+  made against data. Also fixed here: the old anchor took the earliest ts
+  of ANY frame carrying the utterance_id, including an `audio.transcript`
+  partial, which is emitted part-way through the utterance — so a turn
+  whose partial arrived before the vad frame was silently measured short.
+  Boundaries now come only from `audio.vad`, by `event`.
+
   **UPDATE 2026-09-23 (308e12b): streaming reply — the perceived-latency
   fix.** jv-brain now streams the llama completion and speaks each sentence
   as it closes (SentenceChunker → one speech.say per sentence, shared

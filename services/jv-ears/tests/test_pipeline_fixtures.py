@@ -109,6 +109,30 @@ def test_the_pipeline_reports_the_wake_window_it_actually_enforces():
     assert reported > 0
 
 
+def test_the_pipeline_reports_the_endpoint_hold_it_actually_enforces():
+    """`jv tap --latency` cannot split a turn without this number.
+
+    A voice turn measured from the bus is VAD start -> first spoken word,
+    and most of it is the user talking: the 5.4 s measured on ares on
+    2026-09-15 contained 2-3 s of the user's own voice and could not be
+    compared to the 2.5 s budget at all. The boundary that separates the
+    two is ears' endpoint hold — the silence it deliberately sits through
+    to bridge a mid-sentence pause — and nothing outside this process
+    knew it.
+
+    Published for the same reason `wake_timeout_s` is (PLAN A14, B7):
+    there is now a READER, `jarvisd::cli::ears_endpoint_hold_s`. It
+    refuses rather than falling back, so a gauge that stops being
+    published turns into a `?` in the report instead of a wrong number.
+    Read off the sample count the code compares against, not off cfg.
+    """
+    pipe = EarsPipeline(CFG, lambda t, c, v, b: None)
+    reported = pipe.budgets()["vad_min_silence_s"]
+    assert reported == pipe._min_silence / CFG.sample_rate
+    assert reported == pytest.approx(CFG.vad_min_silence_ms / 1000.0, abs=1.0 / CFG.sample_rate)
+    assert reported > 0
+
+
 # ------------------------------------------------ the committed sessions
 
 # What the live pipeline does here is also committed, frame by frame, in

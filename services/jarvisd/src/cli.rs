@@ -87,14 +87,13 @@ pub fn percentile(sorted: &[f64], p: f64) -> f64 {
     sorted[rank.saturating_sub(1).min(sorted.len() - 1)]
 }
 
-/// Per-topic hop latency (`ts` on the frame -> now in this process) plus the
-/// end-to-end numbers, accumulated so `jv tap --latency` can print a summary
-/// instead of only a firehose. Invariant 5 says measure, don't assume; a
-/// scrolling column of per-frame numbers is not a measurement.
+/// Per-topic hop latency (`ts` on the frame -> now in this process),
+/// accumulated so `jv tap --latency` can print a summary instead of only a
+/// firehose. Invariant 5 says measure, don't assume; a scrolling column of
+/// per-frame numbers is not a measurement.
 #[derive(Default)]
 pub struct HopStats {
     per_topic: HashMap<String, Vec<f64>>,
-    e2e: Vec<f64>,
 }
 
 impl HopStats {
@@ -102,12 +101,8 @@ impl HopStats {
         self.per_topic.entry(topic.to_string()).or_default().push(ms);
     }
 
-    pub fn e2e(&mut self, ms: f64) {
-        self.e2e.push(ms);
-    }
-
     pub fn is_empty(&self) -> bool {
-        self.per_topic.is_empty() && self.e2e.is_empty()
+        self.per_topic.is_empty()
     }
 
     /// The summary block, worst p95 first (the interesting end), or an empty
@@ -135,94 +130,309 @@ impl HopStats {
         for (topic, n, p50, p95, max) in &rows {
             out.push_str(&format!("{topic:<22} {n:>5} {p50:>8.2}ms {p95:>8.2}ms {max:>8.2}ms\n"));
         }
-        if !self.e2e.is_empty() {
-            let mut s = self.e2e.clone();
-            s.sort_by(f64::total_cmp);
-            out.push_str(&format!(
-                "--- end-to-end (VAD start -> first speech.say): n={} p50={:.0}ms p95={:.0}ms max={:.0}ms\n",
-                s.len(),
-                percentile(&s, 50.0),
-                percentile(&s, 95.0),
-                percentile(&s, 100.0),
-            ));
-        }
         out
     }
 }
 
-/// Tracks when each input utterance was first heard so a later `speech.say`
-/// can be reported as one end-to-end latency.
+/// jv-ears, and the gauge on its heartbeat that says how long it sits in
+/// silence before it calls an utterance finished.
 ///
-/// Two things this is careful about:
+/// `metrics` is free-form and service-local by schema, so this costs no
+/// schema change (invariant 2) — jv-ears already states `wake_timeout_s`
+/// there for the HUD (PLAN A14). This is the second reader of that section,
+/// and the reason the gauge exists at all: without it the only number this
+/// CLI can print about a turn is one that contains the user's own voice.
+pub const EARS: &str = "jv-ears";
+pub const EARS_HOLD_METRIC: &str = "vad_min_silence_s";
+
+/// jv-ears' endpoint hold in seconds, off ONE `sys.health` frame, or None.
 ///
-/// 1. **Report once per utterance.** jv-brain streams a reply sentence by
+/// Refused on the same four grounds `jv health --check` refuses a heartbeat —
+/// they belong to the topic, not to either reader: a schema version this
+/// binary was not written against, a hedged `conf` on a state topic, a body
+/// naming a service other than the one the broker saw publish it, and a
+/// gauge that is not a finite, non-negative duration.
+///
+/// There is deliberately NO fallback to jv-ears' shipped default. The HUD
+/// may fall back — it has to draw something — but this is a measuring
+/// instrument, and an instrument that substitutes a constant for a reading
+/// is how a number stops meaning what its label says.
+pub fn ears_endpoint_hold_s(frame: &rmpv::Value) -> Option<f64> {
+    if get_str(frame, "src").as_deref() != Some(EARS) {
+        return None;
+    }
+    if get(frame, "v").and_then(|v| v.as_u64()) != Some(1) {
+        return None;
+    }
+    if get_f64(frame, "conf") != Some(1.0) {
+        return None;
+    }
+    let body = get(frame, "body").filter(|b| b.is_map())?;
+    if get_str(body, "service").as_deref() != Some(EARS) {
+        return None;
+    }
+    let metrics = get(body, "metrics").filter(|m| m.is_map())?;
+    get_f64(metrics, EARS_HOLD_METRIC).filter(|h| h.is_finite() && *h >= 0.0)
+}
+
+/// One voice turn, split at the boundaries jv-ears itself publishes.
+///
+/// ```text
+///   speech_start        last speech      speech_end      first speech.say
+///        |---- spoke ------|---- hold ----|---- respond ----|
+///        |-------------------- total ----------------------|
+/// ```
+///
+/// Why this is not one number. The Phase 1 exit criterion is "< 2.5 s", and
+/// what `jv tap --latency` used to print against it was VAD start -> first
+/// speech.say: the user's own speaking time (2-3 s of a typical request)
+/// plus everything the machine did. The 5.4 s measured on ares on
+/// 2026-09-15 could not be compared to the budget at all, and nothing in
+/// the output said so — PHASE1-STATUS carries "decide the measurement
+/// anchor" as an open question because of it.
+///
+/// Each span here has exactly one owner:
+///
+///   * **spoke** — the user talking. Not the machine's to spend, and not
+///     something a faster machine would shorten.
+///   * **hold** — jv-ears' `vad_min_silence_ms`, deliberately spent to
+///     bridge a mid-sentence pause. Machine time, and tunable.
+///   * **respond** — ASR, the brain, and the bus hops between them:
+///     everything after ears decided the utterance had ended.
+///
+/// So the machine's share of a turn is `hold + respond`, and THAT is the
+/// number a budget can be argued about. Which span the 2.5 s applies to is
+/// a human's call; this type exists so the call can be made against data
+/// instead of against one figure that mixes both.
+///
+/// Every field is optional because every one of them can genuinely be
+/// unknown — a tap started mid-sentence never heard the start, and a tap
+/// that has not heard jv-ears' heartbeat does not know the hold. None
+/// prints as `?`; none of them is ever filled in with a plausible zero.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Turn {
+    /// speech_start -> first speech.say: what the user waited, start to end.
+    pub total_ms: Option<f64>,
+    /// speech_start -> speech_end: the whole segment, the user's voice AND
+    /// the hold ears sat through at the end of it.
+    pub speech_ms: Option<f64>,
+    /// speech_end -> first speech.say: ASR + brain + bus.
+    pub respond_ms: Option<f64>,
+    /// jv-ears' endpoint hold, as jv-ears reported it.
+    pub hold_ms: Option<f64>,
+}
+
+impl Turn {
+    /// The user's own speaking time: the segment less the silence ears sat
+    /// through at the end of it.
+    ///
+    /// None when the hold is unknown, and also when it does not FIT — a hold
+    /// longer than the segment it is supposed to be part of means the
+    /// heartbeat and the utterance are describing different configurations
+    /// (ears restarted mid-tap, say). Two numbers that disagree produce no
+    /// third number.
+    pub fn spoke_ms(&self) -> Option<f64> {
+        let (speech, hold) = (self.speech_ms?, self.hold_ms?);
+        (speech >= hold).then_some(speech - hold)
+    }
+
+    /// The live one-line report, printed as each turn completes.
+    pub fn line(&self, id: &str) -> String {
+        let ms = |v: Option<f64>| match v {
+            Some(v) => format!("{v:.0}ms"),
+            None => "?".to_string(),
+        };
+        format!(
+            "turn {id}: total={} spoke={} hold={} respond={}",
+            ms(self.total_ms),
+            ms(self.spoke_ms()),
+            ms(self.hold_ms),
+            ms(self.respond_ms),
+        )
+    }
+}
+
+/// Where one input utterance's boundaries are collected until its reply
+/// arrives.
+struct Utt {
+    /// `audio.vad` speech_start, or None if the tap started mid-sentence.
+    start: Option<f64>,
+    /// `audio.vad` speech_end.
+    end: Option<f64>,
+    reported: bool,
+}
+
+/// Tracks each input utterance's boundaries so the first `speech.say` that
+/// answers it can be reported as one decomposed `Turn`.
+///
+/// Three things this is careful about:
+///
+/// 1. **Only `audio.vad` defines a boundary.** An `audio.transcript` partial
+///    used to be allowed to set the start, because it carries the same
+///    `utterance_id` and might arrive first. But a partial is ASR output
+///    emitted PART-WAY through the utterance, so using it as the start
+///    silently shortened the turn by however much of the sentence had
+///    already been said. Boundaries come from the service that decides them.
+/// 2. **Report once per utterance.** jv-brain streams a reply sentence by
 ///    sentence, so one utterance produces several `speech.say` frames. Only
-///    the first is the latency that matters (time to first word, the Phase 1
-///    budget); printing a bigger number for every later sentence reads as
-///    latency getting worse and is simply the reply being long.
-/// 2. **Bounded.** `jv tap` is meant to be left running for hours, so the map
-///    cannot grow one entry per utterance forever.
+///    the first is time-to-first-word; printing a bigger number for every
+///    later sentence reads as latency getting worse and is simply the reply
+///    being long.
+/// 3. **Bounded.** `jv tap` is meant to be left running for hours, so the
+///    map cannot grow one entry per utterance forever.
 pub struct Utterances {
-    first_seen: HashMap<String, f64>,
-    reported: HashMap<String, bool>,
+    utts: HashMap<String, Utt>,
     order: VecDeque<String>,
     cap: usize,
 }
 
 impl Utterances {
     pub fn with_capacity(cap: usize) -> Self {
-        Self {
-            first_seen: HashMap::new(),
-            reported: HashMap::new(),
-            order: VecDeque::new(),
-            cap: cap.max(1),
+        Self { utts: HashMap::new(), order: VecDeque::new(), cap: cap.max(1) }
+    }
+
+    /// `audio.vad` `speech_start` for `id`, at envelope `ts`.
+    pub fn started(&mut self, id: &str, ts: f64) {
+        Self::keep_earliest(&mut self.entry(id).start, ts);
+    }
+
+    /// `audio.vad` `speech_end` for `id`, at envelope `ts`.
+    pub fn ended(&mut self, id: &str, ts: f64) {
+        Self::keep_earliest(&mut self.entry(id).end, ts);
+    }
+
+    /// The EARLIEST ts seen for a boundary, not the first one delivered: the
+    /// frames carrying an `utterance_id` need not arrive in ts order, and a
+    /// boundary is a moment in the audio rather than a moment in this
+    /// process's inbox.
+    fn keep_earliest(slot: &mut Option<f64>, ts: f64) {
+        match slot {
+            Some(t) if *t <= ts => {}
+            _ => *slot = Some(ts),
         }
     }
 
-    /// Note that utterance `id` existed at `ts`. Keeps the EARLIEST ts seen,
-    /// not the first one delivered: the frames that carry an utterance_id
-    /// (`audio.vad`, partial and final `audio.transcript`) need not arrive in
-    /// ts order, and the number we want is when the speech started.
-    pub fn saw(&mut self, id: &str, ts: f64) {
-        match self.first_seen.get_mut(id) {
-            Some(t0) => {
-                if ts < *t0 {
-                    *t0 = ts;
-                }
-            }
-            None => {
-                self.first_seen.insert(id.to_string(), ts);
-                self.reported.insert(id.to_string(), false);
-                self.order.push_back(id.to_string());
-                while self.order.len() > self.cap {
-                    if let Some(old) = self.order.pop_front() {
-                        self.first_seen.remove(&old);
-                        self.reported.remove(&old);
-                    }
+    fn entry(&mut self, id: &str) -> &mut Utt {
+        if !self.utts.contains_key(id) {
+            self.utts.insert(id.to_string(), Utt { start: None, end: None, reported: false });
+            self.order.push_back(id.to_string());
+            while self.order.len() > self.cap {
+                if let Some(old) = self.order.pop_front() {
+                    self.utts.remove(&old);
                 }
             }
         }
+        self.utts.get_mut(id).expect("just inserted")
     }
 
-    /// ms from the start of `id` to `now`, but only the FIRST time it is
-    /// asked for a given utterance. None if unknown, already reported, or
-    /// evicted.
-    pub fn first_reply_ms(&mut self, id: &str, now: f64) -> Option<f64> {
-        let t0 = *self.first_seen.get(id)?;
-        let reported = self.reported.get_mut(id)?;
-        if *reported {
+    /// The turn `id` took, given the ts of the FIRST `speech.say` answering
+    /// it and jv-ears' endpoint hold if it has been heard. Only the first
+    /// time it is asked for a given utterance. None if we heard no boundary
+    /// for it at all, if it was already reported, or if it was evicted.
+    pub fn reply(&mut self, id: &str, say_ts: f64, hold_s: Option<f64>) -> Option<Turn> {
+        let u = self.utts.get_mut(id)?;
+        if u.reported {
             return None;
         }
-        *reported = true;
-        Some((now - t0) * 1e3)
+        u.reported = true;
+        Some(Turn {
+            total_ms: u.start.map(|t0| (say_ts - t0) * 1e3),
+            speech_ms: match (u.start, u.end) {
+                (Some(t0), Some(t1)) => Some((t1 - t0) * 1e3),
+                _ => None,
+            },
+            respond_ms: u.end.map(|t1| (say_ts - t1) * 1e3),
+            hold_ms: hold_s.map(|h| h * 1e3),
+        })
     }
 
     pub fn len(&self) -> usize {
-        self.first_seen.len()
+        self.utts.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.first_seen.is_empty()
+        self.utts.is_empty()
+    }
+}
+
+/// The measured turns, as four distributions instead of one.
+///
+/// A span is only in its row when it was actually measured for that turn, so
+/// the `n` column says how many turns each number stands on — a `respond`
+/// over twelve turns next to a `total` over nine is not a discrepancy, it is
+/// three turns whose start this tap did not hear.
+///
+/// `spoke` and `hold` are pushed together or not at all: they are two halves
+/// of one subtraction, and a spoke sample whose hold was refused would be an
+/// average over turns measured two different ways.
+#[derive(Default)]
+pub struct TurnStats {
+    turns: usize,
+    spoke: Vec<f64>,
+    hold: Vec<f64>,
+    respond: Vec<f64>,
+    total: Vec<f64>,
+}
+
+impl TurnStats {
+    pub fn push(&mut self, t: &Turn) {
+        self.turns += 1;
+        if let (Some(spoke), Some(hold)) = (t.spoke_ms(), t.hold_ms) {
+            self.spoke.push(spoke);
+            self.hold.push(hold);
+        }
+        if let Some(v) = t.respond_ms {
+            self.respond.push(v);
+        }
+        if let Some(v) = t.total_ms {
+            self.total.push(v);
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.turns == 0
+    }
+
+    pub fn summary(&self) -> String {
+        if self.is_empty() {
+            return String::new();
+        }
+        let plural = if self.turns == 1 { "" } else { "s" };
+        let mut out = format!(
+            "--- turn latency: {} turn{plural}, split at the boundaries jv-ears publishes\n",
+            self.turns
+        );
+        out.push_str(&format!("{:<10} {:<28} {:>4} {:>9} {:>9} {:>9}\n", "span", "whose time it is", "n", "p50", "p95", "max"));
+        let rows: [(&str, &str, &Vec<f64>); 4] = [
+            ("spoke", "you, talking", &self.spoke),
+            ("hold", "jv-ears' endpoint wait", &self.hold),
+            ("respond", "ASR + brain + bus", &self.respond),
+            ("total", "speech start -> first word", &self.total),
+        ];
+        for (span, whose, v) in rows {
+            if v.is_empty() {
+                continue;
+            }
+            let mut s = v.clone();
+            s.sort_by(f64::total_cmp);
+            out.push_str(&format!(
+                "{span:<10} {whose:<28} {:>4} {:>7.0}ms {:>7.0}ms {:>7.0}ms\n",
+                s.len(),
+                percentile(&s, 50.0),
+                percentile(&s, 95.0),
+                percentile(&s, 100.0),
+            ));
+        }
+        if self.spoke.is_empty() {
+            out.push_str(&format!(
+                "--- spoke/hold unmeasured: no jv-ears heartbeat carried `{EARS_HOLD_METRIC}`, and a\n    measurement may not substitute a default for a reading. `total` therefore\n    still contains the user's own speaking time, and no budget applies to it.\n"
+            ));
+        } else {
+            out.push_str(
+                "--- the machine's share of a turn is hold+respond; spoke is the user, and no\n    faster machine shortens it.\n",
+            );
+        }
+        out
     }
 }
 
@@ -1316,8 +1526,9 @@ mod tests {
         // Nearest-rank p50 of [9,11] is 9; max is 11.
         assert!(out.contains("9.00ms"), "{out}");
         assert!(out.contains("11.00ms"), "{out}");
-        // No end-to-end section when nothing was end-to-end.
-        assert!(!out.contains("end-to-end"), "{out}");
+        // Hops only. Turns are a different measurement with a different
+        // shape, and they have their own table (`TurnStats`).
+        assert!(!out.contains("turn"), "{out}");
     }
 
     #[test]
@@ -1326,57 +1537,253 @@ mod tests {
         assert_eq!(HopStats::default().summary(), "");
     }
 
-    #[test]
-    fn hop_summary_reports_end_to_end_when_present() {
-        let mut s = HopStats::default();
-        s.hop("speech.say", 0.4);
-        s.e2e(1800.0);
-        s.e2e(2400.0);
-        let out = s.summary();
-        assert!(out.contains("end-to-end (VAD start -> first speech.say): n=2"), "{out}");
-        assert!(out.contains("p50=1800ms"), "{out}");
-        assert!(out.contains("max=2400ms"), "{out}");
+    /// Milliseconds derived from float seconds land a few ulps off a round
+    /// number; a latency test is not about the 13th decimal place.
+    fn about(got: Option<f64>, want: f64) {
+        match got {
+            Some(v) => assert!((v - want).abs() < 1e-6, "got {v}, want {want}"),
+            None => panic!("nothing measured, want {want}"),
+        }
     }
 
     #[test]
-    fn utterance_start_is_the_earliest_ts_not_the_first_frame() {
+    fn a_turn_is_split_at_the_boundaries_jv_ears_publishes() {
         let mut u = Utterances::with_capacity(8);
-        // A partial transcript (ts 10.5) can be routed ahead of the vad
-        // speech_start (ts 10.0) it belongs to; the start is 10.0 either way.
-        u.saw("utt-1", 10.5);
-        u.saw("utt-1", 10.0);
-        u.saw("utt-1", 11.0);
-        assert_eq!(u.first_reply_ms("utt-1", 12.0), Some(2000.0));
+        u.started("utt-1", 10.0);
+        u.ended("utt-1", 13.0); // ears waited out its hold and called it done
+        let t = u.reply("utt-1", 14.2, Some(1.5)).expect("a reported turn");
+        about(t.total_ms, 4200.0);
+        about(t.speech_ms, 3000.0);
+        about(t.respond_ms, 1200.0);
+        about(t.hold_ms, 1500.0);
+        // The user talked for the segment minus the silence ears sat through.
+        about(t.spoke_ms(), 1500.0);
     }
 
     #[test]
-    fn end_to_end_is_reported_once_per_utterance() {
+    fn without_ears_own_budget_the_spoken_part_is_unknown_not_zero() {
         let mut u = Utterances::with_capacity(8);
-        u.saw("utt-1", 100.0);
+        u.started("utt-1", 10.0);
+        u.ended("utt-1", 13.0);
+        let t = u.reply("utt-1", 14.2, None).expect("a reported turn");
+        // What was measured is still measured; what was not is not invented.
+        about(t.total_ms, 4200.0);
+        about(t.respond_ms, 1200.0);
+        assert_eq!(t.hold_ms, None);
+        assert_eq!(t.spoke_ms(), None);
+        assert!(t.line("utt-1").contains("spoke=?"), "{}", t.line("utt-1"));
+        assert!(t.line("utt-1").contains("hold=?"), "{}", t.line("utt-1"));
+    }
+
+    #[test]
+    fn a_hold_longer_than_the_speech_it_sat_through_is_refused() {
+        let mut u = Utterances::with_capacity(8);
+        u.started("utt-1", 10.0);
+        u.ended("utt-1", 10.9); // 0.9 s of segment
+        let t = u.reply("utt-1", 11.5, Some(1.5)).expect("a reported turn");
+        // A 1.5 s hold cannot fit inside a 0.9 s segment: the heartbeat and
+        // the utterance disagree, so neither derived number is published.
+        assert_eq!(t.spoke_ms(), None);
+        about(t.speech_ms, 900.0);
+    }
+
+    #[test]
+    fn an_utterance_whose_start_was_missed_still_reports_what_it_can() {
+        let mut u = Utterances::with_capacity(8);
+        // `jv tap` started mid-sentence: the speech_start was never seen.
+        u.ended("utt-1", 13.0);
+        let t = u.reply("utt-1", 14.2, Some(1.5)).expect("respond is knowable");
+        about(t.respond_ms, 1200.0);
+        assert_eq!(t.total_ms, None, "nothing may stand in for a start we never heard");
+        assert_eq!(t.speech_ms, None);
+        assert_eq!(t.spoke_ms(), None);
+    }
+
+    #[test]
+    fn a_partial_transcript_is_not_a_speech_start() {
+        let mut u = Utterances::with_capacity(8);
+        // Only `audio.vad` says when speech began. A partial transcript at
+        // 10.5 used to define the start; it is ASR output, not a boundary.
+        let t = u.reply("utt-1", 12.0, None);
+        assert!(t.is_none(), "an utterance nothing bounded has no turn to report");
+    }
+
+    #[test]
+    fn boundaries_keep_the_earliest_ts_not_the_first_frame() {
+        let mut u = Utterances::with_capacity(8);
+        u.started("utt-1", 10.5);
+        u.started("utt-1", 10.0);
+        u.ended("utt-1", 13.5);
+        u.ended("utt-1", 13.0);
+        let t = u.reply("utt-1", 14.0, None).expect("a reported turn");
+        about(t.total_ms, 4000.0);
+        about(t.speech_ms, 3000.0);
+    }
+
+    #[test]
+    fn a_turn_is_reported_once_however_many_sentences_it_takes() {
+        let mut u = Utterances::with_capacity(8);
+        u.started("utt-1", 100.0);
+        u.ended("utt-1", 101.0);
         // A streamed reply is several speech.say frames for ONE utterance.
-        assert_eq!(u.first_reply_ms("utt-1", 101.0), Some(1000.0));
-        assert_eq!(u.first_reply_ms("utt-1", 103.0), None);
-        assert_eq!(u.first_reply_ms("utt-1", 106.0), None);
-        // An utterance we never heard start has no latency to report.
-        assert_eq!(u.first_reply_ms("never-seen", 106.0), None);
+        about(u.reply("utt-1", 102.0, None).and_then(|t| t.total_ms), 2000.0);
+        assert!(u.reply("utt-1", 103.0, None).is_none());
+        assert!(u.reply("utt-1", 106.0, None).is_none());
+        // An utterance we never heard at all has no turn to report.
+        assert!(u.reply("never-seen", 106.0, None).is_none());
     }
 
     #[test]
     fn utterances_are_bounded_and_evict_oldest_first() {
         let mut u = Utterances::with_capacity(3);
         for i in 0..10 {
-            u.saw(&format!("utt-{i}"), i as f64);
+            u.started(&format!("utt-{i}"), i as f64);
         }
         assert_eq!(u.len(), 3, "a tap left running for hours must not grow");
-        assert_eq!(u.first_reply_ms("utt-0", 100.0), None, "oldest evicted");
-        assert_eq!(u.first_reply_ms("utt-9", 100.0), Some((100.0 - 9.0) * 1e3));
+        assert!(u.reply("utt-0", 100.0, None).is_none(), "oldest evicted");
+        about(u.reply("utt-9", 100.0, None).and_then(|t| t.total_ms), (100.0 - 9.0) * 1e3);
     }
 
     #[test]
     fn utterances_capacity_zero_still_holds_one() {
         let mut u = Utterances::with_capacity(0);
-        u.saw("utt-1", 1.0);
-        assert_eq!(u.first_reply_ms("utt-1", 2.0), Some(1000.0));
+        u.started("utt-1", 1.0);
+        about(u.reply("utt-1", 2.0, None).and_then(|t| t.total_ms), 1000.0);
+    }
+
+    /// Build a turn the way `Utterances` would, for the summary tests.
+    fn turn(start: f64, end: f64, say: f64, hold_s: Option<f64>) -> Turn {
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", start);
+        u.ended("t", end);
+        u.reply("t", say, hold_s).expect("a turn")
+    }
+
+    #[test]
+    fn turn_summary_of_nothing_is_nothing() {
+        assert!(TurnStats::default().is_empty());
+        assert_eq!(TurnStats::default().summary(), "");
+    }
+
+    #[test]
+    fn turn_summary_reads_in_the_order_the_turn_happened() {
+        let mut s = TurnStats::default();
+        s.push(&turn(10.0, 13.0, 14.2, Some(1.5)));
+        s.push(&turn(20.0, 24.0, 26.0, Some(1.5)));
+        let out = s.summary();
+        let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("no {w} row in\n{out}"));
+        assert!(at("spoke") < at("hold"), "{out}");
+        assert!(at("hold") < at("respond"), "{out}");
+        assert!(at("respond") < at("total"), "{out}");
+        assert!(out.contains("2 turns"), "{out}");
+        // Nearest-rank p50 of [1500, 2500] spoke is 1500; max is 2500.
+        assert!(out.contains("1500ms"), "{out}");
+        assert!(out.contains("2500ms"), "{out}");
+        // The two numbers a reader has to keep apart are named, not implied.
+        assert!(out.contains("hold+respond"), "{out}");
+        assert!(!out.contains("unmeasured"), "everything was measured:\n{out}");
+    }
+
+    #[test]
+    fn turn_summary_omits_the_spans_it_could_not_measure_and_says_why() {
+        let mut s = TurnStats::default();
+        s.push(&turn(10.0, 13.0, 14.2, None));
+        let out = s.summary();
+        assert!(out.contains("respond"), "{out}");
+        assert!(out.contains("total"), "{out}");
+        assert!(!out.contains("spoke  "), "no spoke row without a hold to subtract:\n{out}");
+        assert!(out.contains(EARS_HOLD_METRIC), "the reason must name the gauge:\n{out}");
+        // And the total must not be offered as the machine's number, because
+        // it still has the user's voice in it.
+        assert!(!out.contains("hold+respond"), "{out}");
+    }
+
+    #[test]
+    fn a_hold_that_did_not_fit_takes_its_own_row_down_with_it() {
+        let mut s = TurnStats::default();
+        // 1.5 s of hold cannot have happened inside a 0.9 s segment.
+        s.push(&turn(10.0, 10.9, 11.5, Some(1.5)));
+        let out = s.summary();
+        // `spoke` and `hold` are two halves of one subtraction. Printing the
+        // hold on its own would put a number in the table for a turn whose
+        // other half was refused, and the row above it would be an average
+        // over a different set of turns.
+        assert!(!out.contains("\nhold  "), "{out}");
+        assert!(!out.contains("\nspoke "), "{out}");
+        assert!(out.contains("unmeasured"), "{out}");
+    }
+
+    #[test]
+    fn a_turn_with_no_start_still_earns_a_respond_row() {
+        let mut s = TurnStats::default();
+        let mut u = Utterances::with_capacity(4);
+        u.ended("t", 13.0);
+        s.push(&u.reply("t", 14.2, Some(1.5)).expect("a turn"));
+        let out = s.summary();
+        assert!(out.contains("respond"), "{out}");
+        assert!(!out.contains("total "), "a total we could not measure is not a row:\n{out}");
+    }
+
+    // --- reading jv-ears' endpoint hold off its own heartbeat -------------
+
+    /// A `sys.health` frame as jv-ears publishes it, with `metrics` under the
+    /// caller's control.
+    fn ears_health(src: &str, service: &str, v: u64, conf: f64, metrics: rmpv::Value) -> rmpv::Value {
+        map(&[
+            ("topic", rmpv::Value::from("sys.health")),
+            ("src", rmpv::Value::from(src)),
+            ("v", rmpv::Value::from(v)),
+            ("conf", rmpv::Value::from(conf)),
+            ("ts", rmpv::Value::from(1.0)),
+            (
+                "body",
+                map(&[
+                    ("service", rmpv::Value::from(service)),
+                    ("state", rmpv::Value::from("ok")),
+                    ("period_s", rmpv::Value::from(5.0)),
+                    ("metrics", metrics),
+                ]),
+            ),
+        ])
+    }
+
+    fn hold_metrics(v: rmpv::Value) -> rmpv::Value {
+        map(&[("mic_open", rmpv::Value::from(1.0)), (EARS_HOLD_METRIC, v)])
+    }
+
+    #[test]
+    fn the_endpoint_hold_is_read_off_jv_ears_own_heartbeat() {
+        let f = ears_health(EARS, EARS, 1, 1.0, hold_metrics(1.5.into()));
+        assert_eq!(ears_endpoint_hold_s(&f), Some(1.5));
+    }
+
+    #[test]
+    fn an_endpoint_hold_is_refused_unless_jv_ears_itself_said_it() {
+        let ok = hold_metrics(1.5.into());
+        // Someone else's heartbeat, whatever it claims to be.
+        assert_eq!(ears_endpoint_hold_s(&ears_health("jv-voice", EARS, 1, 1.0, ok.clone())), None);
+        // jv-ears' connection carrying a body that names another service.
+        assert_eq!(ears_endpoint_hold_s(&ears_health(EARS, "jv-voice", 1, 1.0, ok.clone())), None);
+        // A schema version this binary was not written against.
+        assert_eq!(ears_endpoint_hold_s(&ears_health(EARS, EARS, 2, 1.0, ok.clone())), None);
+        // A state topic hedging its confidence disagrees with itself.
+        assert_eq!(ears_endpoint_hold_s(&ears_health(EARS, EARS, 1, 0.9, ok)), None);
+    }
+
+    #[test]
+    fn a_hold_that_is_not_a_duration_is_not_a_hold() {
+        for bad in [
+            rmpv::Value::from("1.5"),
+            rmpv::Value::from(-0.1),
+            rmpv::Value::from(f64::NAN),
+            rmpv::Value::from(f64::INFINITY),
+        ] {
+            let f = ears_health(EARS, EARS, 1, 1.0, hold_metrics(bad.clone()));
+            assert_eq!(ears_endpoint_hold_s(&f), None, "{bad:?}");
+        }
+        // A heartbeat that simply does not carry the gauge.
+        let f = ears_health(EARS, EARS, 1, 1.0, map(&[("mic_open", rmpv::Value::from(1.0))]));
+        assert_eq!(ears_endpoint_hold_s(&f), None);
     }
 
     #[test]

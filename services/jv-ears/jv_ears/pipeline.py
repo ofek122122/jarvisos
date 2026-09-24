@@ -94,11 +94,29 @@ class EarsPipeline:
 
         Read off the SAMPLE-clock counts the code compares against rather
         than off cfg, for the same reason CaptureMeter counts what the
-        device delivered: what runs is the truth. Today it differs from
-        `cfg.wake_timeout_s` by at most one sample; the day this rounds
-        differently, what is published follows the code.
+        device delivered: what runs is the truth. Today they differ from
+        `cfg.wake_timeout_s` / `cfg.vad_min_silence_ms` by at most one
+        sample; the day this rounds differently, what is published follows
+        the code.
+
+          wake_timeout_s     how long a wake keeps the utterance gate armed
+                             (read by the HUD, PLAN A14).
+          vad_min_silence_s  the endpoint hold: how long this pipeline sits
+                             in silence before it calls an utterance over.
+                             Deliberate — it bridges the 1.2 s mid-sentence
+                             pause a person takes — and it is the boundary
+                             that separates the user's own speaking time
+                             from the machine's, which is what `jv tap
+                             --latency` needs to split a turn into spans
+                             that each have one owner. Without it the only
+                             voice number this system can print contains
+                             the user's voice, and cannot be held against
+                             the Phase 1 budget at all.
         """
-        return {"wake_timeout_s": self._wake_timeout / self.cfg.sample_rate}
+        return {
+            "wake_timeout_s": self._wake_timeout / self.cfg.sample_rate,
+            "vad_min_silence_s": self._min_silence / self.cfg.sample_rate,
+        }
 
     def set_suppressed(self, value: bool) -> None:
         """Half-duplex gate: True while jv-voice is speaking. Blocks only

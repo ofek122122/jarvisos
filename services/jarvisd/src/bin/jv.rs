@@ -10,7 +10,7 @@
 
 use clap::{Parser, Subcommand};
 use jarvisd::broker::BusAddr;
-use jarvisd::cli::{self, HopStats, Outcome, Utterances};
+use jarvisd::cli::{self, HopStats, Outcome, TurnStats, Utterances};
 use jarvisd::client::BusClient;
 use jarvisd::proto::ServerMsg;
 use jarvisd::time::mono_now;
@@ -64,9 +64,13 @@ enum Cmd {
         #[arg(long, default_value_t = 1)]
         schema_v: u64,
     },
-    /// Watch everything; with --latency print per-hop latency, the end-to-end
-    /// time to first word for each tracked utterance, and a percentile summary
-    /// when the stream stops.
+    /// Watch everything; with --latency print per-hop latency, one decomposed
+    /// line per voice turn, and a percentile summary when the stream stops.
+    ///
+    /// A turn is split at the boundaries jv-ears publishes — spoke (your
+    /// voice), hold (its endpoint wait), respond (ASR + brain + bus) — so
+    /// the machine's share can be read apart from your own speaking time.
+    /// Spans that were not measured print as `?`, never as a zero.
     Tap {
         #[arg(long)]
         latency: bool,
@@ -205,7 +209,12 @@ async fn main() -> anyhow::Result<()> {
             let mut c = BusClient::connect(&addr, "jv-tap").await?;
             c.subscribe(&["*"]).await?;
             let mut stats = HopStats::default();
+            let mut turns = TurnStats::default();
             let mut utts = Utterances::with_capacity(UTTERANCE_MEMORY);
+            // jv-ears' endpoint hold, once it has said what it is. No
+            // fallback: a turn measured before the first heartbeat lands
+            // reports `?` for the spans that need it (cli::Turn).
+            let mut hold_s: Option<f64> = None;
             let run = drive(&mut c, count, for_secs, |frame| {
                 let topic = cli::get_str(&frame, "topic").unwrap_or_default();
                 let ts = cli::get_f64(&frame, "ts").unwrap_or(0.0);
@@ -219,21 +228,36 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     println!("{}", cli::to_json(&frame));
                 }
+                if topic == "sys.health" {
+                    if let Some(h) = cli::ears_endpoint_hold_s(&frame) {
+                        hold_s = Some(h);
+                    }
+                }
                 let Some(body) = cli::get(&frame, "body") else { return };
                 match topic.as_str() {
-                    "audio.vad" | "audio.transcript" => {
-                        if let Some(id) = cli::get_str(body, "utterance_id") {
-                            utts.saw(&id, ts);
+                    // Only jv-ears says where an utterance begins and ends. A
+                    // transcript carries the same utterance_id and is emitted
+                    // part-way through, so it is not a boundary (cli::Utterances).
+                    "audio.vad" => {
+                        let Some(id) = cli::get_str(body, "utterance_id") else { return };
+                        match cli::get_str(body, "event").as_deref() {
+                            Some("speech_start") => utts.started(&id, ts),
+                            Some("speech_end") => utts.ended(&id, ts),
+                            _ => {}
                         }
                     }
                     "speech.say" => {
                         if let Some(id) = cli::get_str(body, "in_reply_to_utterance") {
                             // Only the FIRST reply frame: a streamed reply is
                             // many speech.say frames for one utterance, and
-                            // only the first is time-to-first-word.
-                            if let Some(ms) = utts.first_reply_ms(&id, now) {
-                                println!(">>> end-to-end {id}: {ms:.0}ms (VAD start -> first speech.say)");
-                                stats.e2e(ms);
+                            // only the first is time-to-first-word. Anchored on
+                            // the frame's own `ts`, not on when this process
+                            // got round to it — every other boundary here is a
+                            // frame ts, and a busy tap must not inflate the
+                            // number it exists to report.
+                            if let Some(turn) = utts.reply(&id, ts, hold_s) {
+                                println!(">>> {}", turn.line(&id));
+                                turns.push(&turn);
                             }
                         }
                     }
@@ -243,6 +267,7 @@ async fn main() -> anyhow::Result<()> {
             .await?;
             if latency {
                 print!("{}", stats.summary());
+                print!("{}", turns.summary());
             }
             cli::exit_code(run.outcome, count, run.seen)
         }

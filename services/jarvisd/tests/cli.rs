@@ -146,8 +146,8 @@ async fn tap_latency_prints_a_percentile_summary_when_it_stops() {
     assert!(out.stdout.contains("jv.test"), "{}", out.stdout);
     // Three per-frame lines, a header, a column header and one row.
     assert_eq!(out.lines().len(), 6, "{:?}", out.lines());
-    // No utterances were tracked, so there is no end-to-end section to invent.
-    assert!(!out.stdout.contains("end-to-end"), "{}", out.stdout);
+    // No utterances were tracked, so there is no turn table to invent.
+    assert!(!out.stdout.contains("turn latency"), "{}", out.stdout);
 }
 
 #[tokio::test]
@@ -303,47 +303,219 @@ async fn check_and_count_are_two_different_questions_and_cannot_both_be_asked() 
     assert!(out.stderr.contains("--check"), "{}", out.stderr);
 }
 
-#[tokio::test]
-async fn a_streamed_reply_reports_end_to_end_exactly_once() {
-    let bus = start(Config::default()).await;
-    // One utterance, then three reply sentences — what jv-brain's streaming
-    // reply actually looks like on the bus.
-    let utt = "utt-ralph-1";
-    let say = body(&[("text", "hi".into()), ("in_reply_to_utterance", utt.into())]);
-    let p = pump(
-        &bus,
-        vec![
-            ("audio.vad", body(&[("kind", "speech_start".into()), ("utterance_id", utt.into())])),
-            ("speech.say", say.clone()),
-            ("speech.say", say.clone()),
-            ("speech.say", say),
-        ],
-        60,
-    );
+/// jv-ears' heartbeat carrying the one gauge `jv tap` reads off it.
+fn ears_heartbeat(hold_s: f64) -> rmpv::Value {
+    body(&[
+        ("service", "jv-ears".into()),
+        ("state", "ok".into()),
+        ("uptime_s", 12.0.into()),
+        ("period_s", 5.0.into()),
+        ("metrics", body(&[("mic_open", 1.0.into()), ("vad_min_silence_s", hold_s.into())])),
+    ])
+}
 
-    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--for", "2"]), 8.0).await;
+fn vad(event: &str, utt: &str) -> rmpv::Value {
+    body(&[("event", event.into()), ("utterance_id", utt.into())])
+}
+
+/// Publish one voice turn per cycle, forever, with a FRESH utterance id each
+/// time, as the real services publish it: `before` is what leads up to the
+/// reply — each entry naming the service whose connection publishes it —
+/// and jv-brain then sends three sentences, which is what a streamed reply
+/// looks like on the bus.
+///
+/// A new id per cycle is what makes the assertions true under repeats. A turn
+/// reports once, so with a fixed id the only turn ever reported would be the
+/// one straddling the moment the child's subscription took effect — which is
+/// exactly the cycle that may be missing its leading frames. With fresh ids,
+/// every later cycle is a whole turn.
+fn pump_turns<F>(bus: &TestBus, every_ms: u64, before: F) -> tokio::task::JoinHandle<()>
+where
+    F: Fn(&str) -> Vec<(&'static str, &'static str, rmpv::Value)> + Send + 'static,
+{
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut ears = BusClient::connect(&addr, "jv-ears").await.expect("ears connect");
+        let mut brain = BusClient::connect(&addr, "jv-brain").await.expect("brain connect");
+        let mut n = 0u32;
+        loop {
+            n += 1;
+            let utt = format!("utt-ralph-{n}");
+            for (src, topic, b) in before(&utt) {
+                let c = if src == "jv-ears" { &mut ears } else { &mut brain };
+                if c.publish(topic, 1.0, 1, b).await.is_err() {
+                    return;
+                }
+                // Long enough that a hold measured in tens of ms fits inside
+                // the segment, so `spoke` is a real subtraction.
+                tokio::time::sleep(Duration::from_millis(every_ms)).await;
+            }
+            let say = body(&[("text", "hi".into()), ("in_reply_to_utterance", utt.as_str().into())]);
+            for _ in 0..3 {
+                if brain.publish("speech.say", 1.0, 1, say.clone()).await.is_err() {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(every_ms)).await;
+        }
+    })
+}
+
+/// The whole turn as jv-ears publishes it: its budgets, then both boundaries.
+fn whole_turn(utt: &str) -> Vec<(&'static str, &'static str, rmpv::Value)> {
+    vec![
+        ("jv-ears", "sys.health", ears_heartbeat(0.02)),
+        ("jv-ears", "audio.vad", vad("speech_start", utt)),
+        ("jv-ears", "audio.vad", vad("speech_end", utt)),
+    ]
+}
+
+/// Every `>>> turn` line the child printed.
+fn turn_lines(out: &Out) -> Vec<&str> {
+    out.stdout.lines().filter(|l| l.starts_with(">>> turn ")).collect()
+}
+
+#[tokio::test]
+async fn a_streamed_reply_reports_its_turn_exactly_once() {
+    let bus = start(Config::default()).await;
+    let p = pump_turns(&bus, 30, whole_turn);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--for", "1.2"]), 8.0).await;
     p.abort();
 
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
-    let reports: Vec<&str> = out.stdout.lines().filter(|l| l.starts_with(">>> end-to-end")).collect();
-    assert_eq!(
-        reports.len(),
-        1,
-        "a streamed reply is many speech.say frames for ONE utterance; only the \
-         first is time-to-first-word. got {reports:?}"
-    );
-    assert!(reports[0].contains(utt), "{:?}", reports[0]);
-    assert!(reports[0].contains("(VAD start -> first speech.say)"), "{:?}", reports[0]);
-    // Cross-process CLOCK_MONOTONIC: the pump's ts and jv's now are comparable,
-    // so the number must be a small positive latency, not a negative or a
-    // wall-clock-sized nonsense.
-    let ms: f64 = reports[0]
-        .split("ms ")
-        .next()
-        .and_then(|s| s.rsplit(": ").next())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| panic!("no latency in {:?}", reports[0]));
-    assert!((0.0..10_000.0).contains(&ms), "implausible end-to-end {ms}ms in {:?}", reports[0]);
+    let lines = turn_lines(&out);
+    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
+    // Three speech.say frames per utterance, one report each: only the first
+    // sentence is time-to-first-word.
+    let mut ids: Vec<&str> = lines.iter().filter_map(|l| l.split_whitespace().nth(2)).collect();
+    let before = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), before, "a turn was reported more than once: {lines:?}");
+}
+
+#[tokio::test]
+async fn a_turn_is_reported_split_at_the_boundaries_jv_ears_published() {
+    let bus = start(Config::default()).await;
+    // 20 ms of endpoint hold inside a ~40 ms segment: small enough for a test
+    // to wait out, and it is jv-ears' own gauge that carries it.
+    let p = pump_turns(&bus, 30, whole_turn);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.2"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    // At least one turn measured every span: the hold was read off jv-ears'
+    // heartbeat, not assumed.
+    let full: Vec<&str> = turn_lines(&out).into_iter().filter(|l| !l.contains('?')).collect();
+    assert!(!full.is_empty(), "no fully-measured turn:\n{}", out.stdout);
+    assert!(full[0].contains("hold=20ms"), "the hold must be the one ears published: {:?}", full[0]);
+
+    let s = &out.stdout;
+    assert!(s.contains("--- turn latency:"), "{s}");
+    for span in ["spoke", "hold", "respond", "total"] {
+        assert!(s.contains(&format!("\n{span:<10} ")), "no {span} row:\n{s}");
+    }
+    assert!(s.contains("hold+respond"), "the machine's share must be named:\n{s}");
+    // Cross-process CLOCK_MONOTONIC: every number is a small positive latency,
+    // not a negative or a wall-clock-sized nonsense.
+    for ms in numbers_in(full[0]) {
+        assert!((0.0..10_000.0).contains(&ms), "implausible {ms}ms in {:?}", full[0]);
+    }
+}
+
+#[tokio::test]
+async fn without_jv_ears_own_budget_the_spoken_share_is_a_question_mark() {
+    let bus = start(Config::default()).await;
+    let p = pump_turns(&bus, 30, |utt| {
+        vec![
+            ("jv-ears", "audio.vad", vad("speech_start", utt)),
+            ("jv-ears", "audio.vad", vad("speech_end", utt)),
+        ]
+    });
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.2"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = turn_lines(&out);
+    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
+    assert!(lines[0].contains("spoke=? hold=?"), "{:?}", lines[0]);
+    assert!(lines[0].contains("respond="), "what WAS measured is still printed: {:?}", lines[0]);
+
+    let s = &out.stdout;
+    // The two spans that need the gauge are absent from the table, and the
+    // table says which gauge and why — never a zero, never ears' default.
+    assert!(!s.contains("\nspoke     "), "a span nothing measured is not a row:\n{s}");
+    assert!(s.contains("vad_min_silence_s"), "{s}");
+    assert!(s.contains("\nrespond   "), "{s}");
+}
+
+#[tokio::test]
+async fn a_transcript_is_not_a_boundary_and_cannot_stand_in_for_one() {
+    let bus = start(Config::default()).await;
+    // A partial transcript carries the same utterance_id and is emitted
+    // PART-WAY through the utterance. It used to be allowed to define the
+    // start, which silently measured every such turn short. With no
+    // `audio.vad` on the bus there is nothing to bound this utterance, so
+    // there is nothing to report about it.
+    let p = pump_turns(&bus, 30, |utt| {
+        vec![(
+            "jv-ears",
+            "audio.transcript",
+            body(&[
+                ("kind", "partial".into()),
+                ("utterance_id", utt.into()),
+                ("text", "what time".into()),
+                ("lang", "en".into()),
+            ]),
+        )]
+    });
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.2"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(turn_lines(&out).is_empty(), "{:?}", turn_lines(&out));
+    assert!(!out.stdout.contains("--- turn latency:"), "{}", out.stdout);
+    // The transcripts themselves are still taken as frames, so this is an
+    // absence of a MEASUREMENT and not an absence of traffic.
+    assert!(out.stdout.contains("audio.transcript"), "{}", out.stdout);
+}
+
+#[tokio::test]
+async fn a_tap_that_joined_mid_utterance_reports_the_span_it_heard_and_no_other() {
+    let bus = start(Config::default()).await;
+    // speech_end but no speech_start: `jv tap` was started while the user
+    // was already talking. `respond` is knowable; `total` is not, and a
+    // speech_end standing in for the start would be a turn measured from
+    // the wrong end.
+    let p = pump_turns(&bus, 30, |utt| {
+        vec![
+            ("jv-ears", "sys.health", ears_heartbeat(0.02)),
+            ("jv-ears", "audio.vad", vad("speech_end", utt)),
+        ]
+    });
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.2"]), 8.0).await;
+    p.abort();
+
+    let lines = turn_lines(&out);
+    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
+    assert!(lines[0].contains("total=?"), "{:?}", lines[0]);
+    assert!(lines[0].contains("spoke=?"), "{:?}", lines[0]);
+    assert!(!lines[0].contains("respond=?"), "{:?}", lines[0]);
+    assert!(out.stdout.contains("\nrespond   "), "{}", out.stdout);
+    assert!(!out.stdout.contains("\ntotal     "), "{}", out.stdout);
+}
+
+/// Every `<digits>ms` in a line, as f64.
+fn numbers_in(line: &str) -> Vec<f64> {
+    line.split('=')
+        .skip(1)
+        .filter_map(|s| s.split("ms").next().and_then(|n| n.trim().parse().ok()))
+        .collect()
 }
 
 /// Ctrl-C is how an interactive `jv tap --latency` asks for its summary, so it
