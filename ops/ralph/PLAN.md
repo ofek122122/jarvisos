@@ -115,8 +115,22 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       this autonomously.** When the schemas land it is one binding each in
       `Motion.qml` plus the jv-context publisher work. Discovered in A7.
 
-- [ ] A6. `sys.health` glance: a quiet, edge-docked readout of service health +
-      llm rung, 0 fps when nothing changes.
+- [x] A6. `sys.health` glance: a quiet, edge-docked readout of service health +
+      llm rung, 0 fps when nothing changes. — 7406009
+      (`core/HealthState.qml` decides — 35 new QML tests, 22 mutations run
+      through them — and `HealthPlate.qml` draws the SHORT list: what is not
+      well, worst first, and NOTHING when every service heard from says `ok`.
+      The roster is who has SPOKEN: nothing on the bus announces which
+      services are supposed to be running, so a service that never started is
+      absent rather than dead. A heartbeat expires after the two periods the
+      schema grants it, on ONE timer armed for the soonest deadline in the
+      roster — a HUD with nothing on the bus runs no timer at all. Anything
+      unreadable (wrong `v`, hedged `conf`, a body naming another service, no
+      `period_s`, a state word outside the enum) is `unknown` and reported,
+      and `unknown`/`lost` rank ABOVE `degraded`. The llm rung shows only
+      when the brain is on the CPU floor, and never off a stale heartbeat.
+      Also landed: `BusModel.publishersOf(topic)`, forwarded by `Bus`.
+      Tests: `bash ops/ralph/qmltest.sh`, `bash ops/ralph/runtests.sh tools`.)
 - [ ] A10. `shell.qml` is still untestable by construction: the surface
       properties that make the HUD safe (keyboardFocus None, exclusionMode
       Ignore, the empty input mask) are asserted by nobody — qmllint only
@@ -184,6 +198,15 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `metrics` on sys.health; reporting its own budgets there would let
       the HUD read them instead of guessing, with no schema change. Small,
       and it deletes two footguns. Discovered in A4.
+- [ ] A15. `shell.qml`'s `visible` is a hand-maintained OR of every plate's
+      `shown`/`lit`, and it grew a term per element (three plates, six
+      terms). The next element that forgets to add itself will simply never
+      appear, on a surface that is unmapped by design — nothing fails, and
+      nothing notices. Wants the Column to answer for itself (`children`
+      opacity, or a `visibleChildren.length` test), or a tools test that
+      fails when a plate in the stack is missing from the expression. Same
+      family as A10: the properties that make the HUD safe and the ones that
+      make it appear are both asserted by nobody. Discovered in A6.
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
       right (you see it wherever you look) or noise. Needs a human eye on
@@ -205,3 +228,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   and the counters that make it honest (6796579, 2026-09-24)
 - B4 — `jv act-log`/`jv confirm` tested; a torn audit log now reads as torn
   (3a3e8ec, 2026-09-24)
+- A6 — the sys.health glance: HealthState/HealthPlate, a corner that stays
+  empty until something is actually wrong (7406009, 2026-09-24)

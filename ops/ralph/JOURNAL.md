@@ -703,3 +703,103 @@ everything here (and every commit) since the last time you asked. Format per ent
   `--since` and an outcome filter over the entries it already parses are pure
   additions to `act_log_render`. And the standing one: nobody has ever LOOKED
   at this HUD on ares (A13), which no amount of green tests fixes.
+
+## 2026-09-24 — iteration 10 — A6: the sys.health glance
+
+- built **A6**, the HUD's third real element: `core/HealthState.qml` (logic,
+  tested) + `HealthPlate.qml` (pixels), wired into the corner stack under
+  StatePlate and MicPlate. Every service already heartbeats on `sys.health`
+  with a state word, an uptime and the period it promises to speak again on,
+  and jv-brain adds `llm_rung`/`llm_gpu` to the free-form `metrics` — nothing
+  turned any of it into something a human could see. A degraded brain, or a
+  service that fell over three minutes ago, looked exactly like a working
+  machine.
+- what it shows is the SHORT list: what is not well, worst first, and
+  NOTHING when every service heard from says `ok`. §06's earned emptiness
+  taken literally — a readout that is on screen all day is a readout nobody
+  reads, and this one only has to be right the day it appears. Which makes
+  the silence ambiguous (nothing wrong / cannot see the bus) and that is
+  deliberate: both are the same amount of information, and the alternative
+  is a plate reading "all services ok" from a bus that died, which is the
+  exact failure invariant 10 exists to prevent.
+- the three rules it is built on, each of which is where the tests are:
+  · **the roster is who has SPOKEN.** Nothing anywhere on the bus announces
+    which services are SUPPOSED to be running. Hardcoding that list in the
+    HUD would be it reporting on a machine it has not heard — and would rot
+    the first time a service is added. So a service that never started is
+    absent, and absence claims nothing in either direction.
+  · **a heartbeat expires.** schemas/sys.health.json: two missed periods =
+    presumed dead, so a frame speaks for two of its own periods and no
+    longer. Nothing publishes "jv-brain died", so a timer is the only way
+    the HUD ever learns it. ONE timer for the whole roster, armed for the
+    soonest deadline among the services still believed — not one per
+    service: the roster is discovered at runtime, and a HUD with nothing on
+    the bus must run no timer at all (§06: 0 fps when nothing happens). On
+    a healthy machine each heartbeat pushes the deadline out, so it is
+    restarted forever and never actually fires.
+  · **unreadable is not fine.** Wrong schema `v`, a hedged `conf`, a body
+    naming a different service than the envelope said published it, no
+    usable `period_s`, a state word outside the frozen enum: all `unknown`,
+    all reported, none rendered raw. `unknown` and `lost` rank ABOVE
+    `degraded` on purpose — a service that told us it is impaired is in
+    better shape than one we cannot hear at all.
+- the llm rung rides the same expiry and appears only when the brain is on
+  the CPU floor. No service calls that a fault, so it is not coloured as
+  one, but it is the only thing on this machine that explains a Jarvis that
+  takes thirty seconds to answer (invariant 6). A rung read off a stale
+  heartbeat describes a process that may not be running, so that is not
+  shown either.
+- one real design bug, found by the tests and worth recording: the expiry
+  timer first RECOMPUTED every age when it fired. Correct-looking, and in
+  the tests (whose monotonic clock is frozen by hand) it meant a claim
+  un-expired itself and re-armed at the 1 ms floor — a spin, not a HUD. The
+  fix splits the two reasons to re-arm: a frame arriving reassesses
+  everything from the frames, and the timer firing expires exactly what it
+  was counting down for, because the wall clock waiting those milliseconds
+  IS the evidence. A frozen clock can no longer produce a busy loop.
+- also landed: `BusModel.publishersOf(topic)` — the roster the model could
+  always answer and had no way to be asked — forwarded by `Bus.qml`, which
+  the existing tools test enforces.
+- proving the tests bite: 22 mutations, 21 caught. Rejecting the version /
+  conf / service-name / period gates, rendering an undefined state word
+  raw, never losing anyone, only the timer being allowed to expire a
+  heartbeat, the timer expiring nobody, a new frame failing to revive,
+  arming for the LAST deadline instead of the first, a stale rung still
+  counting, whoever-spoke-first owning the rung, an unknown backend reading
+  as `gpu`, a dead link still reporting, the roster in arrival order, and
+  both halves of `publishersOf`.
+  The ONE survivor: deleting the name tiebreak from the `findings` sort.
+  It is equivalent under the current code — the roster is already
+  name-sorted when `findings` filters it, so a stable sort gives the same
+  answer. It is kept anyway, because "the engine's sort happens to be
+  stable" is not a guarantee a rendered order should rest on.
+  Two other mutations survived at first for a related reason and were then
+  caught by a change to the TESTS: driving HealthState through a real
+  BusModel can never prove HealthState sorts its own roster or refuses a
+  dead link, because BusModel already sorts its publishers and empties
+  itself on a drop. A stub bus with the same API and none of the good
+  manners now proves both — the guarantee was doubly held and singly
+  tested, which is how a refactor deletes one silently.
+- tests: `bash ops/ralph/qmltest.sh` — 158 green, was 123 (35 new: 32 for
+  HealthState, 6 for publishersOf, minus overlap). `bash
+  ops/ralph/runtests.sh tools` — 23 green. Both also green INSIDE the nix
+  sandbox via jv-hud's checkPhase (qmllint then qmltestrunner).
+- build: `nix build .#jv-hud` ok; `nixos-rebuild build --flake .#ares` ok.
+  Never test/switch. No schema change, no jv-act, no boot path, no pins.
+- files: shell/jv-hud/core/HealthState.qml (new),
+  shell/jv-hud/HealthPlate.qml (new), shell/jv-hud/tests/tst_healthstate.qml
+  (new), shell/jv-hud/core/BusModel.qml, shell/jv-hud/Bus.qml,
+  shell/jv-hud/shell.qml, shell/jv-hud/tests/tst_busmodel.qml,
+  tools/gen_theme_qml.py, the two generated qmldirs
+- commit: 7406009
+- next: **A12** is now the cheapest thing left on Track A — one line in the
+  bridge's `DEFAULT_TOPICS` plus one branch in `core/SpeechState.qml`, and
+  it closes the gap where Jarvis is thinking and the HUD says `idle`.
+  **A14** (jv-ears publishing its own budgets on sys.health) is more
+  valuable and now cheaper than it was, since HealthState already reads
+  free-form `metrics` off a heartbeat the same way. New follow-up **A15**:
+  three plates now decide independently when to fade, and shell.qml's
+  `visible` is a growing hand-maintained OR of every one of them — the next
+  element that forgets to add itself will be invisible and nothing will
+  notice. And the standing one, unchanged and unfixable by tests: nobody
+  has ever LOOKED at this HUD on ares (A13).
