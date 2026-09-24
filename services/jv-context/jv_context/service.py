@@ -66,31 +66,95 @@ class ContextService:
         self.audio = audio
         self.cfg = cfg or ContextConfig()
         self._started = time.monotonic()
+        # None while the snapshot is being taken; the reason it is not,
+        # otherwise. Read by the heartbeat, written by the system pump.
+        self._system_fault: Optional[str] = None
+        # Set when that answer CHANGES, so the heartbeat does not have to
+        # wait out its period to say so.
+        self._health_now = asyncio.Event()
 
     async def _pump_windows(self) -> None:
         async for ev in self.backend.events():
             await self.bus.publish("context.window", window_body(self.cfg, ev))
 
     async def _pump_system(self) -> None:
+        """One snapshot per period, forever.
+
+        A tick that cannot be taken publishes NOTHING. Every field a
+        probe feeds is required by schemas/context.system.json, so there
+        is no legal partial frame, and the two ways of filling the gap
+        are both worse than the gap: a substituted number is a reading
+        nobody took, and restating the last good snapshot dates it NOW.
+        The bus's last word simply ages out, which consumers already
+        handle — the HUD stops believing a snapshot after three periods.
+
+        The failure is not swallowed, it MOVES: to the heartbeat, as
+        `degraded` with a note. Before this, one exception out of a probe
+        killed this task for the life of the process — jv-context stayed
+        alive pumping window events, so `Restart=on-failure` never fired,
+        and `_pump_health` went on saying `ok` about a service that had
+        stopped publishing half of what it exists for.
+
+        The catch is broad on purpose: the point is that no probe, present
+        or future, can end this loop. It is not silent, which is the thing
+        a broad catch is usually guilty of — every failure ends up on the
+        bus, named by its exception type.
+        """
         while True:
-            body = await asyncio.get_running_loop().run_in_executor(
-                None, snapshot, self.audio
-            )
-            await self.bus.publish("context.system", body)
+            try:
+                body = await asyncio.get_running_loop().run_in_executor(
+                    None, snapshot, self.audio
+                )
+            except Exception as exc:  # noqa: BLE001 - report, stay alive
+                self._set_fault(f"{type(exc).__name__}: {exc}")
+            else:
+                self._set_fault(None)
+                await self.bus.publish("context.system", body)
             await asyncio.sleep(self.cfg.system_period_s)
+
+    def _set_fault(self, fault: Optional[str]) -> None:
+        """Record what the snapshot is doing, and wake the heartbeat if
+        that CHANGED. schemas/sys.health.json asks for a beat every
+        period "and immediately on state change"; on a 5 s beat, a
+        jv-context that had just gone blind was up to 5 s of silence
+        about itself. Only the transition wakes it — a probe failing the
+        same way twice running is not news, and a beat per failed tick
+        would put jv-context's 1 Hz onto a topic that is meant to be
+        quiet (invariant 5).
+        """
+        if (fault is None) != (self._system_fault is None):
+            self._health_now.set()
+        self._system_fault = fault
+
+    def _health_body(self) -> dict:
+        fault = self._system_fault
+        body: dict = {
+            "service": "jv-context",
+            "state": "ok" if fault is None else "degraded",
+            "uptime_s": time.monotonic() - self._started,
+            "period_s": self.cfg.health_period_s,
+        }
+        if fault is not None:
+            # `degraded` = alive but impaired, which is exactly this: the
+            # window half of jv-context is still running.
+            body["notes"] = f"no context.system snapshot: {fault}"
+        return body
 
     async def _pump_health(self) -> None:
         while True:
-            await self.bus.publish(
-                "sys.health",
-                {
-                    "service": "jv-context",
-                    "state": "ok",
-                    "uptime_s": time.monotonic() - self._started,
-                    "period_s": self.cfg.health_period_s,
-                },
-            )
-            await asyncio.sleep(self.cfg.health_period_s)
+            # Cleared before the body is read and with no await between
+            # the two, so a fault raised during the publish below sets the
+            # event again and is beaten out on the next pass rather than
+            # waiting a period.
+            self._health_now.clear()
+            body = self._health_body()
+            await self.bus.publish("sys.health", body)
+            try:
+                await asyncio.wait_for(
+                    self._health_now.wait(), self.cfg.health_period_s
+                )
+            except asyncio.TimeoutError:
+                pass
 
     async def run(self) -> None:
         health = asyncio.create_task(self._pump_health())

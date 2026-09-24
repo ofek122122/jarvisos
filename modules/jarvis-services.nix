@@ -193,6 +193,13 @@ in
       description = "Jarvis context (window events + system snapshot)";
       wantedBy = [ "default.target" ];
       unitConfig.ConditionUser = "ofek";
+      # wpctl is how the 1 Hz snapshot reads the default sink, and it ships
+      # in wireplumber rather than in this service's own closure. Inherited
+      # PATH happened to carry it; a unit that shells out names the package
+      # it shells out to, the way jv-act does below. Without it the snapshot
+      # now reports itself degraded rather than inventing a volume — which
+      # is the right failure and still a failure.
+      path = [ pkgs.wireplumber ];
       environment = commonEnv;
       serviceConfig = {
         ExecStart = "${pyEnvs.contextEnv}/bin/jv-context";
