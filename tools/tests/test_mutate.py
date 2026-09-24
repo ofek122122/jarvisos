@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -235,6 +236,21 @@ def test_python_env_names_a_fresh_cache_dir_and_forbids_writing_beside_the_sourc
 # ----------------------------------------------------------------- the run
 
 
+@pytest.fixture(autouse=True)
+def _harness_logs_under_tmp(tmp_path_factory, monkeypatch):
+    """`run()` KEEPS its run tree whenever a mutation survived or it aborted
+    (B56), and these tests do both dozens of times. Left alone that is a
+    directory per test in the real /tmp, forever — 189 of them after twelve
+    suite runs, which is how this was found.
+
+    The harness is right to keep them: the caller is told where the tree is
+    and owns it from there. So the fix belongs here, in the caller. Redirect
+    `mkdtemp`'s default parent at pytest's own temporary directory and the
+    trees are still real, still inspectable while a test runs, and swept with
+    everything else pytest makes."""
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path_factory.mktemp("harness-logs")))
+
+
 class FakeSuite:
     """A test suite that fails when the file says MUTANT — i.e. one that
     catches everything. Records the env of every run it is handed."""
@@ -253,7 +269,13 @@ class FakeSuite:
         # away when the run ends, so "it was a fresh empty directory" is only
         # answerable while the suite is being handed it.
         self.scratches.append(scratch)
-        self.scratch_fresh.append(scratch.is_dir() and not list(scratch.iterdir()))
+        # "Empty" means empty of any SUITE's leavings. The harness plants one
+        # file of its own before it calls, naming the run (B56), and that is
+        # what the run dir is allowed to hold and nothing else.
+        self.scratch_fresh.append(
+            scratch.is_dir()
+            and sorted(p.name for p in scratch.iterdir()) == [mutate.WHAT]
+        )
         text = self.path.read_text(encoding="utf-8")
         self.seen.append(text)
         if mutate.CANARY_MARK in text:
@@ -865,7 +887,11 @@ def test_a_hint_that_cannot_run_git_says_nothing_at_all(tmp_path):
         )
     said = str(exc.value)
     assert "B53" not in said and "matches HEAD" not in said
-    assert said.endswith("fix the suite first.")
+    # Split off the sentence every abort now ends with (B56, the kept run) so
+    # this still holds the strong claim: the hint added NOTHING, not merely
+    # nothing recognisable.
+    bare, _, kept = said.partition(" That run was kept in ")
+    assert bare.endswith("fix the suite first.") and kept
 
 
 def test_nothing_modified_and_could_not_look_are_different_answers(tmp_path, tmp_path_factory):
@@ -927,3 +953,187 @@ def test_the_runner_flag_picks_the_language_the_run_is_given(spec_file, monkeypa
 def test_a_target_the_qml_runner_does_not_grade_exits_two(spec_file, monkeypatch):
     monkeypatch.setattr(mutate, "run", lambda *a, **k: pytest.fail("ran on a bad target"))
     assert mutate.main(["--runner", "qml", "jv-ears", spec_file]) == 2
+
+
+# ============================================================ B56: the logs
+#
+# Every suite run's output was captured and dropped: `script_runner` printed
+# the LAST LINE of stdout and kept nothing. For `--runner tests` that line is
+# a pytest summary and is roughly the right line; for `--runner shots` it is
+# whatever the comparator's closing paragraph happened to end with, and while
+# closing B53 the printed line was the sentence for the case that was NOT what
+# happened. B53 fixed the one abort where the loop was actively misled. What
+# is left is the general shape: a survivor, a canary that lived, or a red
+# baseline could not be investigated without re-running a 53 s suite by hand.
+#
+# Each run already gets a private scratch directory. These tests hold the
+# three things that turn it into evidence: the whole output lands in it, the
+# tree is KEPT when something needs looking at (and swept when nothing does),
+# and every run says which of the four things it was.
+
+
+def _script_repo(tmp_path, body: str) -> Path:
+    (tmp_path / "ops" / "ralph").mkdir(parents=True)
+    (tmp_path / "ops" / "ralph" / "runtests.sh").write_text(body, encoding="utf-8")
+    return tmp_path
+
+
+def test_a_runs_whole_output_is_kept_where_the_one_printed_line_came_from(tmp_path, capsys):
+    """The printed line is a progress indicator. The LOG is the evidence, and
+    B53's lesson is why they must not be the same thing: choosing one line out
+    of a suite's output is a guess, and that guess was wrong the one time it
+    mattered."""
+    root = _script_repo(
+        tmp_path,
+        "#!/usr/bin/env bash\nfor i in $(seq 1 30); do echo \"line $i\"; done\n"
+        "echo 'and a word to stderr' >&2\nexit 1\n",
+    )
+    scratch = tmp_path / "run001"
+    scratch.mkdir()
+    assert mutate.script_runner(root, mutate.PYTHON, "svc")({}, scratch) is False
+
+    log = (scratch / mutate.SUITE_LOG).read_text(encoding="utf-8")
+    assert "line 1\n" in log and "line 30" in log      # all of it, not the tail
+    assert "and a word to stderr" in log               # including the other stream
+    assert "exit 1" in log                             # and how it ended
+
+    printed = capsys.readouterr().out
+    assert "line 30" in printed and "line 1\n" not in printed
+    assert "run001" in printed, "the printed line must name the log it came from"
+
+
+def test_a_survivor_keeps_the_logs_and_says_which_run_graded_it(tree):
+    root, src = tree
+    report = mutate.run(mutate.parse_spec(SPEC), FakeSuite(src, catches=False), root=root)
+    assert report.logs is not None and report.logs.is_dir()
+    (o,) = report.outcomes
+    assert o.status == "survived"
+    assert Path(o.logs).is_dir() and Path(o.logs).parent == report.logs
+    assert o.logs in report.summary()
+
+
+def test_a_clean_sweep_throws_the_logs_away(tree):
+    """The kept tree is a cost — under `--runner shots` it is a dozen runs of
+    thirteen PNGs — and a grading where every mutation was caught has nothing
+    in it anyone will ever open."""
+    root, src = tree
+    suite = FakeSuite(src)
+    report = mutate.run(mutate.parse_spec(SPEC), suite, root=root)
+    assert report.survived == 0 and report.logs is None
+    assert not suite.scratches[0].parent.exists()
+
+
+def test_the_index_names_every_run_in_order_with_what_it_was(tree):
+    root, src = tree
+    report = mutate.run(mutate.parse_spec(SPEC), FakeSuite(src, catches=False), root=root)
+    lines = (report.logs / mutate.INDEX).read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 4
+    assert lines[0].startswith("run001  pass  baseline")
+    assert "canary" in lines[1] and "svc/thing.py" in lines[1] and "  fail  " in lines[1]
+    assert "mutation" in lines[2] and "value mutated" in lines[2] and "  pass  " in lines[2]
+    assert lines[3].startswith("run004  pass  closing baseline")
+
+
+def test_a_run_says_what_it_is_before_it_runs_and_not_after(tree):
+    """A runner that dies takes its INDEX line with it, and the run nobody can
+    name is exactly the one being investigated."""
+    root, src = tree
+    seen: list[Path] = []
+
+    def explode(env, scratch):
+        seen.append(scratch)
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        mutate.run(mutate.parse_spec(SPEC), explode, root=root)
+    (scratch,) = seen
+    assert (scratch / mutate.WHAT).read_text(encoding="utf-8").strip() == "baseline"
+    assert scratch.parent.is_dir(), "a run that crashed is a run worth keeping"
+
+
+def test_the_red_baseline_abort_names_the_run_whose_output_was_kept(tree):
+    root, src = tree
+    seen: list[Path] = []
+
+    def red(env, scratch):
+        seen.append(scratch)
+        return False
+
+    with pytest.raises(mutate.HarnessError) as exc:
+        mutate.run(mutate.parse_spec(SPEC), red, root=root)
+    (scratch,) = seen
+    assert str(scratch) in str(exc.value)
+    assert scratch.is_dir()
+
+
+def test_a_canary_that_lived_names_its_own_run_and_not_the_baselines(tree):
+    root, src = tree
+    seen: list[Path] = []
+
+    def green(env, scratch):
+        seen.append(scratch)
+        return True
+
+    with pytest.raises(mutate.HarnessError) as exc:
+        mutate.run(mutate.parse_spec(SPEC), green, root=root)
+    msg = str(exc.value)
+    assert "canary lived" in msg
+    assert str(seen[1]) in msg and str(seen[0]) not in msg
+
+
+def test_a_tree_still_red_after_the_last_restore_names_that_run_too(tree):
+    root, src = tree
+    seen: list[Path] = []
+    results = iter([True, False, False, False])
+
+    def suite(env, scratch):
+        seen.append(scratch)
+        return next(results)
+
+    with pytest.raises(mutate.HarnessError) as exc:
+        mutate.run(mutate.parse_spec(SPEC), suite, root=root)
+    msg = str(exc.value)
+    assert "RED after the last restore" in msg
+    assert str(seen[3]) in msg
+
+
+def test_the_cli_says_where_the_logs_were_kept(spec_file, monkeypatch, capsys, tmp_path):
+    kept = tmp_path / "jv-mutate-kept"
+    (kept / "run003").mkdir(parents=True)
+    monkeypatch.setattr(
+        mutate,
+        "run",
+        lambda *a, **k: mutate.Report(
+            [mutate.Outcome("x", "svc/thing.py", "survived", str(kept / "run003"))],
+            logs=kept,
+        ),
+    )
+    assert mutate.main(["tools", spec_file]) == 1
+    # `kept: ` and not merely the path: `summary()` prints the SURVIVOR's run
+    # dir, which contains this path as a prefix, so the looser assertion was
+    # satisfied by a different mechanism and graded the CLI's own line immune.
+    # Found by mutating that line to `if False:` and watching it survive.
+    assert f"kept: {kept}" in capsys.readouterr().out
+
+
+def test_a_clean_sweep_says_nothing_about_logs_there_are_none(spec_file, monkeypatch, capsys):
+    monkeypatch.setattr(mutate, "run", lambda *a, **k: _report("caught"))
+    assert mutate.main(["tools", spec_file]) == 0
+    assert "logs" not in capsys.readouterr().out
+
+
+def test_an_abort_before_the_first_suite_run_leaves_no_tree_at_all(tree, tmp_path_factory):
+    """The line the kept tree rests on: nothing is created until a suite has
+    actually run, so a spec the harness rejects on sight costs nothing to
+    clean up. `tempfile.tempdir` is where the fixture above pointed `mkdtemp`,
+    which makes "no tree" something this can count rather than assume."""
+    root, _ = tree
+    parent = Path(tempfile.tempdir)
+    before = list(parent.iterdir())
+    with pytest.raises(mutate.HarnessError, match="no such file"):
+        mutate.run(
+            mutate.parse_spec("@ x\nsvc/absent.py\n- A = 1\n+ A = 2\n"),
+            lambda env, scratch: pytest.fail("ran a suite for a file that is not there"),
+            root=root,
+        )
+    assert list(parent.iterdir()) == before

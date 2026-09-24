@@ -34,6 +34,16 @@
 # cannot make an honest claim (red baseline, a canary that lived, a bad spec,
 # the wrong grader for the file, a tree still red after the last restore).
 #
+# WHERE THE OUTPUT WENT (B56). One line of each suite run is printed, prefixed
+# with the run it came from (run003). The WHOLE of it is in that run's own
+# scratch directory as suite.log, and the run tree is KEPT whenever a mutation
+# survived or the harness aborted — the path is in the abort, or printed under
+# the summary. INDEX at the top names every run (baseline, canary <file>,
+# mutation: <label>, closing baseline) and whether its suite passed. Nothing is
+# kept when every mutation was caught. Delete a kept tree when you are done;
+# it is in /tmp and under --runner shots it holds every PNG each run drew,
+# which is the one way to SEE what a surviving plate mutation looked like.
+#
 # A RED BASELINE UNDER --runner shots IS USUALLY THE SHEET (B53). hudshots.sh
 # compares every PNG it renders against HEAD:docs/hud, so an uncommitted change
 # to a plate makes the baseline red with nothing wrong with the suite. The abort

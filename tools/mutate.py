@@ -117,6 +117,19 @@ artifact back it is a measurement of the tree rather than a slogan — it names
 the plates that differ from HEAD, or says the tree matches HEAD and the red is
 real, or (when git cannot answer) says nothing at all.
 
+B56 is what makes any of the above investigable. Every suite run's output was
+captured and thrown away: one line was printed — "the last line of stdout" —
+and the rest went with the scratch tree, so a survivor, a canary that lived or
+a red baseline could only be looked into by re-running a 53 s suite by hand.
+Each run now writes its whole output to `suite.log` in the private scratch it
+already had, says what it was in `WHAT` BEFORE it starts (so a runner that
+dies still leaves its run named), and appends a line to `INDEX` at the top of
+the tree. The tree is KEPT when there is a survivor or an abort and swept when
+every mutation was caught, and each abort names the one run that went wrong.
+The printed line stays one line and now says which run it came from: it is a
+progress indicator, and B53 is the record of what happens when one chosen line
+is mistaken for the evidence.
+
 `@ label` opens a block, the next bare line is the repo-relative file, and
 the `-`/`+` lines are the hunk (joined in order, indentation kept verbatim).
 `old` must appear EXACTLY once in the file: a hunk that matches twice is an
@@ -144,6 +157,16 @@ from typing import Callable, Iterable, Mapping, Sequence
 
 CANARY_MARK = "jv-mutate canary: this file must be executed by the suite"
 
+# What a suite run leaves behind in its own scratch directory (B56). `WHAT` is
+# written BEFORE the suite starts and `INDEX` (at the top of the run tree) is
+# appended to after it finishes, so a runner that dies still leaves the run it
+# died in named — and the run nobody can name is exactly the one being
+# investigated. `SUITE_LOG` is `script_runner`'s, because only a runner knows
+# whether it has output to keep.
+SUITE_LOG = "suite.log"
+WHAT = "WHAT"
+INDEX = "INDEX"
+
 
 class SpecError(Exception):
     """The spec could not be read as mutations."""
@@ -166,11 +189,15 @@ class Outcome:
     label: str
     path: str
     status: str  # "caught" | "survived"
+    logs: str = ""  # the scratch dir of the suite run that graded it (B56)
 
 
 @dataclasses.dataclass(frozen=True)
 class Report:
     outcomes: Sequence[Outcome]
+    # The run tree, when it was KEPT — which is only when a survivor makes it
+    # worth opening. `None` means the grading was clean and the tree is gone.
+    logs: Path | None = None
 
     @property
     def caught(self) -> int:
@@ -185,6 +212,8 @@ class Report:
         for o in self.outcomes:
             if o.status == "survived":
                 lines.append(f"  survived: {o.label}  ({o.path})")
+                if o.logs:
+                    lines.append(f"            {o.logs}")
         return "\n".join(lines)
 
 
@@ -604,6 +633,13 @@ def run(
 
     Order: baseline (must be green) -> one canary per file (each must be red)
     -> the mutations -> baseline again (must be green).
+
+    The run tree is KEPT whenever this returns a survivor or raises, and swept
+    when every mutation was caught (B56). A clean grading has nothing in it
+    anyone will ever open, and under `--runner shots` it is a dozen runs of
+    thirteen PNGs; a survivor or an abort is precisely the case where the
+    alternative was re-running a 53 s suite by hand to see what happened.
+    Every abort below names the one run that went wrong rather than the tree.
     """
     mutations = list(mutations)
     if not mutations:
@@ -626,32 +662,41 @@ def run(
         path.write_text(text, encoding="utf-8")
         stamps.stamp(path)
 
-    def suite() -> bool:
+    def suite(what: str) -> tuple[bool, Path]:
+        """Run the suite once and return (passed, that run's scratch dir)."""
         state["n"] += 1
         cache = base / f"run{state['n']:03d}"
         cache.mkdir()
-        return bool(runner(lang.env(cache), cache))
+        (cache / WHAT).write_text(f"{what}\n", encoding="utf-8")
+        passed = bool(runner(lang.env(cache), cache))
+        with (base / INDEX).open("a", encoding="utf-8") as fh:
+            fh.write(f"{cache.name}  {'pass' if passed else 'fail'}  {what}\n")
+        return passed, cache
 
-    def swapped(rel: str, text: str) -> bool:
+    def swapped(rel: str, text: str, what: str) -> tuple[bool, Path]:
         """Run the suite with `rel` holding `text`, then put it back."""
         path = targets[rel]
         try:
             write(path, text)
-            return suite()
+            return suite(what)
         finally:
             write(path, originals[rel])
 
+    keep = True
     try:
-        if not suite():
+        ok, cache = suite("baseline")
+        if not ok:
             hint = lang.baseline_hint(root) if lang.baseline_hint else ""
             raise HarnessError(
                 "the baseline suite is RED before any mutation. Every mutation "
                 "would be reported as caught for free; fix the suite first."
                 + (f" {hint}" if hint else "")
+                + f" That run was kept in {cache}."
             )
 
         for rel in targets:
-            if swapped(rel, with_canary(originals[rel], lang)):
+            lived, cache = swapped(rel, with_canary(originals[rel], lang), f"canary {rel}")
+            if lived:
                 raise HarnessError(
                     f"the canary lived: the suite stayed GREEN with {rel} made "
                     f"impossible to load, so the suite does not execute that "
@@ -659,28 +704,33 @@ def run(
                     f"mean anything — check the runner, the target, and that "
                     f"the tests read the worktree and not an installed copy."
                     + (f" {lang.canary_hint}" if lang.canary_hint else "")
+                    + f" That run was kept in {cache}."
                 )
 
         outcomes: list[Outcome] = []
         for mut in mutations:
             mutant = apply_once(originals[mut.path], mut.old, mut.new)
-            passed = swapped(mut.path, mutant)
+            passed, cache = swapped(mut.path, mutant, f"mutation: {mut.label}")
             outcomes.append(
-                Outcome(mut.label, mut.path, "survived" if passed else "caught")
+                Outcome(mut.label, mut.path, "survived" if passed else "caught", str(cache))
             )
 
         for rel, path in targets.items():
             if path.read_text(encoding="utf-8") != originals[rel]:
                 raise HarnessError(f"{rel} was not restored; put it back by hand before committing")
-        if not suite():
+        ok, cache = suite("closing baseline")
+        if not ok:
             raise HarnessError(
                 "the suite is RED after the last restore, with every file back "
                 "as it was. Something outside these mutations is broken — do "
-                "not commit until it is green."
+                f"not commit until it is green. That run was kept in {cache}."
             )
-        return Report(outcomes)
+        report = Report(outcomes, logs=base if any(o.status == "survived" for o in outcomes) else None)
+        keep = report.logs is not None
+        return report
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        if not keep:
+            shutil.rmtree(base, ignore_errors=True)
 
 
 # --------------------------------------------------------------------- cli
@@ -694,19 +744,36 @@ def suite_runs(mutations: Sequence[Mutation]) -> int:
 
 
 def script_runner(root: Path, lang: Language, target: str, *, quiet: bool = False) -> Runner:
-    """The real runner: one of the loop's own `ops/ralph/*.sh` suites."""
+    """The real runner: one of the loop's own `ops/ralph/*.sh` suites.
+
+    The whole of each run's output goes to `scratch/suite.log`; ONE line of it
+    is printed, and that line names the run it came from (B56). The two are
+    deliberately not the same thing. Choosing one line out of a suite's output
+    is a guess about which line matters, and B53 is the record of that guess
+    being wrong at the worst moment: the line printed for a red `--runner
+    shots` baseline was the tail of the comparator's closing paragraph, which
+    is the sentence for the case that was NOT what happened. The printed line
+    is a progress indicator. The log is the evidence.
+    """
 
     def go(env: Mapping[str, str], scratch: Path) -> bool:
+        cmd = lang.command(root, target, scratch)
         proc = subprocess.run(
-            lang.command(root, target, scratch),
+            cmd,
             cwd=root,
             env={**os.environ, **env},
             capture_output=True,
             text=True,
         )
+        (scratch / SUITE_LOG).write_text(
+            f"$ {' '.join(cmd)}\n[exit {proc.returncode}]\n"
+            f"\n--- stdout ---\n{proc.stdout}"
+            f"\n--- stderr ---\n{proc.stderr}",
+            encoding="utf-8",
+        )
         if not quiet:
             tail = (proc.stdout or proc.stderr).strip().splitlines()[-1:] or [""]
-            print(f"    {tail[0][:100]}", flush=True)
+            print(f"    {scratch.name}  {tail[0][:100]}", flush=True)
         return proc.returncode == 0
 
     return go
@@ -765,6 +832,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"\nHARNESS: {exc}", file=sys.stderr)
         return 2
     print("\n" + report.summary())
+    if report.logs is not None:
+        print(
+            f"\nkept: {report.logs} — {INDEX} names every run, each run dir "
+            f"holds its {WHAT} and the suite's whole {SUITE_LOG}. Delete it "
+            f"when you are done with it.",
+            flush=True,
+        )
     return 0 if report.survived == 0 else 1
 
 
