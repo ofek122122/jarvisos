@@ -1460,7 +1460,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       copied verbatim and a fix to the generated file is erased by the next
       regeneration. pylib 63, was 19; 12 mutations, 12 caught.)
 
-- [ ] B61. **The last of pylib: the two `client.py` claims B60 named and
+- [x] B61. **The last of pylib: the two `client.py` claims B60 named and
       left.** (a) `next_event` returns None for a short read on the HEAD and
       for a short read on the BODY, and nothing distinguishes either from a
       frame that never came — so a truncated frame and a closed bus give
@@ -1475,7 +1475,36 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       deliberate and visible in a diff — then the rule itself is a decision
       someone can make on purpose rather than a thing that quietly differs
       from what every reader assumes. With this, all three pylib modules
-      will have been graded. Discovered in B59, deferred by B60.
+      will have been graded. Discovered in B59, deferred by B60. — de510db
+      (Five tests, each saying PIN NOT ENDORSEMENT in its own docstring:
+      a clean EOF as the control, a short head, a short body, the same
+      truncation reaching consumers through `next_frame`, and a six-row
+      address table with both openers replaced so the test is about the
+      DECISION and nothing dials. The relative-path case turned out to be
+      sharper than B59 described it: `run/jarvis:bus.sock` does not dial
+      the wrong host and time out, it raises ValueError out of `int(port)`
+      while the caller holds what it believes is a filename. pylib 68, was
+      63; 5 mutations, 5 caught, including both "fixes" a reader reaches
+      for first — before the tests, 1 of 5. All three pylib modules are
+      now graded.)
+
+- [ ] B62. **The decision B61 deliberately did not make, and it is two
+      decisions.** (a) Should a TRUNCATED frame be distinguishable from a
+      closed bus? Today both are None and eight services read that as "the
+      bus is gone". Three shapes: leave it (a torn frame on a unix socket
+      to a local broker essentially means the broker died anyway, and the
+      reconnect is right by accident); raise a distinct error out of
+      `next_event` for a short read after a valid prefix, which makes every
+      caller's `frame is None` branch incomplete and is therefore an edit
+      in eight files; or return a sentinel the callers may ignore, which is
+      the cheap one and the one that silently keeps today's behaviour for
+      everyone who does not opt in. (b) Should `connect()` decide unix-vs-TCP
+      by ABSOLUTENESS (today), by shape (`"/" not in addr`), or should the
+      caller say — a `unix:` / `tcp:` prefix, which is the only rule with no
+      ambiguous address at all and the only one that touches `JARVIS_BUS` in
+      every unit file. Both halves are cheap to change and neither is cheap
+      to change ACCIDENTALLY, which is what B61's tests are for: whoever
+      answers this moves those tests in the same commit. Raised by B61.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above

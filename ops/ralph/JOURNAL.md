@@ -8433,3 +8433,71 @@ precisely because consumers may not check it.
   question asked three times, and **B10/A28** — one live recording of one
   spoken turn on ares — remains the biggest thing a human can hand this
   loop.
+
+## 2026-09-25 — iteration 83 — B61: the two rules in `client.py` every reader assumes wrong
+
+Track A is still blocked on one human look at `docs/hud/`, and the A items
+that are not blocked all say "not before X" in their own text (A18 waits on
+a topic that does not exist, A33 on the mask being edited, A39 on A22 being
+answered, A31/A35/A36/A56/A59 on a human). So this is B61, which the last
+three iterations each raised and deferred, and which finishes the grading of
+pylib: `client.py` was the last of the three modules.
+
+Two claims, neither of them fixed.
+
+`next_event` returns None for a short read on the HEAD and for a short read
+on the BODY. Every consumer in this repo reads that None as "the bus is
+gone" and leaves its loop — jv-ears' `follow_bus` returns, jv-brain's run
+loop breaks, jv-guard's and jv-compat's the same — so the one condition that
+means "the broker is mid-write and is still there" is spelled exactly like
+the one that must trigger a reconnect. The body half is the worse half: the
+prefix said 64 bytes and 8 arrived, which is the strongest evidence
+available from outside that the other end is ALIVE, and it is reported as
+the other end being gone.
+
+`connect()`'s rule `":" in addr and not addr.startswith("/")` asks whether
+the address is ABSOLUTE, not whether it is a path. Writing the table out
+made the relative case sharper than B59 had described it: `run/jarvis:bus.sock`
+does not dial some wrong host and time out — `rsplit(":", 1)` hands
+`int()` the string `"bus.sock"` and the caller gets a ValueError while
+holding what it believes is a filename. Still cannot bite today (no address
+in this repo is relative; the replay rig is the one thing here that invents
+socket paths), and that is exactly the kind of thing that changes without
+anyone noticing it changed.
+
+So: five tests that PIN today's behaviour, each saying PIN NOT ENDORSEMENT
+in its own docstring. A clean EOF is the control; a short head, a short
+body, and the same truncation arriving at consumers through `next_frame`
+(pinned separately, because a fix could land in either method) are the
+claim. The transport test is a six-row table with BOTH openers replaced, so
+nothing dials and the test is about the decision rather than about anything
+listening.
+
+The grading is the part that says these are worth having. Two of the five
+mutations are not inventions — they are the two edits a reader who noticed
+the rule would actually make: drop the absoluteness test, or replace it with
+`"/" not in addr`. Both are caught now and both passed before.
+
+- tests: pylib **68 (was 63)**. Green. One test file; no source touched.
+- graded with `ops/ralph/mutate.sh`: **5 mutations, 5 caught**. Before the
+  tests: **1 of 5** — and the one that was caught was caught by accident,
+  because swapping `host, port` breaks every test in the file that dials.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/pylib/tests/test_client.py
+- commits: de510db
+- next: **B62** raised, and unlike its three predecessors it is not the
+  loop's to take: it is the DECISION B61 refused to make, in two halves —
+  should a truncated frame be distinguishable from a closed bus (leave it /
+  raise / sentinel, and the middle one is an edit in eight files), and
+  should `connect()` route by absoluteness (today), by shape, or by an
+  explicit `unix:`/`tcp:` prefix the caller writes. Both are cheap to change
+  and neither is cheap to change by accident, which is what the new tests
+  are for: whoever answers moves them in the same commit. With pylib graded
+  end to end, the loop's remaining B work is B12/B20/B25/B28/B33/B36 and the
+  two-minute human reads (B17 with B20). Otherwise unchanged: **Track A is
+  one human look at `docs/hud/` away from unblocking ten items** (A47, A55,
+  A62, A63, A68 and the A21/A22/A25 cluster), **B27** needs one decision
+  between three named options, **B43/B47/B54** are one question asked three
+  times, and **B10/A28** — one live recording of one spoken turn on ares —
+  remains the biggest thing a human can hand this loop.
