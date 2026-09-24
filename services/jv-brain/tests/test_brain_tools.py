@@ -293,3 +293,61 @@ async def test_five_call_cap_per_turn(bus_addr, tmp_path):
     await svc.close()
     await svc_bus.close()
     await watcher.close()
+
+
+async def test_a_tool_turn_states_no_model_share(bus_addr, tmp_path):
+    """The gauge jv-brain publishes to divide the tap's `think` is the
+    LLM's share of it. A turn that ran a tool spends real time in jv-act
+    between its first completion and the words the user hears — here, the
+    whole round trip this test itself plays — and that time is inside
+    `think` and is not the model's. So such a turn states NOTHING rather
+    than a number with a tool call inside it."""
+    script = [
+        {"role": "assistant", "content": None,
+         "tool_calls": [tool_call("app.launch", {"app": "firefox"})]},
+        {"role": "assistant", "content": "Firefox is open."},
+    ]
+    stub, svc, svc_bus, task = await start_brain(bus_addr, script, tmp_path)
+    watcher = await BusClient.connect(bus_addr, src="t-act")
+    await watcher.subscribe(
+        ["intent.action", "speech.say", "sys.health", "brain.response"]
+    )
+    await asyncio.sleep(0.1)
+
+    await watcher.publish(
+        "audio.transcript",
+        {"kind": "final", "utterance_id": "u1", "text": "Hey Jarvis, open Firefox", "lang": "en"},
+        conf=0.9,
+    )
+    intent = await next_topic(watcher, "intent.action")
+    await watcher.publish(
+        "action.result",
+        {"request_id": intent["body"]["request_id"], "ok": True,
+         "duration_ms": 5.0, "output": "launched firefox"},
+    )
+    say = await next_topic(watcher, "speech.say")
+    assert say["body"]["text"] == "Firefox is open."
+
+    # Watch the REST of the turn out: a gauge would be published within
+    # milliseconds of that word, so seeing the turn finish with no gauge
+    # frame in between is the whole assertion.
+    seen: list[dict] = []
+
+    async def drain_until_done():
+        while True:
+            frame = await watcher.next_frame()
+            assert frame is not None
+            if frame["topic"] == "sys.health":
+                seen.append(frame["body"].get("metrics") or {})
+            if frame["topic"] == "brain.response":
+                return frame
+
+    done = await asyncio.wait_for(drain_until_done(), 10.0)
+    assert done["body"]["text"] == "Firefox is open."
+    assert all("llm_first_say_ms" not in m for m in seen), seen
+
+    task.cancel()
+    await svc.close()
+    await svc_bus.close()
+    await watcher.close()
+    stub.server.close()

@@ -382,6 +382,77 @@ fn whole_turn(utt: &str) -> Vec<(&'static str, &'static str, rmpv::Value)> {
     ]
 }
 
+/// jv-brain's heartbeat carrying the gauge that divides `think`: how much of
+/// it was the LLM, and the turn counter that says whether the number is new.
+fn brain_heartbeat(count: u32, model_ms: f64) -> rmpv::Value {
+    body(&[
+        ("service", "jv-brain".into()),
+        ("state", "ok".into()),
+        ("uptime_s", 30.0.into()),
+        ("period_s", 5.0.into()),
+        (
+            "metrics",
+            body(&[
+                ("llm_rung", 1.0.into()),
+                ("llm_first_says", count.into()),
+                ("llm_first_say_ms", model_ms.into()),
+            ]),
+        ),
+    ])
+}
+
+/// The model-share gauge, on a real broker, as jv-brain publishes it: one
+/// FRESH gauge per turn, right after that turn's words, on jv-brain's own
+/// connection — and, before it, a heartbeat whose counter has NOT risen.
+///
+/// That restatement is the thing the counter exists for. jv-brain keeps the
+/// last turn's gauge on every later periodic heartbeat, so a reader that
+/// looked only at the number would divide this turn's `think` with the
+/// previous turn's model span. Here the two are told apart by value —
+/// `STALE_MODEL_MS` could only ever appear in a split line if the counter
+/// check were gone — which is the one way a test outside the process can see
+/// the rule hold.
+const FRESH_MODEL_MS: f64 = 12.0;
+const STALE_MODEL_MS: f64 = 1.0;
+
+fn pump_turns_with_model_gauge(bus: &TestBus, every_ms: u64) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut ears = BusClient::connect(&addr, "jv-ears").await.expect("ears connect");
+        let mut brain = BusClient::connect(&addr, "jv-brain").await.expect("brain connect");
+        let mut n = 0u32;
+        loop {
+            n += 1;
+            let utt = format!("utt-model-{n}");
+            for (_, topic, b) in whole_turn(&utt) {
+                if ears.publish(topic, 1.0, 1, b).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(every_ms)).await;
+            }
+            let say = body(&[("text", "hi".into()), ("in_reply_to_utterance", utt.as_str().into())]);
+            for _ in 0..3 {
+                if brain.publish("speech.say", 1.0, 1, say.clone()).await.is_err() {
+                    return;
+                }
+            }
+            // A periodic heartbeat still carrying the PREVIOUS turn's gauge,
+            // landing after this turn's words. Must divide nothing.
+            if n > 1 {
+                let stale = brain_heartbeat(n - 1, STALE_MODEL_MS);
+                if brain.publish("sys.health", 1.0, 1, stale).await.is_err() {
+                    return;
+                }
+            }
+            let fresh = brain_heartbeat(n, FRESH_MODEL_MS);
+            if brain.publish("sys.health", 1.0, 1, fresh).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(every_ms)).await;
+        }
+    })
+}
+
 /// Every `>>> turn` line the child printed.
 fn turn_lines(out: &Out) -> Vec<&str> {
     out.stdout.lines().filter(|l| l.starts_with(">>> turn ")).collect()
@@ -444,6 +515,69 @@ async fn a_turn_is_reported_split_at_the_boundaries_jv_ears_published() {
     for ms in numbers_in(full[0]) {
         assert!((0.0..10_000.0).contains(&ms), "implausible {ms}ms in {:?}", full[0]);
     }
+}
+
+#[tokio::test]
+async fn think_splits_into_the_llm_and_everything_around_it() {
+    let bus = start(Config::default()).await;
+    let p = pump_turns_with_model_gauge(&bus, 30);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.5"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let splits: Vec<&str> = out
+        .stdout
+        .lines()
+        .filter(|l| l.starts_with(">>> turn ") && l.contains("model="))
+        .collect();
+    assert!(!splits.is_empty(), "no think was ever split:\n{}", out.stdout);
+    // Only the fresh gauge ever divided anything: a heartbeat whose counter
+    // had not risen is the previous turn's number, and this turn is not it.
+    for line in &splits {
+        assert!(
+            line.contains(&format!("model={FRESH_MODEL_MS:.0}ms")),
+            "a stale gauge divided a turn: {line:?}"
+        );
+    }
+    // wait + model is exactly the think it divided, on real frames through a
+    // real broker — the same partition rule hear + think = respond obeys.
+    let n = numbers_in(splits[0]);
+    let (think, wait, model) = (n[0], n[1], n[2]);
+    assert!((wait + model - think).abs() <= 1.0, "wait {wait} + model {model} != think {think}");
+    assert!(model > 0.0 && wait > 0.0, "{:?}", splits[0]);
+
+    // The first gauge this tap saw was recorded and NOT consumed: it could
+    // have been restating a turn from before the tap connected, and a
+    // measurement may not guess. So the first turn reported here is split by
+    // nothing, and there is always at least one more turn line than split.
+    let reported = turn_lines(&out).len() - splits.len();
+    assert!(reported > splits.len(), "every turn was split:\n{}", out.stdout);
+
+    let s = &out.stdout;
+    for span in ["wait", "model"] {
+        assert!(s.contains(&format!("\n  {span:<8} ")), "no {span} row:\n{s}");
+    }
+    assert!(!s.contains("think unsplit"), "the table apologises for a split think:\n{s}");
+}
+
+#[tokio::test]
+async fn a_think_nobody_divided_says_so_rather_than_guessing() {
+    let bus = start(Config::default()).await;
+    // jv-brain publishes the words and no gauge — an older jv-brain, or a
+    // turn that ran tools.
+    let p = pump_turns(&bus, 30, whole_turn);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.2"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let s = &out.stdout;
+    assert!(s.contains("\nthink      "), "think must still be measured:\n{s}");
+    assert!(!s.contains("\n  wait "), "a wait row with no gauge behind it:\n{s}");
+    assert!(!s.contains("\n  model "), "a model row with no gauge behind it:\n{s}");
+    assert!(s.contains("think unsplit"), "the table must say why:\n{s}");
+    assert!(s.contains("llm_first_say_ms"), "and name the gauge it wanted:\n{s}");
 }
 
 #[tokio::test]

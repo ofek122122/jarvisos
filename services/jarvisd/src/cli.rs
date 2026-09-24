@@ -147,18 +147,65 @@ pub const EARS_HOLD_METRIC: &str = "vad_min_silence_s";
 
 /// jv-ears' endpoint hold in seconds, off ONE `sys.health` frame, or None.
 ///
-/// Refused on the same four grounds `jv health --check` refuses a heartbeat —
-/// they belong to the topic, not to either reader: a schema version this
-/// binary was not written against, a hedged `conf` on a state topic, a body
-/// naming a service other than the one the broker saw publish it, and a
-/// gauge that is not a finite, non-negative duration.
-///
-/// There is deliberately NO fallback to jv-ears' shipped default. The HUD
-/// may fall back — it has to draw something — but this is a measuring
-/// instrument, and an instrument that substitutes a constant for a reading
-/// is how a number stops meaning what its label says.
+/// Refused on the four grounds in `service_metrics` (they belong to the topic,
+/// not to either reader), plus a gauge that is not a finite, non-negative
+/// duration.
 pub fn ears_endpoint_hold_s(frame: &rmpv::Value) -> Option<f64> {
-    if get_str(frame, "src").as_deref() != Some(EARS) {
+    let metrics = service_metrics(frame, EARS)?;
+    get_f64(metrics, EARS_HOLD_METRIC).filter(|h| h.is_finite() && *h >= 0.0)
+}
+
+/// The gauge on jv-brain's heartbeat that says how much of `think` was the
+/// model. (`BRAIN`, the service name, is declared with the health-report
+/// reader further down — it is the same service and the same rule: gauges are
+/// read from ITS heartbeat by name, not from whoever published one last.)
+pub const BRAIN_FIRST_SAY_METRIC: &str = "llm_first_say_ms";
+pub const BRAIN_FIRST_SAYS_METRIC: &str = "llm_first_says";
+
+/// jv-brain's `(turn count, model ms)` off ONE `sys.health` frame, or None.
+///
+/// `think` (the final transcript -> the first `speech.say`) is the LLM AND a
+/// bus hop each way AND whatever jv-brain's input worker was doing when the
+/// transcript landed. Nothing on the bus says where inside it the completion
+/// request went out, because only jv-brain knows — so jv-brain states it
+/// (`TurnTiming` in services/jv-brain/jv_brain/service.py), and this reads it.
+///
+/// **The count is not decoration.** `sys.health` carries no `utterance_id`, so
+/// the only thing tying this number to a turn is that jv-brain publishes the
+/// gauge frame IMMEDIATELY after the `speech.say` it measures, on the same
+/// connection — which fixes the order the two frames reach a subscriber in.
+/// The gauge then stays on every later periodic heartbeat, so a reader that
+/// looked only at the number would apply a stale one to the next turn. The
+/// count rises once per measured turn and is how a fresh gauge is told from a
+/// re-stated one (`TurnStats::brain_split`, and the tap loop in bin/jv.rs).
+///
+/// Refused on the same grounds as `ears_endpoint_hold_s` — they belong to the
+/// topic, not to either reader — plus a count that is not a whole number at
+/// least 1: a turn counter with a fraction in it is a frame disagreeing with
+/// itself, and there is no reading of it that makes the pair trustworthy.
+pub fn brain_first_say(frame: &rmpv::Value) -> Option<(u64, f64)> {
+    let metrics = service_metrics(frame, BRAIN)?;
+    let ms = get_f64(metrics, BRAIN_FIRST_SAY_METRIC).filter(|v| v.is_finite() && *v >= 0.0)?;
+    let count = get_f64(metrics, BRAIN_FIRST_SAYS_METRIC)
+        .filter(|c| c.is_finite() && *c >= 1.0 && c.fract() == 0.0)?;
+    Some((count as u64, ms))
+}
+
+/// The `metrics` map of a `sys.health` frame this binary is entitled to read
+/// as `service`'s, or None.
+///
+/// Four refusals, and they belong to the TOPIC rather than to any one reader,
+/// which is why both gauges above share them: a schema version this binary was
+/// not written against, a hedged `conf` on a state topic, a body naming a
+/// service other than the one the broker saw publish it, and no `metrics` at
+/// all.
+///
+/// There is deliberately NO fallback to a service's shipped default anywhere
+/// above this. The HUD may fall back — it has to draw something — but this is
+/// a measuring instrument, and an instrument that substitutes a constant for a
+/// reading is how a number stops meaning what its label says.
+fn service_metrics<'a>(frame: &'a rmpv::Value, service: &str) -> Option<&'a rmpv::Value> {
+    if get_str(frame, "src").as_deref() != Some(service) {
         return None;
     }
     if get(frame, "v").and_then(|v| v.as_u64()) != Some(1) {
@@ -168,11 +215,10 @@ pub fn ears_endpoint_hold_s(frame: &rmpv::Value) -> Option<f64> {
         return None;
     }
     let body = get(frame, "body").filter(|b| b.is_map())?;
-    if get_str(body, "service").as_deref() != Some(EARS) {
+    if get_str(body, "service").as_deref() != Some(service) {
         return None;
     }
-    let metrics = get(body, "metrics").filter(|m| m.is_map())?;
-    get_f64(metrics, EARS_HOLD_METRIC).filter(|h| h.is_finite() && *h >= 0.0)
+    get(body, "metrics").filter(|m| m.is_map())
 }
 
 /// One voice turn, split at the boundaries jv-ears itself publishes.
@@ -180,6 +226,7 @@ pub fn ears_endpoint_hold_s(frame: &rmpv::Value) -> Option<f64> {
 /// ```text
 /// speech_start    last speech  speech_end  final transcript first speech.say
 ///       |--- spoke ----|--- hold ---|---- hear ----|---- think ----|
+///       |                                          |-wait-|--model-|
 ///       |                           |---------- respond -----------|
 ///       |------------------------- total --------------------------|
 /// ```
@@ -211,6 +258,24 @@ pub fn ears_endpoint_hold_s(frame: &rmpv::Value) -> Option<f64> {
 ///     PHASE1-STATUS names those two as separate open items (ASR fixed at
 ///     ~2.2 s; prefill fixed, generation not), and one number over both
 ///     cannot say which one a change moved.
+///
+/// `think` splits once more, and this one needs a PUBLISHER rather than a
+/// frame that was already there. It contains the LLM AND the bus hop each
+/// way AND however long the transcript sat in jv-brain's input queue, and
+/// the span PHASE1-STATUS wants to optimise is the model's alone. Nothing on
+/// the bus marks the moment the completion request went out, because only
+/// jv-brain can see it — so jv-brain states it on its own heartbeat and
+/// `brain_first_say` reads it:
+///
+///   * **model** — the completion request -> the first `speech.say`: the
+///     LLM's prefill and generation up to the first sentence closing.
+///   * **wait** — `think` less `model`: the two bus hops, the input queue,
+///     and jv-brain's own work before the model ran.
+///
+/// Those two live on `TurnStats` and not on this type, because the gauge
+/// arrives one frame AFTER the turn is reported — a turn is printed the
+/// moment its first word lands, and is not held back waiting for a number
+/// that may never come.
 ///
 /// So the machine's share of a turn is `hold + respond`, and THAT is the
 /// number a budget can be argued about. Which span the 2.5 s applies to is
@@ -431,13 +496,22 @@ pub struct TurnStats {
     hold: Vec<f64>,
     hear: Vec<f64>,
     think: Vec<f64>,
+    wait: Vec<f64>,
+    model: Vec<f64>,
     respond: Vec<f64>,
     total: Vec<f64>,
+    /// The id and `think` of the most recently reported turn, until
+    /// jv-brain's gauge for it lands (`brain_split`) or the next turn
+    /// replaces it. At most one turn is ever waiting: jv-brain publishes the
+    /// gauge before the next turn's first word can be read, because both
+    /// frames leave jv-brain on the same connection.
+    awaiting: Option<(String, f64)>,
 }
 
 impl TurnStats {
-    pub fn push(&mut self, t: &Turn) {
+    pub fn push(&mut self, t: &Turn, id: &str) {
         self.turns += 1;
+        self.awaiting = t.think_ms.map(|think| (id.to_string(), think));
         if let (Some(spoke), Some(hold)) = (t.spoke_ms(), t.hold_ms) {
             self.spoke.push(spoke);
             self.hold.push(hold);
@@ -456,6 +530,37 @@ impl TurnStats {
         }
     }
 
+    /// jv-brain's own gauge for the turn just reported: how much of its
+    /// `think` was the LLM. Splits that `think` into `wait` + `model` and
+    /// returns the line to print, or None when the number cannot be placed.
+    ///
+    /// Three refusals:
+    ///
+    ///   * **No turn is waiting.** The gauge is bound to a turn by frame
+    ///     order alone (see `brain_first_say`), so a gauge with nothing in
+    ///     front of it describes a turn this tap did not report — one whose
+    ///     boundaries it never heard, or one already split. It is dropped
+    ///     rather than attached to whatever comes next.
+    ///   * **`think` was unmeasured.** There is nothing to divide, and a
+    ///     `model` sample with no `wait` beside it would leave two rows
+    ///     standing on different turns while looking like two halves.
+    ///   * **The gauge does not FIT.** A model span longer than the `think`
+    ///     it is inside means jv-brain's clock and the bus timestamps
+    ///     disagree about this turn. Two numbers that disagree produce no
+    ///     third number — same rule as `spoke_ms`.
+    pub fn brain_split(&mut self, model_ms: f64) -> Option<String> {
+        let (id, think) = self.awaiting.take()?;
+        if !(model_ms >= 0.0 && model_ms <= think) {
+            return None;
+        }
+        let wait = think - model_ms;
+        self.model.push(model_ms);
+        self.wait.push(wait);
+        Some(format!(
+            "turn {id}: think={think:.0}ms is wait={wait:.0}ms + model={model_ms:.0}ms"
+        ))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.turns == 0
     }
@@ -470,11 +575,13 @@ impl TurnStats {
             self.turns
         );
         out.push_str(&format!("{:<10} {:<31} {:>4} {:>9} {:>9} {:>9}\n", "span", "whose time it is", "n", "p50", "p95", "max"));
-        let rows: [(&str, &str, &Vec<f64>); 6] = [
+        let rows: [(&str, &str, &Vec<f64>); 8] = [
             ("spoke", "you, talking", &self.spoke),
             ("hold", "jv-ears' endpoint wait", &self.hold),
             ("hear", "jv-ears' ASR", &self.hear),
             ("think", "jv-brain, to its first word", &self.think),
+            ("  wait", "of think: before the model ran", &self.wait),
+            ("  model", "of think: the LLM itself", &self.model),
             ("respond", "hear + think: ASR + brain + bus", &self.respond),
             ("total", "speech start -> first word", &self.total),
         ];
@@ -496,6 +603,11 @@ impl TurnStats {
             out.push_str(
                 "--- hear/think unmeasured: no `audio.transcript` final landed between a turn's\n    speech_end and its first word, so respond stays one span over two services.\n    (jv-ears publishes no final for an utterance its ASR read as empty.)\n",
             );
+        }
+        if !self.think.is_empty() && self.model.is_empty() {
+            out.push_str(&format!(
+                "--- think unsplit: no jv-brain heartbeat carried `{BRAIN_FIRST_SAY_METRIC}` for a\n    reported turn, so `think` stays the model plus the bus hops and the queueing\n    around it. (jv-brain states the gauge only for a turn whose first word came\n    straight out of the first completion — a turn that ran tools has tool time\n    inside `think`, and calling that the model would be a lie.)\n"
+            ));
         }
         if self.spoke.is_empty() {
             out.push_str(&format!(
@@ -1845,8 +1957,8 @@ mod tests {
     #[test]
     fn turn_summary_reads_in_the_order_the_turn_happened() {
         let mut s = TurnStats::default();
-        s.push(&turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5)));
-        s.push(&turn_with_seam(20.0, 24.0, 25.6, 26.0, Some(1.5)));
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5)), "t");
+        s.push(&turn_with_seam(20.0, 24.0, 25.6, 26.0, Some(1.5)), "t");
         let out = s.summary();
         let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("no {w} row in\n{out}"));
         assert!(at("spoke") < at("hold"), "{out}");
@@ -1873,8 +1985,8 @@ mod tests {
     #[test]
     fn turn_summary_shows_the_two_halves_of_respond_in_the_order_they_ran() {
         let mut s = TurnStats::default();
-        s.push(&turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5)));
-        s.push(&turn_with_seam(20.0, 24.0, 26.0, 26.4, Some(1.5)));
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5)), "t");
+        s.push(&turn_with_seam(20.0, 24.0, 26.0, 26.4, Some(1.5)), "t");
         let out = s.summary();
         let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("no {w} row in\n{out}"));
         assert!(at("hold") < at("hear"), "{out}");
@@ -1894,7 +2006,7 @@ mod tests {
     #[test]
     fn turn_summary_omits_the_asr_seam_it_never_saw_and_says_why() {
         let mut s = TurnStats::default();
-        s.push(&turn(10.0, 13.0, 14.2, Some(1.5)));
+        s.push(&turn(10.0, 13.0, 14.2, Some(1.5)), "t");
         let out = s.summary();
         assert!(out.contains("\nrespond   "), "{out}");
         assert!(!out.contains("\nhear  "), "no hear row without a final to divide at:\n{out}");
@@ -1905,7 +2017,7 @@ mod tests {
     #[test]
     fn turn_summary_omits_the_spans_it_could_not_measure_and_says_why() {
         let mut s = TurnStats::default();
-        s.push(&turn(10.0, 13.0, 14.2, None));
+        s.push(&turn(10.0, 13.0, 14.2, None), "t");
         let out = s.summary();
         assert!(out.contains("respond"), "{out}");
         assert!(out.contains("total"), "{out}");
@@ -1920,7 +2032,7 @@ mod tests {
     fn a_hold_that_did_not_fit_takes_its_own_row_down_with_it() {
         let mut s = TurnStats::default();
         // 1.5 s of hold cannot have happened inside a 0.9 s segment.
-        s.push(&turn(10.0, 10.9, 11.5, Some(1.5)));
+        s.push(&turn(10.0, 10.9, 11.5, Some(1.5)), "t");
         let out = s.summary();
         // `spoke` and `hold` are two halves of one subtraction. Printing the
         // hold on its own would put a number in the table for a turn whose
@@ -1936,7 +2048,7 @@ mod tests {
         let mut s = TurnStats::default();
         let mut u = Utterances::with_capacity(4);
         u.ended("t", 13.0);
-        s.push(&u.reply("t", 14.2, Some(1.5)).expect("a turn"));
+        s.push(&u.reply("t", 14.2, Some(1.5)).expect("a turn"), "t");
         let out = s.summary();
         assert!(out.contains("respond"), "{out}");
         assert!(!out.contains("total "), "a total we could not measure is not a row:\n{out}");
@@ -2002,6 +2114,143 @@ mod tests {
         // A heartbeat that simply does not carry the gauge.
         let f = ears_health(EARS, EARS, 1, 1.0, map(&[("mic_open", rmpv::Value::from(1.0))]));
         assert_eq!(ears_endpoint_hold_s(&f), None);
+    }
+
+    fn say_metrics(count: rmpv::Value, ms: rmpv::Value) -> rmpv::Value {
+        map(&[
+            ("llm_rung", rmpv::Value::from(1.0)),
+            (BRAIN_FIRST_SAYS_METRIC, count),
+            (BRAIN_FIRST_SAY_METRIC, ms),
+        ])
+    }
+
+    #[test]
+    fn the_models_share_of_think_is_read_off_jv_brains_own_heartbeat() {
+        let f = ears_health(BRAIN, BRAIN, 1, 1.0, say_metrics(3.into(), 412.0.into()));
+        assert_eq!(brain_first_say(&f), Some((3, 412.0)));
+    }
+
+    #[test]
+    fn a_model_share_is_refused_unless_jv_brain_itself_said_it() {
+        let ok = say_metrics(1.into(), 412.0.into());
+        assert_eq!(brain_first_say(&ears_health(EARS, BRAIN, 1, 1.0, ok.clone())), None);
+        assert_eq!(brain_first_say(&ears_health(BRAIN, EARS, 1, 1.0, ok.clone())), None);
+        assert_eq!(brain_first_say(&ears_health(BRAIN, BRAIN, 2, 1.0, ok.clone())), None);
+        assert_eq!(brain_first_say(&ears_health(BRAIN, BRAIN, 1, 0.9, ok)), None);
+    }
+
+    #[test]
+    fn a_model_share_without_a_trustworthy_turn_count_is_refused() {
+        // The count is what tells a fresh gauge from a re-stated one. A frame
+        // that cannot supply one leaves the number unplaceable, not usable.
+        for bad in [
+            rmpv::Value::from(0),            // no turn has been measured yet
+            rmpv::Value::from(-1),
+            rmpv::Value::from(1.5),          // a turn counter with a fraction in it
+            rmpv::Value::from("2"),
+            rmpv::Value::from(f64::NAN),
+            rmpv::Value::from(f64::INFINITY),
+        ] {
+            let f = ears_health(BRAIN, BRAIN, 1, 1.0, say_metrics(bad.clone(), 412.0.into()));
+            assert_eq!(brain_first_say(&f), None, "{bad:?}");
+        }
+        // And a gauge that is not a duration.
+        for bad in [
+            rmpv::Value::from("412"),
+            rmpv::Value::from(-0.1),
+            rmpv::Value::from(f64::NAN),
+        ] {
+            let f = ears_health(BRAIN, BRAIN, 1, 1.0, say_metrics(2.into(), bad.clone()));
+            assert_eq!(brain_first_say(&f), None, "{bad:?}");
+        }
+        // A heartbeat carrying one half of the pair is carrying neither.
+        let only_count = map(&[(BRAIN_FIRST_SAYS_METRIC, rmpv::Value::from(2))]);
+        assert_eq!(brain_first_say(&ears_health(BRAIN, BRAIN, 1, 1.0, only_count)), None);
+        let only_ms = map(&[(BRAIN_FIRST_SAY_METRIC, rmpv::Value::from(412.0))]);
+        assert_eq!(brain_first_say(&ears_health(BRAIN, BRAIN, 1, 1.0, only_ms)), None);
+    }
+
+    #[test]
+    fn a_gauge_splits_the_think_of_the_turn_it_followed() {
+        let mut s = TurnStats::default();
+        // think = 26.0 - 14.0 = 2000ms
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 16.0, Some(1.5)), "utt-1");
+        let line = s.brain_split(1600.0).expect("the gauge fits");
+        assert_eq!(line, "turn utt-1: think=2000ms is wait=400ms + model=1600ms");
+        let table = s.summary();
+        assert!(table.contains("wait "), "{table}");
+        assert!(table.contains("model "), "{table}");
+        // and the footer stops apologising for an unsplit think
+        assert!(!table.contains("think unsplit"), "{table}");
+    }
+
+    #[test]
+    fn one_gauge_splits_one_turn_and_a_restated_one_splits_nothing() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 16.0, Some(1.5)), "utt-1");
+        assert!(s.brain_split(1600.0).is_some());
+        // The same number again (a later periodic heartbeat that slipped the
+        // counter check) must not double-count the turn it already split.
+        assert_eq!(s.brain_split(1600.0), None);
+    }
+
+    #[test]
+    fn a_gauge_longer_than_the_think_it_divides_produces_no_numbers() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 16.0, Some(1.5)), "utt-1");
+        assert_eq!(s.brain_split(2400.0), None, "a model span outside its own think");
+        let table = s.summary();
+        assert!(table.contains("think unsplit"), "{table}");
+    }
+
+    #[test]
+    fn a_turn_whose_think_was_unmeasured_cannot_be_split() {
+        let mut s = TurnStats::default();
+        // no final transcript: no seam, so no think to divide
+        s.push(&turn(10.0, 13.0, 16.0, Some(1.5)), "utt-1");
+        assert_eq!(s.brain_split(1600.0), None);
+    }
+
+    #[test]
+    fn a_gauge_with_no_turn_in_front_of_it_is_dropped() {
+        let mut s = TurnStats::default();
+        assert_eq!(s.brain_split(1600.0), None, "nothing reported yet");
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 16.0, Some(1.5)), "utt-1");
+        // The gauge for an EARLIER turn must not be attached to this one just
+        // because this one is the next thing in the queue. Only a counter rise
+        // gets this far (bin/jv.rs), and this is the one turn it may split.
+        assert!(s.brain_split(1600.0).is_some());
+    }
+
+    #[test]
+    fn a_turn_that_replaces_the_waiting_one_replaces_it_even_unsplittable() {
+        // Turn 2's `think` was unmeasured, so there is nothing for a gauge to
+        // divide — and the gauge belongs to turn 2, not to turn 1. Leaving
+        // turn 1 waiting would split IT with turn 2's number, which is the
+        // same error the counter in bin/jv.rs exists to prevent, one layer in.
+        let mut s = TurnStats::default();
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 16.0, Some(1.5)), "utt-1");
+        s.push(&turn(20.0, 23.0, 26.0, Some(1.5)), "utt-2");
+        assert_eq!(s.brain_split(1600.0), None);
+    }
+
+    #[test]
+    fn a_negative_model_span_divides_nothing() {
+        // `brain_first_say` refuses one off the wire, but this is a public
+        // entry point and the rule is its own: a `wait` longer than the
+        // `think` it is part of would be arithmetic, not a measurement.
+        let mut s = TurnStats::default();
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 16.0, Some(1.5)), "utt-1");
+        assert_eq!(s.brain_split(-1.0), None);
+    }
+
+    #[test]
+    fn only_the_most_recent_turn_waits_for_a_gauge() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 16.0, Some(1.5)), "utt-1");
+        s.push(&turn_with_seam(20.0, 23.0, 24.0, 26.0, Some(1.5)), "utt-2");
+        let line = s.brain_split(1600.0).expect("the gauge fits");
+        assert!(line.starts_with("turn utt-2:"), "{line}");
     }
 
     #[test]

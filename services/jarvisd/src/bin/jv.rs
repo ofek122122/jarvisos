@@ -215,6 +215,15 @@ async fn main() -> anyhow::Result<()> {
             // fallback: a turn measured before the first heartbeat lands
             // reports `?` for the spans that need it (cli::Turn).
             let mut hold_s: Option<f64> = None;
+            // jv-brain's turn counter, as last seen. The gauge beside it says
+            // how much of `think` was the LLM, and it rides a heartbeat that
+            // carries no utterance_id — so a RISE in the counter is what says
+            // the number describes the turn just reported rather than an
+            // earlier one re-stated (cli::brain_first_say). The first count
+            // this tap sees is therefore recorded and NOT consumed: it may be
+            // restating a turn from before the tap connected, and a
+            // measurement may not guess.
+            let mut brain_says: Option<u64> = None;
             let run = drive(&mut c, count, for_secs, |frame| {
                 let topic = cli::get_str(&frame, "topic").unwrap_or_default();
                 let ts = cli::get_f64(&frame, "ts").unwrap_or(0.0);
@@ -231,6 +240,14 @@ async fn main() -> anyhow::Result<()> {
                 if topic == "sys.health" {
                     if let Some(h) = cli::ears_endpoint_hold_s(&frame) {
                         hold_s = Some(h);
+                    }
+                    if let Some((count, model_ms)) = cli::brain_first_say(&frame) {
+                        if brain_says.is_some_and(|prev| count > prev) {
+                            if let Some(line) = turns.brain_split(model_ms) {
+                                println!(">>> {line}");
+                            }
+                        }
+                        brain_says = Some(count);
                     }
                 }
                 let Some(body) = cli::get(&frame, "body") else { return };
@@ -269,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
                             // number it exists to report.
                             if let Some(turn) = utts.reply(&id, ts, hold_s) {
                                 println!(">>> {}", turn.line(&id));
-                                turns.push(&turn);
+                                turns.push(&turn, &id);
                             }
                         }
                     }

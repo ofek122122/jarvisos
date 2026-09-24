@@ -139,6 +139,52 @@ _YES = {"yes", "yeah", "yep", "yup", "correct", "right", "that's right", "perfec
 _NO = {"no", "nope", "wrong", "not quite", "not right", "incorrect"}
 
 
+class TurnTiming:
+    """Where inside one turn the MODEL's share of it began.
+
+    `jv tap --latency` splits a voice turn at the boundaries jv-ears
+    publishes, and its last span — `think` — runs from the final transcript
+    to the first `speech.say`. That span is the LLM's prefill and
+    generation AND a bus hop each way AND whatever the input worker was
+    doing when the transcript landed. PHASE1-STATUS wants to optimise the
+    LLM's part of it, and one number over all of it cannot say which part a
+    change moved.
+
+    Only jv-brain knows where inside `think` the completion request went
+    out, so jv-brain states it: `llm_first_say_ms` on its own `sys.health`
+    `metrics`, which is free-form and service-local by schema, so this
+    costs no schema change (invariant 2).
+
+    The one thing this type is careful about: a turn that ran TOOLS spends
+    real time in jv-act — including a confirm window — between its first
+    completion and the words the user hears. That time is inside `think`
+    and it is not the model's, so such a turn publishes NO gauge at all. A
+    `model` number with a tool round-trip inside it is exactly how a number
+    stops meaning its label, and the tap's `n` column is what says how many
+    turns the number it does print stands on."""
+
+    __slots__ = ("streams", "_request")
+
+    def __init__(self) -> None:
+        self.streams = 0
+        self._request = 0.0
+
+    def request(self, now: float) -> None:
+        """A completion request is going out to llama-server, now."""
+        self.streams += 1
+        self._request = now
+
+    def model_ms(self, now: float) -> Optional[float]:
+        """Milliseconds from this turn's completion request to `now`, or
+        None when the turn never reached the LLM, or reached it more than
+        once (see the class docstring). The `streams` count is what makes
+        `_request` unambiguous: it is only ever read for a turn that issued
+        exactly one request, so there is no earlier one to have lost."""
+        if self.streams != 1:
+            return None
+        return (now - self._request) * 1e3
+
+
 def _yes_no(text: str) -> Optional[bool]:
     n = " ".join(
         "".join(c for c in text.lower() if c.isalnum() or c.isspace() or c == "'").split()
@@ -232,6 +278,13 @@ class BrainService:
         self.tool_defs = openai_tool_defs(self.tools)
         self._pending_results: dict[str, asyncio.Future] = {}
         self._hallucinated_calls = 0
+        # The model's share of `think`, for the turn most recently spoken,
+        # and the count of turns that have had one. The count is how a
+        # reader tells a FRESH gauge from the same number re-stated on the
+        # next periodic heartbeat (see TurnTiming, and cli::brain_first_say
+        # in the jv CLI, which is the reader this exists for).
+        self._first_say_ms: Optional[float] = None
+        self._first_says = 0
         # barge-in: the spoken turn in flight, and the one task a wake has
         # asked to cancel (so a shutdown cancellation is never mistaken for
         # an interruption).
@@ -289,7 +342,9 @@ class BrainService:
             payload["tool_choice"] = "auto"
         return payload
 
-    async def _stream_turn(self, conv: Conversation, on_sentence) -> tuple[str, list, str]:
+    async def _stream_turn(
+        self, conv: Conversation, on_sentence, timing: Optional["TurnTiming"] = None
+    ) -> tuple[str, list, str]:
         """Stream one completion. Assemble content + any tool_calls from the
         SSE deltas; call `await on_sentence(str)` for each sentence as it
         closes (so piper starts on sentence 1 while the LLM writes the
@@ -304,6 +359,12 @@ class BrainService:
         parts: list[str] = []
         tool_frags: dict[int, dict] = {}
         finish = "stop"
+        # The model's clock starts here and not a line earlier: assembling
+        # the system prompt and trimming the conversation are jv-brain's
+        # work, and `think` is being divided into what the LLM did and what
+        # this service did around it.
+        if timing is not None:
+            timing.request(time.monotonic())
         async with self._http.stream(
             "POST", f"{self.cfg.llm_url}/v1/chat/completions", json=payload
         ) as resp:
@@ -415,27 +476,35 @@ class BrainService:
         propagates untouched."""
         reply_group = str(uuid.uuid4())
         said: list[str] = []
+        timing = TurnTiming()
 
         async def on_sentence(sentence: str) -> None:
-            if speak:
-                said.append(sentence)
-                await self._say_chunk(sentence, utterance_id, reply_group)
+            if not speak:
+                return
+            said.append(sentence)
+            await self._say_chunk(sentence, utterance_id, reply_group)
+            if len(said) == 1:
+                await self._state_model_share(timing)
 
         try:
-            return await self._respond_loop(conv, utterance_id, on_sentence)
+            return await self._respond_loop(conv, utterance_id, on_sentence, timing)
         except asyncio.CancelledError:
             if asyncio.current_task() is not self._barged:
                 raise
             return " ".join(said), INTERRUPTED
 
     async def _respond_loop(
-        self, conv: Conversation, utterance_id: Optional[str], on_sentence
+        self,
+        conv: Conversation,
+        utterance_id: Optional[str],
+        on_sentence,
+        timing: Optional["TurnTiming"] = None,
     ) -> tuple[str, str]:
         """The tool loop itself, split out only so `_respond` can wrap it in
         one try/except without indenting all of it."""
         calls_used = 0
         while True:
-            text, tool_calls, finish = await self._stream_turn(conv, on_sentence)
+            text, tool_calls, finish = await self._stream_turn(conv, on_sentence, timing)
             if not tool_calls:
                 return text, finish
             conv.add_raw(
@@ -716,6 +785,24 @@ class BrainService:
             await self._speak(q["prompt"])
             await self._request_listen("followup", 15.0)
 
+    async def _state_model_share(self, timing: TurnTiming) -> None:
+        """The first word of a turn has just gone out. If the turn is one
+        whose `think` can honestly be divided (TurnTiming), record the
+        model's share of it and heartbeat IMMEDIATELY.
+
+        The immediacy is the whole binding: `sys.health` carries no
+        utterance_id and adding one is a frozen-schema change, so the only
+        thing that ties this number to the turn it describes is that the
+        gauge frame and the `speech.say` frame leave jv-brain on the SAME
+        connection, in that order. A reader that sees a gauge whose count
+        has risen since the word it is holding knows which turn it belongs
+        to without either frame naming it."""
+        if (ms := timing.model_ms(time.monotonic())) is None:
+            return
+        self._first_say_ms = ms
+        self._first_says += 1
+        await self._health()
+
     async def _health(self, state: str = "ok", notes: Optional[str] = None) -> None:
         rung, backend = self._rung()
         body: dict = {
@@ -732,6 +819,10 @@ class BrainService:
             metrics["hallucinated_tool_calls"] = float(self._hallucinated_calls)
         if self._barge_ins:
             metrics["barge_ins"] = float(self._barge_ins)
+        if self._first_say_ms is not None:
+            # `jv tap --latency` divides `think` with these two (cli.rs).
+            metrics["llm_first_say_ms"] = self._first_say_ms
+            metrics["llm_first_says"] = float(self._first_says)
         if metrics:
             body["metrics"] = metrics
         if notes:

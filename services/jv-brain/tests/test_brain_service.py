@@ -296,3 +296,131 @@ def test_strip_wake_prefix():
     assert strip_wake_prefix("What about jarvis?") == "What about jarvis?"
     # An utterance that is ONLY the wake word survives as itself.
     assert strip_wake_prefix("Hey Jarvis.") == "Hey Jarvis."
+
+
+# --------------------------------------------- the model's share of `think`
+
+def first_say_gauge(frame) -> tuple[float, float] | None:
+    """(count, ms) off one jv-brain sys.health frame, or None."""
+    m = (frame["body"].get("metrics") or {}) if frame["topic"] == "sys.health" else {}
+    if "llm_first_say_ms" not in m:
+        return None
+    return m["llm_first_says"], m["llm_first_say_ms"]
+
+
+async def test_brain_states_the_models_share_of_think(stack):
+    """`jv tap --latency` can see the final transcript and the first
+    `speech.say`; it cannot see where between them the completion request
+    went out. jv-brain states that on its own heartbeat — and publishes one
+    IMMEDIATELY after the first word, on the same connection the word went
+    out on, so the frame order binds the gauge to the turn (the tap has no
+    utterance_id on sys.health to bind it with)."""
+    addr, stub, watcher = stack
+    await watcher.subscribe(["speech.say", "sys.health"])
+    await asyncio.sleep(0.1)
+
+    # A reply of SEVERAL sentences: the gauge is time-to-FIRST-word, so the
+    # later sentences must not each restate it as a new turn.
+    await watcher.publish(
+        "audio.transcript",
+        {
+            "kind": "final",
+            "utterance_id": "utt-g",
+            "text": "Hey Jarvis, one. Two. Three.",
+            "lang": "en",
+        },
+        conf=0.9,
+    )
+    say = await next_topic(watcher, "speech.say")
+    assert say["body"]["in_reply_to_utterance"] == "utt-g"
+
+    # read IN ORDER from here: the gauge frame must follow the FIRST word,
+    # and every later frame must re-state the same turn rather than count a
+    # new one. (This is the whole binding: a reader tells a fresh gauge from
+    # a re-stated one by the count, and nothing else.)
+    says = 1
+    gauges: list[tuple[float, float]] = []
+
+    async def drain():
+        nonlocal says
+        while True:
+            frame = await watcher.next_frame()
+            assert frame is not None
+            if frame["topic"] == "speech.say":
+                says += 1
+            if (g := first_say_gauge(frame)) is not None:
+                gauges.append(g)
+
+    try:
+        await asyncio.wait_for(drain(), 1.5)
+    except asyncio.TimeoutError:
+        pass
+    assert says >= 3, f"a multi-sentence reply should be several says, got {says}"
+    assert gauges, "no sys.health carried llm_first_say_ms after the first word"
+    count, ms = gauges[0]
+    assert count == 1.0, "the first turn of this process is turn 1"
+    assert 0.0 <= ms < 5_000.0
+    assert all(c == 1.0 for c, _ in gauges), gauges
+
+
+async def test_the_turn_counter_rises_so_a_second_turn_is_not_read_as_stale(stack):
+    """The counter beside the gauge is the whole binding: a reader applies a
+    gauge to the turn it just saw only when the count has RISEN since the
+    last one. A counter that stayed at 1 would leave every turn after the
+    first looking like a re-statement, and `jv tap --latency` would quietly
+    stop dividing `think` after one turn."""
+    addr, stub, watcher = stack
+    await watcher.subscribe(["speech.say", "sys.health"])
+    await asyncio.sleep(0.1)
+
+    counts: list[float] = []
+    for n in (1, 2, 3):
+        await watcher.publish(
+            "audio.transcript",
+            {"kind": "final", "utterance_id": f"utt-{n}", "text": f"Hey Jarvis, {n}",
+             "lang": "en"},
+            conf=0.9,
+        )
+
+        async def until_gauge():
+            while True:
+                frame = await watcher.next_frame()
+                assert frame is not None
+                if (g := first_say_gauge(frame)) is not None and g[0] not in counts:
+                    return g
+
+        count, ms = await asyncio.wait_for(until_gauge(), 10.0)
+        counts.append(count)
+        assert 0.0 <= ms < 5_000.0
+    assert counts == [1.0, 2.0, 3.0], counts
+
+
+async def test_a_silent_turn_publishes_no_first_say_gauge(stack):
+    """The gauge ends at a `speech.say`. A brain.request answered silently
+    never publishes one, so there is nothing to time and no number to
+    state — not a zero."""
+    addr, stub, watcher = stack
+    await watcher.subscribe(["brain.response", "sys.health"])
+    await asyncio.sleep(0.1)
+
+    await watcher.publish(
+        "brain.request",
+        {"text": "what time is it", "conversation_id": "cli", "speak": False},
+    )
+    # collect WHILE the turn runs: a gauge is published mid-turn, right
+    # after the word it measures, so waiting for brain.response first would
+    # throw away the only frame that could fail this.
+    seen: list[tuple[float, float]] = []
+
+    async def drain_until_done():
+        while True:
+            frame = await watcher.next_frame()
+            assert frame is not None
+            if (g := first_say_gauge(frame)) is not None:
+                seen.append(g)
+            if frame["topic"] == "brain.response":
+                return frame
+
+    done = await asyncio.wait_for(drain_until_done(), 10.0)
+    assert done["body"]["text"] == "You said: what time is it"
+    assert seen == []

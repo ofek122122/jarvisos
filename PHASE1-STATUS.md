@@ -106,6 +106,33 @@ install day; anything needing real hardware is mocked and tagged
   llama-server's own timings and a stopwatch; they are now readable off
   the bus in the same table as everything else.
 
+  **UPDATE 2026-09-24: `think` stops being one number over the model and
+  everything around it.** `think` was the LLM AND a bus hop each way AND
+  however long the transcript sat in jv-brain's input queue, and the span
+  this file wants to optimise ("prefill fixed, generation not") is the
+  model's alone. Unlike the hear/think seam, no frame on the bus marks the
+  moment the completion request went out — only jv-brain can see it — so
+  jv-brain now states it: `llm_first_say_ms` plus a turn counter
+  `llm_first_says` in its `sys.health` `metrics`, which is free-form and
+  service-local by schema (no schema change). `jv tap --latency` divides
+  `think` into `model` (the completion request -> the first `speech.say`:
+  prefill + generation to the first sentence) and `wait` (the rest: bus
+  hops, the input queue, jv-brain's own work), as two more rows in the
+  table and a second line per turn — the `>>> turn` line itself is
+  deliberately no wider, because nothing has yet read it on a real turn.
+
+  Two honesty rules, both enforced by tests. (1) A turn that ran TOOLS
+  publishes no gauge at all: tool round-trips — including a confirm window —
+  sit inside its `think`, and calling that time "the model" is how a number
+  stops meaning its label. The table then says `think unsplit` and names the
+  gauge it wanted rather than printing a guess. (2) `sys.health` carries no
+  `utterance_id`, so the gauge is bound to its turn by frame ORDER: jv-brain
+  publishes it immediately after the `speech.say` it measures, on the same
+  connection, and the counter is what tells a fresh gauge from the same
+  number re-stated on the next periodic heartbeat. The first count a tap
+  sees is recorded and not consumed — it may describe a turn from before the
+  tap connected, and a measurement may not guess.
+
   **UPDATE 2026-09-23 (308e12b): streaming reply — the perceived-latency
   fix.** jv-brain now streams the llama completion and speaks each sentence
   as it closes (SentenceChunker → one speech.say per sentence, shared
