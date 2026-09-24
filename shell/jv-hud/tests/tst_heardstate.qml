@@ -44,6 +44,14 @@ TestCase {
     HeardState {}
   }
 
+  // The element on the other side of A57: it times the "THINKING" above
+  // these words, and the point of the paired test at the bottom of this
+  // file is that the two windows close together on ONE bus.
+  Component {
+    id: speechState
+    SpeechState {}
+  }
+
   // createObject() is typed QObject, so every member read on the result
   // would be `missing-property` to qmllint. Going through an untyped
   // helper keeps the file lint-clean at -W 0 (see tst_speechstate).
@@ -114,6 +122,31 @@ TestCase {
     const env = suite.envelope("audio.transcript", o.ts !== undefined ? o.ts : suite.fakeNow, o.conf !== undefined ? o.conf : 0.88, body, o);
     deliver(heard, env);
     return env;
+  }
+
+  // The boundary jv-ears publishes at each end of a speech segment. The
+  // `speech_end` one is what the rest of the HUD times a turn from, and
+  // since A57 it is what this element times its hold from too.
+  function vad(heard, event, utteranceId, ts, conf) {
+    let body = {
+      "event": event
+    };
+    if (utteranceId !== undefined)
+      body.utterance_id = utteranceId;
+    if (event === "speech_end")
+      body.duration_s = 2.96;
+    deliver(heard, suite.envelope("audio.vad", ts !== undefined ? ts : suite.fakeNow, conf !== undefined ? conf : 1, body));
+  }
+
+  // A wake detection that clears its own threshold — only needed by the
+  // paired test, since it takes a wake before SpeechState will read a
+  // closing utterance as a question in flight.
+  function wake(heard, ts) {
+    deliver(heard, suite.envelope("audio.wake", ts !== undefined ? ts : suite.fakeNow, 0.99, {
+      "model": "hey_jarvis",
+      "score": 0.99,
+      "threshold": 0.5
+    }));
   }
 
   function speech(heard, state, ts) {
@@ -362,6 +395,166 @@ TestCase {
     heard.bus.ingest('{"t":"link","up":true}');
     transcript(heard, "a sentence with no clock behind it");
     compare(heard.heard, false);
+  }
+
+  // --- A57: which instant the hold is measured from --------------------
+
+  function test_the_hold_is_timed_from_the_utterance_and_not_from_the_asr() {
+    // The whole of A57 in one arithmetic. jv-ears closes the utterance at
+    // ts=0 — the instant SpeechState starts timing "THINKING" from — and
+    // the final lands six seconds later because that is how long the ASR
+    // took. Anchored to the words, this line would be treated as brand new
+    // and held for the full window AFTER the word above it had gone;
+    // anchored to the utterance, the window is already over.
+    const heard = makeHeard({
+      "holdS": 5
+    });
+    vad(heard, "speech_end", "utt-1", 0);
+    suite.fakeNow = 6;
+    transcript(heard, "a sentence the ASR sat on", {
+      "ts": 6
+    });
+    compare(heard.heard, false, "the hold was timed from the transcript instead of the turn");
+  }
+
+  function test_a_boundary_from_another_utterance_does_not_time_this_line() {
+    // ears' VAD runs continuously (A4), so the newest boundary on the bus
+    // is often somebody clearing their throat rather than the end of the
+    // sentence being held. `utterance_id` is minted at speech_start and
+    // threaded through both topics precisely so the two can be matched;
+    // unmatched, the transcript times itself, which is what it always did.
+    const heard = makeHeard({
+      "holdS": 5
+    });
+    vad(heard, "speech_end", "some-other-utterance", 0);
+    suite.fakeNow = 6;
+    transcript(heard, "the words that matter", {
+      "ts": 6,
+      "utterance_id": "utt-1"
+    });
+    compare(heard.heard, true, "a stranger's boundary expired this line");
+    compare(heard.text, "the words that matter");
+  }
+
+  function test_a_speech_start_is_not_the_end_of_an_utterance() {
+    // Same id, wrong edge: a speech_start is where the utterance BEGAN, and
+    // timing the hold from it would subtract the length of the sentence as
+    // well as the ASR — a long question would arrive already expired.
+    const heard = makeHeard({
+      "holdS": 5
+    });
+    vad(heard, "speech_start", "utt-1", 0);
+    suite.fakeNow = 6;
+    transcript(heard, "a question that took a while to ask", {
+      "ts": 6
+    });
+    compare(heard.heard, true, "the opening of the utterance was read as its end");
+  }
+
+  function test_a_boundary_newer_than_the_words_is_refused() {
+    // A speech_end stamped AFTER the final it supposedly preceded is a pair
+    // that cannot be ordered — a late or replayed transcript, a publisher
+    // that restarted. Anchoring to the later of the two would LENGTHEN the
+    // hold, which is the one direction this window may not err in: the words
+    // would outlive the "THINKING" above them again, which is the whole
+    // complaint A57 was about. So the line times itself, as it always did.
+    const heard = makeHeard({
+      "holdS": 5
+    });
+    vad(heard, "speech_end", "utt-1", 6);
+    transcript(heard, "a final older than the boundary above it", {
+      "ts": 0
+    });
+    compare(heard.heard, false, "a boundary newer than the words bought this line more time");
+  }
+
+  function test_a_boundary_that_arrives_late_still_shortens_the_hold() {
+    // jv-ears publishes the boundary before it transcribes, so this is the
+    // order nothing on this machine produces — and the hold is re-armed on
+    // it anyway, because the anchor is a property and not a reading taken
+    // once. It can only ever shorten: by the rule above, a boundary this
+    // element will use is older than the words, so what is LEFT of the
+    // window can only be less than what the transcript alone would claim.
+    const heard = makeHeard({
+      "holdS": 5
+    });
+    transcript(heard, "words whose turn began six seconds ago", {
+      "ts": 6
+    });
+    compare(heard.heard, true, "a fresh final is a fresh final");
+    vad(heard, "speech_end", "utt-1", 0);
+    compare(heard.heard, false, "the boundary arrived and nothing re-timed the hold");
+  }
+
+  function test_a_boundary_that_doubts_itself_is_not_an_anchor() {
+    // `audio.vad` is a boundary topic: jv-ears stamps conf 1.0 because a
+    // segment either ended or it did not. A frame claiming less disagrees
+    // with its own schema, and expiring a sentence early on the strength of
+    // one would be invariant 4 read backwards. SpeechState refuses the same
+    // frame for the same reason.
+    const heard = makeHeard({
+      "holdS": 5
+    });
+    vad(heard, "speech_end", "utt-1", 0, 0.5);
+    suite.fakeNow = 6;
+    transcript(heard, "the words a doubtful boundary would have expired", {
+      "ts": 6
+    });
+    compare(heard.heard, true, "a boundary that contradicts its own topic timed this line");
+  }
+
+  function test_a_boundary_from_a_bus_we_lost_does_not_time_the_next_turn() {
+    // Every other memory in this file is dropped when the link goes down,
+    // and this one has to go with them: a boundary latched off a bus we can
+    // no longer see describes a turn we can no longer see, and keeping it
+    // would expire the FIRST line of the next session against it.
+    const heard = makeHeard({
+      "holdS": 5
+    });
+    vad(heard, "speech_end", "utt-1", 0);
+    heard.bus.ingest('{"t":"link","up":false,"err":"bridge died"}');
+    heard.bus.ingest('{"t":"link","up":true}');
+    suite.fakeNow = 6;
+    transcript(heard, "the first thing said after the bus came back", {
+      "ts": 6
+    });
+    compare(heard.heard, true, "a boundary outlived the link it arrived on");
+  }
+
+  function test_the_words_never_outlive_the_thinking_word_beside_them() {
+    // A57 as the reader experiences it, with both elements on one bus and
+    // real timers. The two windows are pinned equal by a tools gate, but
+    // equal lengths are not one window unless they are timed from the same
+    // instant — and before this they were not, so the transcript sat on
+    // screen alone for the length of the ASR, with nothing above it saying
+    // why it was still there.
+    const bus = spawn(busModel);
+    suite.fakeNow = 0;
+    bus.monotonic = () => suite.fakeNow;
+    bus.ingest('{"t":"link","up":true}');
+    const heard = spawn(heardState);
+    const voice = spawn(speechState);
+    heard.bus = bus;
+    voice.bus = bus;
+    // Short and equal, the way the shipped pair is equal. Real time passes
+    // here: these are Timers, and a test that only wound the fake clock
+    // would pass whether or not either was ever armed.
+    heard.holdS = 0.5;
+    voice.thinkWindowS = 0.5;
+
+    wake(heard, 0);
+    vad(heard, "speech_end", "utt-1", 0);
+    compare(voice.state, "thinking", "a closing wake-gated utterance is a question in flight");
+    // 400 ms of faster-whisper, which is an ordinary number on this machine.
+    suite.fakeNow = 0.4;
+    transcript(heard, "what is the weather like", {
+      "ts": 0.4
+    });
+    compare(heard.heard, true);
+
+    tryCompare(heard, "heard", false, 2000, "a line nobody answered cannot stay up forever");
+    compare(voice.state, "thinking", "the words outlived the word above them");
+    tryCompare(voice, "state", "unknown", 2000, "the thinking window has to close too");
   }
 
   // --- frames we will not read -----------------------------------------

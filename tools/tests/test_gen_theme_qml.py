@@ -753,6 +753,16 @@ def test_the_heard_line_and_the_thinking_word_time_out_together():
     belongs to, words with nothing left saying they are still live. The
     other direction is merely odd — "THINKING" with nothing under it — and
     equality is the only relation that catches a retune of either.
+
+    Equal lengths are only half the rule, and this gate only ever checked
+    that half. Two equal windows started at different instants are not one
+    window: until A57 this one was timed from the transcript, which lands
+    however long the ASR took after the `audio.vad speech_end` SpeechState
+    times its own from, so the words outlived the word above them by exactly
+    that much. The other half — both windows anchored to the same frame —
+    is a behaviour and is proved where behaviour can be: HeardState's
+    `anchor`, under tst_heardstate.qml, which pairs the two real elements on
+    one bus and fails if the line outlives the "THINKING".
     """
     core = ROOT / "shell" / "jv-hud" / "core"
     windows = {}

@@ -9,7 +9,7 @@ fakes sensor state (invariant 10).
 `shell.qml` maps one layer-shell surface per connected monitor, and that
 surface is **unmapped unless an element has something true to draw** — the
 default state of the screen is your work and nothing else, and an unmapped
-surface renders at 0 fps. Today it stacks eight plates in the top-right
+surface renders at 0 fps. Today it stacks nine plates in the top-right
 corner, in this order:
 
 | plate | draws while | topic |
@@ -18,8 +18,9 @@ corner, in this order:
 | `ConfirmPlate` (A20) | jv-act is waiting on your yes or no | `action.confirm` |
 | `StatePlate` (A3) | Jarvis is listening, thinking, speaking or was interrupted | `speech.state` + `audio.wake` + `brain.*` |
 | `OutputPlate` (A40/A41) | Jarvis is speaking into a sink you cannot hear | `speech.state` + `context.system` + `sys.health` (jv-voice) |
-| `HeardPlate` (A26) | your words are still the live question | `audio.transcript` |
+| `HeardPlate` (A26) | your words are still the live question | `audio.transcript` (+ `audio.vad` for the window, A57) |
 | `ActionPlate` (A37) | the last thing Jarvis did to the machine failed | `intent.action` + `action.result` |
+| `GuardPlate` (A51) | this machine refused to run a program | `guard.verdict` |
 | `MicPlate` (A4) | the microphone is actually open | `sys.health` (jv-ears) |
 | `HealthPlate` (A6) | some service is not well | `sys.health` |
 
@@ -27,7 +28,7 @@ Every one of them reads the bus and nothing else, several take jv-ears' own
 tuning from `core/EarsBudgets.qml` (A14) rather than mirroring it, and every
 one of them draws NOTHING until it has something true to say — which is why
 the ordinary state of this HUD is an unmapped surface. `docs/hud/` is a
-contact sheet of all eight, at the surface's real size.
+contact sheet of all nine, at the surface's real size.
 
 The skeleton pins the properties that make the HUD safe by construction,
 and `tools/tests/test_gen_theme_qml.py` fails the build if any of them is
