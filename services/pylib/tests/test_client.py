@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from jarvis_bus import BusClient, BusError
-from jarvis_bus.client import DEFAULT_UNIX, MAX_FRAME, default_addr
+from jarvis_bus.client import DEFAULT_TCP, DEFAULT_UNIX, MAX_FRAME, default_addr
 from jarvis_bus.schema import AudioWake, from_body, to_body
 
 REPO = Path(__file__).resolve().parents[3]
@@ -285,3 +285,123 @@ def test_jarvis_bus_in_the_environment_chooses_the_address(monkeypatch):
     assert default_addr() == DEFAULT_UNIX
     monkeypatch.delenv("JARVIS_BUS")
     assert default_addr() == DEFAULT_UNIX
+
+
+# --- the two rules every reader assumes and nobody wrote down (PLAN B61) -----
+#
+# B59 graded the envelope, B60 graded the codec, and both named the same two
+# claims in this file and left them: `next_event` collapses a TRUNCATED frame
+# into EOF, and `connect` decides unix-vs-TCP by a rule that is not the one a
+# reader would guess. Neither is fixed here. These tests PIN TODAY'S
+# BEHAVIOUR so that changing either is a deliberate edit visible in a diff,
+# rather than a quiet difference between what the code does and what every
+# caller believes — and so that the decision about what the behaviour SHOULD
+# be can be made on purpose by whoever makes it.
+
+
+async def test_a_truncated_length_prefix_reads_as_the_end_of_the_stream():
+    """PIN, not an endorsement. Every consumer in this repo treats a None
+    from `next_frame` as "the bus is gone" and leaves its loop —
+    jv-ears' `follow_bus` returns, jv-brain's run loop breaks, jv-guard's
+    and jv-compat's the same. `next_event` gives them that same None for a
+    head that arrived short, which on a real socket means the broker is
+    MID-WRITE and still there. So the one condition that should not trigger
+    a reconnect is spelled exactly like the one that must.
+
+    The control is the first half: a clean EOF is None. The claim is that
+    the truncated read is not distinguishable from it.
+    """
+    clean = asyncio.StreamReader()
+    clean.feed_eof()
+    assert await BusClient(clean, None, "t-eof").next_event() is None
+
+    torn = asyncio.StreamReader()
+    torn.feed_data(b"\x00\x00")  # two bytes of a four-byte prefix
+    torn.feed_eof()
+    assert await BusClient(torn, None, "t-torn-head").next_event() is None, (
+        "a short head stopped reading as EOF — if that is deliberate, this "
+        "test moves in the same commit as the rule"
+    )
+
+
+async def test_a_frame_whose_body_arrives_short_reads_as_the_end_of_the_stream():
+    """PIN, not an endorsement. The second half of the same collapse, and
+    the worse half: the prefix said 64 bytes, 8 arrived, and the reader
+    has already proved a frame was BEGUN. That is the strongest possible
+    evidence the other end is alive, and it is reported as the other end
+    being gone.
+    """
+    torn = asyncio.StreamReader()
+    torn.feed_data((64).to_bytes(4, "big") + b"12345678")
+    torn.feed_eof()
+    assert await BusClient(torn, None, "t-torn-body").next_event() is None
+
+
+async def test_the_collapse_reaches_consumers_through_next_frame():
+    """`next_event` is internal; `next_frame` is what eight services call.
+    It passes the None straight up, so the truncation is indistinguishable
+    from EOF at the layer where the reconnect decision is actually made.
+    Pinned separately because a fix could land in either method.
+    """
+    torn = asyncio.StreamReader()
+    torn.feed_data((64).to_bytes(4, "big") + b"12345678")
+    torn.feed_eof()
+    assert await BusClient(torn, None, "t-torn-frame").next_frame() is None
+
+
+async def test_which_transport_each_address_dials(monkeypatch):
+    """PIN, not an endorsement. `connect`'s rule is `":" in addr and not
+    addr.startswith("/")` — it asks whether the address is ABSOLUTE, not
+    whether it is a path, so an absolute socket path containing a colon is
+    a unix socket and a RELATIVE one is a hostname. No address in this repo
+    is relative, so it cannot bite today; the replay rig is the one thing
+    here that invents socket paths.
+
+    Nothing dials: both openers are replaced, so this is a test about the
+    decision and not about anything listening.
+    """
+    dialed: List[Any] = []
+
+    async def fake_tcp(host, port):
+        dialed.append(("tcp", host, port))
+        return None, None
+
+    async def fake_unix(path):
+        dialed.append(("unix", path))
+        return None, None
+
+    monkeypatch.setattr(asyncio, "open_connection", fake_tcp)
+    monkeypatch.setattr(asyncio, "open_unix_connection", fake_unix)
+
+    cases = [
+        (DEFAULT_UNIX, ("unix", DEFAULT_UNIX)),
+        (DEFAULT_TCP, ("tcp", "127.0.0.1", 7451)),
+        ("localhost:7451", ("tcp", "localhost", 7451)),
+        ("/tmp/replay:1.sock", ("unix", "/tmp/replay:1.sock")),  # absolute: a path
+        ("run/replay:2", ("tcp", "run/replay", 2)),  # relative: a HOSTNAME today
+        ("bus.sock", ("unix", "bus.sock")),  # relative, no colon: a path
+    ]
+    for addr, expected in cases:
+        dialed.clear()
+        await BusClient.connect(addr, src="t-addr")
+        assert dialed == [expected], f"{addr!r} dialed {dialed[0]} not {expected}"
+
+
+async def test_a_relative_socket_path_with_a_colon_fails_before_it_dials(monkeypatch):
+    """PIN, not an endorsement — and the shape the rule's cost really
+    takes. A relative path whose colon is not followed by digits does not
+    dial the wrong thing and time out; `int(port)` raises ValueError out of
+    `connect`, so the caller sees a number-parsing error while holding what
+    it believes is a filename. Pinned because the obvious "fix" ("/" not in
+    addr) would make this an ordinary unix connection, and that change
+    should be a choice.
+    """
+
+    async def refuse(*a, **k):  # pragma: no cover — nothing should dial
+        raise AssertionError("connect dialed something")
+
+    monkeypatch.setattr(asyncio, "open_connection", refuse)
+    monkeypatch.setattr(asyncio, "open_unix_connection", refuse)
+
+    with pytest.raises(ValueError):
+        await BusClient.connect("run/jarvis:bus.sock", src="t-rel")
