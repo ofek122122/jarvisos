@@ -1543,19 +1543,23 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       including both original bugs re-introduced. Tests:
       `bash ops/ralph/runtests.sh jv-compat`.)
 
-- [ ] B64. `--new-session`, `--unshare-ipc` and `--unshare-uts` belong in
-      that argv and are not in it, deliberately: none can be OBSERVED from
-      inside the sandbox by the suite B63 just built. `--new-session` is
-      bubblewrap's own answer to TIOCSTI terminal injection and needs a pty
-      to test, which matters here because `jv-compat install` is a CLI a
-      human runs FROM a terminal (`main.py`), not only a systemd unit;
-      `--unshare-ipc` shows up as an empty `/proc/sysvipc/shm`, which is
-      only evidence on a host that has a segment; `--unshare-uts` changes
-      nothing observable without writing to the namespace. The whole point
-      of B63 is that this file had just finished paying for claims nobody
-      ran, so each of these lands WITH the thing that watches it or not at
-      all. A pty fixture would answer the first and is the one worth
-      building. Discovered in B63.
+- [x] B64. `--new-session`, `--unshare-ipc` and `--unshare-uts` are in the
+      argv, each with the instrument that watches it. — 8b5efc9
+      (`--new-session`: `sh_on_a_tty` opens a pty and the child `setsid()`s
+      and claims it with TIOCSCTTY before bwrap starts, so the terminal is
+      really the confined process's controlling one; with the flag removed
+      the sandbox writes INJECTED-FROM-THE-SANDBOX and the bytes reach the
+      terminal, with it `/dev/tty` is ENXIO. `legacy_tiocsti` is 0 on this
+      kernel and is a host setting this repo does not own, so the door is
+      measured, not that one burglar. `--unshare-ipc`: the suite MAKES the
+      SysV segment it looks for via ctypes `shmget`, which is what dissolves
+      the host-dependence B63 named. `--unshare-uts` carries `--hostname`:
+      every prefix is told the machine is `jarvis-sandbox`, and the test
+      states the premise that the constant is not the real name rather than
+      assuming it. Every claim has a CONTROL — same probe, same argv, that
+      one flag removed — and `without()` asserts the flag was there to begin
+      with. 33 tests, was 27. 8 mutations, 8 caught. Tests:
+      `bash ops/ralph/runtests.sh jv-compat`.)
 
 - [ ] B65. A grant naming a folder the user does not have yet aborts the
       whole install with a bwrap error: `--bind` fails on a missing source.

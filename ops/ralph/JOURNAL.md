@@ -8731,3 +8731,80 @@ is a CLI a human runs FROM a terminal, not only a systemd unit.
   times; **B62** is B61's two decisions; and **B10/A28** — one live
   recording of one spoken turn on ares — remains the biggest thing a human
   can hand this loop.
+
+## 2026-09-25 — iteration 86 — B64: three flags, and the instruments that watch them
+
+B63 ended with a restraint rather than a flourish: `--new-session`,
+`--unshare-ipc` and `--unshare-uts` all belong in the bubblewrap argv and
+none of them went in, because none could be OBSERVED by a suite that runs
+`/bin/sh` with pipes on both ends — and that file had just finished paying
+for a confinement whose claims nobody had ever run. Adding three more
+unwatched flags in the same commit would have been the same mistake with
+better vocabulary. This iteration builds the three instruments and then
+adds the flags.
+
+Every claim below is paired with a **control**: the same probe, the same
+argv, that ONE flag removed by `without()`. This is the part that matters.
+A pty fixture that never really owned a terminal would report "the sandbox
+cannot reach it" no matter what the code did, and a machine with no SysV
+segment would report an empty IPC table for free. `without()` also asserts
+the flag was in the argv to begin with, so it fails loudly the day one is
+deleted.
+
+**`--new-session`.** `sh_on_a_tty` opens a pty and the child calls
+`setsid()` then `TIOCSCTTY` before bwrap starts, so the terminal is
+genuinely the confined process's controlling one — inheriting pytest's
+(which in a headless run is none) is exactly how this test would have
+become a tautology. The control is loud: with the flag removed the
+sandboxed shell runs `echo INJECTED-FROM-THE-SANDBOX > /dev/tty` and the
+bytes arrive at the master. With it, `/dev/tty` is "No such device or
+address". Why this one is not plumbing: `jv-compat install` is a CLI a
+human types into a shell (`main.py`), and the controlling terminal is the
+capability TIOCSTI needs to push a COMMAND into that shell's input, which
+runs after wine exits. `legacy_tiocsti` is 0 on this kernel and is a host
+sysctl this repo does not own, so what gets measured is the door, not that
+one burglar — stated in the test rather than left for a reader to wonder
+about. The flag costs nothing here: `RealRunner` pipes stdout and stderr
+and the install is silent, so nothing inside ever wanted a tty.
+
+**`--unshare-ipc`.** The suite MAKES the thing it looks for — a SysV shared
+memory segment via ctypes `shmget`, removed in the fixture's teardown —
+rather than hoping this host has one. That was the whole reason B63 called
+this flag host-dependent, and creating the evidence dissolves it. The
+segment's id is absent from `/proc/sysvipc/shm` inside the sandbox and
+present with the flag removed.
+
+**`--unshare-uts`**, which on its own changes nothing a shell can read. It
+earns its place by carrying `--hostname`: every prefix is told this
+computer is called `jarvis-sandbox`, not `ares`. That is a real privacy
+gain under invariant 7 — writing down the host is among the first things a
+Windows installer does — and it fits §08's cattle-not-pets: every prefix
+sees the same machine. The test states the premise the claim rests on (the
+constant is not this machine's real name) instead of assuming it, and that
+is precisely what catches the sneaky mutation: a constant quietly computed
+from `os.uname().nodename` reads like hardening and is the leak.
+
+- tests: `bash ops/ralph/runtests.sh jv-compat` **33 (was 27)**, all green.
+- graded with **8 mutations, 8 caught**: each of the three flags deleted;
+  each swapped for a plausible real neighbour (`--as-pid-1`,
+  `--unshare-cgroup`); the constant set to `ares`; the constant computed
+  from the host; and `--hostname` without the namespace that permits it,
+  which bwrap refuses outright and turns 13 tests red.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/jv-compat/jv_compat/prefix.py,
+  services/jv-compat/tests/test_sandbox.py, recipes/README.md
+- commits: 8b5efc9
+- next: **B65** is now the only cheap thing left in jv-compat and it is
+  still free TODAY: a grant naming a folder the user does not have yet
+  aborts the install with a raw bwrap error, the obvious fix (create it) is
+  forbidden by invariant 3, and the three ways out are not equal. No
+  recipes with grants are committed yet, so the decision costs nothing now
+  and costs a recipe later. Otherwise unchanged: **Track A is one human
+  look at `docs/hud/` away from unblocking** A47, A55, A62, A63's picture
+  half, A70 and the A21/A22/A25 cluster; **A56** asks whether the shot
+  suites belong in the build gate; **B27** needs one decision between three
+  named options; **B43/B47/B54** are one question asked three times;
+  **B62** is B61's two decisions; and **B10/A28** — one live recording of
+  one spoken turn on ares — remains the biggest thing a human can hand
+  this loop.
