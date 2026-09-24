@@ -6491,3 +6491,96 @@ longer theoretical: as of today the fork returns a number.
   A38/A39 (a human at ares), B27/B28 share one decision, B30/B33 share
   another, and B10/A28 — one live recording of one spoken turn — is
   still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 64 — B39: the blind rung
+
+**What.** `jv_brain/launcher.py:probe_free_vram_bytes` returned `None` on
+every way it could fail: OSError, a timeout, a non-zero exit, and `int()`
+choking on `[N/A]`. `None` goes straight into `pick_rung`, which reads it
+as "no usable GPU" and pins Jarvis to the CPU rung for the life of that
+llama-server. So a driver hiccup at launch was indistinguishable from a
+machine that never had a card — and unlike B37's jv-context probe, this
+one DECIDES something. The only trace was a line on stderr: nothing on
+the bus, no heartbeat note, `free_vram_mb=-1` written for both.
+
+Three answers now, the shape B37 built:
+
+- **measured** — a number, strictly parsed. `[N/A]`, `[Not Supported]`,
+  NVML init errors arriving on stdout, `nan`/`inf`, negatives, and a
+  number printed alongside a non-zero exit are all rejected. `nan` was
+  the nastiest: `float()` takes it, and it then walks the whole ladder
+  comparing false to every rung budget — indistinguishable from a card
+  with nothing free, which at least lands on the same floor, but by
+  accident.
+- **absent** — no nvidia-smi at all. A fact about the machine, not a
+  fault, and the only silent `None` left.
+- **unreadable** — there IS a driver and it would not answer.
+
+The CPU floor holds for all three; you cannot allocate VRAM you could not
+count, so which rung gets picked does not change. What changes is what
+anyone is allowed to CONCLUDE. The launcher execs into llama-server and
+can never reach the bus, so the rung file is the whole of what it gets to
+say: it now carries `vram=` and, when unreadable, nvidia-smi's own words
+in `vram_note=`. Writer and reader moved in together (`write_rung_file` /
+`read_rung_file`, tested as one pair), jv-brain's `_rung()` became a thin
+call on that, and a blind launch turns its heartbeat **degraded** with the
+reason attached — without erasing a worse note it already carried. A
+GPU-less machine stays `ok`: on a dev box "degraded forever" is noise, and
+"there is no card here" is not an impairment. An old rung file with no
+`vram=` line infers from `free_vram_mb` and can never invent a fault
+nobody observed.
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` — **85 (was 57)**.
+  **Seventeen mutations, all seventeen caught**: any OSError folded back
+  into "no GPU" (the original bug), the exit code ignored, the
+  finite/negative guard dropped, empty output read as `0.0`, a timeout
+  left uncaught, unreadable collapsed into absent, the source word or the
+  reason left out of the rung file, a missing field read as a fault, the
+  note left unflattened, the heartbeat not escalating, the blind note
+  overwriting a real one, the reason never reaching the bus, a GPU-less
+  machine reported degraded, the rung file not written on the blind path,
+  and unreadable allowed to keep a GPU rung.
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change, no jv-act, no boot path, no
+  NVIDIA/kernel/flake pin — `jarvis-services.nix` is read, not written
+  (it already puts the driver on jv-llm's path, which is why this was
+  B37's second half and not B37's bug).
+- **verified through the BUILT closure on ares**, under the jv-llm unit's
+  own `Environment="PATH="`: the shipped `jv-llm-launch` read **943 MiB
+  free of 6144** off the GTX 1660 SUPER, cross-checked against
+  nvidia-smi's own `name,memory.total,memory.free`, and wrote
+  `vram=measured`, rung 4. **That is the case this commit exists for** —
+  ares launches its brain onto the CPU rung right now with a perfectly
+  healthy card, because the desktop and a browser own the VRAM, and until
+  today that outcome was byte-for-byte identical to a probe that failed.
+  The same binary with the driver off PATH wrote `vram=absent`; with a
+  stub answering `[N/A]`, and another printing `5432` then exiting 9, it
+  wrote `vram=unreadable` plus the reason. No exec of llama-server was
+  performed — every run went through the `exec_fn` seam into a tmp dir.
+- files: services/jv-brain/jv_brain/launcher.py,
+  services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_vram_guard.py (new)
+- commit: 05117db
+- next: **B41 or B40 — and B39 just made them the same question.** The
+  bus can now say the brain picked its rung blind, but it still cannot
+  say in WORDS which rung it is on: `llm_rung=4.0` and `llm_gpu=0.0` need
+  the ladder memorised to become "CPU fallback, replies will be slow",
+  and the launcher's own `label=` — the one human-readable string it
+  writes — is read by nobody, though `RungRecord` now has it in reach for
+  free (**B41**, small). **B40** is the same consumer question one step
+  out: `context.system.gpu_vram_free_mb` has been on the bus since B37
+  and nothing reads it, and today's 943 MiB is the argument for a HUD
+  plate — but a plate showing "943 MiB free" without saying the desktop
+  owns the rest reads as a fault when it is the machine working as
+  designed, so that plate needs a sentence, not just a number. **B42** is
+  the small hygiene B39 turned up: the rung file is written
+  non-atomically and jv-brain is only `after=` jv-llm, so the window is
+  real — it fails safe today (a torn read is `index=None`, `vram=absent`,
+  degrading nothing), which is why it is a nicety and not a bug. **B38**
+  is unchanged and still small: jv-ears, jv-guard and jv-brain beat on a
+  timer alone, and `_set_fault` + an Event is the shape to copy. **B36 is
+  a human's** (proposal R8). Otherwise unchanged: A is blocked on
+  A62/A65/A68/A47/A56/A50/A60 (decisions) and A13/A21/A22/A25/A27/A31/
+  A38/A39 (a human at ares), B27/B28 share one decision, B30/B33 share
+  another, and B10/A28 — one live recording of one spoken turn — is still
+  the biggest thing a human can hand this loop.

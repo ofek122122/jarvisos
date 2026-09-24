@@ -800,8 +800,8 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       Tests: `runtests.sh jv-context` 105, was 82; eleven mutations,
       eleven caught.)
 
-- [ ] B39. **jv-brain's VRAM guard has the same probe, with none of the
-      fixes, and it is the one that actually decides.**
+- [x] B39. **jv-brain's VRAM guard has the same probe, with none of the
+      fixes, and it is the one that actually decides.** — 05117db
       `jv_brain/launcher.py:probe_free_vram_bytes` shells out to the same
       nvidia-smi query and returns `None` on EVERY failure — OSError,
       timeout, non-zero exit, and `int()` choking on `[N/A]` — and `None`
@@ -817,6 +817,21 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       strict parse, and "could not read" told apart from "not there".
       Note it runs ONCE per launch, so backlog 14's fork cost does not
       apply and neither does the latch. Discovered in B37.
+      (Three answers now: `measured` / `absent` / `unreadable`. Strict
+      parse rejects `[N/A]`, `[Not Supported]`, NVML init errors on
+      stdout, `nan`/`inf`, negatives, and a number printed alongside a
+      non-zero exit; only a missing nvidia-smi is still a silent None.
+      The CPU floor holds for all three — nothing about rung choice
+      changes — but the rung file now carries `vram=` and, when
+      unreadable, nvidia-smi's own words in `vram_note=`, and jv-brain
+      turns its heartbeat `degraded` with that reason attached (never
+      erasing a worse note; a GPU-less machine stays `ok`). Writer and
+      reader now live together in launcher.py. Verified through the
+      BUILT closure on ares under the jv-llm unit's own PATH: the real
+      card reads 943 MiB free of 6144 and lands on rung 4 — ares is on
+      CPU with a healthy card, which until today was byte-for-byte
+      identical to a failed probe. Tests: `runtests.sh jv-brain` 85, was
+      57; seventeen mutations, seventeen caught.)
 
 - [ ] B40. Nothing reads `context.system.gpu_vram_free_mb`, and as of
       B37 there is finally something to read. The field's own schema
@@ -832,6 +847,38 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       built — a HUD that displays it is the loop's; a brain that reacts
       to it is a scheduling change and pairs with backlog 14. Discovered
       in B37.
+      **Sharpened by B39**: ares measured 943 MiB free again today, so
+      the brain is genuinely launching onto the CPU rung with a healthy
+      6 GB card — the ladder is working exactly as specified and the
+      result is still "no GPU brain". That is the number a HUD plate
+      would be showing, and it is not a fault, so the plate has to say
+      *why* (desktop + browser own the card) or it reads as one.
+
+- [ ] B41. Nothing on the bus ever says WHICH rung the brain is on in
+      words. `sys.health.metrics.llm_rung` is a float and `llm_gpu` a
+      0/1, so a reader has to know the ladder by heart to turn `4.0`
+      into "CPU fallback, replies will be slow" — and the rung file's
+      own `label=` (the one human-readable string the launcher writes)
+      is read by nobody. B39 put the label in `RungRecord`'s reach at
+      zero cost. The consumer question is the same one B40 has: `jv
+      health` is the cheap honest reader, the HUD is the visible one.
+      Discovered in B39.
+
+- [ ] B42. jv-brain's heartbeat re-reads the rung file on every beat
+      (`_rung()` in `_health`, once per 5 s, plus once per turn for
+      `brain.response.backend`). The file is written once, by a process
+      that has already exec'd away, and lives on tmpfs — so it cannot
+      change while llama-server lives, and a service that dies is a
+      service whose file is stale anyway. Not a cost worth chasing on
+      its own (a tmpfs read is nothing next to the 5 s period), but B39
+      made it the read that decides a STATE. A torn read fails SAFE
+      today — a half-written `rung=` raises ValueError and reads as
+      `index=None`, `vram=absent`, which degrades nothing — so this is
+      a nicety, not a bug. But jv-brain is only `after=` jv-llm, which
+      orders starts and not this write, so the window is real and the
+      next reader of this file may not be as forgiving. Worth one look
+      at write-temp-then-rename before anything else depends on it.
+      Discovered in B39.
 
 - [ ] B38. jv-context is now the only service that beats immediately on
       a state change; `schemas/sys.health.json` asks EVERY service for it
