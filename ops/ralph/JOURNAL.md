@@ -7413,3 +7413,119 @@ earning its keep rather than describing itself.
   `docs/hud/` away from unblocking ten items, and **B10/A28** — one live
   recording of one spoken turn on ares — is still the biggest thing a
   human can hand this loop.
+
+## 2026-09-24 — iteration 73 — B51: the runner that can grade a plate, and the two things it found
+
+Track A is where the ladder points and every open item there is still a
+human's (A13/A21/A22/A25/A27/A38/A47/A55/A62/A63/A65/A68 — one look at
+`docs/hud/`, or one decision about an IPC seam) or says "do not build
+before that one is answered". So B51, which iteration 72 raised and
+which is Track A's tooling: `ops/ralph/mutate.sh` could not grade a
+single one of the HUD's ten plates.
+
+**Why it could not.** B49 measured what `--runner qml` covers and the
+answer was `shell/jv-hud/core/` and nothing else: `qmltest.sh` imports
+`"../core"` and never a top-level plate, so a canary on `StatePlate.qml`
+LIVES and the harness refuses the file. The plates ARE exercised, by
+`ops/ralph/hudshots.sh`, which copies the whole shell into a `mktemp`
+stage, substitutes the two Quickshell-bound singletons and drives the
+real plates through `tst_shots.qml` and `tst_sequence.qml`. It was one
+argument away from being a runner.
+
+**What was built.** `--runner shots hud`, the fourth runner. Two things
+had to be solved and both are in the `Language` table rather than in a
+special case: it writes thirteen PNGs and DEFAULTS to `docs/hud/` — the
+committed contact sheet — so `scratch_out` hands it a directory inside
+the run's own scratch, thrown away with the rest of it (the sheet is
+never touched, and the run log naming `/tmp/jv-mutate-*/run001/shots` is
+the proof). And its cost is measured rather than promised: **53 s a
+suite run**, three times `qmltest.sh`'s 14 s, so `main` now prints the
+run count — one baseline, one canary per file, one per mutation, one
+baseline — before the first run starts. A three-mutation grading over
+two files is seven runs and took 265 s.
+
+**The canary means something weaker here, and it was checked rather than
+assumed.** `hudshots.sh` runs `qmllint` over the whole staged shell
+before either driver starts, so an unparseable `***` line is a LINT
+failure: planting one on `StatePlate.qml` exits 255 out of qmllint with
+no driver reached. That is the Rust canary's limit in a third language —
+it proves the file is in the stage, not that anything instantiates it —
+and the docstring says so, pointing at the gate that does make the
+stronger claim (`test_every_plate_in_the_shell_is_lit_in_some_shot`,
+next to the pin that ties `Corner.qml`'s membership and ORDER to
+`shell.qml`'s). What it does catch is a file the stage DROPS, and that
+was run rather than reasoned about: `--runner shots` on
+`shell/jv-hud/shell.qml` aborts with exit 2 after two runs, because the
+stage removes `shell.qml` and `tests/`. Worth saying plainly: **no
+runner in this harness can grade `shell.qml`** — it is the Quickshell
+half no other engine can load — and the abort now says which two files
+those are instead of leaving the reader checking a target that was
+correct.
+
+**What it found on its first honest run: 1 of 3 caught.**
+
+The first survivor is the one worth the iteration. `StatePlate.shown` is
+`root.voice.known && !root.voice.idle`; drop the second half so the
+plate lights while NOTHING is happening, and all thirteen photographs,
+all fifteen tests the two drivers ran and all 585 QML tests came out
+exactly as before. The reason is precise: no recording and no composed shot has
+ever carried a KNOWN idle. jv-voice is in none of the recordings
+(B10/A28), so `unknown` — the HUD unable to see — is covered everywhere
+and `idle` — the machine at rest, which is a different claim and the
+first decision this HUD ever made (A3, §06's earned emptiness) — had
+never reached a plate at all. Closed here, because it is one test: a
+hand-written `speech.state` frame from jv-voice, fresh at its own `ts`,
+and the corner must stay dark. Re-graded through the same runner
+afterwards: **1/1 caught**, 4 runs, 173 s.
+
+The second survivor is reported and not closed. `dotColor` can spend the
+ember on every state that is not idle — the exact opposite of "scarcity
+is the point" — and nothing anywhere notices, because the sheet is
+WRITTEN and never COMPARED. Nothing in this repo asserts what a plate
+says or what colour it says it in; `litNames` asserts which plate is up,
+which is A47's open question one layer further in. Raised as **B52**,
+with the cheap shape noted: A45 already made the PNGs byte-reproducible,
+so comparing a run's output against the committed sheet would turn all
+thirteen into assertions at once.
+
+- tests: `bash ops/ralph/runtests.sh tools` — **199 green, was 190**
+  (9 new: the scratch output dir reaching `hudshots.sh` and never
+  `docs/hud`, only the shots runner asking for one, a fresh unused
+  scratch per run checked while the suite holds it rather than after the
+  run has deleted it, `shots_env` disabling the disk cache the script
+  itself does not set, the suffix guard, the abort naming `--runner
+  shots` when a core canary lives, the abort naming the two files the
+  stage drops, a target the shots runner does not grade, and the run
+  count printed before a 53 s suite starts).
+  **Nine mutations on the new code, nine caught** — the scratch dir not
+  appended (a grading over the committed sheet), every runner asking for
+  one, the shots suffixes opened to `.py`, its target check removed, the
+  QML disk cache left on, both canary hints emptied, the run count short
+  by the closing baseline, and the count computed but never printed.
+  `bash ops/ralph/qmltest.sh` — 585, unchanged, green before and after.
+  `bash ops/ralph/hudshots.sh` — **16, was 15**; the 13 shots came out
+  byte-identical, which is the claim the new test had to leave intact.
+  **Plates, through the new runner: 3 mutations, 1 caught, 2 survived**
+  (both survivors described above), then **1/1** on the re-grade.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change,
+  no jv-act, no boot path, no pins. `shell/jv-hud/` was not modified at
+  all — the only QML edit is one test in `tools/hudshots/scene/`, which
+  is why the sheet is byte-identical and there is no HUD diff to look at.
+- files: tools/mutate.py, tools/tests/test_mutate.py,
+  tools/hudshots/scene/tst_sequence.qml, ops/ralph/mutate.sh,
+  ops/ralph/README.md
+- commit: 9904c46
+- next: **B52** is the sharpest thing left that is the loop's own — the
+  sheet is thirteen pictures nothing compares, and A45 already made them
+  byte-reproducible, so it is a comparison and a decision about where
+  "expected" lives rather than new machinery. **B50** (a suite
+  parameterised on its own constants needs one claim that is not) is
+  still cheap service by service. **A56** matters slightly more now:
+  `hudshots.sh` is a mutation runner and still not in `nix build
+  .#jv-hud`. And the human-sized items have not moved: **B43/B47** are
+  one question asked three times, **A47** is one decision that unblocks
+  **A55** with it, Track A is one look at `docs/hud/` away from
+  unblocking ten items, and **B10/A28** — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this
+  loop, and is now also what would put a real `speech.state idle` in a
+  recording instead of in a hand-written frame.

@@ -1117,24 +1117,62 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       claim re-graded three-of-nine through the controls: 3/3, canary
       dead, that entry stands.)
 
-- [ ] B51. **The fourth runner, and the only one that can grade a
-      plate.** B49 measured what `qmltest.sh` covers and the answer is
-      `shell/jv-hud/core/` — a canary on `StatePlate.qml` LIVED, because
-      the tests import `"../core"` and never a plate. So every QML
-      mutation number ever claimed about a top-level plate through
-      `qmltest.sh` meant nothing, and B49's harness now refuses those
-      rather than grading them immune. The plates ARE exercised:
-      `ops/ralph/hudshots.sh` copies the whole shell into a `mktemp`
-      stage, substitutes the two Quickshell-bound singletons, and drives
-      the real plates through `tst_shots.qml` and `tst_sequence.qml`. It
-      is nearly ready to be a runner — it already gets a fresh
-      `XDG_CACHE_HOME` per run by construction, so the staleness half is
-      free. Two things to solve: it writes PNGs to `docs/hud/` by
-      default and a grading run must NOT (it takes an output dir as
-      `$1`, so the `Language` needs a scratch dir threaded into
-      `command()`), and it is slower than `qmltest.sh` — it realizes
-      fonts and lints the stage every run — so a twelve-run grading
-      wants measuring before it is promised. Discovered in B49.
+- [x] B51. **The fourth runner, and the only one that can grade a
+      plate.** — 9904c46
+      (`--runner shots hud` drives `ops/ralph/hudshots.sh`: the whole
+      shell staged, the two Quickshell singletons substituted, the real
+      plates driven by `tst_shots.qml` and `tst_sequence.qml`. Two things
+      solved, both in the `Language` table: `scratch_out` hands the script
+      an output directory inside the run's own scratch, so a grading never
+      writes over the committed contact sheet; and the cost is MEASURED —
+      53 s a suite run against qmltest.sh's 14 s — so `main` prints the run
+      count (baseline + one canary per file + one per mutation + baseline)
+      before the first one starts. The canary means the RUST thing here and
+      was checked rather than assumed: hudshots.sh lints the stage before
+      either driver runs, so a `***` line dies in qmllint (exit 255, no
+      driver reached) and proves only that the file is IN the stage. What
+      it does catch is a file the stage drops — `--runner shots` on
+      `shell/jv-hud/shell.qml` aborts with exit 2, because the stage
+      removes `shell.qml` and `tests/`, and the abort now names both.
+      **No runner in this harness can grade `shell.qml`**; what it claims
+      is gated by `tools/tests/test_hudshots.py`, which reads it as text.
+      First honest run: 3 plate mutations, 1 caught, 2 survived. One
+      survivor closed here (see A69), one raised as B52. Tests:
+      `bash ops/ralph/runtests.sh tools` 199, nine mutations and nine
+      caught; `bash ops/ralph/hudshots.sh` 16, the 13 shots byte-identical.)
+
+- [x] A69. `idle` — the machine at rest — had never reached a plate.
+      — 9904c46
+      (Found by B51's new runner, not by reading: `StatePlate.shown` is
+      `root.voice.known && !root.voice.idle`, and dropping the second half
+      so the plate lights while NOTHING is happening left all thirteen
+      photographs, all fifteen driver tests and all 585 QML tests exactly
+      as they were. jv-voice appears in no recording (B10/A28), so every
+      dark corner in this repo is dark because the state is UNKNOWN — the
+      HUD unable to see — and `idle`, which is a different claim and the
+      first decision this HUD ever made (A3, §06's earned emptiness), was
+      asserted nowhere above `core/`. Closed with one hand-written frame in
+      `tst_sequence.qml`: a fresh `speech.state idle` from jv-voice, and the
+      corner must stay dark. Re-graded through the same runner: 1/1 caught.
+      The frame is hand-written because it does not exist in any recording,
+      which is one more thing B10/A28 would fix at the source.)
+
+- [ ] B52. The contact sheet is thirteen pictures that nothing compares.
+      B51's second survivor: `StatePlate.dotColor` can spend the ember on
+      every state that is not idle — the exact inversion of §06's "scarcity
+      is the point" — and no suite anywhere notices, because `hudshots.sh`
+      WRITES the PNGs and never reads them back. Nothing in this repo
+      asserts what a plate says or what colour it says it in; `litNames`
+      asserts which plate is UP, which is A47's question one layer further
+      in. The cheap shape exists already: A45 made the shots
+      byte-reproducible, so comparing a run's output against the committed
+      `docs/hud/*.png` would turn all thirteen into assertions at once. The
+      one real decision is where "expected" lives — a driver that writes to
+      `docs/hud` and then compares against it has compared a file to
+      itself, so the comparison has to be against the committed bytes
+      (`git show`, or a second copy), and the refresh workflow has to stay
+      one command. Pixel-level assertions on chosen points are the other
+      option and are narrower but say WHY they failed. Discovered in B51.
 
 - [ ] B50. The canary proves the suite executes the FILE and never the
       LINE, which is the honest meaning of a survivor and also its
