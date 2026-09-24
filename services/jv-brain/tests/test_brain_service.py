@@ -13,7 +13,7 @@ import pytest
 
 from jarvis_bus import BusClient
 from jv_brain.config import BrainConfig
-from jv_brain.service import BrainService, strip_wake_prefix
+from jv_brain.service import HEALTH_PERIOD_S, BrainService, strip_wake_prefix
 from jv_brain.tools import load_tools
 
 REPO = Path(__file__).resolve().parents[3]
@@ -108,8 +108,11 @@ def _tokenize(text: str) -> list[str]:
 
 
 @pytest.fixture
-async def stack(tmp_path):
-    """jarvisd + stub LLM + BrainService, wired together."""
+async def stack(tmp_path, request):
+    """jarvisd + stub LLM + BrainService, wired together.
+
+    Indirectly parametrizable with a heartbeat period, for the tests that
+    are about WHEN jv-brain beats rather than what it says."""
     addr = f"127.0.0.1:{free_port()}"
     proc = subprocess.Popen(
         [str(jarvisd_bin()), "--bus", addr],
@@ -134,7 +137,9 @@ async def stack(tmp_path):
         personality_dir=REPO / "personality",
     )
     svc_bus = await BusClient.connect(addr, src="jv-brain")
-    svc = BrainService(svc_bus, cfg)
+    svc = BrainService(
+        svc_bus, cfg, health_period_s=getattr(request, "param", HEALTH_PERIOD_S)
+    )
     task = asyncio.create_task(svc.run())
     await asyncio.sleep(0.2)
 
@@ -424,3 +429,65 @@ async def test_a_silent_turn_publishes_no_first_say_gauge(stack):
     done = await asyncio.wait_for(drain_until_done(), 10.0)
     assert done["body"]["text"] == "You said: what time is it"
     assert seen == []
+
+
+# --------------------------------------- the period an off-schedule beat owns
+
+
+async def next_health(watcher, timeout=10.0, gauge=False):
+    """The next sys.health frame, and the moment it arrived. With
+    `gauge=True`, the next one carrying `llm_first_say_ms` — i.e. the
+    off-schedule beat a spoken turn publishes."""
+
+    async def inner():
+        while True:
+            frame = await watcher.next_frame()
+            assert frame is not None
+            if frame["topic"] != "sys.health":
+                continue
+            if not gauge or first_say_gauge(frame) is not None:
+                return frame, asyncio.get_running_loop().time()
+
+    return await asyncio.wait_for(inner(), timeout)
+
+
+@pytest.mark.parametrize("stack", [1.6], indirect=True)
+async def test_the_first_say_beat_owns_the_period_it_lands_in(stack):
+    """jv-brain publishes a heartbeat the instant the first word of a turn
+    goes out, and one the instant the LLM errors — both right, and both
+    used to leave the period timer alone. Two costs. The `degraded` a dead
+    llama-server reports was erased by the next periodic `ok` after
+    whatever was left of the period it interrupted, which near the
+    boundary is nothing: `bus.latest()` keeps one frame per publisher, so
+    the HUD and `jv health --check` read the erasure and never the report.
+    And on an ordinary busy machine the gauge beat ADDED a frame per turn
+    to a topic meant to be quiet (invariant 5), instead of being the beat.
+
+    The off-schedule beat is this period's beat now. Asserted as a gap
+    rather than a silence, because a heartbeat that stopped would pass a
+    silence.
+    """
+    addr, stub, watcher = stack
+    period = 1.6
+    await watcher.subscribe(["sys.health"])
+
+    first, at_first = await next_health(watcher)
+    assert first["body"]["period_s"] == period  # the body declares what is enforced
+
+    await asyncio.sleep(period * 0.6)
+    await watcher.publish(
+        "audio.transcript",
+        {"kind": "final", "utterance_id": "utt-p", "text": "Hey Jarvis, hello",
+         "lang": "en"},
+        conf=0.9,
+    )
+    gauge, at_gauge = await next_health(watcher, gauge=True)
+    # A turn slower than the period would make the rest of this measure
+    # nothing and still pass.
+    assert at_gauge - at_first < period, "the turn outran the period it was to land in"
+
+    nxt, at_next = await next_health(watcher, timeout=period * 3)
+    assert at_next - at_gauge >= period * 0.6, (
+        f"the beat after the turn came {at_next - at_gauge:.3f}s later, "
+        f"on the schedule that turn's beat should have taken over"
+    )

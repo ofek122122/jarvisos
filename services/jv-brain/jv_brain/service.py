@@ -21,7 +21,7 @@ from typing import Optional
 
 import httpx
 
-from jarvis_bus import BusClient
+from jarvis_bus import BusClient, HealthBeat
 
 from . import onboarding
 from .config import BrainConfig
@@ -326,9 +326,20 @@ class Conversation:
 
 
 class BrainService:
-    def __init__(self, bus: BusClient, cfg: BrainConfig) -> None:
+    def __init__(
+        self,
+        bus: BusClient,
+        cfg: BrainConfig,
+        health_period_s: float = HEALTH_PERIOD_S,
+    ) -> None:
         self.bus = bus
         self.cfg = cfg
+        # Every beat goes through this — the periodic one, the `degraded` an
+        # LLM error raises, and the gauge one the first word of a turn
+        # publishes — so an off-schedule beat gets a whole period on the bus
+        # instead of whatever was left of the one it interrupted, and costs
+        # a frame instead of adding one. See jarvis_bus.health.
+        self._beats = HealthBeat(health_period_s)
         self.profile = Profile.load()
         self.system_template = self._load_system_template()
         self.conversations: dict[str, Conversation] = {}
@@ -860,6 +871,7 @@ class BrainService:
         await self._health()
 
     async def _health(self, state: str = "ok", notes: Optional[str] = None) -> None:
+        self._beats.beat()  # before the publish, not after
         rec = self._rung()
         if (finding := rung_finding(rec)) is not None:
             # The rung, in words, and only when the words are a finding.
@@ -872,7 +884,7 @@ class BrainService:
             "service": "jv-brain",
             "state": state,
             "uptime_s": time.monotonic() - self._started,
-            "period_s": HEALTH_PERIOD_S,
+            "period_s": self._beats.period_s,
         }
         metrics: dict = {}
         if rec.index is not None:
@@ -928,11 +940,9 @@ class BrainService:
         warmup = asyncio.create_task(self._warmup())
         inputs: asyncio.Queue = asyncio.Queue()
         worker = asyncio.create_task(self._input_worker(inputs))
-        health_at = time.monotonic()
         try:
             while True:
-                if time.monotonic() - health_at >= HEALTH_PERIOD_S:
-                    health_at = time.monotonic()
+                if self._beats.due:
                     await self._health()
                 try:
                     frame = await asyncio.wait_for(self.bus.next_frame(), timeout=0.1)

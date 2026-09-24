@@ -36,5 +36,11 @@ fi
 # jarvisd binary for tests that spawn the real broker
 export JARVISD_BIN="${JARVISD_BIN:-$(nix build "$root#jarvisd" --no-link --print-out-paths 2>/dev/null)/bin/jarvisd}"
 
+# Every jv-* service imports jarvis_bus, and until now it imported the one in
+# the nix store: `python -m pytest` puts the CWD first, which is the service's
+# own dir, so a worktree change to services/pylib was invisible to every suite
+# but pylib's own. A gate that tests the tree must test the tree it has.
+export PYTHONPATH="$root/services/pylib${PYTHONPATH:+:$PYTHONPATH}"
+
 cd "$testdir"
 exec "$venv/bin/python" -m pytest tests -q

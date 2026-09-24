@@ -25,7 +25,7 @@ import time
 from collections import deque
 from typing import Optional
 
-from jarvis_bus import BusClient
+from jarvis_bus import BusClient, HealthBeat
 
 from .player import Player
 from .tts import Synthesizer
@@ -50,7 +50,13 @@ DROPPED_GROUPS = 8
 
 
 class VoiceService:
-    def __init__(self, bus: BusClient, synth: Synthesizer, player: Player) -> None:
+    def __init__(
+        self,
+        bus: BusClient,
+        synth: Synthesizer,
+        player: Player,
+        health_period_s: float = HEALTH_PERIOD_S,
+    ) -> None:
         self.bus = bus
         self.synth = synth
         self.player = player
@@ -65,6 +71,11 @@ class VoiceService:
         self._dropped: deque[str] = deque(maxlen=DROPPED_GROUPS)
         self._wake_task: Optional[asyncio.Task] = None
         self._started = time.monotonic()
+        # Every beat goes through this — the periodic one and the degraded
+        # one a failed utterance publishes — so a fault report gets a whole
+        # period on the bus instead of whatever was left of the one it
+        # interrupted. See jarvis_bus.health.
+        self._beats = HealthBeat(health_period_s)
 
     def _health(self, state: str, notes: Optional[str] = None) -> dict:
         """One heartbeat body. `output_device_pinned` rides every one of
@@ -80,12 +91,20 @@ class VoiceService:
             "service": "jv-voice",
             "state": state,
             "uptime_s": time.monotonic() - self._started,
-            "period_s": HEALTH_PERIOD_S,
+            "period_s": self._beats.period_s,
             "metrics": {"output_device_pinned": 1.0 if self.player.output_device_pinned else 0.0},
         }
         if notes is not None:
             body["notes"] = notes
         return body
+
+    async def _beat(self, state: str, notes: Optional[str] = None) -> None:
+        """Publish one heartbeat. The ONLY way jv-voice beats, so that both
+        kinds — the periodic one and the degraded one a failed utterance
+        raises — go through the same clock. The stamp is taken before the
+        publish, not after: see jarvis_bus.health."""
+        self._beats.beat()
+        await self.bus.publish("sys.health", self._health(state, notes))
 
     async def _state(self, state: str, say_id: Optional[str] = None, reason: Optional[str] = None) -> None:
         body: dict = {"state": state}
@@ -179,10 +198,7 @@ class VoiceService:
             return False
         except Exception as exc:  # noqa: BLE001 - report, stay alive
             await self._state("idle", say_id, "error")
-            await self.bus.publish(
-                "sys.health",
-                self._health("degraded", f"synthesis/playback error: {exc}"),
-            )
+            await self._beat("degraded", f"synthesis/playback error: {exc}")
             return False
 
     async def _next_in_turn(self, spoken: dict) -> Optional[dict]:
@@ -223,12 +239,9 @@ class VoiceService:
         await self.bus.subscribe(["speech.say", "audio.wake"])
         await self._state("idle")
         speak_task: Optional[asyncio.Task] = None
-        health_at = 0.0
         while True:
-            now = time.monotonic()
-            if now - health_at >= HEALTH_PERIOD_S:
-                health_at = now
-                await self.bus.publish("sys.health", self._health("ok"))
+            if self._beats.due:
+                await self._beat("ok")
             if speak_task and speak_task.done():
                 speak_task = None
             if speak_task is None and self._queue:

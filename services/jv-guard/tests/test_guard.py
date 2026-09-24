@@ -219,3 +219,71 @@ async def test_guard_stays_silent_when_only_the_shape_engine_ran(bus_addr, tmp_p
     task.cancel()
     await svc_bus.close()
     await watcher.close()
+
+
+# --------------------------------------- the period an off-schedule beat owns
+
+async def next_health(watcher, timeout=5.0, state=None):
+    """The next sys.health frame (of `state`, if given), and the moment it
+    arrived. Skipping to a state rather than asserting the next one is it
+    is deliberate: what this section is about is the beat AFTER the fault,
+    and a test that could not reach the fault would say nothing about it."""
+
+    async def inner():
+        while True:
+            frame = await watcher.next_frame()
+            assert frame is not None
+            if frame["topic"] == "sys.health":
+                if state is None or frame["body"].get("state") == state:
+                    return frame, asyncio.get_running_loop().time()
+
+    return await asyncio.wait_for(inner(), timeout)
+
+
+async def test_the_degraded_beat_owns_the_period_it_lands_in(bus_addr, tmp_path):
+    """jv-guard beats `degraded` the instant a scan finds no engine, which
+    is right — and then left its period timer alone, so the `ok` that
+    erases that report went out with whatever was left on the old timer.
+    Land the fault three quarters of the way through a period and the
+    report had a quarter of one to live; land it at the boundary and it
+    had none. `bus.latest()` keeps one frame per publisher, so that is an
+    outage the HUD and `jv health --check` can both miss entirely.
+
+    The beat is the schedule now: the next one is a full period after the
+    fault, not after the beat the fault interrupted. Asserted as a gap and
+    not as a silence, because a heartbeat that stopped would pass that.
+    """
+    f = tmp_path / "app.exe"
+    f.write_bytes(b"MZ payload")
+    period = 1.2
+    watcher = await BusClient.connect(bus_addr, src="t")
+    await watcher.subscribe(["sys.health"])
+    svc_bus = await BusClient.connect(bus_addr, src="jv-guard")
+    svc = GuardService(svc_bus, [MockScanner(broken=True)], health_period_s=period)
+    task = asyncio.create_task(svc.run())
+
+    first, at_first = await next_health(watcher)
+    assert first["body"]["period_s"] == period  # the body declares what is enforced
+    assert first["body"]["state"] == "ok"
+
+    # Three quarters of the way through the period the startup beat began.
+    await asyncio.sleep(period * 0.75)
+    await watcher.publish(
+        "compat.install",
+        {"event": "fingerprinted", "app": "app", "sha256": sha256_file(f), "path": str(f)},
+    )
+    fault, at_fault = await next_health(watcher, state="degraded")
+    # A fault that arrived after the beat it was supposed to interrupt would
+    # make the rest of this test measure nothing and still pass.
+    assert at_fault - at_first < period, "the scan outran the period it was to land in"
+
+    nxt, at_next = await next_health(watcher, timeout=period * 3)
+    assert nxt["body"]["state"] == "ok"  # it does come back, this is not a latch
+    assert at_next - at_fault >= period * 0.6, (
+        f"the beat after the fault came {at_next - at_fault:.3f}s later, "
+        f"on the schedule the fault should have taken over"
+    )
+
+    task.cancel()
+    await svc_bus.close()
+    await watcher.close()

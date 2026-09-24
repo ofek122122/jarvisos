@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from jarvis_bus import BusClient
+from jarvis_bus import BusClient, HealthBeat
 
 from .scan import Scanner, decide, sha256_file
 
@@ -17,10 +17,20 @@ HEALTH_PERIOD_S = 5.0
 
 
 class GuardService:
-    def __init__(self, bus: BusClient, scanners: Sequence[Scanner]) -> None:
+    def __init__(
+        self,
+        bus: BusClient,
+        scanners: Sequence[Scanner],
+        health_period_s: float = HEALTH_PERIOD_S,
+    ) -> None:
         self.bus = bus
         self.scanners = scanners
         self._started = time.monotonic()
+        # Every beat goes through this — the periodic one and the degraded
+        # one a failed scan publishes — so a fault report gets a whole
+        # period on the bus instead of whatever was left of the one it
+        # interrupted. See jarvis_bus.health.
+        self._beats = HealthBeat(health_period_s)
 
     async def _screen(self, path_str: str, claimed_sha: str) -> None:
         path = Path(path_str)
@@ -75,11 +85,12 @@ class GuardService:
         )
 
     async def _health(self, state: str = "ok", notes: str | None = None) -> None:
+        self._beats.beat()  # before the publish, not after
         body: dict = {
             "service": "jv-guard",
             "state": state,
             "uptime_s": time.monotonic() - self._started,
-            "period_s": HEALTH_PERIOD_S,
+            "period_s": self._beats.period_s,
         }
         if notes:
             body["notes"] = notes
@@ -88,10 +99,8 @@ class GuardService:
     async def run(self) -> None:
         await self.bus.subscribe(["compat.install"])
         await self._health()
-        health_at = time.monotonic()
         while True:
-            if time.monotonic() - health_at >= HEALTH_PERIOD_S:
-                health_at = time.monotonic()
+            if self._beats.due:
                 await self._health()
             try:
                 frame = await asyncio.wait_for(self.bus.next_frame(), timeout=0.1)
