@@ -7094,3 +7094,89 @@ once for all three. jv-voice is the one service still unread for this.
   (A13/A21/A22/A25/A27 are all one human look at `docs/hud/`) and
   **B10/A28** — one live recording of one spoken turn on ares — remains
   the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 70 — B42: the rung file written in one move
+
+Track A is where the ladder points, and every open A item is either a
+human's to answer (A13/A21/A22/A25/A27/A38/A62/A65/A68 — one look at
+`docs/hud/`) or explicitly "do not build until that one is". So: the
+B track's smallest complete thing, and the one B41 had already turned
+from a nicety into a state.
+
+**What this file is.** `jv-llm-launch` measures free VRAM, walks the
+ladder, writes `/run/jarvis-llm/rung`, and then `execvp`s into
+llama-server. That exec is the whole reason the file exists: the
+process that knows which rung was picked is GONE a microsecond later,
+so anything it learned that nobody can re-derive is either in that file
+or lost. jv-brain re-reads it on every 5 s heartbeat — and since B39/B41
+what it reads decides a published STATE (`degraded` + `rung 4 (CPU
+fallback)`), not just the `llm_rung` gauge it used to be.
+
+**The window was real.** `path.write_text()` is open-truncate-write, so
+there is an instant in which the file exists and is empty or half a
+record. jv-brain is only `after=` jv-llm, which orders STARTS and not
+this write, and a restarted llama-server rewrites it under a running
+brain. A torn read fails safe in the parser (`ValueError` → `index=None`)
+— but "safe" now means the heartbeat says `ok` about a brain that may
+be crawling on the CPU at 2 tokens/s, which is the sensor-truthfulness
+failure invariant 10 exists against, arriving through the one topic
+meant to catch it. `os.replace` closes it: a pid-stamped temp file
+beside the target, then one rename. The reader gets the last whole
+record or this one, and never the seam between them.
+
+**The half I did not go looking for.** Writing the mode down turned up a
+live bug, not a tidiness: the file's permissions were whatever the
+launcher's umask made them. jv-llm writes it, jv-brain reads it — two
+users, one group (`jarvis`), inside a 0750 `RuntimeDirectory` — so the
+GROUP read bit is the entirety of the reader's access. systemd's default
+umask is 0022 and today's 0644 works; a `UMask=0077` added to `harden`
+one day (an obviously-correct hardening line) would hand jv-brain a file
+it cannot open, and the failure is invisible by construction: an
+unreadable file is caught as `OSError` and reads as "llama-server has
+told me nothing", which is `ok` about a CPU brain — the exact same
+silent direction as the torn read. `RUNG_FILE_MODE = 0o640`, fchmod'd on
+the fd rather than passed to `O_CREAT` (that mode is umask'd too). The
+world-read bit is dropped because a 0750 directory already made it
+unreachable, so it was never access anyone had.
+
+**No fsync, on purpose.** /run is tmpfs. A record that survived the
+reboot which emptied it would be a claim about an llama-server that no
+longer exists; durability is the opposite of what this file wants, and
+the docstring says so where the next reader will look.
+
+**The iteration's other finding, which cost more than the change did.**
+The loop's mutation practice — rewrite the source, re-run pytest, expect
+red — can silently grade UNMUTATED code. CPython validates a cached
+`.pyc` on (mtime *seconds*, size), so an equal-length edit written
+inside the same second as the one before it reuses stale bytecode: the
+run passes because the mutant never executed. It showed up as one
+mutation "surviving" and then a full-suite failure on a RESTORED file
+that was still running the mutant's bytecode — the honest tell, and the
+reason this is written down rather than shrugged off. `python -B` plus
+clearing `__pycache__` fixes it and every number below was measured that
+way. Raised as **B48**, including that pre-iteration-70 equal-length
+mutations in this journal were measured without it.
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` — **114 green, was 109**
+  (5 new: the whole previous record still readable at the instant of the
+  rename, a failed write leaving the old record and no litter, a
+  finished write leaving exactly one file, two overlapping writers each
+  landing whole, and the group-readable mode measured under a 0077
+  umask). **Six mutations, six caught**: `write_text` back, the fchmod
+  dropped, the temp left behind on failure, the temp not pid-stamped,
+  the write aimed at the target itself, the mode down to 0600. One
+  survivor ON PURPOSE — 0644 is indistinguishable from 0640 behind a
+  0750 directory, so no test claims the other-read bit and none should.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change,
+  no jv-act, no boot path, no pins, no QML (so no HUD shots to re-take).
+- files: services/jv-brain/jv_brain/launcher.py,
+  services/jv-brain/tests/test_vram_guard.py, ops/ralph/PLAN.md
+- commit: 2a81605
+- next: **B48** is the loop's own and cheap — one `ops/ralph/mutate.sh`
+  with `-B` baked in, so the practice stops being re-typed per
+  iteration. **B38's** last unexamined service is jv-voice. Everything
+  else small is a human's: **B43/B47** are one question asked three
+  times ("may `jv health --check` be red on an ordinary day?"), and
+  Track A is one look at `docs/hud/` away from unblocking five items.
+  **B10/A28** — one live recording of one spoken turn on ares — is
+  still the biggest thing a human can hand this loop.

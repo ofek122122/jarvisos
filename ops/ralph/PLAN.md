@@ -968,7 +968,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       ladder. Tests: jv-hud 585, was 569; tools 138, was 137; 11
       mutations, 11 caught. `docs/hud/06-health.png` re-shot.)
 
-- [ ] B42. jv-brain's heartbeat re-reads the rung file on every beat
+- [x] B42. jv-brain's heartbeat re-reads the rung file on every beat
       (`_rung()` in `_health`, once per 5 s, plus once per turn for
       `brain.response.backend`). The file is written once, by a process
       that has already exec'd away, and lives on tmpfs — so it cannot
@@ -988,6 +988,22 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       a gauge. A torn read still fails safe (`index=None`,
       `vram=absent`, no finding), but "fails safe" now means "reports
       `ok` while the brain crawls on the CPU". One rename.
+      **DONE — 2a81605.** `write_rung_file` writes a pid-stamped temp
+      file beside the target and `os.replace`s it in: a reader gets the
+      last whole record or this one, never the seam, and a write that
+      fails leaves the old record and no litter (the next thing that
+      happens in this process is an exec). The mode is explicit (0640)
+      instead of umask-derived — that was the second, unlooked-for half:
+      jv-llm writes this file and jv-brain reads it, two users in one
+      group inside a 0750 runtime directory, so the GROUP read bit is
+      the whole of the reader's access and a launcher under a tighter
+      umask would hand jv-brain a file it cannot open — failing silently
+      in exactly the `ok`-about-a-CPU-brain direction this item names.
+      No fsync: /run is tmpfs and a record that outlived the reboot that
+      emptied it would describe an llama-server that no longer exists.
+      Tests: jv-brain 114, was 109; six mutations, six caught. One
+      survivor on purpose — 0644 is indistinguishable from 0640 behind a
+      0750 directory, so nothing asserts the other-read bit.
 
 - [ ] B38. jv-context is now the only service that beats immediately on
       a state change; `schemas/sys.health.json` asks EVERY service for it
@@ -1037,6 +1053,23 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       installed one. That is exactly the trade-off B43 states, in two
       more places, and it should be answered once for all three. Cheap
       either way; nothing else waits on it. Discovered in B38.
+
+- [ ] B48. **The loop's own mutation harness can silently test
+      UNMUTATED code, and it did once in this iteration.** Mutations are
+      applied by rewriting the source file in place and re-running
+      pytest. CPython validates a cached `.pyc` by (mtime seconds, size)
+      — so a mutation that keeps the file's size and lands in the same
+      second as the write before it (flipping `0o640` to `0o600`, say,
+      or any other equal-length edit) reuses the stale bytecode and the
+      run reports a PASS for code that never executed. It showed up here
+      as a mutation that "survived" and a later full-suite failure from
+      a restored file that was still running the mutant. The fix that
+      worked is one flag — `python -B` (and clearing `__pycache__`
+      between runs) — but every mutation number in this JOURNAL before
+      iteration 70 was measured without it, so equal-length mutations in
+      past iterations are worth ONE re-run, not trusted. Worth writing
+      the harness down in `ops/ralph/` as a small script with `-B` baked
+      in instead of re-typing it per iteration. Discovered in B42.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
