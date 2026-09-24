@@ -2883,3 +2883,155 @@ glyph edge, which the sheet already says is not evidence of anything.
   through it. New: **A33** — the probe proves a click passes through and
   says nothing about scroll or hover, which share the same input region
   and are the two a user would notice next.
+
+## 2026-09-24 — iteration 30 — B13: the latency number stops containing
+## the user's own voice
+
+Track A is where the ladder points first and every open item on it is a
+question for a person: A13/A27 want two minutes of opinion on
+`docs/hud/screens/02-heard-desk.png`, A21/A22/A25 want one opinion about
+what a plate does over seconds, A31 and A33 are builds that follow those
+answers, and A11 is blocked on proposal R1. Three iterations of UI in a
+row besides. So: the backlog.
+
+PHASE1-STATUS has carried the same open line since the first on-hardware
+measurements — *"decide the measurement anchor (VAD end vs start) and
+re-state the budget accordingly"*. The exit criterion for this phase is
+`"hey jarvis" → spoken reply, end-to-end < 2.5 s, measured by jv tap`,
+and the FAIL recorded against it is 5353 ms best, typical 5-7 s. What
+`jv tap --latency` measured was the earliest ts of any frame carrying an
+utterance_id, to the first `speech.say`. Two or three seconds of that is
+the user speaking. The number could not be compared to the budget it was
+being compared to, and nothing in the output said so.
+
+**A turn is now four spans, and each one has exactly one owner.**
+
+```
+  speech_start        last speech      speech_end      first speech.say
+       |---- spoke ------|---- hold ----|---- respond ----|
+       |-------------------- total ----------------------|
+```
+
+`spoke` is the user talking, and no faster machine shortens it. `hold`
+is jv-ears' `vad_min_silence_ms` — the silence it deliberately sits
+through so a 1.2 s mid-sentence pause does not end the utterance;
+machine time, and tunable. `respond` is ASR, the brain, and the bus hops
+between them. So the machine's share of a turn is `hold + respond`, and
+that is printed as a rule under the table rather than left to be worked
+out. Per-span p50/p95/max, and one line per turn as it completes.
+
+It does NOT re-state the budget. Which span the 2.5 s applies to is a
+human's call — a good case exists for `hold+respond` (what Jarvis costs)
+and for `total` (what the user experiences), and they differ by seconds.
+The point is that the call can now be made against data instead of
+against one figure that mixes both.
+
+**The boundary had to come from somewhere.** Only jv-ears knows its
+endpoint hold, so it publishes it: `vad_min_silence_s` on its
+`sys.health` `metrics`, the same free-form section `wake_timeout_s` has
+used since A14, so nothing frozen moved (invariant 2). B7's rule was
+"publish a gauge WHEN something reads it, not before" — this is the
+reader, and it is the second reader of that section, which is what B7
+was waiting for.
+
+**No fallback, on purpose.** The HUD's `EarsBudgets` falls back to ears'
+shipped defaults, because the HUD has to draw something. This is a
+measuring instrument, and an instrument that substitutes a constant for
+a reading is exactly how a number stops meaning what its label says. A
+tap that has not heard a jv-ears heartbeat prints `?` for the two spans
+that need one, drops both rows from the table, and says which gauge was
+missing and that `total` therefore still has the user's voice in it.
+`spoke` and `hold` are recorded together or not at all — they are two
+halves of one subtraction, and a hold that does not FIT inside the
+segment it is supposed to be part of (ears restarted mid-tap with
+different tuning) produces no third number rather than a negative one.
+
+**Two real bugs fell out of writing it down.**
+
+1. `audio.transcript` was allowed to define an utterance's start. A
+   partial transcript carries the same `utterance_id` and is emitted
+   PART-WAY through the utterance, so any turn whose partial was routed
+   ahead of its vad frame was silently measured short — by however much
+   of the sentence had already been said. The old code's comment
+   defended taking the earliest ts of any such frame; the earliest ts of
+   the WRONG frame is still the wrong answer. Boundaries now come from
+   `audio.vad` alone, by `event`.
+2. The one integration test covering any of this published
+   `{"kind": "speech_start"}` on `audio.vad`. The schema's field is
+   `event`. Nothing caught it because the old reader never looked at the
+   field at all — it took any frame with an `utterance_id`. A fixture
+   that does not match the schema it claims to imitate is a test proving
+   something about a bus that does not exist.
+
+Also: the report is anchored on the frames' own `ts` now, not on
+`mono_now()` when this process got round to them. Every other boundary
+in the calculation is a frame ts, and a tap doing other work must not
+inflate the number it exists to report. That change is NOT pinned by a
+test — a test would have to starve the reader deliberately — and it is
+recorded here rather than claimed.
+
+**Seven mutations, six caught, one real survivor fixed, one equivalence
+recorded.**
+
+  · `speech_end` also sets the start → the mid-utterance test fails
+    (`total=?` becomes a number measured from the wrong end).
+  · a transcript defines the start again → the transcript test fails
+    (a turn gets reported that nothing on the bus bounded).
+  · the hold falls back to jv-ears' shipped 1.5 → the no-budget test
+    fails; a constant had been printed as a reading.
+  · the hold is read off anyone's heartbeat → refused-unless-jv-ears
+    fails.
+  · a hold that does not fit is subtracted anyway → the fit test fails.
+  · `?` prints as `0ms` → unknown-not-zero fails.
+  · SURVIVED, then fixed: `spoke` and `hold` recorded independently.
+    A hold that did not fit left its own row in the table with n=1
+    beside a `spoke` row with n=0 — two rows averaging over different
+    sets of turns, under a footer saying the spans were unmeasured.
+    `a_hold_that_did_not_fit_takes_its_own_row_down_with_it` now pins it.
+  · EQUIVALENCE, recorded not fixed: publishing the hold as
+    `cfg.vad_min_silence_ms / 1000` instead of
+    `_min_silence / sample_rate` passes. At 16 kHz the two are
+    identical for every integer millisecond (`ms * 16000 // 1000` never
+    truncates), so the docstring's "the day this rounds differently,
+    what is published follows the code" is true and untestable at the
+    rate this runs at. Distinguishing it would mean building the
+    pipeline at a sample rate openWakeWord and Silero do not accept,
+    which is a worse test than none. The pre-existing `wake_timeout_s`
+    test has exactly the same property.
+
+One flake, seen once and chased: `health_check_prints_the_rung_the_brain_reports`
+(`--for 0.6`, pre-existing) failed on the first run with the new
+integration tests holding three `jv` children and six bus clients open
+for 2 s each. The new tests were cut to 1.2 s windows and 30 ms cycles;
+five consecutive full runs since are clean. Recorded rather than
+declared fixed — the window is tight and the next test added here may
+find it again.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 63 unit + 31
+  integration + 7 bus (was 57 + 27 + 7), all green, run five times for
+  the flake. `bash ops/ralph/runtests.sh jv-ears` — 37 (was 36).
+  `bash ops/ralph/runtests.sh tools` — 83, untouched and green.
+- build: `nix build .#jarvisd` ok (it runs the same tests in its
+  checkPhase), `nixos-rebuild build --flake .#ares` ok. Never
+  test/switch. No schema change — `metrics` is free-form by
+  `schemas/sys.health.json`. No jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin touched.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs, services/jv-ears/jv_ears/pipeline.py,
+  services/jv-ears/tests/test_pipeline_fixtures.py, PHASE1-STATUS.md
+- commit: ee96c43
+- next: **the question this hands to a human is small and concrete** —
+  which span the 2.5 s exit budget names. `hold+respond` is what Jarvis
+  costs and what an optimisation would move; `total` is what the user
+  waits through. Answering it also decides **B15**, which would push the
+  end of the measurement from `speech.say` (brain hands words to voice)
+  to `speech.state` `speaking` (the user actually hears something) —
+  the same conversation, so ask them together. **B14** splits `respond`
+  into ASR and brain with one more anchor already on the bus, and is
+  worth doing the day someone is optimising either. Everything on Track
+  A is still waiting on the same two human opinions: **A13/A27** (two
+  minutes on `docs/hud/screens/02-heard-desk.png`) and **A21/A22/A25**
+  (what a plate does over seconds). **B10/A28** still need one real
+  spoken turn recorded at ares — and it is worth more now than it was
+  this morning, because a recording with `sys.health` in it would be the
+  first thing that could replay this whole measurement.

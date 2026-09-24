@@ -342,6 +342,58 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       does this is one more section in the report and one more reason to
       exit 1. Discovered in B11.
 
+- [x] B13. The one number the Phase 1 budget is judged on stops containing
+      the user's own voice. — ee96c43
+      (`jv tap --latency` printed "VAD start -> first speech.say" and
+      nothing else, so the 5.4 s measured on ares on 2026-09-15 could not
+      be held against the 2.5 s budget at all: 2-3 s of it was the user
+      speaking. A turn is now split at the boundaries jv-ears itself
+      publishes — `spoke` (you, talking), `hold` (its `vad_min_silence_ms`,
+      the silence it deliberately sits through to bridge a mid-sentence
+      pause), `respond` (ASR + brain + bus) — with a p50/p95/max per span
+      and a stated rule: the machine's share is `hold + respond`. It does
+      NOT re-state the budget; which span the 2.5 s applies to is a human's
+      call, and the point is that the call can now be made against data.
+      The hold is read off jv-ears' `sys.health` `metrics`
+      (`vad_min_silence_s`, added for this reader — the free-form section
+      `wake_timeout_s` already uses, so no schema change; B7's rule is
+      "publish when something reads it", and this is the reader). There is
+      deliberately NO fallback to ears' default, unlike the HUD, which has
+      to draw something: an instrument that substitutes a constant for a
+      reading is how a number stops meaning its label, so an unheard
+      budget prints `?` and the table says which gauge was missing. Two
+      real bugs fell out: an `audio.transcript` partial — emitted PART-WAY
+      through an utterance — was allowed to define its start, silently
+      measuring those turns short, and the one integration test covering
+      any of this published `{"kind": "speech_start"}` on `audio.vad`,
+      where the schema says `event`, which nothing noticed because the old
+      reader never looked at the field. Anchored on the frames' own `ts`
+      now rather than on when the tap got round to them. 63 unit + 31
+      integration tests (was 57 + 27); seven mutations, one real survivor
+      fixed. Tests: `bash ops/ralph/cargotest.sh jarvisd`,
+      `bash ops/ralph/runtests.sh jv-ears`.)
+
+- [ ] B14. `respond` is one span and it is two services: ears' ASR and the
+      brain. Both are named in PHASE1-STATUS as separate open items (ASR is
+      ~2.2 s fixed; prefill is fixed but generation is not), and the split
+      between them is on the bus already — the `audio.transcript` final for
+      an utterance lands between its `speech_end` and its `speech.say`. One
+      more anchor would turn `respond` into `hear` + `think` with no new
+      publisher and no schema change. Not done here because B13 was about
+      the boundary that separates the user from the machine, and a span
+      that is entirely the machine's can wait until someone is optimising
+      it. Discovered in B13.
+
+- [ ] B15. Nothing measures the last hop. `jv tap` stops at `speech.say`,
+      which is jv-brain handing words to jv-voice — the user hears nothing
+      until Piper has synthesised and the device has started playing, and
+      `speech.state` `speaking` is exactly that moment. Adding it would
+      make `total` the thing the budget actually names ("hey jarvis" →
+      spoken reply) instead of a proxy for it. Worth doing WITH the human
+      decision B13 leaves open, because moving the end of the measurement
+      and choosing which span the budget covers are one conversation.
+      Discovered in B13.
+
 ## Track C — Creative (within blueprint + invariants)
 - [ ] C1. Propose and add genuinely new, on-brand capabilities here before building
       them — one line each, so a human can veto in the next `updates` read.
@@ -769,6 +821,9 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       it the day the mask is ever edited; not before. Discovered in A32.
 
 ## Done
+- B13 — `jv tap --latency` stops reporting one number: a turn split into
+  spoke / hold / respond, and the gauge jv-ears had to publish for it
+  (ee96c43, 2026-09-24)
 - A32 — a click over the HUD reaches the window underneath, measured
   rather than read (48d9c74, 2026-09-24)
 - A30 — the HUD on three monitors, and the four invariant-10 claims that

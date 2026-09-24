@@ -66,7 +66,7 @@ install day; anything needing real hardware is mocked and tagged
   jv-voice while the rest generates; decide the measurement anchor
   (VAD end vs start) and re-state the budget accordingly.
 
-  **UPDATE 2026-09-24 (PLAN B13): the measurement stops mixing your voice
+  **UPDATE 2026-09-24 (ee96c43): the measurement stops mixing your voice
   with the machine's time.** `jv tap --latency` no longer prints one
   number. Each turn is split at the boundaries jv-ears itself publishes —
   `spoke` (you talking), `hold` (ears' `vad_min_silence_ms`, the silence
