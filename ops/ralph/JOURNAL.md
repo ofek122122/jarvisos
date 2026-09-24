@@ -6999,3 +6999,98 @@ two-row shape got chosen over it.
   decisions and on a human at ares, and **B10/A28** — one live recording
   of one spoken turn — is still the biggest thing a human can hand this
   loop.
+
+## 2026-09-24 — iteration 69 — B38: the stall, said when it happens
+
+`schemas/sys.health.json` has asked for this since v1, in one clause:
+every service beats "every fixed period, **and immediately on state
+change**". jv-ears only ever did the first half. So the failure this
+service exists to report — PortAudio holding a stream open that delivers
+nothing, which is the 2026-09-15 field bug verbatim — became a
+`degraded` heartbeat somewhere in the next five seconds, and
+`jv health --check` reads a **6 s** window: one nominal period plus a
+margin. A stall landing just after a beat is a stall that check can
+miss entirely, and it is the one thing a mic indicator must never be
+wrong about (invariant 10).
+
+**B35's shape could not be copied, and that is the interesting part.**
+jv-context wakes its heartbeat with an `asyncio.Event` its system pump
+sets, because there the state changes when a probe RAISES — somebody is
+holding the news. jv-ears has nobody: its state is a function of a
+CLOCK. A stream stalls by a chunk *not* arriving, `CaptureMeter.age_s`
+crosses `STALL_S` while no code of ours runs, and there is no moment at
+which a writer could set anything. A state nobody announces has to be
+WATCHED — so `pump_health` re-reads it every 250 ms and publishes only
+when the answer has moved. Four times a second, one property read and
+two comparisons; the publish is the rare case.
+
+**It compares against the bus, not against itself.** The pump keeps no
+`last_state` variable. It is handed `said()` — the state the last
+published FRAME carried — and compares the meter's answer now against
+that. This is not stylistic: a chunk arriving between `health_body`
+building a body and the loop's next read would leave a bookkeeping
+variable claiming something the bus never heard, and the whole point of
+this pump is that the bus's last word and the machine's state agree. The
+one writer is the function that builds the frame.
+
+**A floor, because every flap is a real state change.** A device
+delivering a chunk just either side of `STALL_S` alternates ok/degraded
+honestly — and without a floor the watch would publish each flip and put
+`sys.health` at 4 Hz for as long as the hardware misbehaved, which is
+exactly the "quiet topic" invariant 5 protects. `HEALTH_MIN_GAP_S` is
+1 s (= `STALL_S`), so the news is at most a second late on a fault that
+was already a second old when it became one — still four seconds inside
+the window the check reads. And a flicker that undoes itself while the
+floor holds publishes NOTHING: `said()` is still `ok` and `ok` is true
+again, so there is nothing to say. A beat there would have reported a
+state that had already ended.
+
+**Only the enum is watched.** jv-ears' degraded note is
+`microphone open but no audio for 3.2s` — a string that changes on every
+read. A pump that woke on the note would beat on every tick for as long
+as the fault lasted, which is how a 0.2 Hz heartbeat turns into a 4 Hz
+one. The growing number rides out on the periodic beat, where a number
+that changes belongs. `period_s` still says 5.0: the schema calls it
+nominal, and every consumer in the repo uses it as an expiry
+(`period_s * 2` in `MicState`, `HealthState`, `jv health`), which extra
+beats only push further away. A `--wav` run is unaffected — no device
+can stall, `meter.health()` is constant, and the pump degenerates to the
+timer it replaced.
+
+**What B38 asked for in jv-guard and jv-brain turned out to be a
+different job.** Both already beat at the instant of their faults
+(`_health("degraded", ...)` on a scan with no engine, on an `llm
+error`) — the item's premise was wrong about them. Their gap is the
+opposite one: the fault is not LATCHED, so the next periodic beat says
+`ok` again while nothing has changed. A machine with no signature
+scanner reports one `degraded` blip per screened binary and `ok` in
+between; a dead llama-server reports one blip per failed turn. Latching
+either is a few lines and makes `jv health --check` red for as long as
+the condition lasts — which is precisely the judgement **B43** is
+already waiting on. So it was NOT built: it is **B47**, to be answered
+once for all three. jv-voice is the one service still unread for this.
+
+- tests: `bash ops/ralph/runtests.sh jv-ears` — **114 green, was 104**
+  (10 new, all in tst-style scripted time: a fake clock the pump's own
+  sleeps wind, so every assertion is about seconds and none are spent).
+  **Nine mutations, nine caught**: the change rule dropped (timer only),
+  the floor dropped, the period not reset by a change beat, `said()`
+  replaced by a second look at the state, the watch interval widened to
+  the period, the floor raised above the period, main feeding the pump a
+  constant state, main comparing against the meter instead of the bus's
+  last word, and `done` ignored so the pump outlives the pipeline.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change
+  (this is the schema's existing clause, finally honoured), no jv-act, no
+  boot path, no pins. No QML touched, so no HUD shots to re-take.
+- files: services/jv-ears/jv_ears/main.py,
+  services/jv-ears/tests/test_health_watch.py, ops/ralph/PLAN.md
+- commit: 3d01c31
+- next: **B47** is the newly raised one and it is a human's, bundled with
+  **B43** — the same question ("may a check be red on an ordinary day?")
+  now in three services. The loop's own remaining small ones are
+  unchanged: **B42** (jv-brain's rung file is written non-atomically and
+  now decides a published state — one rename) and **B38's** last
+  unexamined service, jv-voice. Track A is still blocked on decisions
+  (A13/A21/A22/A25/A27 are all one human look at `docs/hud/`) and
+  **B10/A28** — one live recording of one spoken turn on ares — remains
+  the biggest thing a human can hand this loop.

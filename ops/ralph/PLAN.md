@@ -1001,6 +1001,42 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       Small and mechanical per service, and B35 wrote the shape to copy
       (`_set_fault` + an `asyncio.Event` the health pump waits on with a
       timeout). Discovered in B35.
+      **jv-ears half DONE — 3d01c31** (`pump_health` in
+      `jv_ears/main.py`: the meter's state is re-read every 250 ms and
+      published the moment it stops matching what the bus was last told,
+      with a 1 s floor so a flapping device cannot beat at the watch
+      rate). B35's shape could NOT be copied: jv-ears' state is a
+      function of a CLOCK — a stream stalls by a chunk not arriving — so
+      there is no writer to set an Event, and a state nobody announces
+      has to be watched.
+      What is LEFT is a different job, and that is this item's finding:
+      jv-guard and jv-brain ALREADY beat at the instant of their faults
+      (`_health("degraded", ...)` in both — a scan with no engine, an
+      `llm error`). Their gap is the opposite one — the fault is not
+      LATCHED, so the next periodic beat says `ok` again while the
+      condition is unchanged. Fixing that changes what the CLI says on an
+      ordinary day, which is B43's judgement call again, so it is raised
+      as **B47** rather than built. jv-voice is the one service nobody
+      has read for this at all.
+
+- [ ] B47. **A human's call, and it is B43's question in two more
+      services.** jv-guard and jv-brain both publish `degraded` at the
+      instant of a fault and then go back to saying `ok` on the next
+      periodic beat, because neither service KEEPS the fault: jv-guard's
+      "no signature scan engine available" is a property of the machine
+      — true of every scan until clamav is installed — reported as one
+      blip per screened binary, and jv-brain's `llm error` is one blip
+      per failed turn even if llama-server is gone for good. So a
+      heartbeat can be `ok` about a guard that cannot scan and a brain
+      that cannot answer, which is the sensor-truthfulness failure the
+      health topic exists against. Latching them is a few lines each
+      (jv-context's `_system_fault` is the pattern, and B38 just built
+      the watch half in jv-ears) and it changes what `jv health --check`
+      says on an ORDINARY day: a machine with no signature scanner would
+      be `degraded` permanently and the check would exit 1 until a human
+      installed one. That is exactly the trade-off B43 states, in two
+      more places, and it should be answered once for all three. Cheap
+      either way; nothing else waits on it. Discovered in B38.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
