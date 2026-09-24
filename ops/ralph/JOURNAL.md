@@ -7289,3 +7289,127 @@ as **B50**, with the file/line limit of the canary.
   unblocking five items, and **B10/A28** — one live recording of one
   spoken turn on ares — is still the biggest thing a human can hand
   this loop.
+
+## 2026-09-24 — iteration 72 — B49: the harness in three languages, and what it found in two
+
+Track A is still where the ladder points and still where every open item
+is a human's (A13/A21/A22/A25/A27/A38/A47/A55/A62/A63/A65/A68 — one look
+at `docs/hud/`, or one decision about an IPC seam) or says "do not build
+before that one is". So B49, which iteration 71 raised and which is
+about the loop's own evidence: `ops/ralph/mutate.sh` graded PYTHON only,
+so the thirty-odd QML claims and every Rust one were still produced by
+the hand practice iteration 70 caught out.
+
+**What was built.** `--runner {tests,qml,cargo}`, with a `Language`
+holding the four things that differ: which script runs the suite, which
+file suffixes it may grade, what a canary looks like, and what a private
+cache means. A `raise ImportError` for Python, an unparseable `***` line
+for QML, a `compile_error!` for Rust. Each makes a slightly different
+claim and the Rust one is the weakest — a `compile_error!` proves the
+file is compiled into the crate, not that any test exercises it, so a
+Rust survivor means "no test asserts this line" and never "the tests do
+not load this file". Its docstring says so. The suffix check is not
+pedantry: `--runner tests` on a `.qml` file would append a Python
+`raise` to QML, which parses as nothing, so the canary would LIVE and
+the abort would blame the tests for the operator's mistake.
+
+**B49's own premise was wrong about both new languages.** It said the
+stale-artifact half "cannot bite" QML and Rust. It bites both.
+
+QML has the bug exactly. `qmltestrunner` writes compiled QML to
+`$XDG_CACHE_HOME/qmltestrunner/qmlcache/*.qmlc` and validates it against
+(mtime, size) just like a `.pyc`, so an equal-length edit with the mtime
+put back passes a test asserting the value the source no longer holds.
+Reproduced with the real Qt in a subprocess, with the un-fixed run as
+the control, exactly the shape B48's `.pyc` test has. It is arguably
+worse than the Python case: `__pycache__` sits beside the source where
+someone might think to clear it, and this cache sits in the user's HOME
+where nothing in this repo ever would. Both halves of the fix work
+independently — a fresh `XDG_CACHE_HOME` and `QML_DISABLE_DISK_CACHE=1`
+— and the harness sets both, so the guarantee does not depend on Qt
+honouring the first.
+
+Rust made the same lie from the mtime side, and **the harness's own new
+control was the cause.** Cargo cannot be given a private cache cheaply
+(a fresh `CARGO_TARGET_DIR` per run recompiles the world a dozen times),
+so it got the other guarantee: every write stamped a whole second newer
+than the last. The first real cargo grading then ended with the tree
+byte-for-byte clean and `proto::tests::matching` FAILING — iteration
+70's exact tell, in a third language. The counter started when the run
+did and added one second per write; the run spent forty seconds
+compiling; so the restored file claimed start+5 s while the artifacts
+cargo had just written said start+35 s. Cargo asks only "is any source
+newer than what I built", read the restore as thirty seconds old, and
+skipped the rebuild. Every stamp now re-reads the clock, which is the
+one line that makes the rule true for a suite of any speed. Worth being
+plain about what caught it: **B48's run-the-suite-once-more-at-the-end
+check, added for precisely this and firing on its first real use.**
+
+**Two findings from USING it, which is the half a tool does not give
+you.**
+
+`--runner qml` grades `shell/jv-hud/core/` and nothing else. A canary on
+`StatePlate.qml` LIVED — the suite stayed green with the file made
+unparseable — because `shell/jv-hud/tests/*` import `"../core"` and
+never a plate. So every QML mutation number ever claimed about a
+top-level plate through `qmltest.sh` meant nothing, and the harness now
+refuses those rather than grading them immune (exit 2, mutation never
+executed). The plates ARE exercised, by `ops/ralph/hudshots.sh`, which
+copies the whole shell into a stage and drives the real plates — and
+which already isolates its own QML cache per run by construction.
+Raised as **B51**: it is a fourth runner, and the only one that can
+grade a plate at all.
+
+Re-graded PlateStack's nine-caught claim from the A15 iteration through
+the controls — three of the nine (the unaskable-child fail-safe
+inverted, the children never consulted, the surface never unmapped),
+3/3 caught, canary dead. That entry stands.
+
+`--runner cargo` found a real survivor on its first honest run:
+`topic_matches` compares `topic.len() > prefix.len() + 1`, so `audio.`
+— the separator with an empty leaf — does not match `audio.*`, and the
+`>=` mutant survived because nothing asserted it. Deliberate since the
+matcher was written, written down nowhere. One line in `proto.rs`'s
+test closes it and the re-grade caught the mutant. That is the harness
+earning its keep rather than describing itself.
+
+- tests: `bash ops/ralph/runtests.sh tools` — **190 green, was 173**
+  (17 new: the three canaries and what each keeps intact, the QML
+  stale-cache reproduction with its two controls, `qml_env` and the
+  deliberately-empty `cargo_env`, the stamp that must not fall behind a
+  slow clock, the stamp that must keep increasing, the restore that
+  leaves bytes identical and mtime newer, the wrong-grader refusal
+  before any suite runs, the language table checked against the scripts
+  `ops/ralph/` really has, and the `--runner` flag reaching `run`).
+  **Nine mutations on the new code, nine caught** — the QML canary
+  reverted to the Python one, the Rust canary commented out, the QML
+  disk cache left on, the QML cache prefix left pointing at HOME, the
+  suffix guard opened, the clock re-read dropped (the cargo bug,
+  restored), the stamp frozen, the language check deferred past the
+  suite, and an unknown `--runner qml` target accepted.
+  `bash ops/ralph/qmltest.sh` — 585, unchanged, run eight times by the
+  harness and green at both ends. `bash ops/ralph/cargotest.sh jarvisd`
+  — 128+39+8, one more than before, run nine times and green at both
+  ends.
+- build: `nix build .#jarvisd` and
+  `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins, no QML touched (so no HUD shots to
+  re-take), no service behaviour changed — the one non-harness edit is
+  an assertion added to a test module.
+- files: tools/mutate.py, tools/tests/test_mutate.py,
+  services/jarvisd/src/proto.rs, ops/ralph/mutate.sh, ops/ralph/README.md
+- commit: 4fa5991
+- next: **B51** is the fourth runner and it is the one the A track needs
+  — `hudshots.sh` is the only suite that loads a plate, so it is the
+  only way a plate mutation can ever be graded, and it already stages a
+  fresh copy with its own cache so most of the work is an output
+  directory that is not `docs/hud/`. **B50** (a suite parameterised on
+  its own constants needs one claim that is not) is now cheap to
+  discharge service by service, since a re-grade is one pasted spec.
+  Everything else small is a human's: **B43/B47** are one question asked
+  three times ("may `jv health --check` be red on an ordinary day?"),
+  **A47** is one decision (OCR, an IPC seam, or leave four checks saying
+  what they say) that unblocks **A55** with it, Track A is one look at
+  `docs/hud/` away from unblocking ten items, and **B10/A28** — one live
+  recording of one spoken turn on ares — is still the biggest thing a
+  human can hand this loop.

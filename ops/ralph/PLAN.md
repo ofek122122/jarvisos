@@ -1082,16 +1082,59 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       entry is now one pasted spec away from the same treatment, which is
       as far as "worth ONE re-run" can be discharged by building a tool.)
 
-- [ ] B49. The harness's runner is `ops/ralph/runtests.sh` and nothing
-      else, so it grades PYTHON only. The QML claims ("nine mutations,
-      all caught") and the Rust ones are still hand-run, and while the
-      stale-bytecode half cannot bite them, the CANARY half is exactly as
-      valuable there: nothing has ever asked whether `qmltest.sh`
-      executes the file an A-track iteration was mutating, and a
-      `core/` element that no test imports would grade as immune. One
-      `--runner {tests,qml,cargo}` and a canary per language (an
-      unparseable QML file, a `compile_error!` in Rust) is the shape.
-      Discovered in B48.
+- [x] B49. The harness's runner graded PYTHON only, so the QML claims
+      ("nine mutations, all caught") and the Rust ones were still
+      hand-run. — 4fa5991
+      (`--runner {tests,qml,cargo}`, with a `Language` holding the four
+      things that differ: the script, the suffixes it may grade, the
+      canary, and what a private cache means. A `raise ImportError` for
+      Python, an unparseable `***` line for QML, a `compile_error!` for
+      Rust — the last is the weakest and says so in its docstring: it
+      proves the file is COMPILED into the crate, not that a test
+      exercises it, so a Rust survivor means "no test asserts this line"
+      and never "the tests do not load this file".
+      **This item's own premise was wrong about both new languages.** It
+      said the stale-artifact half "cannot bite" them. QML has the bug
+      exactly — `qmltestrunner` writes `.qmlc` to
+      `$XDG_CACHE_HOME/qmltestrunner/qmlcache/` and validates it against
+      (mtime, size) like a `.pyc`, reproduced with the real Qt in a
+      subprocess with the un-fixed run as the control, and it is worse
+      than the Python case because that cache lives in the user's HOME.
+      Rust made the same lie from the mtime side, and the harness's own
+      new control caused it: a stamp counter that started when the run
+      did fell forty seconds behind a suite that spent forty seconds
+      compiling, so the restore looked OLDER than the artifacts cargo had
+      just built and cargo skipped the rebuild — `proto::tests::matching`
+      failed with the tree byte-for-byte clean. Every stamp now re-reads
+      the clock. B48's run-the-suite-once-more-at-the-end check is what
+      caught it, on its first real use.
+      Two findings from USING it: `--runner qml` grades
+      `shell/jv-hud/core/` and nothing else, because the canary LIVES on
+      every top-level plate (raised as B51); and a real Rust survivor in
+      `topic_matches`, closed by one line in proto.rs's test.
+      Tests: `bash ops/ralph/runtests.sh tools` — 190, was 173, with nine
+      mutations on the new code and nine caught. PlateStack's nine-caught
+      claim re-graded three-of-nine through the controls: 3/3, canary
+      dead, that entry stands.)
+
+- [ ] B51. **The fourth runner, and the only one that can grade a
+      plate.** B49 measured what `qmltest.sh` covers and the answer is
+      `shell/jv-hud/core/` — a canary on `StatePlate.qml` LIVED, because
+      the tests import `"../core"` and never a plate. So every QML
+      mutation number ever claimed about a top-level plate through
+      `qmltest.sh` meant nothing, and B49's harness now refuses those
+      rather than grading them immune. The plates ARE exercised:
+      `ops/ralph/hudshots.sh` copies the whole shell into a `mktemp`
+      stage, substitutes the two Quickshell-bound singletons, and drives
+      the real plates through `tst_shots.qml` and `tst_sequence.qml`. It
+      is nearly ready to be a runner — it already gets a fresh
+      `XDG_CACHE_HOME` per run by construction, so the staleness half is
+      free. Two things to solve: it writes PNGs to `docs/hud/` by
+      default and a grading run must NOT (it takes an output dir as
+      `$1`, so the `Language` needs a scratch dir threaded into
+      `command()`), and it is slower than `qmltest.sh` — it realizes
+      fonts and lints the stage every run — so a twelve-run grading
+      wants measuring before it is promised. Discovered in B49.
 
 - [ ] B50. The canary proves the suite executes the FILE and never the
       LINE, which is the honest meaning of a survivor and also its
