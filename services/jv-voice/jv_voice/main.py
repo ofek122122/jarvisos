@@ -25,7 +25,8 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     synth = Synthesizer(cfg)
     bus = await BusClient.connect(args.bus, src="jv-voice")
     try:
-        await VoiceService(bus, synth, SoundDevicePlayer()).run()
+        player = SoundDevicePlayer(cfg.output_device)
+        await VoiceService(bus, synth, player).run()
     finally:
         await bus.close()
     return 0

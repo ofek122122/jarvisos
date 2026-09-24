@@ -11,21 +11,25 @@
 // audit log is clean, and the only thing wrong is a toggle somewhere else
 // on the machine.
 //
-// This element says the missing half, out of two topics:
+// This element says the missing half, out of three topics:
 //
-//   speech.state    (jv-voice)   an utterance is in flight RIGHT NOW.
+//   speech.state    (jv-voice)    an utterance is in flight RIGHT NOW.
 //   context.system  (jv-context)  the default sink, at 1 Hz: audio_muted
-//                                and audio_volume, both required fields
-//                                of schemas/context.system.json.
+//                                 and audio_volume, both required fields
+//                                 of schemas/context.system.json.
+//   sys.health      (jv-voice)    whether that sink is the one Jarvis
+//                                 plays into at all — see A41 below.
 //
 // It is a LIVE READING and not a latch — unlike ActionState (A37) or
 // HeardState (A26), which remember a thing the bus has stopped carrying.
-// Both inputs here describe the present, so the line goes away the instant
-// either stops being true: Jarvis finishes the sentence, or you unmute.
-// There is nothing to forget and nothing to time out; the only clock in
-// this file exists to stop BELIEVING a frame, never to hide one.
+// The first two topics describe the present, so the line goes away the
+// instant either stops being true: Jarvis finishes the sentence, or you
+// unmute. There is nothing to forget and nothing to time out; the only
+// clock in this file exists to stop BELIEVING a frame, never to hide one.
+// The third is not a reading at all but a statement of how jv-voice is
+// configured, and is treated differently on purpose — see A41 below.
 //
-// Four decisions shape it:
+// Five decisions shape it:
 //
 // ONLY WHILE SPEAKING. A muted machine is not news — it is a choice you
 // made, probably on purpose, and a HUD that nags about it all day is the
@@ -59,27 +63,48 @@
 // mirrors no service's configuration (B7) — it is this element's policy,
 // the same kind of number as SpeechState's `thinkWindowS`.
 //
-// On confidence (invariant 4): schemas/context.system.json fixes envelope
-// conf at 1.0, and so does speech.state. A hedged snapshot of a mixer is
-// a frame that disagrees with itself, and this plate is not worth showing
-// on a maybe.
+// THE SINK HAS TO BE JARVIS' SINK (A41). Everything above rests on one
+// thing: that the default sink jv-context reports is the device jv-voice
+// plays into. It was true — jv-voice called `sd.play(audio, rate)` with no
+// device argument, landing on PortAudio's default, which under PipeWire is
+// the sink `wpctl get-volume @DEFAULT_AUDIO_SINK@` reads — but it was true
+// by inspection of another service's source, which is not a thing a bus
+// consumer is allowed to know (invariant 1). Pin a device in jv-voice and
+// this plate becomes a true statement about the WRONG sink, and a HUD that
+// is confidently wrong about why you cannot hear Jarvis is worse than the
+// empty corner it replaced.
 //
-// On what it assumes (and this is the one assumption in the file):
-// jv-voice plays through `sd.play(audio, rate)` with no device argument
-// (services/jv-voice/jv_voice/player.py), which is PortAudio's default
-// output — the same default sink jv-context reads with
-// `wpctl get-volume @DEFAULT_AUDIO_SINK@`. If jv-voice ever pins a device,
-// this plate becomes a true statement about the wrong sink and must gain a
-// source that names the one it means. The other direction is safe and
-// stays unreported: PipeWire can mute jv-voice's STREAM while the sink is
-// open, and that is silence this element cannot see — it under-claims,
-// which is the direction every element in core/ errs in.
+// So the assumption became a published fact. jv-voice's heartbeat carries
+// `output_device_pinned` in `sys.health.metrics` — 1 if it opened a device
+// it was configured to open, 0 if it took the default — and this element
+// speaks only on the 0. `metrics` is free-form NUMBERS
+// (schemas/sys.health.json), so a device name cannot ride it and none is
+// needed: whether the visible sink is the relevant one is the whole of
+// what this claim depends on. Unknown is not 0: a jv-voice that has not
+// heartbeated yet, or a heartbeat this file may not read, leaves the plate
+// dark. That costs a few seconds of silence after the link is made, and
+// buys that the plate never speaks about a sink nobody said Jarvis uses.
+//
+// What that still does NOT cover, and nothing on this bus can: PipeWire
+// can mute jv-voice's STREAM while the sink is wide open — the same
+// silence, one level down — because jv-context reads sinks, not streams.
+// Seeing it needs a new `context.system` field, which is a frozen-schema
+// change and therefore a proposal (docs/optimization-backlog.md R6), not a
+// build. Until then this element under-claims, which is the direction
+// every element in core/ errs in.
+//
+// On confidence (invariant 4): schemas/context.system.json fixes envelope
+// conf at 1.0, and so do speech.state and sys.health. A hedged snapshot of
+// a mixer is a frame that disagrees with itself, and this plate is not
+// worth showing on a maybe.
+//
 import QtQuick
 
 QtObject {
   id: root
 
-  // Anything offering `linkUp`, `latest(topic)` and `ageOf(envelope)`:
+  // Anything offering `linkUp`, `latest(topic)`, `latestFrom(topic, src)`
+  // and `ageOf(envelope)`:
   // the `Bus` singleton in production, a BusModel the tests drive by hand.
   // Consumer-only by construction — there is nothing to publish with.
   property var bus: null
@@ -95,6 +120,12 @@ QtObject {
   // flip about the scheduler.
   property real snapshotS: 3.0
 
+  // The service that does the playing, and so the only one that can say
+  // which device the samples land on. Read by name rather than off
+  // whoever published `sys.health` last, exactly like HealthState reads
+  // the brain's rung: one topic, one publisher per service.
+  property string voice: "jv-voice"
+
   // How long a `speaking` frame keeps meaning an utterance is in flight.
   // The backstop for a jv-voice that died mid-sentence (see the header),
   // never the ordinary exit — which is jv-voice publishing `idle`.
@@ -106,12 +137,12 @@ QtObject {
   // draws nothing whenever this is false, which is every moment of an
   // ordinary day.
   //
-  // No `linked` term here, deliberately: both readers below already refuse
-  // to hand back a frame off a dead link, and a third guard on top of them
-  // would be unreachable — which means an edit that deleted one of THEIRS
-  // would be invisible to every test. The gate belongs where the frame is
-  // read, once.
-  readonly property bool unheard: !root.stale && root.speaking && root.silence !== ""
+  // No `linked` term here, deliberately: all three readers below already
+  // refuse to hand back a frame off a dead link, and a fourth guard on top
+  // of them would be unreachable — which means an edit that deleted one of
+  // THEIRS would be invisible to every test. The gate belongs where the
+  // frame is read, once.
+  readonly property bool unheard: !root.stale && root.ownSink && root.speaking && root.silence !== ""
 
   // Why you cannot hear it: "muted" or "zero", and "" whenever there is
   // nothing to say. Two different facts with two different fixes, so they
@@ -142,6 +173,34 @@ QtObject {
     if (typeof b.audio_muted !== "boolean")
       return null;
     return typeof b.audio_volume === "number" ? env : null;
+  }
+
+  // Is the sink jv-context reports the one Jarvis speaks into? Only when
+  // jv-voice has SAID so. Silence from jv-voice, a heartbeat this file may
+  // not read, a missing gauge and a gauge carrying a number that is
+  // neither 0 nor 1 all land here as false — unknown, not "probably the
+  // default".
+  readonly property bool ownSink: root.devicePinned === 0
+
+  // jv-voice's `output_device_pinned`, or NaN when there is nothing this
+  // element may read. Deliberately NOT aged, unlike the two frames below:
+  // this gauge is jv-voice's CONFIGURATION rather than a reading of the
+  // world, and configuration does not rot sitting still — it changes when
+  // the process restarts, and a restarting jv-voice heartbeats at once.
+  // Expiring it would hang a second, shorter clock on this plate and hand
+  // the dead-jv-voice case to it, when `sayWindowS` below is the backstop
+  // written for exactly that. The link is the one thing that does forget
+  // it: a bus we cannot see is a machine we know nothing about.
+  readonly property real devicePinned: {
+    if (!root.linked || typeof root.bus.latestFrom !== "function")
+      return NaN;
+    const env = root.bus.latestFrom("sys.health", root.voice);
+    if (!root.wellFormed(env))
+      return NaN;
+    const m = env.body.metrics;
+    if (!m || typeof m.output_device_pinned !== "number")
+      return NaN;
+    return m.output_device_pinned === 0 || m.output_device_pinned === 1 ? m.output_device_pinned : NaN;
   }
 
   // The newest speech.state we can read, or null.

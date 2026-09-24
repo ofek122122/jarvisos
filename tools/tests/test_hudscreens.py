@@ -475,6 +475,16 @@ def test_the_live_lit_window_feeds_the_pair_that_actually_keeps_a_plate_lit():
         "the live-lit window's snapshot is no longer muted, so OutputPlate "
         "has nothing to say and the window is measuring an unmapped surface"
     )
+    beat = sheet.VOICE_DEFAULT_SINK["publish"]
+    assert beat["src"] == "jv-voice" and beat["body"]["service"] == "jv-voice", (
+        "only the service that does the playing can say which device the "
+        "samples land on; core/OutputState.qml reads the gauge by name"
+    )
+    assert beat["body"]["metrics"]["output_device_pinned"] == 0, (
+        "the live-lit window tells the HUD jv-voice PINNED a device, which "
+        "is exactly the case A41 added to silence the plate — the window "
+        "would be measuring an unmapped surface"
+    )
     # And the quiet window's snapshot must stay the opposite of it, or that
     # window stops being about a HUD with nothing to say.
     assert sheet.SINK_OK["publish"]["body"]["audio_muted"] is False, (
@@ -490,7 +500,7 @@ def test_both_live_lit_frames_are_legal_bodies_for_their_topics():
     """
     import json
 
-    for frame in (sheet.VOICE_SPEAKING, sheet.SINK_MUTED):
+    for frame in (sheet.VOICE_SPEAKING, sheet.SINK_MUTED, sheet.VOICE_DEFAULT_SINK):
         spec = frame["publish"]
         schema = json.loads(
             (ROOT / "schemas" / f"{spec['topic']}.json").read_text("utf-8")
@@ -527,6 +537,11 @@ def test_the_live_lit_window_runs_on_a_real_broker():
         "the live-lit window no longer publishes the pair that lights "
         "OutputPlate, so whatever it is measuring is not a lit HUD"
     )
+    assert "sheet.VOICE_DEFAULT_SINK" in live, (
+        "the live-lit window no longer tells the HUD that jv-voice plays "
+        "into the default sink (A41), so OutputPlate stays dark and the "
+        "window measures StatePlate alone"
+    )
 
 
 def test_the_live_lit_window_keeps_feeding_and_proves_the_plate_stayed():
@@ -546,8 +561,13 @@ def test_the_live_lit_window_keeps_feeding_and_proves_the_plate_stayed():
         "window; OutputState stops believing a snapshot after three of "
         "jv-context's periods and the plate would expire under it"
     )
-    assert re.search(r"IDLE_WINDOW_S,\s*\[sheet\.SINK_MUTED\]", live), (
+    assert re.search(r"IDLE_WINDOW_S,\s*muted", live), (
         "the live-lit window's feed no longer covers the measured window"
+    )
+    assert re.search(r"muted = \[sheet\.VOICE_DEFAULT_SINK, sheet\.SINK_MUTED\]", live), (
+        "the live-lit window's feed no longer re-publishes jv-voice's "
+        "heartbeat, so HealthState calls it lost two of its periods in and "
+        "HealthPlate arrives under the plate being held still"
     )
     assert "if after != box:" in live, (
         "the live-lit window no longer re-measures the plate after the "

@@ -66,6 +66,27 @@ class VoiceService:
         self._wake_task: Optional[asyncio.Task] = None
         self._started = time.monotonic()
 
+    def _health(self, state: str, notes: Optional[str] = None) -> dict:
+        """One heartbeat body. `output_device_pinned` rides every one of
+        them, including the degraded ones: the HUD's OutputPlate (A41) reads
+        the DEFAULT SINK to say the room heard nothing, and that claim is
+        only about Jarvis while this is 0 — a heartbeat that dropped the
+        gauge would read as "unknown", silencing the plate for the wrong
+        reason at the moment it is most worth showing. `metrics` is numbers
+        only (schemas/sys.health.json), so this says WHETHER a device was
+        pinned and never which one; whether is the whole of what the HUD's
+        claim depends on."""
+        body: dict = {
+            "service": "jv-voice",
+            "state": state,
+            "uptime_s": time.monotonic() - self._started,
+            "period_s": HEALTH_PERIOD_S,
+            "metrics": {"output_device_pinned": 1.0 if self.player.output_device_pinned else 0.0},
+        }
+        if notes is not None:
+            body["notes"] = notes
+        return body
+
     async def _state(self, state: str, say_id: Optional[str] = None, reason: Optional[str] = None) -> None:
         body: dict = {"state": state}
         if say_id is not None:
@@ -160,13 +181,7 @@ class VoiceService:
             await self._state("idle", say_id, "error")
             await self.bus.publish(
                 "sys.health",
-                {
-                    "service": "jv-voice",
-                    "state": "degraded",
-                    "uptime_s": time.monotonic() - self._started,
-                    "period_s": HEALTH_PERIOD_S,
-                    "notes": f"synthesis/playback error: {exc}",
-                },
+                self._health("degraded", f"synthesis/playback error: {exc}"),
             )
             return False
 
@@ -213,15 +228,7 @@ class VoiceService:
             now = time.monotonic()
             if now - health_at >= HEALTH_PERIOD_S:
                 health_at = now
-                await self.bus.publish(
-                    "sys.health",
-                    {
-                        "service": "jv-voice",
-                        "state": "ok",
-                        "uptime_s": now - self._started,
-                        "period_s": HEALTH_PERIOD_S,
-                    },
-                )
+                await self.bus.publish("sys.health", self._health("ok"))
             if speak_task and speak_task.done():
                 speak_task = None
             if speak_task is None and self._queue:

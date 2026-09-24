@@ -170,8 +170,15 @@ room, and it would put a plate on screen for a machine you deliberately
 turned down.
 
 The frames are a `speech.state` `speaking` (composed, for the same reason
-shot 04 is — see B10/A28) and one `context.system` snapshot, which is
-jv-context's 1 Hz view of the default sink. It is the first non-event topic
+shot 04 is — see B10/A28), one `context.system` snapshot, which is
+jv-context's 1 Hz view of the default sink, and one jv-voice heartbeat
+carrying `output_device_pinned: 0` (A41). The heartbeat is what makes the
+other two mean anything: the plate's claim is that the DEFAULT sink is the
+device Jarvis plays into, which is true only while jv-voice has not been
+pointed at one, so the element says nothing at all until jv-voice has
+published that it took the default. Drop that frame and this tile goes
+dark — which is what it does on a machine where somebody pinned a device,
+and is the whole point. It is the first non-event topic
 the HUD subscribes to, and the element reads exactly two of its fields:
 `audio_muted` and `audio_volume`. The rest of that body — load, memory, net,
 free VRAM — rides the pipe because envelopes are forwarded whole and is read

@@ -17,7 +17,7 @@ corner, in this order:
 | `LinkPlate` (A23) | the HUD cannot see the bus at all | (the pipe itself) |
 | `ConfirmPlate` (A20) | jv-act is waiting on your yes or no | `action.confirm` |
 | `StatePlate` (A3) | Jarvis is listening, thinking, speaking or was interrupted | `speech.state` + `audio.wake` + `brain.*` |
-| `OutputPlate` (A40) | Jarvis is speaking into a sink you cannot hear | `speech.state` + `context.system` |
+| `OutputPlate` (A40/A41) | Jarvis is speaking into a sink you cannot hear | `speech.state` + `context.system` + `sys.health` (jv-voice) |
 | `HeardPlate` (A26) | your words are still the live question | `audio.transcript` |
 | `ActionPlate` (A37) | the last thing Jarvis did to the machine failed | `intent.action` + `action.result` |
 | `MicPlate` (A4) | the microphone is actually open | `sys.health` (jv-ears) |

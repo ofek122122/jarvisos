@@ -59,7 +59,14 @@ TestCase {
   // An OutputState on a live, subscribed link, with a clock we drive.
   // opts: { snapshotS, sayWindowS } for different windows,
   //       { down: true } to leave the link down,
-  //       { bus: obj } to hand it something other than a BusModel.
+  //       { bus: obj } to hand it something other than a BusModel,
+  //       { health: false } to leave jv-voice silent about its device.
+  //
+  // The default is the ORDINARY machine: jv-voice heartbeating that it
+  // took PortAudio's default output (A41), which is the only arrangement
+  // in which the default sink jv-context reports is the one Jarvis speaks
+  // into. Without that heartbeat this element says nothing at all, so
+  // every test below that expects a line needs it.
   function makeOutput(opts) {
     const o = opts || {};
     suite.fakeNow = 0;
@@ -72,6 +79,8 @@ TestCase {
     if (o.bus === undefined && o.down !== true) {
       out.bus.monotonic = () => suite.fakeNow;
       out.bus.ingest('{"t":"link","up":true}');
+      if (o.health !== false)
+        suite.health(out, {});
     }
     return out;
   }
@@ -138,6 +147,32 @@ TestCase {
         delete body[o.drop[i]];
     const env = suite.envelope("speech.state", o.ts !== undefined ? o.ts : suite.fakeNow, o.conf !== undefined ? o.conf : 1, body, {
       "src": "jv-voice",
+      "seq": o.seq,
+      "v": o.v
+    });
+    deliver(out, env);
+    return env;
+  }
+
+  // jv-voice's heartbeat, and the one gauge this element reads out of it:
+  // whether playback opened a device somebody pinned. opts: { pinned,
+  // src, ts, conf, v, seq, metrics: false, set: {gauge: value} }.
+  function health(out, opts) {
+    const o = opts || {};
+    let body = {
+      "service": o.src !== undefined ? o.src : "jv-voice",
+      "state": "ok",
+      "uptime_s": 12.5,
+      "period_s": 5
+    };
+    if (o.metrics !== false)
+      body["metrics"] = {
+        "output_device_pinned": o.pinned !== undefined ? o.pinned : 0
+      };
+    if (o.set !== undefined)
+      body["metrics"] = o.set;
+    const env = suite.envelope("sys.health", o.ts !== undefined ? o.ts : suite.fakeNow, o.conf !== undefined ? o.conf : 1, body, {
+      "src": o.src !== undefined ? o.src : "jv-voice",
       "seq": o.seq,
       "v": o.v
     });
@@ -591,14 +626,31 @@ TestCase {
         "src": "jv-voice"
       })
     };
+    const beat = suite.envelope("sys.health", 0, 1, {
+      "service": "jv-voice",
+      "state": "ok",
+      "uptime_s": 1,
+      "period_s": 5,
+      "metrics": {
+        "output_device_pinned": 0
+      }
+    }, {
+      "src": "jv-voice"
+    });
     const out = makeOutput({
       "bus": {
         "linkUp": false,
         "latest": topic => frames[topic],
+        "latestFrom": () => beat,
         "ageOf": () => 0
       }
     });
     compare(out.unheard, false, "the HUD read a mixer it had already lost sight of");
+    // The third reader (A41) has to be pinned on its own account: `unheard`
+    // is already false because the other two nulled the pair, so deleting
+    // ITS guard changes nothing anyone can see from the outside. `ownSink`
+    // is where it is observable.
+    compare(out.ownSink, false, "the HUD read jv-voice's device off a link it had already lost");
   }
 
   function test_a_bus_that_offers_nothing_is_survived() {
@@ -620,6 +672,170 @@ TestCase {
     const out = makeOutput({
       "bus": null
     });
+    compare(out.unheard, false);
+  }
+
+  // --- the sink this element is allowed to speak about (A41) ------------
+  //
+  // Everything above rests on one thing being true: that the default sink
+  // jv-context reports is the device jv-voice plays into. It is true while
+  // jv-voice calls `sd.play()` with no device argument and false the day
+  // anybody pins one — and a HUD that is confidently wrong about why you
+  // cannot hear Jarvis is worse than the empty corner it replaced. So the
+  // assumption stopped being an assumption: jv-voice states it in its
+  // heartbeat (`output_device_pinned`), and this element says nothing
+  // until it has been told.
+
+  function test_the_line_waits_until_jv_voice_has_said_how_it_opens_its_device() {
+    // Not a hypothetical: the HUD can be started, or the link re-made,
+    // between two five-second heartbeats. Quiet for those seconds is the
+    // under-claiming direction, which is the one core/ always takes.
+    const out = makeOutput({
+      "health": false
+    });
+    mutedWhileSpeaking(out);
+    compare(out.unheard, false, "the HUD claimed a sink it had not been told jv-voice uses");
+    compare(out.reason, "");
+  }
+
+  function test_a_pinned_device_takes_the_line_off_the_screen() {
+    // jv-voice was pointed at a device. The default sink is now somebody
+    // else's business, and its mute switch says nothing about Jarvis.
+    const out = makeOutput();
+    health(out, {
+      "pinned": 1
+    });
+    mutedWhileSpeaking(out);
+    compare(out.unheard, false, "a true statement about the wrong sink is still wrong");
+  }
+
+  function test_pinning_mid_session_clears_a_line_already_up() {
+    // A restarted jv-voice with a device in its config heartbeats within a
+    // second of coming back, while the sentence it is now speaking is one
+    // this HUD can still see.
+    const out = makeOutput();
+    mutedWhileSpeaking(out);
+    compare(out.unheard, true);
+    suite.fakeNow = 1;
+    health(out, {
+      "pinned": 1
+    });
+    compare(out.unheard, false);
+  }
+
+  function test_unpinning_puts_the_line_back() {
+    const out = makeOutput({
+      "health": false
+    });
+    health(out, {
+      "pinned": 1
+    });
+    mutedWhileSpeaking(out);
+    compare(out.unheard, false);
+    suite.fakeNow = 1;
+    health(out, {
+      "pinned": 0
+    });
+    compare(out.unheard, true, "jv-voice went back to the default sink and the HUD would not follow");
+  }
+
+  function test_a_gauge_this_hud_cannot_read_is_not_a_promise() {
+    // A heartbeat with no gauge is every jv-voice built before A41, and
+    // every service that never had an opinion. Absent is unknown, and
+    // unknown is not "took the default".
+    const out = makeOutput({
+      "health": false
+    });
+    health(out, {
+      "metrics": false
+    });
+    mutedWhileSpeaking(out);
+    compare(out.unheard, false);
+  }
+
+  function test_a_gauge_that_is_not_a_number_is_not_read() {
+    const out = makeOutput({
+      "health": false
+    });
+    health(out, {
+      "set": {
+        "output_device_pinned": "no"
+      }
+    });
+    mutedWhileSpeaking(out);
+    compare(out.unheard, false);
+  }
+
+  function test_a_gauge_value_this_hud_has_no_meaning_for_is_not_read() {
+    // schemas/sys.health.json calls `metrics` free-form numbers, so 2 is a
+    // legal frame. It is not a word this element knows, and the nearest
+    // one would be an invention.
+    const out = makeOutput({
+      "health": false
+    });
+    health(out, {
+      "pinned": 2
+    });
+    mutedWhileSpeaking(out);
+    compare(out.unheard, false);
+  }
+
+  function test_the_gauge_is_read_from_jv_voice_and_not_from_whoever_spoke_last() {
+    // `sys.health` has one publisher per service and they all share the
+    // topic. Only the service that does the playing can answer this.
+    const out = makeOutput();
+    suite.fakeNow = 1;
+    health(out, {
+      "src": "jv-context",
+      "pinned": 1
+    });
+    mutedWhileSpeaking(out);
+    compare(out.unheard, true, "another service's gauge silenced the plate");
+  }
+
+  function test_a_hedged_heartbeat_is_not_read() {
+    const out = makeOutput({
+      "health": false
+    });
+    health(out, {
+      "conf": 0.5
+    });
+    mutedWhileSpeaking(out);
+    compare(out.unheard, false);
+  }
+
+  function test_a_heartbeat_from_a_schema_we_do_not_know_is_not_read() {
+    const out = makeOutput({
+      "health": false
+    });
+    health(out, {
+      "v": 2
+    });
+    mutedWhileSpeaking(out);
+    compare(out.unheard, false, "a v2 body is not a v1 body (invariant 2)");
+  }
+
+  function test_an_old_heartbeat_still_answers_for_the_device() {
+    // The deliberate asymmetry: this gauge is jv-voice's CONFIGURATION,
+    // not a reading of the world, and configuration does not go stale
+    // sitting still — it changes when the process restarts, and a restart
+    // heartbeats at once. Expiring it would put a second, shorter clock
+    // on the plate and hand the dead-jv-voice case to the wrong one:
+    // `sayWindowS` is the backstop built for that, and it is tested above.
+    const out = makeOutput();
+    suite.fakeNow = 600;
+    mutedWhileSpeaking(out);
+    compare(out.unheard, true, "a ten-minute-old fact about how jv-voice opens a device is still that fact");
+  }
+
+  function test_a_dropped_link_forgets_the_device_too() {
+    // Everything this element reads goes through the same gate: a HUD
+    // that cannot see the bus reports nothing, and reporting nothing is
+    // not an all-clear.
+    const out = makeOutput();
+    mutedWhileSpeaking(out);
+    compare(out.unheard, true);
+    out.bus.ingest('{"t":"link","up":false}');
     compare(out.unheard, false);
   }
 }

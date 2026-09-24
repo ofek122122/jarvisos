@@ -86,6 +86,20 @@ async def collect_states(client, n, timeout=30.0):
     return out
 
 
+async def collect_health(client, n, timeout=30.0):
+    """Collect n sys.health bodies from jv-voice."""
+    out = []
+    async def inner():
+        while len(out) < n:
+            frame = await client.next_frame()
+            if frame is None:
+                break
+            if frame["topic"] == "sys.health":
+                out.append(frame["body"])
+    await asyncio.wait_for(inner(), timeout)
+    return out
+
+
 async def say(client, text, say_id=None, **extra):
     body = {
         "text": text,
@@ -394,6 +408,74 @@ async def test_an_unrelated_utterance_waits_for_the_turn_to_end(bus_addr, synth)
     assert [s["state"] for s in states[1:]] == [
         "speaking", "speaking", "idle", "speaking", "idle",
     ]
+
+    task.cancel()
+    await watcher.close()
+    await svc_bus.close()
+
+
+# --- the one fact about jv-voice another service reads (PLAN A41) --------
+#
+# The HUD's OutputPlate says OUTPUT MUTED while Jarvis is speaking, off
+# jv-context's reading of the DEFAULT SINK. That the default sink is what
+# jv-voice plays into is true only while no device is pinned here — so
+# jv-voice states it, in the one place the schema leaves for a service's
+# own gauges. `sys.health.metrics` is numbers only
+# (schemas/sys.health.json), which is why this is a 1/0 and not a name: the
+# HUD does not need to know WHICH device, only whether the sink it can see
+# is the one that matters.
+
+
+async def test_the_heartbeat_states_that_playback_took_the_default(bus_addr, synth):
+    watcher = await BusClient.connect(bus_addr, src="t-watch")
+    await watcher.subscribe(["sys.health"])
+    svc_bus, task = await start_service(bus_addr, synth, FakePlayer(0.1))
+
+    beat = (await collect_health(watcher, 1))[0]
+    assert beat["service"] == "jv-voice"
+    assert beat["metrics"] == {"output_device_pinned": 0.0}
+
+    task.cancel()
+    await watcher.close()
+    await svc_bus.close()
+
+
+async def test_the_heartbeat_states_a_pinned_device(bus_addr, synth):
+    """The day somebody points jv-voice at a device, the HUD must stop
+    reading the default sink as a statement about Jarvis."""
+    watcher = await BusClient.connect(bus_addr, src="t-watch")
+    await watcher.subscribe(["sys.health"])
+    svc_bus, task = await start_service(bus_addr, synth, FakePlayer(0.1, pinned=True))
+
+    beat = (await collect_health(watcher, 1))[0]
+    assert beat["metrics"] == {"output_device_pinned": 1.0}
+
+    task.cancel()
+    await watcher.close()
+    await svc_bus.close()
+
+
+async def test_a_degraded_heartbeat_carries_it_too(bus_addr, synth):
+    """The heartbeat that reports a playback failure is exactly the one the
+    HUD is most likely to be reading when it matters, and a body that drops
+    the gauge would read as "unknown device" — silencing the plate for the
+    wrong reason."""
+
+    class BrokenPlayer(FakePlayer):
+        async def play(self, audio, rate, abort):
+            raise RuntimeError("no such device")
+
+    watcher = await BusClient.connect(bus_addr, src="t-watch")
+    await watcher.subscribe(["sys.health"])
+    svc_bus, task = await start_service(bus_addr, synth, BrokenPlayer(0.1, pinned=True))
+    await asyncio.sleep(0.2)
+    await say(watcher, "Anything at all.")
+
+    beats = await collect_health(watcher, 2)
+    degraded = [b for b in beats if b["state"] == "degraded"]
+    assert degraded, f"no degraded heartbeat: {beats}"
+    assert degraded[0]["metrics"] == {"output_device_pinned": 1.0}
+    assert "no such device" in degraded[0]["notes"]
 
     task.cancel()
     await watcher.close()

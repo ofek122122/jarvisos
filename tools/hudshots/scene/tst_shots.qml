@@ -282,6 +282,18 @@ Item {
     function shot_muted() {
       Bus.ingest('{"t":"link","up":true}');
       suite.micOpen();
+      // A41: the plate will not speak about the default sink until
+      // jv-voice has said that is where it plays. 0 = `sd.play()` with no
+      // device argument, which is jv-voice's ordinary configuration.
+      suite.send("sys.health", "jv-voice", {
+        "service": "jv-voice",
+        "state": "ok",
+        "uptime_s": 1847,
+        "period_s": 5,
+        "metrics": {
+          "output_device_pinned": 0
+        }
+      });
       suite.send("speech.state", "jv-voice", {
         "state": "speaking",
         "utterance_id": "5ab8fecf-13d0-4f86-aa5d-0b2cc23b4d5d"

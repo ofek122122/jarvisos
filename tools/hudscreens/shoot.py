@@ -740,35 +740,48 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         # OutputPlate arriving under it, measured in pixels, and it is also
         # the first time A40's decision — this line exists only while the
         # sink is silent — has been checked through a compositor.
+        # Both feeds carry jv-voice's heartbeat as well as the snapshot, and
+        # that is a lesson this window taught rather than a decoration. A41
+        # gave OutputPlate a second publisher to satisfy, and the first
+        # version published that beat ONCE: `sys.health` says `period_s` 5,
+        # core/HealthState.qml calls a service lost after two of its own
+        # periods, and eleven seconds into the window HealthPlate arrived
+        # under the plate being held still — 41 px of "jv-voice lost",
+        # reported as the plate changing under the measurement. A service
+        # this HUD is being told is SPEAKING has to keep saying it is alive,
+        # which is what a real one does.
+        audible = [sheet.VOICE_DEFAULT_SINK, sheet.SINK_OK]
+        muted = [sheet.VOICE_DEFAULT_SINK, sheet.SINK_MUTED]
+
         mark = hud.mark()
-        publish_shot({"frames": [sheet.VOICE_SPEAKING, sheet.SINK_OK]}, bus_addr)
+        publish_shot({"frames": [sheet.VOICE_SPEAKING] + audible}, bus_addr)
         wait_for_drawing(
             ppm,
             background,
             bus_addr,
-            [sheet.SINK_OK],
+            audible,
             "jv-voice said it was speaking and the HUD drew nothing",
         )
         # Both boxes are read AFTER a settle, never off the first capture
         # that differs: §06's fade is a real animation and a region measured
         # half way through one is a smaller region than the plate. Comparing
         # two mid-fade boxes would make the growth check below a coin flip.
-        feed_snapshots(IDLE_SETTLE_S, [sheet.SINK_OK], bus_addr)
+        feed_snapshots(IDLE_SETTLE_S, audible, bus_addr)
         capture("primary", ppm)
         speaking_box = drawn_box(read_ppm(ppm), background)
         log(f"  speaking into an audible sink: drawn at {speaking_box}")
 
-        publish_shot({"frames": [sheet.SINK_MUTED]}, bus_addr)
+        publish_shot({"frames": muted}, bus_addr)
         wait_for_drawing(
             ppm,
             background,
             bus_addr,
-            [sheet.SINK_MUTED],
+            muted,
             "the sink went muted mid-utterance and the HUD drew nothing",
             differs_from=speaking_box,
         )
         lighting, _ = sheet.surface_traffic(hud.since(mark))
-        feed_snapshots(IDLE_SETTLE_S, [sheet.SINK_MUTED], bus_addr)
+        feed_snapshots(IDLE_SETTLE_S, muted, bus_addr)
         capture("primary", ppm)
         box = drawn_box(read_ppm(ppm), background)
         # What "a plate arrived UNDER another one" is, in this geometry. The
@@ -808,7 +821,7 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         )
 
         mark = hud.mark()
-        snapshots = feed_snapshots(IDLE_WINDOW_S, [sheet.SINK_MUTED], bus_addr)
+        snapshots = feed_snapshots(IDLE_WINDOW_S, muted, bus_addr)
         commits, frames = sheet.surface_traffic(hud.since(mark))
 
         # The box FIRST, and the commit count is quoted in its message: a

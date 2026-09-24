@@ -214,6 +214,21 @@ SINK_MUTED = {
 }
 
 
+# jv-voice stating how it opens its output device (A41). Not decoration
+# either: core/OutputState.qml refuses to say OUTPUT MUTED about a sink
+# nobody has told it Jarvis uses. The plate's whole claim is that the
+# DEFAULT sink jv-context reports is the one the samples land on, and that
+# is true only while no device is pinned — so 0 here is jv-voice's ordinary
+# configuration (`sd.play()` with no device argument), published rather
+# than assumed. Without this frame the pair below lights StatePlate alone
+# and the live-lit window measures a HUD with one plate on it.
+#
+# It does NOT expire: the gauge is jv-voice's configuration, not a reading
+# of the world, so one beat holds for as long as the link does — which is
+# why the feeds below carry only the snapshot.
+VOICE_DEFAULT_SINK = _beat("jv-voice", metrics={"output_device_pinned": 0.0})
+
+
 # jv-voice with an utterance in flight. core/OutputState.qml reads
 # `speech.state` verbatim (not SpeechState's answer), and it does not
 # expire on its own — jv-voice publishes `idle` when it finishes, and the
