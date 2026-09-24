@@ -227,7 +227,11 @@ of what the **real** pipeline published while listening to the fixture WAVs
 | `speech-no-wake` | real speech nobody addressed to Jarvis — `unknown` throughout, start to finish |
 
 Those seconds are facts about the recordings, so a flicker or an early
-blank shows up as an extra transition rather than as a judgement call. Two
+blank shows up as an extra transition rather than as a judgement call.
+The words land LATER than the `thinking` above them — 2.2 s later, the
+ASR jv-ears runs after the boundary (A58) — which is why the two elements
+that a turn puts on screen are timed from the same frame and not each from
+its own (A57), and why that is now something a replay can check. Two
 of the assertions are about the coupling to jv-ears rather than about the
 HUD: the real wake frames must clear SpeechState's "a frame that disagrees
 with itself is not a detection" bar (they carry openWakeWord's own `score`

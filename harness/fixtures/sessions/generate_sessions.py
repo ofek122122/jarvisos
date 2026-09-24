@@ -24,6 +24,10 @@ is also why the header's `boot_id` is the `sample-clock` sentinel instead
 of a real one: these `ts` are not this boot's CLOCK_MONOTONIC and must not
 be lined up against a session that is.
 
+The one thing the sample clock cannot see is the ASR, and `ASR_LATENCY_S`
+below is where that is put back. Everything else here is a recording; that
+constant is a declared model, and it says so.
+
 Regenerate (requires ./models/fetch.sh --only ears):
 
     python harness/fixtures/sessions/generate_sessions.py
@@ -60,6 +64,53 @@ SOURCES = (
 )
 
 SRC = "jv-ears"
+
+# How much later than the sample clock a final transcript really reaches
+# the bus (PLAN A58).
+#
+# `EarsPipeline.clock()` is samples consumed / rate. It does not advance
+# while faster-whisper runs, and jv-ears publishes the final from inside
+# `_on_speech_end`, immediately after `asr.transcribe()` returns — so on a
+# real bus jarvisd stamps that frame however long the transcribe took AFTER
+# the `speech_end` beside it. Stamping it at the sample clock made the ASR
+# INSTANTANEOUS, and the gap between "the turn ended" and "the words
+# arrived" was therefore exactly zero in every committed recording. That is
+# why a HUD bug about precisely that gap (A57) lived through five suites
+# built on these files: none of them could express the number.
+#
+# 2.2 s is the figure measured on ares — PHASE1-STATUS.md, "ASR is ~2.2 s
+# fixed (faster-whisper distil-small, CPU, runs after speech_end)" — which
+# is the same span `jv tap --latency` calls `hear`. Fixed rather than
+# proportional to the utterance because that is how it measured.
+#
+# A DECLARED constant and not a measurement taken while generating, on
+# purpose: a recording whose numbers depended on how busy the generating
+# machine was would stop being reproducible to the sample, which is the
+# property the rest of this file exists to protect. So a frame's `ts` here
+# is the sample clock plus a stated model of one wall-clock cost, and
+# nothing else.
+ASR_LATENCY_S = 2.2
+
+# PARTIALS ARE NOT DELAYED, and that is a limit rather than a claim. Each
+# one costs a transcribe too, but no measurement of that exists, and
+# modelling it honestly means modelling the sample clock falling BEHIND the
+# room and catching up — the transcribe runs inline on the one thread that
+# feeds wake and VAD (docs/optimization-backlog.md §6), so a live mic backs
+# its queue up and drops. That would move every other frame in these
+# recordings rather than one, and it would be inventing a timeline instead
+# of recording one. The final is the frame downstream services act on and
+# the only one whose lateness anything already measures. See PLAN A59.
+
+
+def asr_delay(topic: str, body: Dict[str, Any]) -> float:
+    """Seconds between this frame's sample clock and its arrival on the bus.
+
+    One rule, in one place, so `frames_for` and anything re-deriving these
+    files agree about what a recorded `ts` means.
+    """
+    if topic != "audio.transcript" or body.get("kind") != "final":
+        return 0.0
+    return ASR_LATENCY_S
 
 
 def _plain(value: Any) -> Any:
@@ -103,7 +154,7 @@ def frames_for(wav: Path) -> List[Dict[str, Any]]:
             "topic": topic,
             # 6 decimals resolves 1/16000 s with room to spare, and keeps
             # the committed file readable by a human doing the diff.
-            "ts": round(pipe.clock(), 6),
+            "ts": round(pipe.clock() + asr_delay(topic, body), 6),
             "seq": n,
             "src": SRC,
             "conf": round(float(conf), 6),
@@ -113,6 +164,14 @@ def frames_for(wav: Path) -> List[Dict[str, Any]]:
 
     pipe = EarsPipeline(cfg, publish)
     pipe.run(WavSource([wav], cfg.chunk_samples))
+    # File order is chronological, because replay.py sleeps the DELTA
+    # between consecutive lines: a frame written before one it now follows
+    # in time would replay with that gap clamped to zero and the recording
+    # would silently lose it. A stable sort, so frames sharing a `ts` keep
+    # the order jv-ears published them in. Today this moves nothing — every
+    # final is already the last frame of its recording — which is exactly
+    # when an invariant is cheap to state.
+    out.sort(key=lambda f: f["ts"])
     return out
 
 

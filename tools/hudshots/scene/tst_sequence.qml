@@ -115,6 +115,25 @@ Item {
       compare(suite.names(), "", "a HUD that has seen nothing has something on screen");
     }
 
+    // The declared policy, back on every plate, after every test.
+    //
+    // One test below shortens two windows to watch them close, and the
+    // plates are not rebuilt between tests — so restoring them at the end
+    // of that function meant a `compare` in the middle of it restored
+    // nothing, and four later tests then ran against a HUD with a 200 ms
+    // memory and failed for a reason that was not theirs. A `cleanup()`
+    // runs whether or not the test got there. (The sheet next door
+    // photographs these same plates, which is the other half of why this
+    // cannot be left to a happy path.)
+    function cleanup() {
+      const voice = suite.plateNamed("state");
+      const words = suite.plateNamed("heard");
+      if (voice)
+        voice.voice.thinkWindowS = 30.0;
+      if (words)
+        words.heard.holdS = 30.0;
+    }
+
     // The plate that calls itself `name`, or null. By its own name (A53)
     // rather than by its position in the stack, so this survives the next
     // plate being inserted above it.
@@ -192,7 +211,7 @@ Item {
       // this turn could say is in `03-heard.png`; everything it cannot say
       // is the two numbers and the order.
       compare(suite.corner("hey-jarvis-clean"),
-              "(dark) -> state@1.44 -> state heard@3.76");
+              "(dark) -> state@1.44 -> state heard@5.96");
     }
 
     function test_the_same_question_over_music_reads_the_same_shape() {
@@ -204,7 +223,7 @@ Item {
       // differently, which is A26's "no confidence bar" decision holding
       // at the level of what the user sees.
       compare(suite.corner("hey-jarvis-music"),
-              "(dark) -> state@1.44 -> state heard@4.16");
+              "(dark) -> state@1.44 -> state heard@6.36");
     }
 
     function test_a_pause_mid_sentence_never_takes_the_corner_down_and_up() {
@@ -216,7 +235,7 @@ Item {
       // flicker: extra entries, in both directions, in the middle of
       // somebody talking. Two entries is the whole claim.
       compare(suite.corner("hey-jarvis-pause"),
-              "(dark) -> state@1.36 -> state heard@6.64");
+              "(dark) -> state@1.36 -> state heard@8.84");
     }
 
     function test_a_room_talking_never_puts_anything_in_the_corner() {
@@ -301,30 +320,32 @@ Item {
       // and no still picture can catch it: every shot is taken while
       // something is true.
       //
-      // The two budgets are shortened to 200 ms and nothing else is
-      // staged: both windows then close the way they close on ares, on
-      // their own one-shot timers, in real time. Winding the injected
-      // clock instead would prove less — SpeechState reads a frame's AGE
-      // and would expire, while HeardState keeps its own time and would
-      // not, so the corner would empty for a reason the machine does not
-      // have.
+      // The two budgets are shortened and nothing else is staged: both
+      // windows then close the way they close on ares, on their own
+      // one-shot timers, in real time. Winding the injected clock instead
+      // would prove less — SpeechState reads a frame's AGE and would
+      // expire, while HeardState keeps its own time and would not, so the
+      // corner would empty for a reason the machine does not have.
+      //
+      // 3 s, and the number is no longer arbitrary (A58). Both windows
+      // start at the utterance's boundary and the words arrive 2.2 s
+      // later — the ASR, which these recordings now carry — so a budget
+      // under that expires the line before it is ever shown, and this
+      // test would go green over a corner the reader never saw. It used
+      // to be 200 ms, which was only ever legal while the recordings said
+      // the ASR was free.
       const voice = suite.plateNamed("state");
       const words = suite.plateNamed("heard");
       verify(voice && words, "the corner is missing a plate this test drives");
-      voice.voice.thinkWindowS = 0.2;
-      words.heard.holdS = 0.2;
+      voice.voice.thinkWindowS = 3.0;
+      words.heard.holdS = 3.0;
 
       compare(suite.corner("hey-jarvis-clean"),
-              "(dark) -> state@1.44 -> state heard@3.76");
+              "(dark) -> state@1.44 -> state heard@5.96");
       tryVerify(function () {
         return suite.names() === "";
-      }, 4000, "the corner never emptied after a question nobody answered");
+      }, 6000, "the corner never emptied after a question nobody answered");
       compare(stack.anyLit, false, "the surface would have stayed mapped for nothing");
-
-      // Back to the declared policy: the plates outlive this test, and the
-      // sheet next door photographs the same ones.
-      voice.voice.thinkWindowS = 30.0;
-      words.heard.holdS = 30.0;
     }
 
     function test_losing_the_bus_mid_turn_takes_every_plate_down_first() {
@@ -340,7 +361,7 @@ Item {
       // `07-no-bus.png` settles past the grace and can only ever show the
       // end of that, which is why this is checked here instead.
       compare(suite.corner("hey-jarvis-clean"),
-              "(dark) -> state@1.44 -> state heard@3.76");
+              "(dark) -> state@1.44 -> state heard@5.96");
       Bus.ingest('{"t":"link","up":false,"err":"connect /run/jarvis/bus.sock: No such file or directory"}');
       compare(suite.names(), "",
               "a plate stayed up over a bus the HUD can no longer see");

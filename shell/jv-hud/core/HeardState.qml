@@ -70,12 +70,16 @@
 // short. Nothing about this decides WHETHER the line is shown; a missing,
 // mismatched or unreadable boundary costs the reader nothing.
 //
-// None of the committed recordings can show this, and that is worth
-// stating where somebody will look: the fixture generator stamps a final
-// at the same `ts` as the speech_end that preceded it, so in every replay
-// the ASR is instantaneous and both anchors are the same number. The gap
-// exists on ares and nowhere else, which is exactly why it survived five
-// suites (A28 is the item that would give it a recording).
+// None of the committed recordings COULD show this, and that is why it
+// survived five suites: the fixture generator stamped each final at the
+// same `ts` as the speech_end before it, so in every replay the ASR was
+// instantaneous and both anchors were the same number. A58 closed that —
+// the generator now stamps a final at the sample clock plus the ASR
+// measured on ares, so the three recordings that contain one put 2.2 s
+// between the boundary and the words, and tst_sessionreplay reads the
+// anchor off a real recording. A live recording of a real utterance
+// (A28) would still be better; this is the part that needed no human at
+// the machine.
 //
 // On confidence (invariant 4). A numeric envelope `conf` is required and
 // nothing else is done with it, which is a decision and not an oversight.

@@ -40,6 +40,37 @@ than a real one — these `ts` are not this boot's `CLOCK_MONOTONIC`, and
 saying so in the field that exists to prove they are is better than
 borrowing a boot_id that would.
 
+### The one thing the sample clock cannot see (A58)
+
+The sample clock counts samples consumed, and no samples are consumed
+while faster-whisper runs. jv-ears publishes the **final** transcript from
+inside `_on_speech_end`, right after `asr.transcribe()` returns — so on a
+real bus jarvisd stamps it however long the transcribe took *after* the
+`speech_end` beside it. Recorded at the bare sample clock, that gap was
+exactly zero: the ASR was instantaneous in every committed session, and
+the one number that distinguishes "the turn ended" from "the words
+arrived" did not exist anywhere in this directory. A HUD bug about
+precisely that gap survived five suites built on these files for that
+reason.
+
+So a final's `ts` is the sample clock **plus `generate_sessions.ASR_LATENCY_S`**
+— 2.2 s, the figure measured on ares (`PHASE1-STATUS.md`, "ASR is ~2.2 s
+fixed"), the same span `jv tap --latency` calls `hear`. A declared model,
+not a measurement taken while generating: a recording whose numbers
+depended on how busy the generating machine was would stop being
+reproducible to the sample.
+
+**Partials are not delayed**, and that is a stated limit. Each one costs a
+transcribe too, but nothing has measured it, and modelling it honestly
+means modelling the sample clock falling *behind* the room and catching up
+(the transcribe runs inline on the thread that feeds wake and VAD —
+`docs/optimization-backlog.md` §6), which would move every other frame in
+these files. See PLAN A59.
+
+File order is time order, because `replay.py` sleeps the delta between
+consecutive lines and clamps it at zero — a frame written out of order
+would replay with its gap silently lost.
+
 `utterance_id`s are real UUIDs minted during the recording, so they differ
 from run to run. Nothing compares them across recordings; what is checked
 is that every transcript threads an utterance the VAD opened.
@@ -57,6 +88,9 @@ is that every transcript threads an utterance the VAD opened.
   the repo, so `tools/gen_sessions_qml.py` compiles these lines verbatim
   into `shell/jv-hud/tests/Sessions.qml`, and `nix build .#jv-hud` runs it
   with `--check`.
+- **the HUD's corner as a sequence** (`tools/hudshots/scene/tst_sequence.qml`,
+  A54) — the same recordings through the whole plate stack, asserting which
+  plates are on screen at which recorded second.
 
 ## Regenerating
 
@@ -65,6 +99,17 @@ is that every transcript threads an utterance the VAD opened.
 python harness/fixtures/sessions/generate_sessions.py
 python tools/gen_sessions_qml.py       # the HUD's compiled copy (or its build fails)
 ```
+
+A note on the A58 commit itself, because it is the one place these files
+were changed without the pipeline being re-run: the loop's machine has no
+model weights, so the three finals were **restamped in place** by the same
+`asr_delay()` the generator now applies — one number per recording, the
+header untouched (`wall_time_utc` still dates the real recording rather
+than the edit). The diff is three lines and it is in the git history. What
+proves it is what a regeneration would produce is
+`test_the_committed_session_is_what_the_pipeline_still_does`, which
+compares `ts` frame by frame and needs the weights — so the first run of
+the jv-ears suite on a machine that has them is the check.
 
 Then **read the diff before committing it**. A fixture that changed without
 anyone intending it is the finding, not the chore — and the HUD's replay
