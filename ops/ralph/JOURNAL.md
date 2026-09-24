@@ -7742,3 +7742,86 @@ suite's result depended on its own order. It is a real `monkeypatch` now.
   cluster are two questions asked five ways), **B43/B47** are one question
   asked three times, and **B10/A28** — one live recording of one spoken
   turn on ares — remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 76 — B53: the red baseline that was never the suite's fault
+
+Track A is still one human look at `docs/hud/` away from unblocking ten
+items, and `docs/optimization-backlog.md` is human-review-required by
+construction, so this took the one concrete cheap item the last iteration
+left: the abort the loop will hit the first time it mutates a plate it has
+just changed.
+
+The shape is worth stating because it is a harness lying about its own
+health. `--runner shots` is the only one of the four runners that reads a
+COMMITTED artifact back — B52 made `hudshots.sh` compare every PNG it
+renders against `HEAD:docs/hud`, which is the only assertion in this repo
+about what the HUD LOOKS like. The price is that an uncommitted change to a
+plate makes the BASELINE run red, so the harness aborts with "the baseline
+suite is RED before any mutation ... fix the suite first" — and the suite is
+fine. The sheet is stale, and the fix is one command.
+
+The refusal itself is right, and that is the point: it will not make a claim
+it cannot make. Only the sentence was wrong, and it sent the reader to the
+one place where nothing is broken.
+
+So the red-baseline abort now carries a per-runner `baseline_hint`, and for
+the runner that has this failure mode it is a MEASUREMENT of the working
+tree rather than a fixed sentence — because a fixed sentence would be wrong
+half the time. Three answers:
+
+- plates differ from HEAD → name them, and print the refresh: run
+  `hudshots.sh`, LOOK at the new PNGs, **commit** them. The "commit" is not
+  politeness. `hudsheet.py` compares against `HEAD:docs/hud`, so PNGs that
+  were re-rendered and left unstaged leave the baseline exactly as red as
+  before, and the hint says so when it sees a modified `docs/hud`.
+- the tree matches HEAD → say so. There is nothing for the read-back to
+  disagree with, the red is real, and a harness that sent the reader off to
+  re-render a contact sheet would be pointing at the wrong thing.
+- git cannot answer → say NOTHING. `_modified` returns `None` for "I could
+  not look" and `[]` for "nothing is modified", and the caller must not
+  print the first sentence when it only has the second. The abort it
+  decorates is a refusal to make a claim; a hint that guessed at the reason
+  would be the one thing this harness never does. That distinction was not
+  in the first draft — writing the mutation list for it is what found it,
+  which is the second time this month that asking "what would catch this"
+  changed the code rather than the tests.
+
+**Verified end to end, not reasoned.** With the listening dot repainted
+ember in the worktree (`Theme.teal` -> `Theme.ember` in `StatePlate.qml`,
+restored after), a real `bash ops/ralph/mutate.sh --runner shots hud` now
+aborts with: "The SHEET may be stale rather than the suite (B53): 1 file(s)
+under shell/jv-hud differ from HEAD (shell/jv-hud/StatePlate.qml), and
+hudshots.sh compares every PNG it renders against HEAD:docs/hud ... Run
+`bash ops/ralph/hudshots.sh`, LOOK at the new PNGs, commit them, then
+grade." One suite run, one abort, exit 2, the sheet in `docs/hud` untouched
+(the grading run renders into its own scratch).
+
+- tests: `runtests.sh tools` **234 green, was 229** — five new, four of them
+  against a throwaway git repo because a hint that measures the tree cannot
+  be tested against a bare directory. Graded with the harness on itself:
+  **6 mutations, 6 caught** (the stale-sheet branch inverted, the
+  could-not-look guard dropped, a git failure read as a clean tree, the
+  advice stopping short of "commit", the uncommitted-sheet note inverted,
+  and the hint never reaching the abort). Canary red, closing baseline green.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins, no production code at all — this is the
+  loop's own tooling.
+- files: tools/mutate.py, tools/tests/test_mutate.py, ops/ralph/mutate.sh
+- commit: 002ee84
+- raised: **B56** — the harness prints ONE line of each suite log and keeps
+  none of it. Measured today: the line it chose for the red baseline was
+  "something drew a different picture than the one in docs/hud.", the tail
+  of the comparator's closing paragraph, which is the sentence for the case
+  that was NOT what happened. B53 fixes the one abort where the loop was
+  actively misled; the general gap (a survivor or a dead canary cannot be
+  investigated without re-running a 53 s suite by hand) is cheap to close —
+  each run already has a private scratch directory to write its log into.
+- next: **B56** is the natural follow-on and is small. Otherwise unchanged
+  and worth repeating, because it is now several iterations old: **Track A
+  is one human look at `docs/hud/` away from unblocking ten items** (A47,
+  A55, A62, A63, A68 and the A21/A22/A25 cluster are two questions asked
+  five ways), **B27** needs one decision between three named options before
+  any HUD work on no-wake windows can start, **B43/B47/B54** are one
+  question asked three times, and **B10/A28** — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this
+  loop.

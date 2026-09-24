@@ -1184,7 +1184,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       with a test on it. Tests: `bash ops/ralph/runtests.sh tools` 228, was
       199, with eleven mutations on the new module and eleven caught.)
 
-- [ ] B53. `--runner shots` cannot grade a plate while the sheet is out of
+- [x] B53. `--runner shots` cannot grade a plate while the sheet is out of
       date, and the abort does not say so. Measured while closing B52, not
       reasoned: with an uncommitted change to `StatePlate.qml` in the tree,
       `bash ops/ralph/mutate.sh --runner shots hud` renders a sheet that
@@ -1198,7 +1198,34 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       suite log the harness prints one line of. One line in mutate.py's
       red-baseline abort, conditional on the runner, with a test: cheap, and
       the loop will hit this the first time it mutates a plate it has just
-      changed. Discovered in B52.
+      changed. Discovered in B52. — 002ee84
+      (A per-runner `baseline_hint` on `Language`, and for the one runner with
+      this failure mode it is a MEASUREMENT of the tree rather than a fixed
+      sentence: it names the plates that differ from HEAD and prints the
+      refresh — hudshots.sh, LOOK at the PNGs, **commit** them, since the
+      comparison is against HEAD and a re-rendered uncommitted sheet is still
+      stale — or it says the tree matches HEAD and the red is real, or, when
+      git cannot answer, it says NOTHING. `_modified` returns `None` for "I
+      could not look" and `[]` for "nothing is modified" for exactly that
+      reason: the abort it decorates is a refusal to make a claim. Verified end
+      to end with the listening dot repainted ember in the worktree, not just
+      in unit tests. Tests: `runtests.sh tools` 234, was 229; 6 mutations on
+      the new code, 6 caught.)
+
+- [ ] B56. The harness prints ONE LINE of each suite log and keeps none of it.
+      That line is chosen as "the last line of stdout", which is a pytest
+      summary for `--runner tests` and, for `--runner shots`, whatever the
+      comparator's closing paragraph happened to end with — while closing B53
+      the printed line was "something drew a different picture than the one in
+      docs/hud.", which is the sentence for the case that ISN'T what happened.
+      B53 fixes the one abort where the loop was actively misled, and the
+      general shape is still there: a survivor, a canary that lived or a red
+      baseline cannot be investigated without re-running the suite by hand,
+      because every run's output is captured and dropped. Each run already gets
+      a private scratch directory; writing `run003.log` into it and keeping the
+      tree on a nonzero outcome (or just printing the last ~15 lines instead of
+      the last 1 when a run is RED) is cheap and would have replaced a 53 s
+      re-run today. Discovered in B53.
 
 - [x] B50. The canary proves the suite executes the FILE and never the
       LINE, which is the honest meaning of a survivor and also its
