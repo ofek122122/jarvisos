@@ -899,3 +899,97 @@ UI was still the first choice, and the previous entry's `next:` pointed here).
   on sys.health, deleting two hand-mirrored constants) is still the best
   non-UI slice. And the standing one, unchanged and unfixable by tests:
   nobody has ever LOOKED at this HUD on ares (A13, A10).
+
+## 2026-09-24 — iteration 12 — A16: one answer is one utterance
+
+Picked A16, which the previous entry's `next:` called the most valuable thing
+on the board. It is a HUD problem fixed in jv-voice (permitted — not jv-act,
+not a schema), and while proving it I found it was never only a HUD problem.
+
+- the flicker: jv-brain streams the completion and publishes one speech.say
+  per SENTENCE (all sharing a `reply_group`), and jv-voice answered each one
+  with its own `speaking` -> `idle`. So one answer read as four answers.
+  A12 stopped the gap between hearing you and answering from LYING; it did
+  not stop the answer itself from blinking, and §06 calls blinking churn.
+- the part that was not cosmetic, and is why this was worth an iteration:
+  **jv-ears releases its half-duplex gate on `idle`** (main.py
+  `follow_speech_state`). jv-voice synthesizes sentence N+1 only after N
+  finishes playing (backlog entry on prefetch), so every inter-sentence
+  `idle` reopened the utterance gate for the length of a Piper synth while
+  Jarvis was still mid-answer — and the sink+mic chain delivers his last
+  samples ~350 ms late (ears' `suppress_tail_ms` exists for exactly that).
+  "Jarvis hearing Jarvis" was fixed in 7f39196; streaming quietly reopened
+  a slice of it. The gate now stays closed for the whole turn.
+- so the unit is the TURN. `_speak_turn` speaks an item and then the rest of
+  its reply_group as the sentences arrive, publishing one `speaking` per
+  sentence (each carries its own say_id — the schema says speech.state
+  reports progress against a say_id, and `jv tap --latency` keys off
+  speech.say, so nothing loses resolution) and ONE `idle` when the turn
+  drains. `interrupted`/`error` are unchanged: they end the turn where they
+  happen. No schema change was needed, and the contract already anticipated
+  this — speech.state's description says `interrupted` is followed by `idle`
+  OR the next `speaking`.
+- two real bugs fell out of thinking in turns, both about the gaps INSIDE
+  one:
+  1. `self._speaking` used to be cleared after every sentence, so a wake
+     landing between two sentences hit `if self._speaking` and did nothing
+     — no interrupt, no group drop, and sentence N+1 then played over the
+     user who had just barged in. It now stays set across the turn.
+  2. `_drop_group` only purged what was ALREADY QUEUED. jv-brain does not
+     subscribe to audio.wake (checked — it has no barge-in path at all), so
+     it keeps publishing the remaining sentences of an interrupted reply,
+     and those arrived after the purge and were spoken. A dropped group is
+     remembered now and `_enqueue` refuses it. Bounded at 8: this service
+     runs for weeks, and uuid4 groups older than the last handful are over.
+     That bound is the same instinct as `jv tap`'s utterance ring.
+- `TURN_GAP_S` = 0.5 s, and what it is allowed to mean matters. It bridges
+  the BUS, not the brain: sentence N+1 is normally already queued (the LLM
+  generates faster than Piper speaks), so the only gap worth covering is a
+  frame published as the previous sentence ended and still in flight. Past
+  it we stop asserting a turn we can no longer see — which is what a brain
+  that died mid-answer looks like, and the CPU rung that explains a
+  genuinely slow answer is already on screen (A6). Deliberately NOT a
+  mirror of any other service's constant, so it does not join A14's pile.
+- the gap is reactive, not polled: `_enqueue` and `_interrupt` set a
+  `_nudge` event, cleared before the queue is re-scanned so no wakeup can
+  be lost. That is not tidiness — polling or waiting the budget out would
+  add up to half a second of silence before the next sentence's synthesis
+  starts, and half a second before jv-ears learns a barge-in ended the
+  turn. Both are pinned by timing assertions (`< TURN_GAP_S / 2`), which
+  is what finally killed the two mutations that survived the first pass:
+  without them, an interruption-blind gap still ended the turn with the
+  same STATES, just late, and tests that only read states cannot tell the
+  difference.
+- one judgement call, written down: a wake in the gap reports
+  `idle(say_id, completed)`, not `interrupted`. `reason` is "why the
+  previous utterance ended" and that utterance did finish playing — it is
+  the TURN that was cut. The wake itself is on the bus for anyone who
+  wants it, and both consumers only need the level.
+- second judgement call: a turn's sentences are taken out of FIFO order if
+  something unrelated is queued behind them. FIFO is between turns; an
+  announcement from elsewhere belongs after the answer, not wedged between
+  two of its sentences. Urgent still preempts, exactly as before.
+- proving the tests bite: 11 mutations, 11 caught — a zero gap, a dropped
+  group that is not remembered, `_drop_group` forgetting to record, no
+  merging at all, a gap blind to interruption, an unbounded gap, an idle
+  after every sentence, the speaker forgotten between sentences, only the
+  queue HEAD able to continue a turn, and each of the two nudges removed.
+- tests: `bash ops/ralph/runtests.sh jv-voice` — 17 green, was 10 (7 new).
+  The 10 old ones passed untouched, which is the claim that matters: the
+  single-utterance, wake, preempt and low-priority contracts did not move.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act, no boot path, no pins.
+- files: services/jv-voice/jv_voice/service.py,
+  services/jv-voice/jv_voice/player.py (FakePlayer grew a `finished` event
+  so a test can act in the gap deterministically),
+  services/jv-voice/tests/test_voice_service.py
+- commit: 8944abe
+- next: **A14** is the best non-UI slice and it is now cheap to justify —
+  the HUD hand-mirrors two jv-ears constants, and this iteration just added
+  a third hand-tuned budget to the system's timing story. Otherwise **A15**
+  (the HUD's `visible` OR grows a term per plate and nothing notices when
+  one is missing) is small and closes a real quiet-failure hole. And the
+  standing one, unchanged and unfixable by tests: nobody has ever LOOKED at
+  this HUD on ares (A13, A10) — and nobody has heard a streamed reply since
+  this change, so the first live answer on ares is worth listening to for a
+  seam between sentences.

@@ -178,6 +178,17 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       exit-1 when a filter matches nothing so it is scriptable. `ts_mono` and
       the ISO `ts` are both already in every entry. Small, pure, and it lands
       entirely in `cli::act_log_render`. Discovered building B4.
+- [ ] B6. jv-brain has NO barge-in path: it does not subscribe to
+      `audio.wake`, so when the user interrupts, it keeps streaming the
+      rest of an answer nobody is listening to — holding the GPU, adding
+      the abandoned reply to the conversation as if it had been heard, and
+      publishing speech.say frames that jv-voice now has to refuse (A16's
+      dropped-group memory is the downstream patch for this). Cancelling
+      the in-flight `_respond` on a wake that lands while its reply_group
+      is still streaming is the real fix. jv-brain is not jv-act and needs
+      no schema change, but it wants care: the turn must still be recorded
+      as interrupted rather than silently lost, and a wake with no reply in
+      flight must do nothing. Discovered in A16.
 - [ ] B3. More replay-harness fixtures for perception (recorded-session tests).
 
 ## Track C — Creative (within blueprint + invariants)
@@ -206,16 +217,24 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       mutations run through them. Tests: `bash ops/ralph/qmltest.sh`,
       `bash ops/ralph/runtests.sh jv-hud-bridge`.)
 
-- [ ] A16. jv-voice publishes a `speaking`→`idle` PAIR per SENTENCE, because
-      jv-brain streams one `speech.say` per sentence. So a single answer
-      makes StatePlate blink off and on once per sentence, which §06 calls
-      churn rather than information. A12 stopped that gap from LYING (it no
-      longer claims idle) but not from flickering. jv-voice already tracks
-      `reply_group` to drop a whole turn on barge-in, so it can know a
-      streamed reply is ONE utterance and stay `speaking` across it —
-      publishing idle when the group drains, not when a sentence does. A
-      jv-voice change (permitted: not jv-act, not a schema), and it wants
-      care around barge-in and the urgent-preempt path. Discovered in A12.
+- [x] A16. jv-voice speaks TURNS, not sentences: one answer is one
+      `speaking`→`idle` pair. — 8944abe
+      (jv-brain publishes one speech.say per sentence, so an answer used to
+      blink once per sentence. Not only cosmetic: **jv-ears releases its
+      half-duplex gate on `idle`**, so every inter-sentence idle reopened
+      the microphone gate for the length of the next Piper synth while
+      Jarvis was still talking. `_speak_turn` now speaks a reply_group as
+      one thing — a `speaking` per sentence (each with its own say_id) and
+      ONE idle when the turn drains. Two real bugs fell out: `_speaking`
+      used to be cleared between sentences, so a wake in the gap was
+      IGNORED and the next sentence played over the user; and `_drop_group`
+      only purged what was queued, while jv-brain (which has no barge-in
+      path) keeps publishing the rest of an interrupted reply — a dropped
+      group is remembered now, bounded at 8. `TURN_GAP_S` (0.5 s) bridges
+      the bus, not the brain, and the gap is reactive: two timing
+      assertions pin that a turn resumes when the sentence LANDS and ends
+      the instant a wake does. No schema change. 17 tests green (was 10),
+      11 mutations caught 11. Tests: `bash ops/ralph/runtests.sh jv-voice`.)
 - [ ] A14. The HUD mirrors TWO jv-ears constants by hand — `wakeWindowS`
       (8 s, ears' `wake_timeout_s`) and `stallS` (1 s, ears'
       `CaptureMeter.STALL_S`) — because nothing publishes ears'
@@ -258,3 +277,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   empty until something is actually wrong (7406009, 2026-09-24)
 - A12 — "thinking": the HUD stops going dark while Jarvis is working
   (7eca614, 2026-09-24)
+- A16 — jv-voice speaks turns, not sentences: one answer, one speaking/idle
+  pair, and the half-duplex gate stays shut across it (8944abe, 2026-09-24)
