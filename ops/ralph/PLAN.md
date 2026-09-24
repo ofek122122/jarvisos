@@ -901,8 +901,13 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       relaunch may ever be automatic. Do not build the reaction before that
       decision — a brain that unloads itself at the wrong moment is worse
       than a slow one. Discovered in B37, halved by B40.
+      **Cheaper after B45**: the threshold the live figure would be compared
+      against is now a function jv-brain can call (`launcher.gpu_floor_mb`),
+      so "is a GPU brain one restart away?" is one comparison away from a
+      `context.system` subscription. It is still the DECISION that is open,
+      not the arithmetic.
 
-- [ ] B45. The HUD quotes the free-VRAM figure and cannot judge it, because
+- [x] B45. The HUD quotes the free-VRAM figure and cannot judge it, because
       the rung ladder's VRAM requirements live in `jv_brain/config.py` and
       are not on the bus (invariant 1 says the HUD may not know them). So
       the one sentence a reader still has to supply themselves is the useful
@@ -911,7 +916,37 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       chosen rung actually needed — would let `VramState` say it, and the
       gate for it already exists. Small, and it is jv-brain's to publish, not
       the HUD's to guess. Pairs with B44; do not build it twice.
-      Discovered in B40.
+      Discovered in B40. — 532566f
+      (`launcher.gpu_floor_mb` — the least free VRAM at which `pick_rung`
+      would still land on the card, a `min()` over the GPU rungs so a
+      reordered ladder cannot publish a non-floor, in whole MiB rounded UP
+      so it can never claim an early fit. On ares' ladder: **5424 MiB of a
+      6144 MiB card**, which is why "5 GB free and still on the CPU" is the
+      ladder working and not a fault. Published as
+      `sys.health.metrics.llm_gpu_floor_mb` only while something waits on it
+      — never while already on the GPU, never on a machine with no card —
+      and in words in `notes` next to a measured reading only. Tests:
+      jv-brain 109, was 98; 10 mutations, 10 caught.
+      **The HUD half is NOT closed — see B46.**)
+
+- [ ] B46. **The other half of B45.** jv-brain now publishes the floor
+      (5424 MiB) and the HUD does not read it: `VramState` still draws
+      `vram 943 MiB FREE` alone, and the comparison that makes the figure
+      actionable — free vs needed — happens in the reader's head or not at
+      all. The gauge arrives on `sys.health` from jv-brain, which
+      `HealthState` already owns (it is where `llmOnCpu` comes from), so the
+      wiring is the shape B40 used: `HealthState` exposes the floor,
+      `VramState` takes it as an INPUT and never guesses it, unfed means the
+      row is exactly what it is today. The hard part is not the plumbing, it
+      is the ROW: the 300 px surface is sized to `jv-compat DEGRADED` and
+      every branch of `render()` is thirteen characters at its widest by
+      construction, so "943 / 5424 MiB FREE" has to earn its width or find a
+      shorter true form (`943 of 5424 MiB`? a second dimmer line? the deficit
+      — `4481 MiB SHORT` — which is the number a reader would act on and is
+      one subtraction from both). Whichever wins, the absent cases stay
+      absent: no floor published (brain on the GPU, or no card) must draw
+      exactly today's row, never an invented `of 0`. Re-shoot
+      `docs/hud/06-health.png` after. Discovered in B45.
 
 - [ ] B42. jv-brain's heartbeat re-reads the rung file on every beat
       (`_rung()` in `_health`, once per 5 s, plus once per turn for

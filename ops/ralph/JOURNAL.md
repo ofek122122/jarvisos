@@ -6805,3 +6805,102 @@ invariant 7) since A37, and it fired on the first run. The figure is
   on A62/A65/A68/A47/A56/A50/A60 (decisions) and A13/A21/A22/A25/A27/
   A31/A38/A39 (a human at ares), and B10/A28 — one live recording of one
   spoken turn — is still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 67 — B45: what the card would have to give back
+
+**What.** jv-brain now publishes the VRAM its ladder would require to put
+Jarvis back on the GPU — `sys.health.metrics.llm_gpu_floor_mb`, and the
+same figure in words in `notes`. On ares that number is **5424 MiB of a
+6144 MiB card**.
+
+**Why it had to be jv-brain's to say.** B40 put the free-VRAM figure on
+a screen — `vram 943 MiB FREE`, under the rung line it explains. What
+the HUD could not do, and must not do, is judge it: the ladder's
+requirements live in `jv_brain/config.py`, they are not on the bus, and
+invariant 1 exists precisely so that a consumer does not reach through
+the wall for another service's configuration. So `VramState` quotes the
+number and refuses the sentence — and the refused sentence is the useful
+one. Worse, the sentence a reader supplies unaided is usually wrong on
+this machine: "5 GB free and STILL on the CPU?" sounds like a fault, and
+on a ladder whose cheapest GPU rung wants 5424 MiB it is the ladder doing
+exactly its job. The fix is not a smarter HUD. It is the service that
+owns the ladder publishing the one number it alone knows.
+
+**The floor is a threshold, so it is defined as one.** Four decisions,
+each pinned by a test:
+
+- **`min()` over the GPU rungs, not `LADDER[-2]`.** A test already pins
+  the budgets as strictly decreasing, so today they are the same figure.
+  But this number is one somebody will act on — restart jv-llm or don't
+  — and a reordered ladder must not be able to publish a figure that is
+  not the floor. The stronger test is the one that never mentions the
+  ladder's order at all: at the floor `pick_rung` reaches a GPU rung, one
+  byte below it the ladder falls to the CPU.
+- **Whole MiB, rounded UP.** MiB because that is the unit of the reading
+  it will be compared against (`context.system.gpu_vram_free_mb`, and
+  nvidia-smi's own); a threshold in different units from its reading is a
+  comparison nobody can make. Up rather than nearest, because a floor
+  rounded down is a HUD saying "it fits now" about a launch that would
+  land straight back on the CPU.
+- **`None` for a ladder with no GPU rung, never 0.** There is no VRAM
+  figure that would buy a GPU brain on such a ladder; 0 would read as
+  "any card at all will do".
+- **Published only while something is waiting on it.** Not while the
+  brain is already on the card — a requirement already met, restated
+  every 5 s, is the all-day gauge §06 refuses — and not on a machine with
+  no card at all, where a floor would send a reader hunting VRAM this
+  machine has never had (the same invented shortage `VramState` refuses
+  to draw). A blind launch DOES get it: whatever nvidia-smi would not say
+  at launch, a live reading can be compared with the floor now.
+
+**And the same comparison in words**, because `jv health` prints notes
+and not metrics: `llm on cpu — no GPU layers, replies will be slow; 943
+MiB VRAM free at launch, 5424 needed`. Unit said once, both figures MiB.
+Only next to a measured reading, though — beside a blind launch a
+requirement is a number with nothing to compare it with, and a test holds
+it out of that line.
+
+**One process note, for honesty.** This iteration opened on a dirty
+worktree: iteration 66's `next:` named B45, and the changes were sitting
+there unstaged and uncommitted, from a run that was cut off before its
+verify gate. The loop's rule is never to commit unverified code, not
+never to finish it — so it was verified from scratch rather than trusted:
+full suite, ten mutations written and run against it here, tools suite
+(it reads jv-brain's metric names off this very file), and the build.
+The first `nixos-rebuild build` of the iteration was run through a pipe
+to `tail`, which reports the exit status of `tail`; that gate was
+worthless and was re-run with `pipefail`. Worth remembering — a green
+that cannot go red is not a gate.
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` **109, was 98** (11 new),
+  plus tools **137** unchanged. **Ten mutations, ten caught**: the safety
+  margin dropped from the floor, the floor taken off the most expensive
+  GPU rung instead of the cheapest, MiB rounded down, MiB that were
+  really MB, a card-less ladder publishing 0 instead of nothing, the
+  gauge published while already on the GPU, published on a machine with
+  no card, the requirement dropped from the note, and the requirement
+  quoted beside a blind launch.
+- build: `nixos-rebuild build --flake .#ares` green. Never test/switch.
+  No schema change — `metrics` is free-form by schema and has been since
+  v1. No jv-act, no boot path, no pins.
+- files: services/jv-brain/jv_brain/launcher.py,
+  services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_vram_guard.py
+- commit: 532566f
+- next: **B46** — the HUD half of this, and the loop's own pick. The
+  floor is on the bus and nothing reads it, so the comparison still
+  happens in the reader's head. The plumbing is the shape B40 already
+  wrote (`HealthState` owns the heartbeat, `VramState` takes the floor as
+  an INPUT and never guesses it); the real work is the ROW, which is
+  thirteen characters wide by construction on a 300 px surface — so
+  `943 / 5424 MiB FREE` has to earn its width or find a shorter true
+  form, and the deficit (`4481 MiB SHORT`) may be both shorter and the
+  number a reader would actually act on. Otherwise unchanged: **B43 and
+  B44 are still a human's** (is a CPU brain a `degraded` health state,
+  and may jv-brain ever unload or relaunch itself), and **B42** (the rung
+  file decides a published state and is written non-atomically — one
+  rename) and **B38** (jv-ears, jv-guard and jv-brain still beat on a
+  timer alone) are the loop's next small ones. A remains blocked on
+  decisions and on a human at ares, and B10/A28 — one live recording of
+  one spoken turn — is still the biggest thing a human can hand this
+  loop.
