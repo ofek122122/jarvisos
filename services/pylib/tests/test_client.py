@@ -79,6 +79,53 @@ async def test_roundtrip_and_prefix(bus_addr):
     await pub.close()
 
 
+async def test_the_publishers_confidence_reaches_the_subscriber_verbatim(bus_addr):
+    """Invariant 4 — "every producer publishes confidence" — is implemented
+    for the whole of Python by one line in `BusClient.publish`, and nothing
+    held it: the round-trip above publishes `conf=0.93` and never looks at
+    what arrived, so `"conf": 1.0` passed every suite in the repo. Found by
+    tools/mutate.py the first time the gate could really reach this file
+    (B58); a consumer that must "handle low-confidence input" has to be given
+    it first.
+    """
+    sub = await BusClient.connect(bus_addr, src="t-conf-sub")
+    await sub.subscribe(["audio.*"])
+    await asyncio.sleep(0.05)
+
+    pub = await BusClient.connect(bus_addr, src="t-conf-pub")
+    body = to_body(AudioWake(model="hey_jarvis", score=0.31, threshold=0.5))
+    await pub.publish("audio.wake", body, conf=0.31)
+
+    frame = await asyncio.wait_for(sub.next_frame(), timeout=2)
+    assert frame["conf"] == pytest.approx(0.31)
+    await sub.close()
+    await pub.close()
+
+
+async def test_each_publish_from_one_client_gets_the_next_seq(bus_addr):
+    """`seq` is the envelope's only ordering handle — every consumer that
+    notices a dropped or reordered frame does it with this number, and a
+    client that published the same one forever would be invisible to all of
+    them. Two publishes, two consecutive numbers, in the order they were sent.
+    """
+    sub = await BusClient.connect(bus_addr, src="t-seq-sub")
+    await sub.subscribe(["audio.*"])
+    await asyncio.sleep(0.05)
+
+    pub = await BusClient.connect(bus_addr, src="t-seq-pub")
+    body = to_body(AudioWake(model="hey_jarvis", score=0.9, threshold=0.5))
+    first = await pub.publish("audio.wake", body)
+    second = await pub.publish("audio.wake", body)
+    assert second == first + 1, "publish() returned the same seq twice"
+
+    got = [
+        (await asyncio.wait_for(sub.next_frame(), timeout=2))["seq"] for _ in range(2)
+    ]
+    assert got == [first, second]
+    await sub.close()
+    await pub.close()
+
+
 async def test_broker_rejects_invalid_envelope(bus_addr):
     c = await BusClient.connect(bus_addr, src="t-bad")
     await c.publish_env({"topic": "audio.wake"})  # missing everything else
