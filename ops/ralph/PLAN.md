@@ -1103,15 +1103,44 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `bash ops/ralph/runtests.sh tools` (96), `bash ops/ralph/qmltest.sh`
       (423), `bash ops/ralph/hudscreens.sh`.)
 
-- [ ] A43. What is left of A35 after A42: `ConfirmPlate`, `HeardPlate`,
-      `MicPlate` and `HealthPlate` have still never been watched standing
-      still. A42 built the machinery — `feed_snapshots` publishes any
-      frame list at 1 Hz for a given duration — and A35 already named the
-      cheap half: a `sys.health` heartbeat with a long `period_s` keeps
-      MicState and HealthState believing one frame for as long as the
-      harness likes, which buys two of the four with no new mechanism.
-      The other two need a frame clock the harness can hold, which is
-      genuinely more work and should wait for a reason. Discovered in A42.
+- [x] A43. The mic and health plates get watched standing still.
+      — fed202f
+      (The idle probe's fourth window. ONE jv-ears heartbeat describing a
+      device that is open and delivering nothing says both `MIC NO AUDIO`
+      — `core/MicState.qml` against jv-ears' own `capture_stall_s` — and
+      `jv-ears DEGRADED`, so re-publishing that single frame at 1 Hz
+      holds two plates. No long `period_s` was needed: jv-ears' real 5 is
+      long enough, and faking one would be a picture of a machine that
+      does not exist. Lit in two steps like A42's, growing 41 px
+      downwards through `sheet.grew_downwards`. Carries one guard the
+      other three do not, and it is window 3's inverted: those plates
+      OUTLIVE a six-second silence, so the feed is the subject rather
+      than life support and a dead feed would pass every other check — so
+      the heartbeats inside the window are counted and fewer than two
+      fails. Read 0; verified it bites with A42's "freshness" fade moved
+      to the mic dot, which windows 1-3 all read 0 for and this one read
+      18. The failure message's first guess was wrong and was kept:
+      HealthPlate's `Repeater` model IS rebuilt on every heartbeat and it
+      costs no commit. Also tightened the probe's own gates, which were
+      greps of the form "somewhere after LIVE AND LIT" that this window
+      was about to satisfy on window 3's behalf. Tests:
+      `bash ops/ralph/runtests.sh tools` (110),
+      `bash ops/ralph/hudscreens.sh`.)
+
+- [ ] A48. `ConfirmPlate` and `HeardPlate` are the last two plates that
+      have never been watched standing still, and A43 bought nothing
+      toward them — it took the pair that shares one publisher, and these
+      two do not. Both are LATCHES WITH A CLOCK rather than readings, so
+      the two obvious moves are both unknown: a frame carrying an
+      implausibly long window (jv-act declares 15 s; publishing 600 would
+      be a picture of a machine that does not exist, which is the reason
+      A43 refused to fake a `period_s`), or re-publishing the same frame
+      at 1 Hz, which may simply re-latch and re-run the fade — in which
+      case the window measures a plate arriving over and over and is
+      right to fail. Nobody has looked at which. Cheap first step: read
+      `core/ConfirmState.qml` and `core/HeardState.qml` and write down
+      what a repeated identical frame does, before building anything.
+      Discovered in A43.
 
 - [x] A44. The live-lit window held a state nobody had photographed.
       — 3052b8f
@@ -1179,6 +1208,9 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       plugs in a dedicated speaker. Discovered in A41.
 
 ## Done
+- A43 — the mic and health plates get watched standing still: a fourth
+  idle window, two plates off one re-published heartbeat, 0 commits, and
+  a mutation the other three windows are blind to (fed202f, 2026-09-24)
 - B18 — `jv health --check` answers "is generation slow right now?": the
   brain's own gauge beside the rung, dated off its turn counter so a
   re-stated number can never pass as a current condition (4bd95fd,

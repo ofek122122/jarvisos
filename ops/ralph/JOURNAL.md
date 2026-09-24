@@ -4071,3 +4071,102 @@ it claims.
   still the smallest untouched item on the board. A43 is still the four
   plates nobody has watched stand still, and A47 still says the growth
   check proves a plate arrived and not which one.
+
+## 2026-09-24 — iteration 40 — A43: the mic and health plates get watched
+## standing still
+
+A42 was the first time "0 fps with a plate on screen" was measured on a
+HUD that could see a live bus, and it could only be done with one pair of
+plates. Every lit state in this HUD is a frame ageing out — a heartbeat
+speaks for two of its own periods, a confirmation for the window jv-act
+declared — and `core/OutputState.qml` is the one element that is a
+READING of the present rather than a latch, so it stays true for exactly
+as long as the harness keeps feeding it. That left four plates nobody had
+ever watched stand still, which is what A43 was opened for.
+
+**A35 had already named the cheap half and it is cheaper than it looks.**
+One `jv-ears` heartbeat describing a device that is OPEN and delivering
+NOTHING says two things at once: `MIC NO AUDIO`, because
+`core/MicState.qml` compares `capture_age_s` against jv-ears' own
+`capture_stall_s` budget, and `jv-ears DEGRADED`, because that is the
+word the service uses about itself when its capture stalls. Two plates,
+one frame, one publisher. Re-publish it at 1 Hz and both sit there. A35
+thought this needed a heartbeat with a long `period_s`; it does not —
+jv-ears' real 5 is long enough, and faking a period would have been a
+picture of a machine that does not exist.
+
+**Lit in two steps, for A42's reason.** `MicPlate` lights off the first
+heartbeat alone, so "the HUD drew something" would be true of a window
+holding MicPlate while HealthPlate never appeared — and it would report
+exactly the same zero. So: a healthy jv-ears with the device open
+(MicPlate alone), then the device goes silent, and the drawn region has
+to grow DOWNWARDS through `sheet.grew_downwards`. 41 px, the same number
+A44 measured for OutputPlate, which is what one more plate costs in this
+stack. A47's complaint applies here unchanged and is not answered: the
+measurement proves a plate ARRIVED and not WHICH one.
+
+**One guard the other three do not have, and it is window 3's inverted.**
+OutputState stops believing a snapshot after three of jv-context's
+periods, so window 3's feed is life support — stop it and the plate
+leaves and the box check fails loudly. A heartbeat speaks for two of its
+own `period_s`, so these two plates outlive a six-second silence on their
+own. The feed here is the SUBJECT, not the life support, which means a
+feed that stopped would leave the photograph intact, pass every other
+check, and quietly turn this back into A34's lit window. So the
+heartbeats published inside the window are counted and fewer than two is
+a failure. Worth being plain about the limit: what this really rules out
+is a deliberate edit, because the run-up alone (two settles and two
+waits) is past ten seconds, so a feed that never ran at all already fails
+on the box.
+
+**A prediction that was wrong, kept rather than deleted.** The window was
+built expecting it to FAIL. `HealthPlate` renders a list;
+`core/HealthState.qml` rebuilds its roster into a fresh JS array on every
+heartbeat; a `Repeater` told its model changed rebuilds its delegates —
+and that would be a frame on three surfaces, once a second, forever, to
+draw exactly what was already there. It reads 0. That churn is real and
+happens on any machine with a degraded service, and it costs no commit.
+Nothing had to be fixed. The hypothesis stays in the failure message,
+where it is the first thing a future reader should check, and the README
+says it was measured and disproved.
+
+**So the window was made to prove it bites.** The mutation is A42's
+"freshness" fade moved to the one plate only this window can hold: the
+mic dot's opacity bound to the age of jv-ears' heartbeat. No animation,
+no timer, re-running once a second forever — the considerate edit nobody
+looks at twice. Windows 1, 2 and 3 read 0 (MicPlate is dark in all three:
+window 2 has no bus, window 3 is holding SPEAKING and OUTPUT MUTED) and
+this one read 18, three surfaces times six seconds, with the drawn box
+unmoved and the photographs identical.
+
+**The gates needed tightening before they could be trusted.** They are
+greps over `probe_idle_frames`, and several were written as "somewhere
+after the words LIVE AND LIT" — `feed_snapshots(` is there, a broker is
+started, a growth check exists. A fourth window that also starts a broker
+and also feeds would have started satisfying those on window 3's behalf,
+silently. `idle_window_text()` now slices one window out by its own
+`# --- TITLE:` banner and raises if the banner is gone.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 110 (was 104; six new),
+  `bash ops/ralph/qmltest.sh` — 435 (unchanged; no QML was edited),
+  `bash ops/ralph/hudscreens.sh` — all four idle windows 0, seven screens
+  written. Run three times end to end: baseline before the change, with
+  the change, with the mutation.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin, and no change to `shell/jv-hud` at all — this iteration only adds
+  an instrument. `docs/hud/screens/*.png` are deliberately NOT
+  regenerated: the HUD did not change, and A45 measured that re-running
+  the harness moves a handful of pixels for no reason a reader could use.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  tools/tests/test_hudscreens.py, docs/hud/screens/README.md,
+  ops/ralph/hudscreens.sh
+- next: **A48** — `ConfirmPlate` and `HeardPlate` are the two plates left,
+  and both are latches with a clock, so holding one still means either a
+  frame carrying an implausibly long window or a re-publish that may
+  simply re-latch. Neither is known; A43 did not try. A46 (declaring
+  `JARVIS_VOICE_OUTPUT_DEVICE` in `modules/jarvis-services.nix`) is still
+  the smallest untouched item on the board. A47 is unchanged and now has
+  a second instance: two growth checks prove a plate arrived and neither
+  can say which. B20 and B17 are still both waiting on the same two
+  minutes of a human's attention at a terminal.
