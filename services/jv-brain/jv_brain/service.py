@@ -25,6 +25,7 @@ from jarvis_bus import BusClient
 
 from . import onboarding
 from .config import BrainConfig
+from .launcher import UNREADABLE, RungRecord, read_rung_file
 from .profile import Profile
 from .tools import load_tools, openai_tool_defs
 
@@ -312,17 +313,12 @@ class BrainService:
             f"{self.profile.render_about_user()}"
         )
 
-    def _rung(self) -> tuple[Optional[int], str]:
-        """(rung index, backend) as recorded by jv-llm-launch."""
-        try:
-            data = dict(
-                line.split("=", 1)
-                for line in self.cfg.rung_file.read_text(encoding="utf-8").splitlines()
-                if "=" in line
-            )
-            return int(data.get("rung", -1)), data.get("backend", "gpu")
-        except (OSError, ValueError):
-            return None, "gpu"
+    def _rung(self) -> RungRecord:
+        """What jv-llm-launch recorded: the rung, the backend, and how
+        sure it was of the VRAM number it picked them with. That process
+        execs into llama-server and cannot reach the bus, so this file is
+        the whole of what it got to say."""
+        return read_rung_file(self.cfg.rung_file)
 
     def _payload(self, messages: list[dict], max_tokens: Optional[int] = None) -> dict:
         payload = {
@@ -724,7 +720,7 @@ class BrainService:
         conv = self.conversations.setdefault(conversation_id, Conversation(self.cfg))
         conv.add("user", text, time.monotonic())
         t0 = time.monotonic()
-        rung, backend = self._rung()
+        rec = self._rung()
         try:
             # streams the reply, speaking each sentence as it closes
             reply, finish = await self._stream_reply(conv, utterance_id, speak)
@@ -758,7 +754,7 @@ class BrainService:
             "conversation_id": conversation_id,
             "in_reply_to": in_reply_to,
             "model": self.cfg.model_name,
-            "backend": backend,
+            "backend": rec.backend,
             "latency_ms": (time.monotonic() - t0) * 1e3,
         }
         if utterance_id:
@@ -804,7 +800,21 @@ class BrainService:
         await self._health()
 
     async def _health(self, state: str = "ok", notes: Optional[str] = None) -> None:
-        rung, backend = self._rung()
+        rec = self._rung()
+        if rec.vram.source == UNREADABLE:
+            # The ladder was walked blind: nvidia-smi was there and would
+            # not answer, so rung 4 was the floor holding, not a choice.
+            # "no card" reads identically in every other field, which is
+            # why it must not read identically here — and why this is
+            # degraded (invariant 6's scheduler is flying) while a machine
+            # that genuinely has no GPU is simply a machine with no GPU.
+            blind = (
+                f"llm rung chosen blind — VRAM unreadable at launch"
+                f"{f': {rec.vram.detail}' if rec.vram.detail else ''}"
+            )
+            notes = blind if not notes else f"{notes}; {blind}"
+            if state == "ok":
+                state = "degraded"
         body: dict = {
             "service": "jv-brain",
             "state": state,
@@ -812,9 +822,9 @@ class BrainService:
             "period_s": HEALTH_PERIOD_S,
         }
         metrics: dict = {}
-        if rung is not None:
-            metrics["llm_rung"] = float(rung)  # Ofek: rung visible in jv health
-            metrics["llm_gpu"] = 1.0 if backend == "gpu" else 0.0
+        if rec.index is not None:
+            metrics["llm_rung"] = float(rec.index)  # Ofek: rung visible in jv health
+            metrics["llm_gpu"] = 1.0 if rec.backend == "gpu" else 0.0
         if self._hallucinated_calls:
             metrics["hallucinated_tool_calls"] = float(self._hallucinated_calls)
         if self._barge_ins:
