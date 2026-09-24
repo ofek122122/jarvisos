@@ -1343,19 +1343,37 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       files so no staging is needed at all (invites a stub reaching a real
       screen, and is probably wrong). Discovered in A54.
 
-- [ ] A57. The two windows that hold up the pair of plates a turn puts on
-      screen are pinned equal at 30 s and keep time DIFFERENTLY.
-      `SpeechState` expires on a frame's age (`ageOf(prompt) >
-      thinkWindowS`); `HeardState` arms a one-shot Timer when the line
-      arrives. The transcript arrives after the VAD boundary that preceded
-      it, by however long faster-whisper took, so the state plate lets go
-      first and the words sit on screen alone for that gap — a transcript
-      with nothing above it saying why it is still there. Small and real.
-      The fix is to measure the hold the way `SpeechState` does, and it is a
-      behaviour change to a shipped element, so it wants its own commit and
-      its own argument (the headless `tst_heardstate.qml` is where it would
-      be proved, and `tst_sequence.qml` is where it would show). Or a human
-      decides the gap does not matter. Discovered in A54.
+- [x] A57. The two windows that hold up the pair of plates a turn puts on
+      screen were pinned equal at 30 s and kept time DIFFERENTLY. — 3f6c144
+      (`HeardState.anchor`: the hold is timed from the `audio.vad
+      speech_end` of the utterance those words belong to — the same frame
+      SpeechState times "thinking" from — matched by `utterance_id`, with
+      the transcript's own `ts` as the fallback when that boundary was not
+      seen. The fallback is the old behaviour and errs the old way, too
+      long rather than too short; nothing here decides whether the line is
+      SHOWN. `audio.vad` was already subscribed and is never rendered.
+      Eight new cases in `tst_heardstate.qml` (495, was 487), one of them
+      pairing the two real elements on one bus with real timers; nine
+      mutations, all caught; one redundant guard removed rather than
+      shipped untested. `tst_sequence.qml` could NOT show it and says so:
+      the fixture generator stamps the final at the same `ts` as the
+      speech_end, so every replay has an instantaneous ASR — see A58.)
+
+- [ ] A58. Every committed recording has an INSTANTANEOUS ASR, and that is
+      why A57 lived through five suites. `harness/fixtures/sessions/
+      generate_sessions.py` stamps each `audio.transcript` final at the
+      same `ts` as the `audio.vad speech_end` before it, so the one number
+      that distinguishes "when the turn ended" from "when the words
+      arrived" is zero in every replay, and every test built on those
+      recordings is blind to the gap between them. Real faster-whisper on
+      the CPU rung takes a few hundred ms. The fix is a delay in the
+      generator — which means REGENERATING the four recordings, which the
+      contact sheet asserts byte-for-byte and `tst_sessionreplay` pins
+      numbers out of, so it is a commit of its own with a shot diff to
+      look at. Worth it: it is the only way any replay-driven suite can
+      ever catch this class of bug (A28's live recording would too, and
+      would be better, but needs a human at the machine). Discovered
+      in A57.
 
 - [ ] A55. "What is the HUD showing right now" is answerable only by
       looking at the screen. `litNames` is the string a `jv hud` subcommand

@@ -4881,3 +4881,86 @@ invisible to every test that existed before this one.
   print), but it still wants A47's decision about an IPC seam first.
   A47/A52/A50/A13/A27/A21/A22/A25/A31/A38/A39 unchanged and still want a
   human at ares. B21/B22/B17/B20/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 48 — A57: the words and the word above them stop keeping different time
+
+A turn puts two plates on screen. `StatePlate` says THINKING, `HeardPlate`
+says what you said. They are the same claim about the same turn — a question
+is in flight — and a tools gate has failed the build since A26 if their two
+windows ever stopped being the same LENGTH. They were still not one window,
+because nothing checked that they started at the same INSTANT, and they did
+not: `SpeechState` times its window from the utterance's `audio.vad
+speech_end` (the frame that says a question is in flight), while `HeardState`
+armed its hold when the TRANSCRIPT reached it, which is however long
+faster-whisper took after that boundary. Two 30 s windows, one starting later
+than the other, so on ares the state plate lets go first and the transcript
+sits there alone for the length of the ASR — words with nothing above them
+saying why they are still up. Found in A54 and deliberately left for its own
+commit, because it is a behaviour change to a shipped element.
+
+`HeardState` now has an `anchor`: the `speech_end` of the utterance those
+words belong to when it saw one, and the transcript itself otherwise. The two
+frames are matchable because `utterance_id` is minted at speech_start and
+threaded through both topics, which is the only reason this was cheap. Four
+rules keep the new reading from ever costing the reader anything — it decides
+WHEN the line goes, never WHETHER it is shown, so every refusal falls back to
+exactly what shipped before: only `speech_end` (a speech_start is where the
+utterance began, and timing from it would subtract the length of the sentence
+as well as the ASR), only a frame whose `conf` agrees with its own state
+topic, only an id that matches, and never a boundary stamped AFTER the final
+it supposedly preceded — that pair cannot be ordered, and using the later of
+the two would LENGTHEN the hold, which is the one direction this window may
+not err in. The boundary is latched (ears' VAD runs continuously, so the next
+sound in the room replaces it on `bus.latest`) and dropped with everything
+else when the link goes down.
+
+**What this iteration could not do, and it is the finding worth keeping.** No
+recording can show this bug. `harness/fixtures/sessions/generate_sessions.py`
+stamps each final at the SAME `ts` as the speech_end before it, so in all
+four replays the ASR is instantaneous, both anchors are the same number, and
+every suite built on those recordings — tst_sessionreplay, the shot sheet,
+A54's sequence suite — is structurally blind to the one number this is about.
+That is why it survived five suites, and it is why the proof here is a paired
+headless test (two real elements, one BusModel, real timers) rather than a
+picture: the 10 shots came out byte-identical, as expected. A58 records the
+fix — an ASR delay in the generator — and why it is its own commit: it means
+regenerating the four recordings that the contact sheet asserts byte-for-byte
+and that tst_sessionreplay pins real numbers out of.
+
+Also removed one guard rather than shipping it untested: an `utterance_id`
+type/length check in the frame reader that no mutation could distinguish from
+the id comparison next to it, because a boundary carrying no id already fails
+that comparison. One rule, one mechanism. And corrected the plate table in
+`shell/jv-hud/README.md`, which still said eight plates and had never listed
+`GuardPlate` (A51).
+
+- tests: `bash ops/ralph/qmltest.sh` — 495 (was 487): eight new cases, the
+  last of which puts a real `SpeechState` and a real `HeardState` on one bus
+  with 0.5 s windows and 400 ms of ASR, and fails if the words outlive the
+  word above them. NINE mutations run through the suite, all caught: the hold
+  timed from the transcript again (the bug itself, caught by three tests),
+  any boundary accepted regardless of utterance, a speech_start read as an
+  end, every vad event read as an end, a boundary newer than the words
+  accepted, a boundary that doubts its own `conf` accepted, the boundary
+  surviving a dropped link, and nothing re-arming when the anchor changes.
+  `bash ops/ralph/runtests.sh tools` — 131, unchanged (the equality gate
+  still holds; its docstring now says which half of the rule it checks and
+  where the other half is proved). `bash ops/ralph/hudshots.sh` — 15, and the
+  10 shots byte-identical.
+- build: `nix build .#jv-hud` ok (qmllint + the QML suite in its checkPhase),
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin. The HUD
+  is still a read-only consumer and the new topic is never rendered.
+- files: shell/jv-hud/core/HeardState.qml, shell/jv-hud/tests/tst_heardstate.qml,
+  shell/jv-hud/README.md, tools/tests/test_gen_theme_qml.py
+- next: **A58** is the cheapest thing that makes the replay suites able to
+  catch this whole class of bug — give the fixture generator a realistic ASR
+  delay and regenerate, with the shot diff reviewed. It pairs naturally with
+  **A28/B10** (a live recording of one real utterance at the machine), which
+  would do the same job better and would finally give the second half of a
+  turn — the answer starting, the ember lighting — a recorded sequence at
+  all; every trajectory still stops at `thinking`. **A56** (the sequence
+  suite is not in the build gate) is unchanged and wants a human's pick
+  between its three options. **A55** still waits on **A47**'s decision about
+  an IPC seam. A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and still
+  want a human at ares. B21/B22/B17/B20/B15/B13 unchanged.
