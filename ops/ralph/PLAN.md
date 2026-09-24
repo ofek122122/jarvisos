@@ -586,6 +586,69 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       an answer the day two topics on this bus share 19 characters —
       nothing does today. Discovered in B24.
 
+- [x] B26. `dialog.listen` had no consumer: jv-act published it on every
+      confirmation and jv-brain on every onboarding question, and jv-ears
+      subscribed to `speech.state` and nothing else — so the one approved
+      exception to wake-every-time had never once opened, and every
+      spoken "yes" needed "hey jarvis" in front of it. — 4c4d350
+      (`jv_ears/dialog.py` holds the window on the SAMPLE clock, the
+      pipeline advances it once per chunk, and an utterance that STARTS
+      inside it is gated without a wake. Three rules with plausible
+      alternatives rejected: only TIME closes it (a window that shut
+      itself after one utterance would be ears deciding the answer had
+      arrived, which is the interpretation the approved decision keeps
+      out of a perception service); it governs where you may START, so a
+      deadline does not cut off a sentence under way and a window opening
+      mid-sentence does not reach back the way a wake does; half-duplex
+      outranks it, which is the ORDINARY case since jv-act asks while
+      jv-voice is still speaking the question. Every refusal points at
+      "closed" — unknown `v`, hedged `conf` on a command topic, unaudited
+      reason, non-object body, empty `listen_id`, a `window_s` that is
+      not a bounded positive number (`True` included). The cap, the
+      reasons and the required-field list are read off the frozen schema
+      by tests. Tests: `bash ops/ralph/runtests.sh jv-ears` 104, was 37;
+      13 mutations, 13 caught; verified on the built closure against a
+      real broker, where the same WAV went from silent to a final
+      transcript on one `jv pub dialog.listen`.)
+
+- [ ] B27. **The HUD half, and it is the loop's own to take.**
+      `schemas/dialog.listen.json` says of its `reason` field: "audited,
+      and the HUD will show it (sensor truthfulness, invariant 10)".
+      Nothing shows it, and as of B26 the microphone really does open
+      without a wake word — which is precisely the state invariant 10
+      exists to make visible. `MicPlate` cannot answer it: it says the
+      DEVICE is capturing, which it is all day; `StatePlate`'s
+      "listening" is wake-driven and must stay that way (a no-wake window
+      forges no `audio.wake`, and a test says so). The obstacle is the
+      interesting part and it is not cheap: `dialog.listen` is a REQUEST.
+      A plate drawn from it would show what jv-act ASKED for, not what
+      the microphone is doing — the fakeable indicator invariant 10
+      forbids, and it would be wrong in exactly the cases B26 spent its
+      tests on (a refused frame, a window that expired, a window
+      half-duplex is sitting on). Only jv-ears can say the window is
+      open, and today its only voice is a 5 s heartbeat against a 15 s
+      window, so a `sys.health` gauge would be up to 5 s late and 5 s
+      stale on a plate whose whole job is to be true NOW. Three options:
+      (a) an `ears.listen` state topic — a schema change, human review,
+      and the honest shape; (b) the heartbeat gauge, accepting the
+      granularity and drawing the plate only while the gauge is fresh;
+      (c) leave it and write down that the HUD is silent about no-wake
+      windows. Do not build (b) before deciding — a late plate about a
+      microphone is the one kind of late this HUD has never shipped.
+      Discovered in B26.
+
+- [ ] B28. The window is invisible to `jv health` and to the audit for
+      the same reason B27 is stuck: it exists only inside the ears
+      process. The schema calls `reason` "audited" and nothing audits it
+      — jv-act writes its own audit line for the confirmation, but
+      whether the microphone actually opened, for how long, and whether
+      ears REFUSED the frame is recorded nowhere at all. A refusal is the
+      case that matters: a jv-act whose window never opened looks exactly
+      like a user who said nothing, and the difference is a bug report
+      nobody can file. Smaller than B27 and it shares B27's decision —
+      if (a) lands, both are answered by the same topic. Discovered in
+      B26.
+
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
       both. Nothing has ever looked at that output on a real turn — the

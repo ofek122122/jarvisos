@@ -5932,3 +5932,114 @@ are about to reverse instead of discovering it as a collapsed table.
   is and it is almost entirely blocked on people: A62 gates A63;
   A65/A60/A50/A55/A47/A56/A59 want a decision and
   A21/A22/A25/A27/A31/A38/A39/A68 want a human at ares.
+
+## 2026-09-24 21:05 — the approved no-wake window finally opens (B26)
+
+**Nothing consumed `dialog.listen`.** jv-act publishes it on every
+confirmation (`service.rs:332`, alongside the `action.confirm` request),
+jv-brain publishes it for every onboarding and follow-up question
+(`service.py:602`), the schema has been frozen since Phase 2 stretch 0,
+`DECISIONS-approved.md` records the design decision that created it — and
+`grep -rn dialog services/jv-ears/` returned nothing at all. jv-ears
+subscribed to `speech.state` and to nothing else. So every answer to
+"delete this file — yes or no?" has needed "hey jarvis" in front of it,
+and the one approved exception to wake-every-time existed as a topic two
+services shouted into an empty room.
+
+It is the kind of gap that is invisible from either end: jv-act's tests
+assert it PUBLISHES the frame and pass; jv-ears' tests assert the wake
+gate HOLDS and pass; the feature is missing in the space between two
+green suites. I went looking for it because `schemas/dialog.listen.json`
+says of its `reason` field "the HUD will show it (sensor truthfulness,
+invariant 10)" — a HUD obligation nothing had built — and found the
+consumer underneath it missing too.
+
+**What it does.** `jv_ears/dialog.py` holds the window on the sample
+clock, like every other decision in this service, so a replayed fixture
+produces the same events every time. The pipeline advances it once per
+chunk and an utterance that STARTS inside the window is gated without a
+wake.
+
+Three rules, each of which had a plausible alternative I rejected:
+
+- **Only time closes the window.** Not the first utterance in it. The
+  approved decision is that the REQUESTER interprets transcripts and ears
+  never learns what "yes" means; a window that shut itself after one
+  utterance would be ears deciding the answer had arrived — the same
+  interpretation, moved into the perception service, and wrong exactly
+  when the user's first sound is "um". The cap is what keeps it safe, and
+  the cap is the schema's own 60 s, read from the frozen file by a test.
+- **It governs where you may START speaking.** A window expiring
+  mid-sentence does not throw the sentence away (the VAD already bounds
+  the recording), and a window opening mid-sentence does NOT reach back.
+  The wake path gates retroactively because "hey jarvis" lives inside the
+  utterance it belongs to; a no-wake window has no such excuse — those
+  words were spoken before any service asked for them.
+- **Half-duplex still outranks it.** Not an edge case: jv-act publishes
+  the request while jv-voice is still speaking the question, so the
+  window is open for seconds during which the only voice in the room is
+  Jarvis's own.
+
+**Every refusal points the same way** — an unreadable frame leaves the
+microphone exactly as wake-gated as it found it. Unknown body version
+(a v2 body means whatever v2 says), hedged `conf` on a command topic
+(the schema says 1.0; a producer that is not sure does not get a mic),
+unaudited `reason`, non-object body, empty `listen_id`, and a
+`window_s` that is not a bounded positive number — `True` included,
+because it is an `int` in Python and `True * 16_000` looks like a fine
+window. The required-field test is parametrised over the SCHEMA's own
+`required` list, so the day `dialog.listen` gains a fourth field this
+fails until ears validates it.
+
+The bus→pipeline hand-off is a deque, not a slot: `append`/`popleft` are
+atomic under the GIL and a read-then-clear attribute is not, and a
+request lost in that race is a microphone that stayed shut while a
+service waited on it.
+
+- tests: `bash ops/ralph/runtests.sh jv-ears` — **104 (was 37)**, green.
+  58 of them need no models (the window's decisions, and the wire through
+  `main.amain` over a fake bus); 9 are the same fixture WAV with and
+  without the frame. **13 mutations, all 13 caught**: the window never
+  gating, never expiring, reaching back into speech already in flight,
+  its deadline cutting off a sentence under way, a later request
+  shortening it, the schema cap unenforced, the hand-off as a slot, the
+  four validation clauses deleted one at a time, ears dropping the topic,
+  main forwarding only the body (which would make the `conf`/`v`
+  refusals unreachable from the bus), and ears never subscribing.
+  Also: `harness` 88, `tools` 136, `pylib` 4 — unchanged and green.
+- **verified on the built closure against a real broker**, not only in
+  tests. `speech-no-wake.wav` — a real utterance nobody addressed to
+  Jarvis — through the SHIPPED `jv-ears` from
+  `nixos-system-ares…/etc/systemd/user`, on a real `jarvisd`: with no
+  frame, `jv sub audio.transcript` printed nothing, exactly as it always
+  has. With `jv pub dialog.listen --src jv-act
+  --body '{"listen_id":"ralph-e2e","window_s":30,"reason":"confirm"}'`,
+  the same audio produced four partials and a final —
+  "The quick brown fox jumps over the lazy dog." — at conf 0.90.
+- **one process note worth keeping.** The first `nixos-rebuild build`
+  passed while building the OLD jv-ears: `dialog.py` was untracked, and a
+  flake's source is git's. The build gate is only a gate on files git can
+  see — `git add` BEFORE the build, or it verifies the previous commit.
+  Confirmed by listing `jv_ears/` inside the built env both times.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin.
+- files: services/jv-ears/jv_ears/dialog.py (new),
+  services/jv-ears/jv_ears/pipeline.py, services/jv-ears/jv_ears/main.py,
+  services/jv-ears/tests/test_dialog_listen.py (new),
+  services/jv-ears/tests/test_no_wake_window.py (new)
+- commit: 4c4d350
+- next: **B27 is the HUD half and it is now the loop's own to take** —
+  the schema says the HUD will show the reason, and the microphone is
+  open without a wake word, which is precisely what invariant 10 exists
+  for. The obstacle is real and is written into the plan: `dialog.listen`
+  is a REQUEST, and a HUD that drew it would be showing what a service
+  asked for rather than what the microphone is doing — the fakeable
+  indicator invariant 10 forbids. Only jv-ears can say the window
+  actually opened, and its heartbeat is 5 s against a 15 s window. B28
+  is the smaller companion: the window is invisible to `jv health` and to
+  the audit for the same reason. Everything else is where it was — the A
+  track is still almost entirely blocked on people (A62 gates A63;
+  A65/A60/A50/A55/A47/A56/A59 want a decision; A21/A22/A25/A27/A31/A38/
+  A39/A68 want a human at ares), and B10/A28 — one live recording of one
+  spoken turn — is still the biggest thing a human can hand this loop.
