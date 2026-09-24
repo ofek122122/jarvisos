@@ -395,16 +395,50 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       caught after two real survivors were fixed. Tests:
       `bash ops/ralph/cargotest.sh jarvisd`.)
 
-- [ ] B16. `think` is jv-brain's prefill+generation AND two bus hops AND
-      whatever jv-brain's input worker was doing when the transcript
-      landed. On a busy turn those are not the same thing, and the span
-      that PHASE1-STATUS wants to optimise is the LLM's. jv-brain already
-      knows its own `first_token_ms` — publishing it in sys.health
-      `metrics` would let the tap say how much of `think` was the model
-      and how much was everything around it, the same way `hold` is read
-      off jv-ears. B7's rule applies: publish it when the tap reads it,
-      which is the day someone is optimising generation. Discovered in
-      B14.
+- [x] B16. `think` stops being one number over the model and the queue.
+      — ceca526
+      (jv-brain states the one moment nothing on the bus marks — when the
+      completion request went out — as `llm_first_say_ms` plus a turn
+      counter `llm_first_says` in its `sys.health` `metrics` (free-form by
+      schema, so no schema change). `jv tap --latency` divides `think`
+      into `model` (request -> first `speech.say`) and `wait` (the two bus
+      hops, the input queue, and jv-brain's own pre-LLM work), as two
+      table rows and one short second line per turn — the `>>> turn` line
+      itself is deliberately no wider while B17 is open. Three refusals do
+      most of the work: a turn that ran TOOLS publishes no gauge at all
+      (tool time, confirm window included, is inside `think` and is not
+      the model's, so the table prints `think unsplit` and names the gauge
+      it wanted); the gauge is bound to its turn by frame ORDER, because
+      jv-brain heartbeats immediately after the word it measures on the
+      same connection, with the counter telling a fresh gauge from the
+      same number re-stated on the next periodic beat; and the FIRST count
+      a tap sees is recorded and not consumed, because it may describe a
+      turn from before the tap connected. jv-brain 57 tests (was 53),
+      jarvisd 82+8+34 (was 71+8+32); 18 mutations, 3 real survivors, all
+      pinned. Tests: `bash ops/ralph/runtests.sh jv-brain`,
+      `bash ops/ralph/cargotest.sh jarvisd`.)
+
+- [ ] B18. The same gauge would let `jv health` answer "is generation slow
+      right now?" — `llm_first_say_ms` is on jv-brain's heartbeat and
+      `jv health --check` already reads that heartbeat and prints the llm
+      rung off it. That is a SECOND reader of the gauge, which is exactly
+      what B7 says a gauge needs before it is worth publishing, and it
+      arrives free. The care needed is in the wording: the number is the
+      most recent DIVISIBLE turn's, so a report must not present it as a
+      current condition — a brain that has been idle for an hour would
+      otherwise read as one that just took 4 seconds. Discovered in B16.
+
+- [ ] B19. A tool turn's `think` is now the only span in the table with no
+      decomposition at all, and it is the longest one a user can hit (a
+      confirm window is 15 s by design). The frames that would divide it
+      are already on the bus and already carry the utterance: jv-brain
+      publishes `intent.action` and jv-act answers `action.result`, so the
+      time that was jv-act's is bracketed without any new publisher — the
+      same free seam `hear`/`think` had. What is NOT free is the rest: two
+      completions plus the tool round trip is three sub-spans, not two,
+      and `Turn` already prints six numbers (B17). Probably belongs in the
+      summary table only, and probably wants B17 answered first.
+      Discovered in B16.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
@@ -1001,10 +1035,17 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       PortAudio's default diverges from PipeWire's — the plate becomes a
       true statement about the wrong sink, and a HUD that is confidently
       wrong about why you cannot hear anything is worse than the empty
-      corner it replaced. The fix has a known shape and is B16's: jv-voice
-      states the device it actually opened on its own `sys.health`
-      `metrics`, and this element reads it — publish it WHEN something
-      reads it, and for once something would. The other half is the
+      corner it replaced. **CORRECTION (found while building B16): the
+      fix's stated shape does not fit.** `sys.health` `metrics` is
+      `additionalProperties: {"type": "number"}` — numbers ONLY — so a
+      device NAME cannot ride it, and `notes` is for degraded/error
+      detail. What a number CAN say is the fact the plate actually depends
+      on: `output_device_pinned` (1.0 if jv-voice opened a device it was
+      configured to open, 0.0 if it took PortAudio's default). That turns
+      the plate's assumption into a published fact and makes the plate go
+      quiet — not confidently wrong — the day someone pins a device. B16
+      is the worked precedent for the rest of it (publish WHEN something
+      reads it, and for once something would). The other half is the
       inverse and needs a human: PipeWire can mute jv-voice's STREAM while
       the sink is wide open, which is exactly the failure this plate
       exists for, one level down, and nothing on this bus can see it —
@@ -1028,6 +1069,9 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       has both halves of the machinery. Discovered in A40.
 
 ## Done
+- B16 — `think` stops being one number over the model and the queue: the
+  model's share of it, stated by the only service that can see it
+  (ceca526, 2026-09-24)
 - A40 — the HUD stops saying SPEAKING while the room is silent
   (b643c22, 2026-09-24)
 - A37 — the HUD says what Jarvis did to your machine when it did not work

@@ -3547,3 +3547,120 @@ after is now closer for a different reason: see A42.
   bus, which is the measurement A35 said was worth building the day a
   second element could be held). A41 is the one a human should read
   first: it is the only place this plate could be confidently wrong.
+
+## 2026-09-24 — iteration 35 — B16: `think` stops being one number over
+## the model and the queue
+
+Track A's ladder walk came out the same way it has for three iterations
+running: every open UI item is either a question only a human at the
+machine can answer (A13/A27/A38, A21/A22/A25, A31, B17) or gated on a
+signal nobody publishes yet (A33, A36, A39) — and A42, the one genuinely
+buildable Track A item this iteration inherited, is a measurement of the
+HUD rather than a thing the HUD says. But the ladder itself settles it:
+the last three iterations were all UI, so step 2 applies and this one
+takes a feature. Of the open features, B16 is the only one whose
+precondition ("publish the gauge when something reads it") is actually
+met — the memory's standing NEXT TASK is the latency FAIL (5.4 s against
+a 2.5 s budget), and PHASE1-STATUS names the model's generation as one
+of the two spans still open. Today is the day someone reads it.
+
+**What `think` actually was.** B14 split `respond` at the final
+transcript into `hear` (jv-ears' ASR) and `think` (the brain), which was
+enough to stop one number covering two services. It was not enough to
+optimise either: `think` is the LLM's prefill and generation AND a bus
+hop each way AND however long the transcript sat in jv-brain's input
+queue behind whatever the worker was doing. A change to generation and a
+change to queueing move the same number, and the table could not tell
+them apart.
+
+**Why this seam needed a publisher and hear/think did not.** B14's seam
+was free: jv-ears runs whisper AFTER publishing `speech_end`, so the
+final transcript already marked the handover. There is no equivalent
+frame for "jv-brain issued the completion request" — nothing but
+jv-brain can see that moment. So jv-brain states it, in the one place
+that costs no schema change: `sys.health` `metrics`, free-form and
+service-local by schema (invariant 2 intact), as `llm_first_say_ms` plus
+a turn counter `llm_first_says`. The tap divides `think` into **model**
+(request -> first `speech.say`: prefill and generation up to the first
+sentence closing) and **wait** (the remainder: two bus hops, the queue,
+and jv-brain's own pre-LLM work), and they partition it exactly the way
+`hear` + `think` partition `respond`.
+
+**Three refusals, which are most of the work.**
+
+1. *A tool turn states nothing.* `TurnTiming` counts the completions a
+   turn issued and hands back a number only for a turn that issued
+   exactly ONE. A turn that called a tool spends real time in jv-act
+   between its first completion and the words the user hears — a
+   15-second confirm window, potentially — and that time is inside
+   `think` and is not the model's. A `model` gauge with a confirm window
+   in it is precisely the "a number stops meaning its label" failure B13
+   was written against, so the gauge is simply absent and the table
+   prints `think unsplit`, names the gauge it wanted, and says why.
+2. *The gauge is bound by frame ORDER, not by a guess.* `sys.health`
+   carries no `utterance_id` and adding one is a frozen-schema change.
+   What makes the binding sound is that the gauge frame and the
+   `speech.say` frame it measures leave jv-brain on the SAME connection,
+   in that order — jv-brain heartbeats immediately after the first word
+   — so a subscriber cannot see them out of order. The counter then
+   distinguishes that fresh gauge from the identical number re-stated on
+   every later periodic heartbeat, which a reader watching only the
+   value would apply to the NEXT turn.
+3. *The first count a tap sees is recorded and not consumed.* It may be
+   restating a turn from before the tap connected. That costs the first
+   turn of every tap its split, and the `n` column is what says so.
+
+The `>>> turn` line itself is deliberately no wider. B17 is open on
+nobody having read that line on a real turn — it is already six numbers
+across — so the split prints as its own short second line when the gauge
+lands, and the table (rows, not columns) carries the distributions.
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` — 57 (was 53), four of
+  them new: `TurnTiming` in isolation, the gauge landing after a
+  multi-sentence reply with the count NOT rising per sentence, three
+  consecutive turns counting 1/2/3, a silent `brain.request` turn
+  stating nothing, and a tool turn stating nothing. (The silent-turn test
+  found its own premise wrong first time: `brain.request` defaults
+  `speak` to TRUE, so the "silent" turn had been speaking.)
+  `bash ops/ralph/cargotest.sh jarvisd` — 82 unit + 8 bus + 34
+  integration (was 71 + 8 + 32). 18 mutations, 15 caught first time and
+  all three survivors were real:
+  (1) `model_ms >= 0.0` in `brain_split` was dead against the wire —
+  `brain_first_say` already refuses a negative — but `brain_split` is a
+  public entry point with a rule of its own, so it is pinned by a direct
+  call rather than deleted (the opposite call to A40's, where both
+  readers already refused and the third guard went);
+  (2) when a new turn arrives with no measurable `think`, the previous
+  turn must STOP waiting — otherwise the new turn's gauge divides the old
+  turn, which is the same error the counter prevents one layer out;
+  (3) a turn counter that never rose survived everything, because no test
+  ran two turns through one jv-brain. That one mattered most: it would
+  have left the split working on turn 1 and silently dead forever after.
+  The integration test pumps whole turns through a real broker with a
+  *stale* restatement deliberately valued differently from the fresh
+  gauge, so a missing counter check is visible from outside the process.
+- build: `nix build .#jarvisd` ok (its checkPhase runs the Rust tests),
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin.
+- files: services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_turn_timing.py (new),
+  services/jv-brain/tests/test_brain_service.py,
+  services/jv-brain/tests/test_brain_tools.py,
+  services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs, PHASE1-STATUS.md
+- next: the turn table now names five spans a human can argue a budget
+  about and every one of them is read off the bus. What it has never done
+  is print on a REAL turn — B17 asked for one read-through and this
+  iteration widened the output again (a second line per turn, two more
+  rows), so B17 is now worth more, not less. The two new items this
+  iteration created are **B18** (the same gauge would let `jv health`
+  answer "is generation slow right now?", which is a second reader and
+  the thing B7 says a gauge needs before it is published — jv-ears'
+  `wake_refractory_s` and `suppress_tail_ms` are still waiting for
+  theirs) and **B19** (a tool turn's `think` is now the one span with no
+  decomposition at all, and `intent.action`/`action.result` already
+  bracket the part of it that was jv-act's). A41 is still the item a
+  human should read first: it is the only place the HUD could be
+  confidently wrong, and the schema-legal half of its fix is the same
+  shape as this one — except that a device NAME cannot ride `metrics`,
+  which is numbers-only, so that half is smaller than it looks.
