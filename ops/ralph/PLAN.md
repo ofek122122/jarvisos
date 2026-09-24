@@ -833,26 +833,23 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       identical to a failed probe. Tests: `runtests.sh jv-brain` 85, was
       57; seventeen mutations, seventeen caught.)
 
-- [ ] B40. Nothing reads `context.system.gpu_vram_free_mb`, and as of
-      B37 there is finally something to read. The field's own schema
-      description says it "feeds the brain's own situational awareness",
-      and jv-brain currently learns about VRAM exactly once, at launch,
-      from its own fork — it cannot see the number move when a game
-      starts, which is the moment invariant 6 exists for. The HUD is the
-      other candidate and the more honest one to build first (a plate
-      that says how much of the 6 GB is left is a real signal, and the
-      measurement at the time of writing was 943 MiB free, which is
-      itself the interesting case: the 8B Q4 brain would not fit right
-      now). Both want a decision about WHO acts on it before either is
-      built — a HUD that displays it is the loop's; a brain that reacts
-      to it is a scheduling change and pairs with backlog 14. Discovered
-      in B37.
-      **Sharpened by B39**: ares measured 943 MiB free again today, so
-      the brain is genuinely launching onto the CPU rung with a healthy
-      6 GB card — the ladder is working exactly as specified and the
-      result is still "no GPU brain". That is the number a HUD plate
-      would be showing, and it is not a fault, so the plate has to say
-      *why* (desktop + browser own the card) or it reads as one.
+- [x] B40. **The HUD half.** Nothing read `context.system.gpu_vram_free_mb`,
+      and as of B37 there was finally something to read — on ares, 943 MiB
+      free of 6144 with a healthy card, which is why the brain launches onto
+      the CPU rung. — 86cffcb
+      (`core/VramState.qml` + one dim row under `HealthPlate`'s rung line:
+      `vram 943 MiB FREE`. The rung line has read as a fault since A6 and is
+      not one; this is the sentence that says so. Not a gauge — the gate
+      `brainOnCpu` is an INPUT fed from `HealthState.llmOnCpu`, so the figure
+      is on screen only while something is being paid for the shortage, and
+      an unfed VramState is silent; a python test pins the binding, because
+      plates cannot be tested headless. Absent stays absent: a card-less
+      machine reports `llm_gpu = 0` too, and a defaulted 0 would explain a CPU
+      brain with a shortage that never existed. The row is bounded by
+      construction — MiB, then GiB, then GiB with no decimal — so no card can
+      widen it past the line the 300 px surface was measured against. Tests:
+      the headless suite 569, was 536; 20 mutations, 20 caught. Re-shot:
+      docs/hud/06-health.png. **The brain half is NOT closed — see B44.**)
 
 - [x] B41. Nothing on the bus ever says WHICH rung the brain is on in
       words. `sys.health.metrics.llm_rung` is a float and `llm_gpu` a
@@ -889,6 +886,32 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       escalation, keep the words in `notes`); a middle answer is to keep
       `degraded` but teach `jv health --check` that jv-brain-on-CPU is
       an expected finding. Discovered in B41.
+
+- [ ] B44. **The other half of B40, and a human's call.** The HUD can now
+      SEE the card move; jv-brain still cannot. It learns about VRAM exactly
+      once, at launch, from its own fork, so it cannot notice the 943 MiB
+      becoming 5 GB when a browser closes (a GPU brain is one restart away
+      and nothing says so) or becoming 200 MiB when a game starts, which is
+      the moment invariant 6 exists for. Reading
+      `context.system.gpu_vram_free_mb` in jv-brain is five lines; deciding
+      what it DOES with the number is a scheduling change and pairs with
+      backlog 14 (the game-launch unload). The smallest honest first step is
+      not a reaction at all: publish the live figure alongside the rung so
+      `jv health` shows both, and let the human decide whether an unload or a
+      relaunch may ever be automatic. Do not build the reaction before that
+      decision — a brain that unloads itself at the wrong moment is worse
+      than a slow one. Discovered in B37, halved by B40.
+
+- [ ] B45. The HUD quotes the free-VRAM figure and cannot judge it, because
+      the rung ladder's VRAM requirements live in `jv_brain/config.py` and
+      are not on the bus (invariant 1 says the HUD may not know them). So
+      the one sentence a reader still has to supply themselves is the useful
+      one: "5 GB free and still on rung 4 — restart jv-llm and you get a GPU
+      brain." One free-form gauge in jv-brain's heartbeat — the VRAM its
+      chosen rung actually needed — would let `VramState` say it, and the
+      gate for it already exists. Small, and it is jv-brain's to publish, not
+      the HUD's to guess. Pairs with B44; do not build it twice.
+      Discovered in B40.
 
 - [ ] B42. jv-brain's heartbeat re-reads the rung file on every beat
       (`_rung()` in `_health`, once per 5 s, plus once per turn for

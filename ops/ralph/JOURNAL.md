@@ -6698,3 +6698,110 @@ as one line of a table.
   B27/B28 share one decision, B30/B33 share another, and B10/A28 — one
   live recording of one spoken turn — is still the biggest thing a human
   can hand this loop.
+
+## 2026-09-24 — iteration 66 — B40: the free-VRAM number, on a screen at last
+
+**What.** `schemas/context.system.json` has carried `gpu_vram_free_mb`
+since v1 and nothing has ever read it. B37 made jv-context measure it;
+B39 and B41 spent two iterations on the consequence of the number
+without ever being able to show it. What ares measures is the whole
+argument: **943 MiB free of 6144**, twice in one week, on a GTX 1660
+SUPER that works perfectly — the desktop, the compositor and a browser
+own the rest — which is why jv-brain launches onto the CPU rung.
+
+The HUD has been saying the first half of that sentence since A6:
+`llm CPU RUNG 4`, off jv-brain's own heartbeat. It could never say the
+second half, so the line read as a fault — a broken driver, a card that
+fell out, a thing to go and fix. It is none of those; it is the ladder in
+invariant 6 doing exactly its job on a card that is already spent. This
+iteration is the missing line: `vram 943 MiB FREE`, dimmer, directly
+under the one it explains.
+
+**Why it is a line and not a readout.** Four decisions, each of which is
+a test:
+
+- **Not a gauge.** A VRAM figure on screen all day is one nobody reads on
+  the day it matters (§06). It speaks only while something is being paid
+  for the shortage — a brain on the CPU floor. The gate `brainOnCpu` is
+  an INPUT, fed from `HealthState.llmOnCpu`: jv-brain's rung already has
+  a reader that owns the heartbeat's trust rules and expiry, and two
+  files deciding the same fact off the same topic is how they come to
+  disagree. Unfed, it is silent — and since the wiring lives in a plate,
+  and plates import the Quickshell singletons and so cannot be tested
+  headless, a python test pins the binding and the guard around the row.
+  A forgotten binding is the exact edit that would turn this into the
+  all-day gauge, silently and while looking correct.
+- **Absent is not zero.** The field is optional because a machine with no
+  GPU has no such number — and that machine reports `llm_gpu = 0` too
+  (B39). Defaulting the absence to 0 would draw "0 MiB FREE" under the
+  rung line on a card-less machine and explain a CPU brain with a
+  shortage that never existed. So `known` is a separate boolean and
+  `freeMb` is -1 for unknown, which leaves a genuine 0 MiB — the reading
+  that explains the most — able to reach the screen.
+- **A live reading, never a memory.** The value of the number is that it
+  MOVES: a game starts, a browser closes. Three 1 Hz periods and it is
+  gone, on its own timer, because no binding re-evaluates just because a
+  clock moved.
+- **Quoted, never judged.** "Enough VRAM for the 8B Q4" is a fact about
+  the ladder in jv-brain's launcher, and the ladder is not on the bus.
+  A HUD that said "the card is free now, restart the brain" would be
+  guessing at another service's configuration through the wall invariant
+  1 put there. It says the number; the reader knows their own card.
+  Publishing the rung's requirement so the HUD *could* say the rest is
+  B45, and it is jv-brain's to publish.
+
+**Two things the work itself found.** The row's width is bounded by
+construction — whole MiB below five digits, then GiB, then GiB with no
+decimal past 100 — so every branch is thirteen characters at its widest
+and no card can push it past `jv-compat DEGRADED`, the line the 300 px
+surface was measured against. And `detail` turned out not to be
+available as a property name anywhere in `core/`: a test has held that
+name to `action.result.detail` (free log text no element may render,
+invariant 7) since A37, and it fired on the first run. The figure is
+`line`.
+
+- tests: `shell/jv-hud` headless suite **569, was 536** (31 new), plus
+  one in tools (**137, was 136**). **Twenty mutations, twenty caught** —
+  the gate deleted, the gate defaulting open, unknown leaking the last
+  figure, unknown reading as an empty card, a negative figure, a
+  non-finite one, a string, a v2 body, a hedged frame, a timeless frame,
+  a frame off a dropped link, freshness ignored, the expiry never
+  cleared, a timer armed with nothing to expire, the unit seam moved a
+  decade, the decimal kept forever, a gibibyte turned into a gigabyte,
+  fractions of a MiB on screen, and the wrong topic read. Three of those
+  needed a test written for them first, and one needed the test
+  rewritten: a frame cannot be "born stale" against `core/BusModel`,
+  which pins its clock offset off the frames themselves, so the first
+  frame a HUD ever sees is age 0 by construction. The honest version is
+  a second frame that spent nine seconds in flight.
+- **photographed**: `docs/hud/06-health.png` re-shot through the real
+  plates, carrying the 943 MiB ares actually measured, so the sheet shows
+  the rung line explained rather than accused.
+- build: `nix build .#jv-hud` (qmllint -W 0 over every QML file + the
+  headless suite) and `nixos-rebuild build --flake .#ares` both green.
+  Never test/switch. No schema change — the field has been frozen in
+  `context.system` v1 since before anything wrote it. No jv-act, no boot
+  path, no pins.
+- files: shell/jv-hud/core/VramState.qml (new),
+  shell/jv-hud/tests/tst_vramstate.qml (new),
+  shell/jv-hud/HealthPlate.qml, shell/jv-hud/shell.qml,
+  shell/jv-hud/README.md, shell/jv-hud/core/qmldir,
+  tools/gen_theme_qml.py, tools/tests/test_gen_theme_qml.py,
+  tools/hudshots/scene/tst_shots.qml, docs/hud/README.md,
+  docs/hud/06-health.png
+- commit: 86cffcb
+- next: **B43 is still a human's** and still one sentence of judgement —
+  and it is now cheaper to answer, because the thing B41 made `jv health`
+  go red about is the thing the HUD can now show you the reason for. The
+  loop's own pick would be **B42** (one rename: the rung file decides a
+  published state and is written non-atomically) or **B38** (jv-ears,
+  jv-guard and jv-brain still beat on a timer alone, and B35 wrote the
+  shape to copy). **B44** — the brain reacting to the live VRAM number,
+  rather than the HUD reporting it — is explicitly NOT the loop's until a
+  human answers it: an automatic unload at the wrong moment is worse than
+  a slow brain. **B45** is the small, honest half of it and belongs to
+  jv-brain: publish what the chosen rung needed, and `VramState` gains
+  the one sentence it currently refuses to guess. A is unchanged: blocked
+  on A62/A65/A68/A47/A56/A50/A60 (decisions) and A13/A21/A22/A25/A27/
+  A31/A38/A39 (a human at ares), and B10/A28 — one live recording of one
+  spoken turn — is still the biggest thing a human can hand this loop.
