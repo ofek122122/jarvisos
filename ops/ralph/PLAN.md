@@ -1127,20 +1127,43 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `bash ops/ralph/runtests.sh tools` (110),
       `bash ops/ralph/hudscreens.sh`.)
 
-- [ ] A48. `ConfirmPlate` and `HeardPlate` are the last two plates that
-      have never been watched standing still, and A43 bought nothing
-      toward them — it took the pair that shares one publisher, and these
-      two do not. Both are LATCHES WITH A CLOCK rather than readings, so
-      the two obvious moves are both unknown: a frame carrying an
-      implausibly long window (jv-act declares 15 s; publishing 600 would
-      be a picture of a machine that does not exist, which is the reason
-      A43 refused to fake a `period_s`), or re-publishing the same frame
-      at 1 Hz, which may simply re-latch and re-run the fade — in which
-      case the window measures a plate arriving over and over and is
-      right to fail. Nobody has looked at which. Cheap first step: read
-      `core/ConfirmState.qml` and `core/HeardState.qml` and write down
-      what a repeated identical frame does, before building anything.
-      Discovered in A43.
+- [x] A48. The two plates whose words come off a latch get watched
+      standing still. — 9e322a1
+      (The cheap first step answered the question and the answer was the
+      good one: a re-published frame RE-TAKES the latch — the envelope
+      replaced, `requestKey`/`transcriptKey` moved, `armExpiry`/`armHold`
+      run, a one-shot timer restarted — and does NOT re-run the fade,
+      because both elements clear `expired` before anything downstream
+      reads it and `pending`/`heard` never go false in between. So the
+      fifth idle window holds HEARD and CONFIRM on a live bus at 1 Hz and
+      reads 0. It is the only one of the five with a latch in it: every
+      plate the other four hold is a reading. The mutation is A21's own
+      temptation in its most considerate form — the CONFIRM dot's opacity
+      bound to the age of jv-act's question, no animation, no timer —
+      windows 1-4 read 0 and the fifth read 15, three surfaces times five
+      re-publishes, box unmoved. The other refusal is written down: the
+      declared window is jv-act's 15 s and not the 600 that would have
+      made the feed unnecessary, which means the latches outlive a
+      six-second silence and A43's `< 2` guard is needed here too. A test
+      pins the declared window against the schema's own description.
+      `03-confirm` and the window now read one `CONFIRM_REQUEST`. Tests:
+      `bash ops/ralph/runtests.sh tools` (117), `bash ops/ralph/qmltest.sh`
+      (435, unchanged — no QML edited), `bash ops/ralph/hudscreens.sh`.)
+
+- [ ] A49. `ActionPlate` is now the ONLY plate in the stack that has
+      never been watched standing still. Five windows hold seven plates
+      between them — LinkPlate blind, StatePlate+OutputPlate, MicPlate+
+      HealthPlate, HeardPlate+ConfirmPlate — and `action.result` is the
+      one topic left. It should be the cheapest of the lot: `ActionState`
+      is a latch with a 30 s hold, exactly like `HeardState`, and A48 has
+      just proved a re-published latch holds still and costs nothing. The
+      catch is that it needs a SIXTH window for one plate, and a window
+      per plate is how this probe stops being a measurement and starts
+      being a fixture — the honest alternative is to light it inside
+      window 5, where the story is already right (jv-act asked, the
+      answer was no, the tool failed) and the growth check has a third
+      step to make. Worth thinking about before building. Discovered in
+      A48.
 
 - [x] A44. The live-lit window held a state nobody had photographed.
       — 3052b8f
@@ -1177,6 +1200,9 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       a QML-side probe, and both are new machinery in a harness whose
       value is that it stages nothing. Worth writing down so nobody reads
       more into the measurement than it says. Discovered in A44.
+      A48 makes it three: `grew_downwards` is now asked by three idle
+      windows and the shot loop, and all four of them prove only that
+      SOMETHING arrived under the thing above it.
 
 - [x] A45. `docs/hud/screens/*.png` are not byte-reproducible, and the
       README now says so with numbers. — 3052b8f
@@ -1208,6 +1234,10 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       plugs in a dedicated speaker. Discovered in A41.
 
 ## Done
+- A48 — the two plates whose words come off a latch get watched standing
+  still: a fifth idle window, a re-published frame re-taking a latch once
+  a second, 0 commits, and a mutation the other four windows are blind to
+  (9e322a1, 2026-09-24)
 - A43 — the mic and health plates get watched standing still: a fourth
   idle window, two plates off one re-published heartbeat, 0 commits, and
   a mutation the other three windows are blind to (fed202f, 2026-09-24)

@@ -4170,3 +4170,104 @@ silently. `idle_window_text()` now slices one window out by its own
   a second instance: two growth checks prove a plate arrived and neither
   can say which. B20 and B17 are still both waiting on the same two
   minutes of a human's attention at a terminal.
+
+## 2026-09-24 — iteration 41 — A48: the two plates whose words come off a latch get watched standing still
+
+**The cheap first step was the whole risk, so it went first.** A48 was
+written as an open question rather than a task: `ConfirmState` and
+`HeardState` are latches with a clock, and the two obvious ways to hold
+one still were both unknown. Publishing an implausibly long window would
+have worked and would also have been a frame no jv-act sends.
+Re-publishing at 1 Hz might simply re-latch and re-run the fade, in which
+case the window would be measuring a plate arriving over and over and
+would be right to fail. The item said: read the two elements and write
+down what a repeated frame does, before building anything.
+
+It does re-take the latch. `publish_shot` stamps a fresh `ts` on every
+frame — which is what a live publisher does — so `requestKey` and
+`transcriptKey` move on every re-publish, `armExpiry`/`armHold` run,
+`expired` is cleared again and a one-shot timer restarts. What it does
+NOT do is re-run the fade, and the reason is worth keeping: both arming
+functions clear `expired` before anything downstream reads it, and
+`pending`/`heard` are conjunctions that never go false in between. The
+strings the plates draw re-evaluate to the same strings, and QML does not
+signal a string property that did not change. So the plate can be held
+still, and the re-taking of the latch IS the subject of the window.
+
+**Which is a failure the other four windows cannot see.** They hold five
+plates and every one of them is a READING: `OutputState` believes a
+snapshot while the snapshots keep coming, `MicState` and `HealthState`
+read the heartbeat in front of them. Nothing above this window has a
+latch in it at all. A plate that did anything visible when its latch was
+re-taken would cost a composite of three monitors for as long as the
+question stood, and windows 1-4 would all report a flawless zero.
+
+**The mutation is not an invented temptation.** A21 is an open item
+asking this exact plate to show how much of the answer window is left, so
+the mutation is that edit in its most considerate form: the CONFIRM dot's
+opacity bound to the age of jv-act's question. No animation, no timer;
+the binding re-runs only when a frame lands, which is once a second for
+as long as a question stands. `ConfirmPlate` is dark in every other
+window — nothing above publishes an `action.confirm` at all — so windows
+1, 2, 3 and 4 read 0 and the fifth read 15, three surfaces times five
+re-publishes, with the drawn box unmoved at (2284, 16, 2543, 178) and the
+photographs identical.
+
+**The refusal is written into the frame.** `ConfirmState` arms its expiry
+off the window the FRAME declares (A14's rule), so publishing
+`window_s: 600` would have held the plate up for ten minutes, made the
+feed decorative and the measurement easy. It would also be a picture of a
+machine that does not exist — the same thing A43 refused to do to a
+heartbeat's `period_s`. The harness publishes jv-act's own 15 s, and a
+test pins that number against `schemas/action.confirm.json`'s own
+description so the two cannot drift. The cost of the refusal is that both
+latches outlive a six-second silence on their own (15 s and 30 s against
+a window of 6), so this needs A43's guard rather than A42's: the
+re-publishes inside the measured window are counted and fewer than two is
+a failure, because a dead feed would otherwise leave both plates exactly
+where they are and report a perfect zero about an idle bus.
+
+**The transcript is composed, and says so.** The committed recording's
+final asks what time it is, and nothing destructive follows from that, so
+replaying it under an `fs.trash` confirmation would have put two true
+frames on the bus that add up to a machine which had confused itself.
+These two are one turn — the words, and the question they earned. The
+envelope `conf` is borrowed rather than invented: 0.88583 is that
+recording's own final from a quiet room, because invariant 4 wants a
+number there and a composed 1.0 is a certainty no ASR reports.
+
+**One thing got tidier on the way.** `03-confirm` carried its own inline
+copy of the confirmation frame and the new window needed the same one;
+two copies drift, and the side that drifts is the one nobody is looking
+at. Both now read `sheet.CONFIRM_REQUEST`, pinned by a test that counts
+the copies.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 117 (was 113; nine new, and
+  four existing counts updated for the fifth window),
+  `bash ops/ralph/qmltest.sh` — 435 (unchanged; no QML was edited),
+  `bash ops/ralph/hudscreens.sh` — all five idle windows 0, seven screens
+  written. Run four times end to end: baseline before the change, twice
+  with the change, once with the mutation (exit 1 on the fifth window),
+  and once more after reverting it.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin. `shell/jv-hud` is byte-identical to its parent commit — the
+  mutation was applied to `ConfirmPlate.qml`, measured, and restored from
+  a copy. `docs/hud/screens/*.png` are deliberately NOT regenerated: the
+  HUD did not change, and A45 measured that re-running the harness moves
+  a handful of pixels for no reason a reader could use.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  tools/tests/test_hudscreens.py, docs/hud/screens/README.md,
+  ops/ralph/hudscreens.sh
+- next: **A49** — `ActionPlate` is now the only plate in the stack that
+  has never been watched standing still, and it is a latch with a 30 s
+  hold exactly like `HeardState`, so A48 has already proved the mechanism.
+  The open question is whether it earns a sixth window or belongs inside
+  the fifth, where the story already runs the right way (jv-act asked, the
+  answer was no, the tool failed) and the growth check has a third step to
+  make. A47 is now three instances rather than two: three windows and the
+  shot loop all prove a plate ARRIVED and none can say which. A46
+  (declaring `JARVIS_VOICE_OUTPUT_DEVICE` in `modules/jarvis-services.nix`)
+  is still the smallest untouched item on the board. B20 and B17 are still
+  both waiting on the same two minutes of a human's attention at a
+  terminal.
