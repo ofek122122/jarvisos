@@ -7,7 +7,7 @@
 //! and they are cheap to pin down directly. `bin/jv.rs` keeps only argument
 //! parsing and the async stream loop.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // ---------------------------------------------------------------- envelope reads
 
@@ -125,6 +125,7 @@ impl HopStats {
         rows.sort_by(|a, b| b.3.total_cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
 
         let frames: usize = rows.iter().map(|r| r.1).sum();
+        let t = table_topic_columns(&rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>());
         let mut out = format!("--- hop latency: {frames} frames, {} topics\n", rows.len());
         out.push_str(&format!(
             "{:<t$} {:>5} {:>10} {:>10} {:>10}\n",
@@ -133,13 +134,11 @@ impl HopStats {
             "p50",
             "p95",
             "max",
-            t = TOPIC_COLUMNS,
         ));
         for (topic, n, p50, p95, max) in &rows {
             out.push_str(&format!(
                 "{:<t$} {n:>5} {p50:>8.2}ms {p95:>8.2}ms {max:>8.2}ms\n",
-                clip(topic, TOPIC_COLUMNS),
-                t = TOPIC_COLUMNS,
+                clip(topic, t),
             ));
         }
         out
@@ -158,7 +157,53 @@ impl HopStats {
 /// The cost is `short_id`'s cost: two topics sharing their first 19
 /// characters print alike. The whole topic is one `jv sub '*'` away — that
 /// view prints frames, which are raw data and are as wide as they are.
+///
+/// The table pays that cost only while it can: `table_topic_columns` widens
+/// its column past this cap rather than print two topics as one row of
+/// numbers (B24). So this is the table's width for every topic set that can
+/// be told apart at 22 — which is every topic set this bus can produce — and
+/// the STREAM's width always.
 pub const TOPIC_COLUMNS: usize = 22;
+
+/// How wide the summary table makes its topic column, for the topics it is
+/// about to print.
+///
+/// `TOPIC_COLUMNS` normally, which is what lines the table up under the
+/// per-frame stream — and WIDER when that cap would print two topics as the
+/// same label (PLAN B24). A clip is a promise that what it hid is one
+/// `jv sub '*'` away, and that promise is good enough for the stream, where
+/// every line is about a frame that named itself. It is not good enough for
+/// the table, where the label is the only thing saying which topic a row of
+/// numbers is about: two rows that cannot be told apart are worse than one
+/// row that wraps, so identity outranks alignment here and the column grows.
+///
+/// It grows by the smallest amount that separates the labels, so the budget
+/// is spent only as far as identity needs. That can exceed `TAP_COLUMNS` —
+/// deliberately, and only when a distinguishing character sits past column
+/// 41 (a row is `columns + 39` wide). Nothing this bus carries comes near
+/// it: `audio.transcript` is 16 of the 22.
+///
+/// The search always finds a width: `topics` are the keys of a map, so at
+/// the longest topic's own length nothing is clipped and every label is its
+/// whole distinct topic.
+///
+/// PRINTED labels are compared, never the topics. Comparing topics would be
+/// tautological — map keys are distinct, so the column would never grow —
+/// and it would also miss a clipped label colliding with a WHOLE one, which
+/// needs the shorter topic to end in the marker's own `...`. That second
+/// case cannot reach a live tap: `validate_envelope` refuses an empty topic
+/// segment, so no topic the broker accepts ends in two dots. It is covered
+/// anyway, because nothing in `clip` or `TOPIC_COLUMNS` assumes an alphabet
+/// and this should not be the one place that does.
+fn table_topic_columns(topics: &[&str]) -> usize {
+    let widest = topics.iter().map(|t| t.chars().count()).max().unwrap_or(0);
+    (TOPIC_COLUMNS..=widest.max(TOPIC_COLUMNS))
+        .find(|columns| {
+            let mut seen = HashSet::new();
+            topics.iter().all(|t| seen.insert(clip(t, *columns)))
+        })
+        .expect("unclipped topics are map keys and therefore distinct")
+}
 
 /// The widest a publisher's name prints inside one of those lines.
 ///
@@ -3196,7 +3241,9 @@ mod tests {
         // All three views of a topic — the stream, the table's header and its
         // rows — end that column in the same place, which is the one cap
         // `TOPIC_COLUMNS` exists to serve and what lets a reader trace a
-        // topic out of one view into the other.
+        // topic out of one view into the other. True for every topic set this
+        // bus can produce; the table takes more columns when it needs them to
+        // tell two rows apart, which is B24's own test.
         //
         // Each is checked at the first character PAST the column rather than
         // against a padded copy of the topic: the table's next field is right
@@ -3215,6 +3262,108 @@ mod tests {
         assert_eq!(row.as_bytes()[n_at], b'3', "the row's count column moved:\n{row}");
         assert_eq!(stream.as_bytes()[TOPIC_COLUMNS], b' ', "no gap after the topic: {stream}");
         assert_eq!(stream.as_bytes()[TOPIC_COLUMNS + 1], b'j', "the src does not start there: {stream}");
+    }
+
+    /// Two topics, one label, two rows of numbers under it — the one thing a
+    /// measurement table may not do (B24).
+    ///
+    /// `TOPIC_COLUMNS` buys alignment by clipping, and a clip is a promise
+    /// that what it hid is one `jv sub '*'` away. That promise holds for the
+    /// per-frame STREAM, where each line is about a frame that named itself.
+    /// It does not hold for the table, where a row is about a topic and the
+    /// label is the only thing that says WHICH — so here identity outranks
+    /// alignment, and the column grows until every row carries its own name.
+    #[test]
+    fn two_topics_that_clip_alike_never_become_one_row_of_numbers() {
+        let a = "context.window.changed.alpha";
+        let b = "context.window.changed.beta";
+        // The control: without it this test would pass on a pair the fixed
+        // column already told apart, and prove nothing.
+        assert_eq!(clip(a, TOPIC_COLUMNS), clip(b, TOPIC_COLUMNS), "not the case this is about");
+
+        let mut hops = HopStats::default();
+        hops.hop(a, 1.0);
+        hops.hop(b, 2.0);
+        let table = hops.summary();
+        let rows: Vec<&str> = table.lines().skip(2).collect();
+        assert_eq!(rows.len(), 2, "two topics are not two rows:\n{table}");
+
+        let w = table_topic_columns(&[a, b]);
+        let label = |line: &str| line.chars().take(w).collect::<String>();
+        assert_ne!(label(rows[0]), label(rows[1]), "two topics, one label:\n{table}");
+
+        // And the table is still a table: the header moved with the rows, so
+        // every number is still under the heading that names it. Checked at
+        // the first character PAST the column, for the reason the stream test
+        // gives — the next field is right aligned, so a narrow column and a
+        // wide pad are the same string.
+        let n_at = w + 1 + 4;
+        let head = table.lines().nth(1).expect("the table header");
+        assert_eq!(head.as_bytes()[n_at], b'n', "the header did not move with the rows:\n{table}");
+        for row in &rows {
+            assert_eq!(row.as_bytes()[n_at], b'1', "a row's count column moved:\n{table}");
+        }
+    }
+
+    /// The column grows as far as identity needs and not one column further.
+    #[test]
+    fn the_topic_column_grows_only_as_far_as_telling_the_rows_apart_needs() {
+        // Nothing a schema declares reaches the cap, so a real bus never
+        // moves this column at all — which is what keeps the table and the
+        // stream above it lined up in every case that exists today.
+        assert_eq!(
+            table_topic_columns(&["audio.transcript", "sys.health", "speech.say", "action.confirm"]),
+            TOPIC_COLUMNS,
+        );
+        // One column past the first character that tells the two apart.
+        // `...alpha` / `...beta` diverge at index 23, and a clip keeps
+        // `columns - 3` of them, so 27 is the first width that separates
+        // them and 26 is not.
+        let pair = ["context.window.changed.alpha", "context.window.changed.beta"];
+        assert_eq!(table_topic_columns(&pair), 27);
+        assert_eq!(clip(pair[0], 26), clip(pair[1], 26), "26 columns would have done");
+
+        // A CLIPPED label and a whole one can collide too, so it is the
+        // printed labels that are compared and never "the long ones". This
+        // pair is a string pair and not a topic pair — `validate_envelope`
+        // refuses an empty segment, so nothing ending in two dots reaches a
+        // live tap — and it is covered because nothing else in this width
+        // code assumes the topic alphabet.
+        let dotted = format!("{}...", "a".repeat(19));
+        let longer = format!("{}bcdef", "a".repeat(19));
+        assert_eq!(clip(&longer, TOPIC_COLUMNS), dotted, "not the collision this is about");
+        assert_eq!(table_topic_columns(&[&dotted, &longer]), 23);
+    }
+
+    /// The order of the two rules, pinned where it costs something.
+    ///
+    /// Every other report line this CLI writes fits `TAP_COLUMNS` at its
+    /// worst input (B22/B23). This one does not, deliberately: when telling
+    /// two rows apart needs more columns than the budget has, the table
+    /// takes them. A wrapped row is a row a reader can still resolve; two
+    /// identical labels over different numbers is a table that lies.
+    ///
+    /// Nothing on this bus can trigger it — `audio.transcript` is 16 of the
+    /// 22 and the widest topic any schema declares — so this is a
+    /// consequence pinned before it can bite, not a defect.
+    #[test]
+    fn the_table_goes_wider_than_the_budget_rather_than_collapse_two_rows() {
+        let a = format!("{}alpha", "z.".repeat(25));
+        let b = format!("{}beta", "z.".repeat(25));
+        let mut hops = HopStats::default();
+        hops.hop(&a, 1.0);
+        hops.hop(&b, 2.0);
+        let table = hops.summary();
+        let rows: Vec<&str> = table.lines().skip(2).collect();
+
+        let w = table_topic_columns(&[&a, &b]);
+        assert!(w + 39 > TAP_COLUMNS, "{w} columns still fits the budget; no trade was made");
+        assert!(
+            rows.iter().all(|r| r.chars().count() > TAP_COLUMNS),
+            "the rows fit, so nothing was traded:\n{table}",
+        );
+        let label = |line: &str| line.chars().take(w).collect::<String>();
+        assert_ne!(label(rows[0]), label(rows[1]), "and it bought nothing:\n{table}");
     }
 
     #[test]
