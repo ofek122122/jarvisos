@@ -6043,3 +6043,120 @@ service waited on it.
   A65/A60/A50/A55/A47/A56/A59 want a decision; A21/A22/A25/A27/A31/A38/
   A39/A68 want a human at ares), and B10/A28 — one live recording of one
   spoken turn — is still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 60 — B29: the window list niri sends first,
+and nothing ever read
+
+The A track is still almost entirely blocked on people, and so is most
+of B: B27/B28 share one human decision (an `ears.listen` topic or not),
+B7/B12/B25 are each explicitly "not until something reads it", and
+B10/B17/B20/A28 want two minutes of a human at ares. So I went looking
+in the code instead of the plan, and the first thing I read — the niri
+backend, the one part of jv-context that only ever runs on the machine
+— had **no tests at all** and handled three of the four window events
+its own docstring listed.
+
+The missing one is `WindowsChanged`, and it is not a corner case: it is
+niri's complete window list, and **I verified on ares today that it is
+the third line of a live event stream**, before any event at all. It
+listed the 3 windows that were open, exactly one of them focused. The
+old parser threw all of that away, so on any desktop where anything was
+open before jv-context started:
+
+  * the FIRST event about every pre-existing window said `opened`. You
+    have Firefox up all day, you switch tabs, and jv-brain is told
+    Firefox just opened.
+  * a `WindowClosed` or `WindowFocusChanged` for one of them carried
+    `app_id: ""`. `schemas/context.window.json` says focus_changed
+    frames are what jv-act resolves "this"/"the active window" against
+    — so "close this" resolved to a window with no name.
+  * nothing said which window had focus until the user switched one.
+
+**The rule, and it is the whole design: events are forwarded; a RESYNC
+publishes only what it CHANGES.** A state dump has no timestamps in it,
+so it may not emit `opened` for a window that predates this process (it
+cannot date it) and may not emit `closed` for the difference between
+two lists (it cannot say when they went, and niri sends `WindowClosed`
+for the ones it saw go). What it may do is seed the cache — which is
+what lets every later frame NAME a window that predates the service —
+and, when it names a focused window nothing has reported yet, publish
+the one `focus_changed` that makes "this window" resolvable at all.
+Deduped against the last focus reported, so a second resync that agrees
+is silent.
+
+Two decisions worth writing down because both had a defensible
+opposite. `WindowFocusChanged {id: null}` — niri's "nothing has focus
+now" — publishes NOTHING: `window_id` is required and `minimum: 0` in
+the frozen schema, and there is no way to say it without a schema
+change I am not allowed to make. But it must still be FORGOTTEN
+internally, or the next resync dedups against an answer that expired;
+a mutation proves it. And the resync's `focus_changed` is the one frame
+here that could be argued as invented — focus did not change at that
+instant, jv-context merely learned it. I took it because the schema's
+own description makes focus_changed the frame that DEFINES the active
+window, and the alternative is jv-act having no answer to "this" until
+the user happens to switch. It is cheap to revert and it is in the plan
+as B30 for a human to veto.
+
+Privacy: the resync is the first thing that ever put real window titles
+in this process, so the cache holds them raw and `redact_title` runs at
+publish exactly as before. Two tests say a password manager that was
+already open is redacted the same as one opened later, and a private
+browsing title learned from a resync never reaches a body — asserted
+here because seeding the cache is what made that path reachable at all.
+
+- tests: `bash ops/ralph/runtests.sh jv-context` — **41 (was 13)**. The
+  niri parser had ZERO coverage before this. `events()` itself — the
+  `"EventStream"` handshake, the JSON-lines framing, one parser state
+  carried across lines, a malformed line skipped — is now driven over a
+  real unix socket by a fake niri. **Eight mutations, all eight
+  caught**: the resync not handled at all, the resync reporting every
+  listed window as `opened`, merging instead of replacing the list,
+  publishing focus unconditionally, `id: null` not forgotten, a closed
+  focused window still remembered as focused, `is_focused` on
+  `WindowOpenedOrChanged` not tracked, and a resync never clearing a
+  stale focus.
+- **field-verified against the live niri-26.04 on ares**, read-only
+  (connect, request, read, disconnect — no `niri msg action`). The wire
+  answered: the reply is `{"Ok": ...}`, then `WorkspacesChanged`, then
+  `WindowsChanged`; `struct Window` carries `app_id, focus_timestamp,
+  id, is_floating, is_focused, is_urgent, layout, pid, title,
+  workspace_id`, `id` an int, `app_id`/`title` on every entry; and
+  `Ok`, `WorkspacesChanged`, `KeyboardLayoutsChanged`,
+  `OverviewOpenedOrClosed`, `ConfigLoaded`, `CastsChanged` all arrive
+  within three seconds on a desktop nobody is touching — every one of
+  them now a fixture in the passed-over list, because a parser that
+  tripped on any of them would take jv-context down at startup. Only
+  structure was read out of the live session; no window title was
+  printed, kept or committed. The half a quiet capture cannot show —
+  the per-window events, and whether niri ever resyncs mid-session —
+  stays a TODO(machine) in the docstring, now stated precisely.
+- **the live session also found a bug in my own test.** `NiriBackend("")`
+  falls back to `$NIRI_SOCKET`, and this loop runs inside the user's
+  niri session, so the "no socket is an error" test connected to the
+  REAL compositor and blocked until it was killed. `monkeypatch.delenv`,
+  and the reason is in the docstring: a test that reaches the machine it
+  runs on is not a test. Worth remembering for every other service whose
+  seam reads an env var.
+- build: `nixos-rebuild build --flake .#ares` ok, with `git add` BEFORE
+  it (iteration 59's lesson) — and the SHIPPED closure was then asked to
+  translate a resync, so "the new parser is in the built system" is a
+  reading and not an inference. Never test/switch. No schema change, no
+  jv-act, no boot path, no NVIDIA/kernel/flake pin.
+- files: services/jv-context/jv_context/compositor.py,
+  services/jv-context/tests/test_niri_events.py (new)
+- commit: f00273f
+- next: **B30 is the one thing here a human should look at** — the
+  resync's `focus_changed`, which is the only frame in this service that
+  reports a state rather than a transition. B31 is the bigger find and
+  it is not mine to take: `context.window` has a `workspace` field and a
+  `monitor` field and the niri backend has never populated either, while
+  niri's `Window` carries `workspace_id` (an id, not the name the schema
+  wants) — resolving it needs `WorkspacesChanged`, which is the next
+  event down this same socket. Everything else is where it was: A is
+  blocked on A62/A65/A68/A47/A56/A50/A60 (decisions) and A13/A21/A22/
+  A25/A27/A31/A38/A39 (a human at ares), B27/B28 share one decision, and
+  B10/A28 — one live recording of one spoken turn — is still the biggest
+  thing a human can hand this loop. Though today's session is a reminder
+  that the loop IS on ares now: read-only field verification against the
+  live machine is available and was worth more than any test I wrote.

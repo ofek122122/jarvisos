@@ -649,6 +649,56 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       if (a) lands, both are answered by the same topic. Discovered in
       B26.
 
+- [x] B29. `NiriBackend` handled three of niri's four window events, and
+      the missing one is the FIRST thing niri sends. — f00273f
+      (`WindowsChanged` is the authoritative full window list —
+      field-verified on ares as the third line of a live event stream,
+      carrying the 3 windows already open. Dropping it meant: the first
+      event about every pre-existing window said `opened`; a close or a
+      focus of one carried `app_id: ""`, and the schema says
+      focus_changed frames are what jv-act resolves "this window"
+      against; and nothing said which window had focus until the user
+      switched. The rule: events are forwarded, a RESYNC publishes only
+      what it CHANGES — never `opened` for a window it cannot date,
+      never `closed` for the difference between two lists. It seeds the
+      id -> (app_id, title) cache and publishes the one `focus_changed`
+      that makes "this" resolvable. `WindowFocusChanged {id: null}`
+      publishes nothing (the frozen schema requires `window_id`) and is
+      still forgotten, or the next resync dedups against a stale answer.
+      Titles from a resync are redacted at publish like any other; two
+      tests say so. Tests: `runtests.sh jv-context` 41, was 13 — the
+      parser had ZERO coverage, and `events()` is now driven over a real
+      unix socket; eight mutations, eight caught.)
+
+- [ ] B30. **Human veto, cheap either way.** The resync's `focus_changed`
+      is the only frame jv-context publishes that reports a STATE rather
+      than a transition: focus did not change at that instant, the
+      service merely learned who had it. It was taken because
+      `schemas/context.window.json` makes focus_changed the frame that
+      DEFINES the active window for jv-act, and the alternative is
+      jv-act having no answer to "close this" until the user happens to
+      switch windows — but the opposite (stay silent, let the first real
+      focus event define it) is defensible and is two lines to revert.
+      Discovered in B29.
+
+- [ ] B31. `context.window` has a `workspace` field and a `monitor`
+      field and the niri backend has never populated either — so
+      `window.move_workspace` in jv-act's registry acts on a topic that
+      cannot say which workspace anything is on, and the multi-monitor
+      questions the A track keeps asking (A13/A27/A38: three copies of a
+      plate on three screens) have no bus data behind them either.
+      Not a schema change — both fields are already frozen in. The
+      obstacle is a real mismatch: niri's `Window` carries
+      `workspace_id`, an integer, and the schema wants a NAME, which
+      lives in `WorkspacesChanged` — the event immediately above
+      `WindowsChanged` on the same socket and also unread. So this is
+      B29's shape one level out: track the workspace list, resolve the
+      id, and leave the field ABSENT rather than guessing when the id
+      resolves to nothing. `monitor` is in the same event (a workspace
+      names its output). Wants the same read-only capture on ares that
+      B29 used, this time of `WorkspacesChanged`'s own fields.
+      Discovered in B29.
+
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
       both. Nothing has ever looked at that output on a real turn — the
