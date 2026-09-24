@@ -7529,3 +7529,109 @@ thirteen into assertions at once.
   spoken turn on ares — remains the biggest thing a human can hand this
   loop, and is now also what would put a real `speech.state idle` in a
   recording instead of in a hand-written frame.
+
+## 2026-09-24 — iteration 74 — B52: the thirteen pictures, read back
+
+Track A is where the ladder points and every open item there is still a
+human's — one look at `docs/hud/`, or one decision about an IPC seam —
+so this is iteration 73's own finding, closed. B51 built the runner that
+can grade a plate and its first honest run found two survivors. A69 (the
+`idle` plate) was closed there. This is the other one, and it was the
+sharper of the two: `StatePlate.dotColor` can spend the ember — the one
+accent §06 reserves for a machine that is genuinely doing something — on
+every state that is not idle, the exact inversion of "scarcity is the
+point", and all thirteen photographs, all fifteen driver assertions and
+all 585 QML tests came back exactly as they were.
+
+**The reason is one sentence.** `hudshots.sh` WRITES the sheet and never
+READS it. Nothing in this repo had ever opened one of those PNGs.
+`litNames` asserts which plate is UP, which is a different claim and is
+A47's question one layer further in; what a plate SAYS, and what colour
+it says it in, was asserted nowhere.
+
+**Where "expected" lives.** The only real decision here, and it has to
+be git. A run that renders into `docs/hud` and then compares against
+`docs/hud` has compared a file to itself — and the refresh has to stay
+one command, so a second committed copy would be two things to keep
+matching. So both paths are checked against `HEAD:docs/hud`: the grading
+run (which renders into `--runner shots`'s scratch directory) and the
+refresh run (which renders over the sheet). The consequence is that a
+deliberate HUD change now ends `hudshots.sh` nonzero — which is the
+report and not a failure: the new PNGs are on disk, look at them, commit
+them, the next run is green. `docs/hud/README.md` said the opposite in
+so many words ("not byte-compared against anything — a pixel assertion
+breaks when a font ships a new version"); that worry is answered by the
+fonts and Qt both being pinned from the flake, which is what A45 made
+these bytes reproducible for, and the paragraph is rewritten with a
+test holding it.
+
+**What it says.** Bytes first — identical bytes are the same picture and
+that is the ordinary case, so thirteen comparisons cost nothing. When
+they differ, both are DECODED (a small PNG reader: 8-bit truecolour,
+all five scanline filters, multiple IDATs, refusing 16-bit, interlaced,
+palette, a header that lies about its size, anything that is not the
+shape Qt's offscreen grab writes) and the finding is a sentence. Not
+"the PNGs differ": B51's survivor, re-graded through the same runner,
+now reads
+
+    02-listening.png: 36 px of 206400 differ (0.02%), inside x 187..192, y 31..36
+        (187,34)  #41939A -> #BD5C3F
+    03-heard.png: 36 px of 206400 differ (0.02%), inside x 195..200, y 31..36
+        (195,34)  #59666F -> #BD5C3F
+
+— one 6×6 dot, in the two shots where the mic is open and Jarvis is not
+speaking, going from teal to ember. That is the ember spent where it was
+not earned, said in the terms §06 uses. **1/1 caught.**
+
+Two things the sheet gained on the way that are not the diff: the
+comparison is in both directions, so a driver that quietly stops
+photographing a plate is a finding rather than a smaller sheet; and
+`01-quiet.png` is now asserted to be an unbroken field of the declared
+backdrop — §06's earned emptiness, in bytes, for the first time. The
+backdrop is deliberately not a theme colour, so any Jarvis ink anywhere
+in the quiet shot is a plate that spoke when it should not have.
+
+- tests: `bash ops/ralph/runtests.sh tools` — **228 green, was 199** (29
+  new: the PNG reader under all five filters and across split IDATs, its
+  four refusals, byte-equality vs pixel-equality, the counted and boxed
+  and colour-named finding, sampling that spans the change, a size
+  change reported as a size, an unreadable shot as a finding rather than
+  a traceback, both directions of the sheet comparison, sheet order, the
+  committed sheet against git, every shot at the scene's surface box,
+  the quiet field, the script's wiring, the README's honesty, and three
+  CLI runs end to end over the real thirteen).
+  **Eleven mutations on the new module, eleven caught** — interlace and
+  depth and data-length unchecked, Paeth predicting only from the left,
+  truecolour filled transparent, a no-moved-pixels picture still
+  reporting, alpha never shown in a colour, one sample instead of three,
+  each direction of the sheet comparison dropped, and findings not
+  failing the run. Canary died, baseline green before and after.
+  `bash ops/ralph/qmltest.sh` — 585, unchanged. `bash ops/ralph/hudshots.sh`
+  — 16, the 13 shots byte-identical and now compared.
+  **B51's survivor, through `--runner shots`: 1/1 caught.**
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. `shell/jv-hud/` was not modified at all,
+  so the sheet is byte-identical and there is no HUD diff to look at.
+- files: tools/hudsheet.py (new), tools/tests/test_hudsheet.py (new),
+  ops/ralph/hudshots.sh, tools/mutate.py, ops/ralph/README.md,
+  docs/hud/README.md
+- commit: c15b6d0
+- raised: **B53** — measured while closing this, not reasoned. With an
+  uncommitted HUD change in the tree, `--runner shots` renders a sheet
+  that differs from HEAD, the comparator exits 1, the BASELINE is red and
+  the harness aborts with "fix the suite first". The refusal is right and
+  the sentence is wrong: the suite is fine, the sheet is stale, and the
+  fix is one `hudshots.sh` and a commit. One conditional line in
+  mutate.py's abort.
+- next: B51's two survivors are both closed, so the loop's own mutation
+  story is as far as it goes without a human. **B50** (a suite
+  parameterised on its own constants needs one claim that is not) is
+  still the cheapest open item, service by service. **A56** — the
+  sequence suite runs in `hudshots.sh` and not in `nix build .#jv-hud` —
+  matters a little more each time that script grows a gate, and it now
+  carries the sheet comparison too. The human-sized items have not
+  moved: **B43/B47** are one question asked three times, **A47** is one
+  decision that unblocks **A55** with it, Track A is one look at
+  `docs/hud/` away from unblocking ten items, and **B10/A28** — one live
+  recording of one spoken turn on ares — remains the biggest thing a
+  human can hand this loop.

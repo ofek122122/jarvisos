@@ -1157,22 +1157,48 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       The frame is hand-written because it does not exist in any recording,
       which is one more thing B10/A28 would fix at the source.)
 
-- [ ] B52. The contact sheet is thirteen pictures that nothing compares.
-      B51's second survivor: `StatePlate.dotColor` can spend the ember on
-      every state that is not idle — the exact inversion of §06's "scarcity
-      is the point" — and no suite anywhere notices, because `hudshots.sh`
-      WRITES the PNGs and never reads them back. Nothing in this repo
-      asserts what a plate says or what colour it says it in; `litNames`
-      asserts which plate is UP, which is A47's question one layer further
-      in. The cheap shape exists already: A45 made the shots
-      byte-reproducible, so comparing a run's output against the committed
-      `docs/hud/*.png` would turn all thirteen into assertions at once. The
-      one real decision is where "expected" lives — a driver that writes to
-      `docs/hud` and then compares against it has compared a file to
-      itself, so the comparison has to be against the committed bytes
-      (`git show`, or a second copy), and the refresh workflow has to stay
-      one command. Pixel-level assertions on chosen points are the other
-      option and are narrower but say WHY they failed. Discovered in B51.
+- [x] B52. **The contact sheet is thirteen pictures, and now they are
+      assertions.** — c15b6d0
+      (`tools/hudsheet.py` reads the sheet back: `hudshots.sh` renders, then
+      compares every PNG against the one committed at `HEAD:docs/hud`. Bytes
+      first — identical bytes are the same picture and that is the ordinary
+      case — and when they differ both are DECODED by a small PNG reader
+      (8-bit truecolour, all five scanline filters, split IDATs, refusing
+      16-bit/interlaced/palette/a header that lies about its size) and the
+      finding is a sentence: how many pixels moved, the box they moved in,
+      three of them named in colour. Expected lives in git because a refresh
+      run renders over `docs/hud` and a file cannot be compared to itself; so
+      a deliberate HUD change ends the script NONZERO, with the new PNGs on
+      disk — look at them, commit them, next run green. Two things gained on
+      the way: the comparison runs in both directions, so a driver that stops
+      photographing a plate is a finding and not a smaller sheet; and
+      `01-quiet.png` is asserted to be an unbroken field of the declared
+      backdrop — §06's earned emptiness, in bytes, for the first time.
+      B51's surviving `dotColor` mutation, re-graded through `--runner
+      shots`: **1/1 caught**, reported as 36 px in each of 02-listening.png
+      and 03-heard.png, `#41939A -> #BD5C3F` — one 6x6 dot going teal to
+      ember. `docs/hud/README.md` said in so many words that the PNGs were
+      not compared, because a pixel assertion breaks when a font ships a new
+      version; the fonts and Qt are both pinned from the flake, which is what
+      A45 made these bytes reproducible for, and the paragraph is rewritten
+      with a test on it. Tests: `bash ops/ralph/runtests.sh tools` 228, was
+      199, with eleven mutations on the new module and eleven caught.)
+
+- [ ] B53. `--runner shots` cannot grade a plate while the sheet is out of
+      date, and the abort does not say so. Measured while closing B52, not
+      reasoned: with an uncommitted change to `StatePlate.qml` in the tree,
+      `bash ops/ralph/mutate.sh --runner shots hud` renders a sheet that
+      differs from `HEAD:docs/hud`, the comparator exits 1, the BASELINE run
+      is red and the harness aborts — "the baseline suite is RED before any
+      mutation ... fix the suite first". That refusal is right (it will not
+      make a claim it cannot make) and the sentence is wrong: the suite is
+      fine, the SHEET is stale, and the fix is one command — run
+      `hudshots.sh`, look at the new PNGs, commit them, then grade. The
+      comparator says exactly that, but its four lines are the tail of a
+      suite log the harness prints one line of. One line in mutate.py's
+      red-baseline abort, conditional on the runner, with a test: cheap, and
+      the loop will hit this the first time it mutates a plate it has just
+      changed. Discovered in B52.
 
 - [ ] B50. The canary proves the suite executes the FILE and never the
       LINE, which is the honest meaning of a survivor and also its
