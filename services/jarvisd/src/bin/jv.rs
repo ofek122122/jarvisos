@@ -74,12 +74,29 @@ enum Cmd {
     /// Follow sys.health heartbeats.
     Health,
     /// Read the jv-act audit log (newest last). Path: $JARVIS_ACT_AUDIT
-    /// or the platform default. Exits non-zero if the log is missing, or if
-    /// any line in it could not be read as an audit entry.
+    /// or the platform default. Exits non-zero if the log is missing, if any
+    /// line in it could not be read as an audit entry, or if --since/--failed/
+    /// --outcome were given and nothing matched (grep's rule, so
+    /// `jv act-log --failed || echo all clean` means something).
     ActLog {
-        /// Only show the last N entries.
-        #[arg(long)]
+        /// Only show the last N of whatever matched.
+        #[arg(long, value_name = "N")]
         tail: Option<usize>,
+
+        /// Only entries at or after this: a duration back from now (10m, 2h,
+        /// 90s, 3d) or a UTC timestamp (2026-09-24, 2026-09-24T10:00:00Z).
+        #[arg(long, value_name = "WHEN")]
+        since: Option<String>,
+
+        /// Only entries jv-act did not record as 'ok'.
+        #[arg(long, conflicts_with = "outcome")]
+        failed: bool,
+
+        /// Only entries with this outcome; repeatable. jv-act writes ok,
+        /// denied, confirm_timeout, unknown_tool, invalid_args,
+        /// capability_mismatch, execution_failed, timeout.
+        #[arg(long, value_name = "WORD")]
+        outcome: Vec<String>,
     },
     /// Answer a pending confirmation request.
     Confirm {
@@ -220,11 +237,24 @@ async fn main() -> anyhow::Result<()> {
             cli::exit_code(run.outcome, count, run.seen)
         }
 
-        Cmd::ActLog { tail } => {
+        Cmd::ActLog { tail, since, failed, outcome } => {
+            let filter = cli::ActLogFilter {
+                tail,
+                // Parsed BEFORE the file is opened: a malformed --since is the
+                // caller's mistake, and printing a log first would bury it.
+                since: since.map(|s| cli::parse_since(&s, cli::now_epoch())).transpose().map_err(anyhow::Error::msg)?,
+                outcome: if failed {
+                    Some(cli::OutcomeFilter::NotOk)
+                } else if outcome.is_empty() {
+                    None
+                } else {
+                    Some(cli::OutcomeFilter::AnyOf(outcome))
+                },
+            };
             let path = cli::act_audit_path();
             let text = std::fs::read_to_string(&path)
                 .map_err(|e| anyhow::anyhow!("no audit log at {}: {e}", path.display()))?;
-            let log = cli::act_log_render(&text, tail);
+            let log = cli::act_log_render(&text, &filter);
             for line in &log.lines {
                 println!("{line}");
             }
@@ -235,7 +265,10 @@ async fn main() -> anyhow::Result<()> {
                     path.display()
                 );
             }
-            cli::act_log_exit_code(log.unreadable)
+            // Nothing is said about an empty match: on a healthy machine
+            // `--failed` matching nothing is the GOOD answer, and a warning
+            // every time would train a human to ignore this command.
+            cli::act_log_exit_code(&log)
         }
 
         Cmd::Confirm { request_id, answer } => {

@@ -309,16 +309,95 @@ pub fn act_audit_path_from(env: Option<&str>) -> std::path::PathBuf {
     }
 }
 
-/// A rendered `jv act-log` view: the lines to print, oldest first, and how
-/// many of them are admissions rather than entries.
+/// What `--failed` / `--outcome` asks of an entry's `outcome` word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutcomeFilter {
+    /// `--failed`: anything jv-act did not record as `ok`.
+    NotOk,
+    /// `--outcome X [--outcome Y]`: exactly one of these words.
+    ///
+    /// The words are NOT validated against jv-act's enum. Doing so would be a
+    /// second hand-copy of a human-review-only file (see `act_audit_path`),
+    /// and an old `jv` would then refuse an outcome a newer jv-act had learnt
+    /// to write — refusing to show a record because you do not recognise it is
+    /// the wrong failure for an audit reader. A typo is caught by the other
+    /// end instead: a filter that matches nothing exits 1.
+    AnyOf(Vec<String>),
+}
+
+/// The question `jv act-log` was asked.
+#[derive(Debug, Default, Clone)]
+pub struct ActLogFilter {
+    /// `--tail N`: the newest N of whatever answers the question.
+    pub tail: Option<usize>,
+    /// `--since`: epoch seconds; entries stamped before this are not shown.
+    pub since: Option<f64>,
+    /// `--failed` / `--outcome`.
+    pub outcome: Option<OutcomeFilter>,
+}
+
+impl ActLogFilter {
+    /// The whole log, in order — what `jv act-log` has always printed.
+    pub fn all() -> Self {
+        Self::default()
+    }
+
+    /// Was a QUESTION asked, as opposed to a window onto the answer?
+    ///
+    /// `--tail` is a window: it says how much to show, not what to look for,
+    /// so `--tail 0` on a healthy log is not a failed search and must keep
+    /// exiting 0 the way it always has.
+    pub fn is_query(&self) -> bool {
+        self.since.is_some() || self.outcome.is_some()
+    }
+}
+
+/// Does one parsed entry answer the question?
+///
+/// **A filter narrows what is shown; it never hides what it could not
+/// evaluate.** An entry with no readable `ts` cannot be proven older than the
+/// cutoff, and one with no readable `outcome` cannot be proven to have
+/// succeeded — so both are shown, with `?` in the column the filter was about,
+/// which is the admission a human can see. The alternative is a filtered view
+/// of the audit trail that is quietly missing exactly the entries something
+/// went wrong with, which is the same lie `act_log_render` already refuses to
+/// tell about a torn line.
+fn entry_matches(e: &serde_json::Value, f: &ActLogFilter) -> bool {
+    if let Some(cutoff) = f.since {
+        if let Some(t) = e.get("ts").and_then(|v| v.as_str()).and_then(iso_to_epoch) {
+            if t < cutoff {
+                return false;
+            }
+        }
+    }
+    if let Some(want) = &f.outcome {
+        if let Some(word) = e.get("outcome").and_then(|v| v.as_str()) {
+            let hit = match want {
+                OutcomeFilter::NotOk => word != "ok",
+                OutcomeFilter::AnyOf(words) => words.iter().any(|w| w == word),
+            };
+            if !hit {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// A rendered `jv act-log` view: the lines to print, oldest last-written last.
 pub struct ActLog {
     pub lines: Vec<String>,
     /// Lines in the rendered range that could not be read as audit entries.
     pub unreadable: usize,
+    /// Entries that were readable AND answered the question, counted BEFORE
+    /// `--tail` narrows the view: "did anything match" is about the filter,
+    /// not about how many of the matches were asked for.
+    pub matched: usize,
+    /// Whether a question was asked at all (`ActLogFilter::is_query`).
+    pub queried: bool,
 }
 
-/// Render an audit file for `jv act-log` — newest last, optionally only the
-/// last `tail` lines.
+/// Render an audit file for `jv act-log` — newest last, narrowed by `filter`.
 ///
 /// **A line that will not parse is rendered, not skipped.** This is the record
 /// of the one service allowed to change the machine, so a hole in it is news:
@@ -326,14 +405,19 @@ pub struct ActLog {
 /// one, and the entry most likely to be torn is the last one written — the
 /// action that was running when something went wrong. The marker carries the
 /// file's own line number and a bounded echo of the raw bytes, and
-/// `act_log_exit_code` makes the hole visible to a script too.
+/// `act_log_exit_code` makes the hole visible to a script too. An unreadable
+/// line survives every filter for the same reason (see `entry_matches`).
+///
+/// Filters run BEFORE `--tail`, so `--failed --tail 1` is "the newest failure"
+/// and not "the last line, if it happens to be a failure" — the second reading
+/// makes `--tail` silently answer a different question than the one asked.
 ///
 /// Blank lines are not entries and are not holes; they are skipped in silence.
-pub fn act_log_render(text: &str, tail: Option<usize>) -> ActLog {
-    let all: Vec<&str> = text.lines().collect();
-    let start = tail.map(|n| all.len().saturating_sub(n)).unwrap_or(0);
-    let mut out = ActLog { lines: Vec::new(), unreadable: 0 };
-    for (i, raw) in all.iter().enumerate().skip(start) {
+pub fn act_log_render(text: &str, filter: &ActLogFilter) -> ActLog {
+    // (line, is_unreadable), in file order, for everything the filter kept.
+    let mut kept: Vec<(String, bool)> = Vec::new();
+    let mut matched = 0usize;
+    for (i, raw) in text.lines().enumerate() {
         if raw.trim().is_empty() {
             continue;
         }
@@ -341,14 +425,24 @@ pub fn act_log_render(text: &str, tail: Option<usize>) -> ActLog {
         // JSON string or array it prints a plausible row of "?" that looks like
         // a real action with missing fields.
         match serde_json::from_str::<serde_json::Value>(raw) {
-            Ok(e) if e.is_object() => out.lines.push(act_log_line(&e)),
-            _ => {
-                out.unreadable += 1;
-                out.lines.push(format!("!! unreadable audit line {}: {}", i + 1, echo_raw(raw)));
+            Ok(e) if e.is_object() => {
+                if !entry_matches(&e, filter) {
+                    continue;
+                }
+                matched += 1;
+                kept.push((act_log_line(&e), false));
             }
+            _ => kept.push((format!("!! unreadable audit line {}: {}", i + 1, echo_raw(raw)), true)),
         }
     }
-    out
+    let start = filter.tail.map(|n| kept.len().saturating_sub(n)).unwrap_or(0);
+    let shown = &kept[start..];
+    ActLog {
+        lines: shown.iter().map(|(l, _)| l.clone()).collect(),
+        unreadable: shown.iter().filter(|(_, bad)| *bad).count(),
+        matched,
+        queried: filter.is_query(),
+    }
 }
 
 /// A bounded, char-boundary-safe echo of a raw line. A torn write can cut
@@ -361,15 +455,174 @@ fn echo_raw(raw: &str) -> String {
     s
 }
 
-/// Process exit status for `jv act-log`: non-zero if any line in the rendered
-/// range could not be read. `jv act-log --tail 1 && ...` should not proceed on
-/// the strength of a line nobody could parse.
-pub fn act_log_exit_code(unreadable: usize) -> i32 {
-    if unreadable > 0 {
+/// Process exit status for `jv act-log`.
+///
+/// Two ways to fail, and both are about a caller being able to trust the
+/// answer:
+///
+/// 1. **A line in the rendered range could not be read.** `jv act-log --tail 1
+///    && ...` should not proceed on the strength of a line nobody could parse.
+/// 2. **A question was asked and nothing answered it** — grep's rule. It is
+///    what makes `jv act-log --failed || echo all clean` mean something, and
+///    it is the only thing standing between a typo'd `--outcome denyed` and a
+///    reassuring empty listing. `--tail` alone is not a question (see
+///    `ActLogFilter::is_query`), so the old behaviour is unchanged.
+///
+/// Nothing is printed for an empty match, exactly as grep prints nothing: on a
+/// healthy machine `--failed` matching nothing is the GOOD answer, and a
+/// warning on stderr every time would train a human to ignore this command.
+pub fn act_log_exit_code(log: &ActLog) -> i32 {
+    if log.unreadable > 0 || (log.queried && log.matched == 0) {
         1
     } else {
         0
     }
+}
+
+// ---------------------------------------------------------------- act-log time
+
+/// Wall-clock now, epoch seconds. Injected into `parse_since` rather than read
+/// inside it, so the policy is testable without a clock.
+pub fn now_epoch() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+/// `--since` as an absolute epoch second: either a duration back from `now`
+/// (`10m`, `2h`, `90s`, `3d`, `1.5h`) or an absolute UTC timestamp
+/// (`2026-09-24`, `2026-09-24T10:00:00Z`).
+///
+/// **Wall clock, not `ts_mono`.** Audit entries carry both, and `ts_mono` is
+/// the better clock in every way except the one that matters here: "what
+/// happened in the last ten minutes" is a question about the clock on the
+/// wall, `ts_mono` restarts at every boot, and no human can type one.
+///
+/// An unreadable `--since` is an ERROR, never "since the beginning of time".
+/// The failure mode this avoids is the bad one: a filter that silently widens
+/// prints the whole log and looks like a lot of recent activity.
+pub fn parse_since(s: &str, now: f64) -> Result<f64, String> {
+    let t = s.trim();
+    if let Some(secs) = parse_duration(t) {
+        return Ok(now - secs);
+    }
+    if let Some(epoch) = iso_to_epoch(t) {
+        return Ok(epoch);
+    }
+    Err(format!(
+        "--since wants a duration back from now (10m, 2h, 90s, 3d) \
+         or a UTC timestamp (2026-09-24, 2026-09-24T10:00:00Z), got '{s}'"
+    ))
+}
+
+/// `<number><s|m|h|d>` as seconds. No sign and no exponent: `--since -10m` is
+/// nonsense, and `1e3d` is a typo pretending to be a number.
+fn parse_duration(s: &str) -> Option<f64> {
+    let unit = s.chars().last()?;
+    let mult = match unit {
+        's' => 1.0,
+        'm' => 60.0,
+        'h' => 3600.0,
+        'd' => 86_400.0,
+        _ => return None,
+    };
+    let num = &s[..s.len() - unit.len_utf8()];
+    if !plain_number(num) {
+        return None;
+    }
+    Some(num.parse::<f64>().ok()? * mult)
+}
+
+/// ASCII digits with at most one decimal point, and at least one digit.
+/// `str::parse::<f64>` also accepts `inf`, `+5` and `1e9`; none of those are
+/// things a human means here, and all of them would read as a number.
+fn plain_number(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().any(|c| c.is_ascii_digit())
+        && s.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && s.matches('.').count() <= 1
+}
+
+/// `YYYY-MM-DD`, optionally `THH:MM[:SS[.fff]]`, optionally `Z`, as epoch
+/// seconds. The inverse of the stamp jv-act writes (`audit::now_iso`).
+///
+/// Deliberately strict: anything else is `None`, which every caller reads as
+/// "cannot tell" rather than as a date. In particular an offset (`+03:00`) is
+/// REFUSED, not ignored — ignoring one shifts an entry by hours and then
+/// answers the wrong question with complete confidence. jv-act writes UTC and
+/// only UTC, so a stamp with an offset did not come from jv-act.
+pub fn iso_to_epoch(s: &str) -> Option<f64> {
+    let s = s.strip_suffix('Z').unwrap_or(s);
+    let (date, time) = match s.split_once('T') {
+        Some((d, t)) => (d, Some(t)),
+        None => (s, None),
+    };
+
+    let mut parts = date.split('-');
+    let (ys, mos, ds) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    // A 4-digit year, so `26-09-24` is refused rather than read as year 26.
+    if ys.len() != 4 || !ys.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let y: i64 = ys.parse().ok()?;
+    let mo = small_int(mos)?;
+    let d = small_int(ds)?;
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+
+    let (h, mi, sec) = match time {
+        None => (0, 0, 0.0),
+        Some(t) => {
+            let mut tp = t.split(':');
+            let h = small_int(tp.next()?)?;
+            let mi = small_int(tp.next()?)?;
+            let sec = match tp.next() {
+                None => 0.0,
+                Some(secs) => {
+                    if !plain_number(secs) || secs.split('.').next()?.len() > 2 {
+                        return None;
+                    }
+                    secs.parse::<f64>().ok()?
+                }
+            };
+            if tp.next().is_some() {
+                return None;
+            }
+            (h, mi, sec)
+        }
+    };
+    // Upper bounds only: `small_int` and `plain_number` refuse a sign, so
+    // nothing here can arrive negative and a `0 <=` check would be a branch no
+    // input can reach. 60 is a leap second, which a stamp may carry and this
+    // arithmetic need not treat specially.
+    if h > 23 || mi > 59 || sec >= 61.0 {
+        return None;
+    }
+
+    // days-from-civil (Howard Hinnant), the exact inverse of the
+    // civil-from-days in jv-act's `now_iso`.
+    let y = if mo <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = if mo > 2 { mo - 3 } else { mo + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+
+    Some(days as f64 * 86_400.0 + (h * 3600 + mi * 60) as f64 + sec)
+}
+
+/// One or two ASCII digits as an integer — the widths a date field has.
+fn small_int(s: &str) -> Option<i64> {
+    if s.is_empty() || s.len() > 2 || !s.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    s.parse().ok()
 }
 
 #[cfg(test)]
@@ -378,6 +631,21 @@ mod tests {
     use super::*;
 
     // ------------------------------------------------------------ act-log
+
+    /// An `ActLogFilter` that only narrows the view.
+    fn tail(n: usize) -> ActLogFilter {
+        ActLogFilter { tail: Some(n), ..ActLogFilter::all() }
+    }
+
+    /// One audit line stamped and judged, in the shape jv-act writes it.
+    fn entry_at(tool: &str, ts: &str, outcome: &str) -> String {
+        serde_json::json!({
+            "ts": ts, "ts_mono": 1.0, "request_id": "r1",
+            "tool": tool, "args": {}, "capability": "observe",
+            "outcome": outcome, "duration_ms": 1.0
+        })
+        .to_string()
+    }
 
     fn entry(tool: &str) -> String {
         serde_json::json!({
@@ -391,7 +659,7 @@ mod tests {
     #[test]
     fn act_log_renders_oldest_first_one_line_per_entry() {
         let text = format!("{}\n{}\n{}\n", entry("a.one"), entry("a.two"), entry("a.three"));
-        let r = act_log_render(&text, None);
+        let r = act_log_render(&text, &ActLogFilter::all());
         assert_eq!(r.unreadable, 0);
         assert_eq!(r.lines.len(), 3);
         assert!(r.lines[0].contains("a.one"), "{:?}", r.lines);
@@ -401,20 +669,20 @@ mod tests {
     #[test]
     fn act_log_tail_takes_the_newest_n_and_tolerates_a_big_n() {
         let text = format!("{}\n{}\n{}\n", entry("a.one"), entry("a.two"), entry("a.three"));
-        let r = act_log_render(&text, Some(2));
+        let r = act_log_render(&text, &tail(2));
         assert_eq!(r.lines.len(), 2);
         assert!(r.lines[0].contains("a.two"), "{:?}", r.lines);
         assert!(r.lines[1].contains("a.three"), "{:?}", r.lines);
         // More than there are is the whole log, not an error and not a panic.
-        assert_eq!(act_log_render(&text, Some(99)).lines.len(), 3);
+        assert_eq!(act_log_render(&text, &tail(99)).lines.len(), 3);
         // Zero is zero — a caller that asks for nothing gets nothing.
-        assert!(act_log_render(&text, Some(0)).lines.is_empty());
+        assert!(act_log_render(&text, &tail(0)).lines.is_empty());
     }
 
     #[test]
     fn act_log_of_an_empty_file_is_empty_and_clean() {
         for text in ["", "\n", "   \n\n"] {
-            let r = act_log_render(text, None);
+            let r = act_log_render(text, &ActLogFilter::all());
             assert!(r.lines.is_empty(), "{text:?} -> {:?}", r.lines);
             assert_eq!(r.unreadable, 0, "blank lines are whitespace, not a lost entry");
         }
@@ -426,20 +694,20 @@ mod tests {
     #[test]
     fn act_log_shows_a_line_it_cannot_read_instead_of_dropping_it() {
         let text = format!("{}\n{{\"tool\":\"a.torn\"\n{}\n", entry("a.one"), entry("a.two"));
-        let r = act_log_render(&text, None);
+        let r = act_log_render(&text, &ActLogFilter::all());
         assert_eq!(r.unreadable, 1);
         assert_eq!(r.lines.len(), 3, "the unreadable line still occupies its place: {:?}", r.lines);
         assert!(r.lines[1].starts_with("!! unreadable audit line 2"), "{:?}", r.lines[1]);
         assert!(r.lines[1].contains("a.torn"), "show the raw bytes: {:?}", r.lines[1]);
-        assert_eq!(act_log_exit_code(r.unreadable), 1, "a torn log must be scriptable as a failure");
-        assert_eq!(act_log_exit_code(0), 0);
+        assert_eq!(act_log_exit_code(&r), 1, "a torn log must be scriptable as a failure");
+        
     }
 
     #[test]
     fn act_log_treats_valid_json_that_is_not_an_entry_as_unreadable() {
         // `act_log_line` would happily render this as "? ? ?" — a plausible
         // looking row invented out of a JSON string is worse than an admission.
-        let r = act_log_render("\"just a string\"\n[1,2,3]\n42\n", None);
+        let r = act_log_render("\"just a string\"\n[1,2,3]\n42\n", &ActLogFilter::all());
         assert_eq!(r.unreadable, 3, "{:?}", r.lines);
         assert!(r.lines.iter().all(|l| l.starts_with("!! unreadable")), "{:?}", r.lines);
     }
@@ -447,7 +715,7 @@ mod tests {
     #[test]
     fn act_log_line_numbers_are_the_files_own_even_under_tail() {
         let text = format!("{}\nnot json\n{}\n", entry("a.one"), entry("a.two"));
-        let r = act_log_render(&text, Some(2));
+        let r = act_log_render(&text, &tail(2));
         assert_eq!(r.lines.len(), 2);
         assert!(r.lines[0].contains("line 2"), "tail must not renumber: {:?}", r.lines[0]);
         assert_eq!(r.unreadable, 1, "only the lines shown are counted: {:?}", r.lines);
@@ -456,7 +724,7 @@ mod tests {
     #[test]
     fn act_log_marker_is_bounded_so_one_junk_line_cannot_flood_a_terminal() {
         let text = format!("{}\n", "x".repeat(10_000));
-        let r = act_log_render(&text, None);
+        let r = act_log_render(&text, &ActLogFilter::all());
         assert_eq!(r.lines.len(), 1);
         assert!(r.lines[0].len() < 200, "marker was {} chars", r.lines[0].len());
         assert!(r.lines[0].ends_with("..."), "{:?}", r.lines[0]);
@@ -468,7 +736,7 @@ mod tests {
         // the whole reader with it. The odd leading byte puts the byte-index
         // cut INSIDE a two-byte char, which is what makes this bite.
         let text = format!("x{}\n", "é".repeat(300));
-        let r = act_log_render(&text, None);
+        let r = act_log_render(&text, &ActLogFilter::all());
         assert_eq!(r.lines.len(), 1);
         assert!(r.lines[0].contains('é'));
         // Exactly RAW_ECHO_CHARS characters of payload, counted in chars and
@@ -486,6 +754,249 @@ mod tests {
         let d = act_audit_path_from(None);
         assert!(d.is_absolute(), "{d:?}");
         assert!(d.to_string_lossy().ends_with(".jsonl"), "{d:?}");
+    }
+
+
+    // -------------------------------------------------- act-log: the questions
+
+    /// A three-entry day: an old success, a recent denial, a recent success.
+    fn a_day() -> String {
+        format!(
+            "{}\n{}\n{}\n",
+            entry_at("a.old", "2026-09-24T09:00:00Z", "ok"),
+            entry_at("a.denied", "2026-09-24T11:30:00Z", "denied"),
+            entry_at("a.new", "2026-09-24T11:45:00Z", "ok"),
+        )
+    }
+
+    fn tools(r: &ActLog) -> Vec<String> {
+        r.lines.iter().map(|l| l.split_whitespace().nth(1).unwrap_or("?").to_string()).collect()
+    }
+
+    #[test]
+    fn since_keeps_entries_at_or_after_the_cutoff() {
+        let f = ActLogFilter { since: Some(iso_to_epoch("2026-09-24T11:00:00Z").unwrap()), ..ActLogFilter::all() };
+        let r = act_log_render(&a_day(), &f);
+        assert_eq!(tools(&r), vec!["a.denied", "a.new"], "{:?}", r.lines);
+        assert_eq!(r.matched, 2);
+        assert_eq!(act_log_exit_code(&r), 0);
+
+        // The boundary is inclusive: an entry stamped exactly at the cutoff is
+        // in the window the caller asked about. jv-act stamps to the second,
+        // so ties are common, and dropping one loses the entry a human is
+        // most likely to be looking for ("since the moment X happened").
+        let exact = ActLogFilter { since: Some(iso_to_epoch("2026-09-24T11:30:00Z").unwrap()), ..ActLogFilter::all() };
+        assert_eq!(tools(&act_log_render(&a_day(), &exact)), vec!["a.denied", "a.new"]);
+    }
+
+    #[test]
+    fn failed_is_everything_jv_act_did_not_record_as_ok() {
+        let text = format!(
+            "{}\n{}\n{}\n{}\n",
+            entry_at("a.ok", "2026-09-24T10:00:00Z", "ok"),
+            entry_at("a.denied", "2026-09-24T10:01:00Z", "denied"),
+            entry_at("a.timeout", "2026-09-24T10:02:00Z", "confirm_timeout"),
+            entry_at("a.boom", "2026-09-24T10:03:00Z", "execution_failed"),
+        );
+        let f = ActLogFilter { outcome: Some(OutcomeFilter::NotOk), ..ActLogFilter::all() };
+        let r = act_log_render(&text, &f);
+        assert_eq!(tools(&r), vec!["a.denied", "a.timeout", "a.boom"], "{:?}", r.lines);
+        assert_eq!(r.matched, 3);
+    }
+
+    #[test]
+    fn outcome_matches_any_of_the_words_asked_for_and_nothing_near_them() {
+        let text = format!(
+            "{}\n{}\n{}\n",
+            entry_at("a.ok", "2026-09-24T10:00:00Z", "ok"),
+            entry_at("a.denied", "2026-09-24T10:01:00Z", "denied"),
+            entry_at("a.timeout", "2026-09-24T10:02:00Z", "timeout"),
+        );
+        let f = ActLogFilter {
+            outcome: Some(OutcomeFilter::AnyOf(vec!["denied".into(), "timeout".into()])),
+            ..ActLogFilter::all()
+        };
+        assert_eq!(tools(&act_log_render(&text, &f)), vec!["a.denied", "a.timeout"]);
+
+        // Exact words only — `confirm_timeout` and `timeout` are different
+        // outcomes and a substring match would conflate them.
+        let one = ActLogFilter { outcome: Some(OutcomeFilter::AnyOf(vec!["timeout".into()])), ..ActLogFilter::all() };
+        let text2 = format!("{}\n", entry_at("a.ct", "2026-09-24T10:00:00Z", "confirm_timeout"));
+        assert!(act_log_render(&text2, &one).lines.is_empty());
+    }
+
+    #[test]
+    fn filters_compose() {
+        let f = ActLogFilter {
+            since: Some(iso_to_epoch("2026-09-24T11:00:00Z").unwrap()),
+            outcome: Some(OutcomeFilter::NotOk),
+            ..ActLogFilter::all()
+        };
+        assert_eq!(tools(&act_log_render(&a_day(), &f)), vec!["a.denied"]);
+    }
+
+    /// The rule, stated once and tested every way it can be reached: a filter
+    /// narrows what is shown, and never hides what it could not evaluate. A
+    /// filtered view of the audit trail that is quietly missing exactly the
+    /// damaged entries is the lie this command exists not to tell.
+    #[test]
+    fn a_filter_never_hides_what_it_could_not_evaluate() {
+        let since = ActLogFilter { since: Some(iso_to_epoch("2026-09-24T11:00:00Z").unwrap()), ..ActLogFilter::all() };
+        let failed = ActLogFilter { outcome: Some(OutcomeFilter::NotOk), ..ActLogFilter::all() };
+        let named = ActLogFilter { outcome: Some(OutcomeFilter::AnyOf(vec!["denied".into()])), ..ActLogFilter::all() };
+
+        // A line that will not parse at all: no ts, no outcome, no opinion.
+        let torn = "{\"ts\":\"2026-09-24T09:00:00Z\",\"tool\":\"a.tr\n";
+        for f in [&since, &failed, &named] {
+            let r = act_log_render(torn, f);
+            assert_eq!(r.lines.len(), 1, "a torn line survives every filter: {:?}", r.lines);
+            assert_eq!(r.unreadable, 1);
+            assert_eq!(r.matched, 0, "it is shown, but it is not an answer");
+            assert_eq!(act_log_exit_code(&r), 1);
+        }
+
+        // A readable entry whose ts is missing or nonsense cannot be proven
+        // older than the cutoff. It prints with `?` where its stamp would be.
+        for ts in ["", "yesterday", "2026-13-45T99:99:99Z"] {
+            let mut e: serde_json::Value = serde_json::from_str(&entry_at("a.undated", ts, "ok")).unwrap();
+            if ts.is_empty() {
+                e.as_object_mut().unwrap().remove("ts");
+            }
+            let r = act_log_render(&format!("{e}\n"), &since);
+            assert_eq!(tools(&r), vec!["a.undated"], "ts {ts:?} is unreadable, not old");
+            assert_eq!(r.matched, 1);
+        }
+
+        // Likewise an entry with no readable outcome has not been shown to
+        // have succeeded, so `--failed` and `--outcome` both keep it.
+        let mut e: serde_json::Value = serde_json::from_str(&entry_at("a.judgeless", "2026-09-24T12:00:00Z", "ok")).unwrap();
+        e.as_object_mut().unwrap().insert("outcome".into(), serde_json::json!(7));
+        for f in [&failed, &named] {
+            let r = act_log_render(&format!("{e}\n"), f);
+            assert_eq!(tools(&r), vec!["a.judgeless"], "an unreadable outcome is not an 'ok'");
+            assert!(r.lines[0].contains('?'), "and it says so: {:?}", r.lines[0]);
+        }
+    }
+
+    /// `--failed --tail 1` is "the newest failure", not "the last line of the
+    /// file, if it happens to be a failure". The second reading makes `--tail`
+    /// silently answer a different question than the one asked.
+    #[test]
+    fn tail_is_a_window_on_the_answer_not_on_the_file() {
+        let text = format!(
+            "{}\n{}\n{}\n",
+            entry_at("a.denied", "2026-09-24T10:00:00Z", "denied"),
+            entry_at("a.boom", "2026-09-24T10:01:00Z", "execution_failed"),
+            entry_at("a.ok", "2026-09-24T10:02:00Z", "ok"),
+        );
+        let f = ActLogFilter { tail: Some(1), outcome: Some(OutcomeFilter::NotOk), ..ActLogFilter::all() };
+        let r = act_log_render(&text, &f);
+        assert_eq!(tools(&r), vec!["a.boom"], "{:?}", r.lines);
+        // Counted before the window narrowed it: "did anything match" is about
+        // the filter, not about how many of the matches were asked for.
+        assert_eq!(r.matched, 2);
+        assert_eq!(act_log_exit_code(&r), 0);
+    }
+
+    /// grep's rule. It is what makes `jv act-log --failed || echo all clean`
+    /// mean something, and the only thing standing between a typo'd
+    /// `--outcome denyed` and a reassuring empty listing.
+    #[test]
+    fn a_question_nothing_answers_is_a_failure_but_an_empty_log_is_not() {
+        let clean = format!("{}\n", entry_at("a.ok", "2026-09-24T10:00:00Z", "ok"));
+        let failed = ActLogFilter { outcome: Some(OutcomeFilter::NotOk), ..ActLogFilter::all() };
+        let r = act_log_render(&clean, &failed);
+        assert!(r.lines.is_empty());
+        assert_eq!(r.matched, 0);
+        assert!(r.queried);
+        assert_eq!(act_log_exit_code(&r), 1, "nothing answered the question");
+
+        // A typo asks a question nothing can answer, and gets the same 1.
+        let typo = ActLogFilter { outcome: Some(OutcomeFilter::AnyOf(vec!["denyed".into()])), ..ActLogFilter::all() };
+        assert_eq!(act_log_exit_code(&act_log_render(&clean, &typo)), 1);
+
+        // But `--tail` is a window, not a question: it says how much to show,
+        // not what to look for, so the old exit-0 behaviour is untouched.
+        for f in [ActLogFilter::all(), tail(0), tail(99)] {
+            assert!(!f.is_query(), "{f:?}");
+            assert_eq!(act_log_exit_code(&act_log_render(&clean, &f)), 0, "{f:?}");
+            assert_eq!(act_log_exit_code(&act_log_render("", &f)), 0, "an empty log is history, not a failed search");
+        }
+    }
+
+    // -------------------------------------------------- act-log: --since parsing
+
+    #[test]
+    fn since_reads_a_duration_back_from_now() {
+        let now = 1_000_000.0;
+        assert_eq!(parse_since("90s", now), Ok(now - 90.0));
+        assert_eq!(parse_since("10m", now), Ok(now - 600.0));
+        assert_eq!(parse_since("2h", now), Ok(now - 7200.0));
+        assert_eq!(parse_since("3d", now), Ok(now - 259_200.0));
+        assert_eq!(parse_since("1.5h", now), Ok(now - 5400.0));
+        assert_eq!(parse_since("  10m  ", now), Ok(now - 600.0), "a shell quoting artefact is not a syntax error");
+    }
+
+    #[test]
+    fn since_reads_an_absolute_utc_timestamp() {
+        assert_eq!(parse_since("2026-09-24T10:00:00Z", 0.0), Ok(1_790_244_000.0));
+        // A bare date is midnight UTC — the natural reading of "--since 2026-09-24".
+        assert_eq!(parse_since("2026-09-24", 0.0), Ok(1_790_208_000.0));
+    }
+
+    /// An unreadable `--since` must be an ERROR, never "since the beginning of
+    /// time": a filter that silently widens prints the whole log and reads as
+    /// a great deal of recent activity.
+    #[test]
+    fn since_refuses_what_it_cannot_read_rather_than_meaning_everything() {
+        for bad in [
+            "",
+            "   ",
+            "10",                    // no unit: minutes? seconds? say so.
+            "m",                     // no number
+            "10x",                   // not a unit we have
+            "1e3s",                  // f64 would take this; a human would not write it
+            "infs",
+            "yesterday",
+            "2026-09-24T10:00:00+03:00", // an offset we refuse rather than ignore
+            "26-09-24",              // two-digit year is not year 26
+            "2026-13-01",
+            "2026-09-32",
+            "2026-09-24T24:00:00Z",
+            "2026-09-24T10:61:00Z",
+            "2026/09/24",
+            "2026-09-24T10:00:00:00Z",
+            "2026-09-24-01",
+            "2026-09-24T10:00:000Z", // three-digit seconds are not a stamp
+            "2026-09-24T10:00:61Z",  // one past the leap second we do allow
+        ] {
+            let e = parse_since(bad, 1000.0);
+            assert!(e.is_err(), "{bad:?} parsed as {e:?}");
+            assert!(e.unwrap_err().contains(bad.trim()), "the error must quote what was typed: {bad:?}");
+        }
+    }
+
+    /// The exact inverse of the stamp jv-act writes (`audit::now_iso`), which
+    /// cannot be imported here: jv-act is human-review-only and depends on
+    /// this crate, so the arithmetic is pinned against known epochs instead.
+    #[test]
+    fn iso_to_epoch_inverts_the_stamp_jv_act_writes() {
+        assert_eq!(iso_to_epoch("1970-01-01T00:00:00Z"), Some(0.0));
+        assert_eq!(iso_to_epoch("1970-01-02T00:00:00Z"), Some(86_400.0));
+        assert_eq!(iso_to_epoch("2000-01-01T00:00:00Z"), Some(946_684_800.0));
+        assert_eq!(iso_to_epoch("2026-09-24T10:00:00Z"), Some(1_790_244_000.0));
+        // Leap day, and the end of a short February the year after.
+        assert_eq!(iso_to_epoch("2024-02-29T12:00:00Z"), Some(1_709_208_000.0));
+        assert_eq!(iso_to_epoch("2026-02-28T23:59:59Z"), Some(1_772_323_199.0));
+        // Pre-epoch dates go negative rather than wrapping.
+        assert_eq!(iso_to_epoch("1969-12-31T23:59:59Z"), Some(-1.0));
+        // Sub-second precision jv-act does not write today, and a trailing Z
+        // that is optional either way.
+        assert_eq!(iso_to_epoch("2000-01-01T00:00:00.500Z"), Some(946_684_800.5));
+        assert_eq!(iso_to_epoch("2000-01-01T00:00:00"), Some(946_684_800.0));
+        assert_eq!(iso_to_epoch("2000-01-01T00:01"), Some(946_684_860.0), "seconds are optional");
+        // A leap second is a stamp, not a bug.
+        assert_eq!(iso_to_epoch("2016-12-31T23:59:60Z"), Some(1_483_228_800.0));
     }
 
     fn map(pairs: &[(&str, rmpv::Value)]) -> rmpv::Value {

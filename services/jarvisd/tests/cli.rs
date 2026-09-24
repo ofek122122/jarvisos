@@ -371,6 +371,150 @@ async fn a_torn_audit_line_is_reported_and_fails_the_command() {
     assert!(out.stderr.contains("could not be read"), "{}", out.stderr);
 }
 
+
+// ---------------------------------------------------------------- act-log filters
+//
+// The two questions a human actually has after something happened: "what did
+// jv-act do in the last ten minutes" and "show me everything that was not ok".
+// Unit tests in `jarvisd::cli` pin the filtering itself; these pin the wiring
+// no unit test can see — that the flags reach it, and that the exit codes a
+// script depends on come out of the real binary.
+
+/// One audit line stamped when the caller says.
+fn audit_entry_at(tool: &str, ts: &str, outcome: &str) -> String {
+    let mut e: serde_json::Value = serde_json::from_str(&audit_entry(tool, outcome, None)).unwrap();
+    e["ts"] = serde_json::json!(ts);
+    e.to_string()
+}
+
+fn act_log(path: &std::path::Path, args: &[&str]) -> std::process::Child {
+    let mut argv = vec!["act-log"];
+    argv.extend_from_slice(args);
+    spawn_jv_env("/nonexistent/no-bus-needed.sock", &argv, &[("JARVIS_ACT_AUDIT", path.to_str().unwrap())])
+}
+
+#[tokio::test]
+async fn act_log_failed_shows_only_what_did_not_succeed() {
+    let (_tmp, path) = audit_file(&[
+        audit_entry("a.ok", "ok", None),
+        audit_entry("a.denied", "denied", None),
+        audit_entry("a.boom", "execution_failed", None),
+    ]);
+    let out = wait_out(act_log(&path, &["--failed"]), 8.0).await;
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].contains("a.denied"), "{:?}", lines[0]);
+    assert!(lines[1].contains("a.boom"), "{:?}", lines[1]);
+    assert!(!out.stdout.contains("a.ok"), "{}", out.stdout);
+}
+
+/// grep's rule, and the reason a typo'd `--outcome denyed` cannot read as
+/// reassurance. Nothing is PRINTED for it: on a healthy machine "nothing
+/// failed" is the good answer, and a warning every time would train a human
+/// to ignore this command.
+#[tokio::test]
+async fn a_question_nothing_answers_exits_one_and_says_nothing() {
+    let (_tmp, path) = audit_file(&[audit_entry("a.ok", "ok", None)]);
+    for args in [vec!["--failed"], vec!["--outcome", "denyed"]] {
+        let out = wait_out(act_log(&path, &args), 8.0).await;
+        assert_eq!(out.code, 1, "{args:?} -> stdout {:?}", out.stdout);
+        assert!(out.stdout.trim().is_empty(), "{args:?} -> {:?}", out.stdout);
+        assert!(out.stderr.trim().is_empty(), "{args:?} -> {:?}", out.stderr);
+    }
+    // The same log with no question asked is history, not a failed search.
+    let out = wait_out(act_log(&path, &[]), 8.0).await;
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+}
+
+#[tokio::test]
+async fn act_log_outcome_is_repeatable_and_exact() {
+    let (_tmp, path) = audit_file(&[
+        audit_entry("a.ok", "ok", None),
+        audit_entry("a.denied", "denied", None),
+        audit_entry("a.ct", "confirm_timeout", None),
+        audit_entry("a.to", "timeout", None),
+    ]);
+    let out = wait_out(act_log(&path, &["--outcome", "denied", "--outcome", "timeout"]), 8.0).await;
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 2, "confirm_timeout is not timeout: {lines:?}");
+    assert!(lines[0].contains("a.denied"), "{:?}", lines[0]);
+    assert!(lines[1].contains("a.to"), "{:?}", lines[1]);
+}
+
+#[tokio::test]
+async fn act_log_since_bounds_the_window_in_both_directions() {
+    let (_tmp, path) = audit_file(&[
+        audit_entry_at("a.old", "2020-01-01T00:00:00Z", "ok"),
+        audit_entry_at("a.new", "2020-06-01T12:00:00Z", "ok"),
+    ]);
+
+    // An absolute stamp, and --tail applying to the ANSWER.
+    let out = wait_out(act_log(&path, &["--since", "2020-03-01T00:00:00Z"]), 8.0).await;
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert_eq!(out.lines().len(), 1, "{}", out.stdout);
+    assert!(out.stdout.contains("a.new") && !out.stdout.contains("a.old"), "{}", out.stdout);
+
+    // A duration back from a real wall clock. Both entries are years old, so
+    // a long window holds them and a short one holds neither — which is the
+    // arithmetic actually being asserted, without this test needing to know
+    // what time it is.
+    let out = wait_out(act_log(&path, &["--since", "100000d"]), 8.0).await;
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert_eq!(out.lines().len(), 2, "{}", out.stdout);
+
+    let out = wait_out(act_log(&path, &["--since", "10m"]), 8.0).await;
+    assert_eq!(out.code, 1, "nothing happened in the last ten minutes: {}", out.stdout);
+    assert!(out.stdout.trim().is_empty(), "{}", out.stdout);
+}
+
+/// A `--since` that cannot be read must be an ERROR, never "since the
+/// beginning of time" — a filter that silently widens prints the whole log and
+/// reads as a great deal of recent activity.
+#[tokio::test]
+async fn act_log_refuses_a_since_it_cannot_read_and_prints_no_log() {
+    let (_tmp, path) = audit_file(&[audit_entry("a.ok", "ok", None)]);
+    let out = wait_out(act_log(&path, &["--since", "yesterday"]), 8.0).await;
+
+    assert_ne!(out.code, 0, "stdout: {}", out.stdout);
+    assert!(out.stdout.trim().is_empty(), "the log must not be printed anyway: {}", out.stdout);
+    assert!(out.stderr.contains("--since"), "say which flag: {}", out.stderr);
+    assert!(out.stderr.contains("yesterday"), "and what was typed: {}", out.stderr);
+}
+
+/// `--failed` IS `--outcome` negated. Accepting both would have to invent a
+/// meaning for their intersection, and every meaning is a guess at what the
+/// caller wanted.
+#[tokio::test]
+async fn failed_and_outcome_cannot_both_be_asked() {
+    let (_tmp, path) = audit_file(&[audit_entry("a.ok", "ok", None)]);
+    let out = wait_out(act_log(&path, &["--failed", "--outcome", "denied"]), 8.0).await;
+
+    assert_ne!(out.code, 0, "stdout: {}", out.stdout);
+    assert!(out.stdout.trim().is_empty(), "{}", out.stdout);
+    assert!(out.stderr.contains("cannot be used with"), "{}", out.stderr);
+}
+
+/// A line nobody can parse has no ts and no outcome, so no filter can prove it
+/// does not belong in the answer. It stays, and it still fails the command.
+#[tokio::test]
+async fn a_filter_does_not_hide_a_torn_line() {
+    let (_tmp, path) = audit_file(&[
+        audit_entry("a.ok", "ok", None),
+        r#"{"ts":"2026-09-24T10:00:01Z","tool":"fs.tr"#.to_string(),
+    ]);
+    let out = wait_out(act_log(&path, &["--failed"]), 8.0).await;
+
+    assert_eq!(out.code, 1, "stdout: {}", out.stdout);
+    let lines = out.lines();
+    assert_eq!(lines.len(), 1, "the ok entry was filtered out, the hole was not: {lines:?}");
+    assert!(lines[0].starts_with("!! unreadable audit line 2"), "{:?}", lines[0]);
+    assert!(out.stderr.contains("could not be read"), "{}", out.stderr);
+}
+
 // ---------------------------------------------------------------- confirm
 //
 // `jv confirm` is the one CLI path that can cause a real action to happen —
