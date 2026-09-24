@@ -121,7 +121,7 @@ QML engine can answer:
 
 - **The HUD renders nothing while nothing changes.** Commits are counted
   on the HUD's own side of the Wayland socket (libwayland's
-  `WAYLAND_DEBUG` log) over **four** six-second windows, all of which
+  `WAYLAND_DEBUG` log) over **five** six-second windows, all of which
   must be **zero**:
 
   1. **quiet** — a live bus carrying a `context.system` snapshot every
@@ -150,13 +150,29 @@ QML engine can answer:
      heartbeat is a `Repeater` model that changed whether or not a word in
      it did. Window 3's findings list is empty the whole time, and an empty
      list rebuilt is still nothing on screen.
+  5. **heard and confirm** — the last two plates in the stack, and the only
+     two whose words come off a **latch** (A48). Everything the four
+     windows above hold is a *reading*: `OutputState` believes a snapshot
+     while the snapshots keep coming, `MicState` and `HealthState` read the
+     heartbeat in front of them. `HeardState` remembers a final transcript
+     because partials ride the same topic and would blank the sentence;
+     `ConfirmState` remembers a question because the *answer* lands on the
+     same topic and would erase it. So an arriving frame does something
+     here it does nowhere above — it **re-takes the latch**: the envelope
+     is replaced, `transcriptKey`/`requestKey` move, `armHold`/`armExpiry`
+     run and a one-shot timer restarts, once a second, while **HEARD** and
+     **CONFIRM** do not move a pixel. A plate that did anything visible
+     when its latch was re-taken would be invisible to all four windows
+     above.
 
-  Measured: 0, 0, 0 and 0. The fade-in that put the blind plate there cost
+  Measured: 0, 0, 0, 0 and 0. The fade-in that put the blind plate there cost
   42 commits across the three surfaces and then stopped; lighting SPEAKING
   and then OUTPUT MUTED under it cost 82 across the two steps, and the
   plate that arrived was 41 px taller than the one above it alone; lighting
   MIC and then MIC NO AUDIO with jv-ears DEGRADED under it cost 85, also
-  41 px taller. (84 on an earlier run of the same HUD — a fade's frame
+  41 px taller; lighting HEARD and then the question above it cost 77, the
+  drawn region growing 94 px to (2284, 16, 2543, 178) as `ConfirmPlate`
+  docked at the top of the stack and pushed the heard line down. (84 on an earlier run of the same HUD — a fade's frame
   count is not a fixture, which is why only the zeros are asserted.) Nothing had to be fixed to get window 4 to zero — the
   `Repeater` rebuild above is a real thing that happens once a second on a
   degraded machine, and it costs no commit.
@@ -169,11 +185,11 @@ QML engine can answer:
   of two topics rather than a latch, so it stays true for exactly as long
   as the frames keep coming.
 
-  *Verified that none of the four can go vacuous.* Each is paired with a
+  *Verified that none of the five can go vacuous.* Each is paired with a
   stretch that must contain commits — the HUD being woken by a real
   jv-ears heartbeat, the blind plate arriving, the speaking/muted pair
-  arriving, the mic/health pair arriving — counted by the same code
-  through the same log. That control
+  arriving, the mic/health pair arriving, the question arriving over the
+  transcript — counted by the same code through the same log. That control
   is not decoration: it is what caught the first version of this probe,
   whose pattern expected `wl_surface@41` where this libwayland writes
   `wl_surface#41`, and which would otherwise have reported a flawless zero
@@ -204,6 +220,20 @@ QML engine can answer:
   heartbeats published inside the window are counted, and a window that
   measured fewer than two of them fails rather than reporting its zero.
 
+  Window 5 is lit in two steps for the same reason — the transcript alone
+  lights `HeardPlate`, and the question then has to arrive and grow the
+  region — and it needs window 4's guard for a sharper version of window
+  4's reason. A latch does not merely outlive a six-second silence; it is
+  *made* to. `ConfirmState` holds the question for the 15 s `jv-act`
+  declared in the frame and `HeardState` holds the line for 30, so a feed
+  that never ran at all would leave both plates exactly where they are for
+  the whole window. The temptation that would have hidden this is worth
+  naming: publishing a `window_s` of 600 would make the feed unnecessary
+  and the measurement easy, and it would also be a frame no `jv-act` would
+  ever send — the same thing A43 refused to do to a heartbeat's
+  `period_s`. So the window is jv-act's own 15 s, the re-publishes inside
+  the measured window are counted, and fewer than two is a failure.
+
   *Verified that window 3 catches what windows 1 and 2 cannot.* The
   mutation is a "freshness" fade — the dot's opacity bound to the age of
   the snapshot, which is the kind of considerate edit nobody would look at
@@ -216,6 +246,19 @@ QML engine can answer:
   `SequentialAnimation` inside the same plate, by contrast, is caught by
   the lit window too: an animation runs whether or not anyone can see it,
   and that is the failure the first two windows were already built for.
+
+  *Verified that window 5 catches what windows 1–4 cannot.* The same
+  considerate edit again, moved to the one plate only this window has ever
+  held: the CONFIRM dot's opacity bound to the age of `jv-act`'s question —
+  which is not an invented temptation, because A21 is an open item asking
+  this plate to show how much of the answer window is left. There is no
+  animation in it and no timer; the binding re-runs only when the latch is
+  re-taken, which is once a second for as long as a question stands.
+  `ConfirmPlate` is dark in every other window — nothing above it publishes
+  an `action.confirm` at all — so windows 1, 2, 3 and 4 all read **0**
+  while the fifth read **15**, three surfaces times five re-publishes. The
+  drawn box never moved: (2284, 16, 2543, 178) before and after, the same
+  region the unmutated run holds still.
 
   *Verified that window 4 catches what windows 1–3 cannot.* The same
   considerate edit, moved to the plate only this window can hold: the mic

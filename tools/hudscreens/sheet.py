@@ -305,6 +305,63 @@ VOICE_SPEAKING = {
 }
 
 
+# jv-act stopping in front of a destructive tool, in its own words, with
+# the window running (A20). COMPOSED — nothing committed has ever recorded
+# jv-act asking — which is why every number in it is jv-act's own: the
+# window is the 15 s `services/jv-act` declares and `schemas/action.confirm`
+# documents, and not a longer one invented to make a harness convenient. A
+# frame claiming a ten-minute confirmation window would be a picture of a
+# machine that does not exist, and core/ConfirmState.qml would believe it.
+#
+# It lights `ConfirmPlate` and nothing else: the only plate in this HUD
+# that is waiting on YOU, and the only one with an ember border.
+CONFIRM_REQUEST = {
+    "publish": {
+        "topic": "action.confirm",
+        "src": "jv-act",
+        "body": {
+            "kind": "request",
+            "request_id": "req-4f21",
+            "tool": "fs.trash",
+            "summary": "move 14 files in ~/Downloads to the trash — yes or no?",
+            "window_s": 15.0,
+        },
+    }
+}
+
+
+# What the user said to get that question asked: one jv-ears FINAL, which
+# is the only kind core/HeardState.qml will read (partials are provisional
+# and get rewritten, and a plate showing a sentence Jarvis never acted on
+# is a more expensive wrong than an empty one).
+#
+# COMPOSED, and paired with the frame above on purpose. The committed
+# recording's final asks what time it is (harness/fixtures/sessions/
+# hey-jarvis-clean.jsonl), and nothing destructive follows from that — so
+# replaying it under a `fs.trash` confirmation would put two true frames on
+# the bus that add up to a machine which had confused itself. These two are
+# one turn: the words, and the question they earned.
+#
+# The envelope `conf` is BORROWED rather than invented — 0.88583 is that
+# recording's own final, from a quiet room. Invariant 4 requires a number
+# here, and a composed 1.0 would be a certainty no ASR ever reports.
+HEARD_FINAL = {
+    "publish": {
+        "topic": "audio.transcript",
+        "src": "jv-ears",
+        "conf": 0.88583,
+        "body": {
+            "kind": "final",
+            "utterance_id": "9d2c71b4-6e05-4a3a-9f1e-0b7c5d84aa10",
+            "text": "Jarvis, empty my downloads folder into the trash.",
+            "lang": "en",
+            "t0": 0.0,
+            "t1": 2.9,
+        },
+    }
+}
+
+
 SHOTS = [
     {
         "file": "01-quiet",
@@ -356,24 +413,7 @@ SHOTS = [
         # shows that is waiting on YOU — and the reason its size on a real
         # 1440p panel is worth measuring rather than guessing.
         "source": "composed (nothing committed has recorded jv-act asking)",
-        "frames": [
-            MIC_OPEN,
-            {
-                "publish": {
-                    "topic": "action.confirm",
-                    "src": "jv-act",
-                    "body": {
-                        "kind": "request",
-                        "request_id": "req-4f21",
-                        "tool": "fs.trash",
-                        "summary": (
-                            "move 14 files in ~/Downloads to the trash — yes or no?"
-                        ),
-                        "window_s": 15.0,
-                    },
-                }
-            },
-        ],
+        "frames": [MIC_OPEN, CONFIRM_REQUEST],
     },
     {
         "file": "04-unheard",

@@ -33,9 +33,11 @@ asked things no QML engine knows:
     idle" was an argument about how Qt Quick works, and the thing that
     breaks it is one ordinary edit — a pulse, a counter, an animation
     left looping. `probe_idle_frames` counts commits on the HUD's own
-    side of the Wayland socket over four windows — quiet, lit, lit on a
-    bus that never stops talking (A42), and the two plates a single
-    re-published heartbeat can hold still (A43) — with a control for each.
+    side of the Wayland socket over five windows — quiet, lit, lit on a
+    bus that never stops talking (A42), the two plates a single
+    re-published heartbeat can hold still (A43), and the two whose words
+    come off a latch that is re-taken once a second (A48) — with a
+    control for each.
 
 Nothing here asserts a pixel COLOUR: a font ships a new version, Qt
 changes its rasteriser, and a byte comparison fails in a way nobody can
@@ -1052,6 +1054,193 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         log(
             f"  mic and health: {commits} commits in {IDLE_WINDOW_S:.0f}s "
             f"under {beats} heartbeats, plates still at {after}"
+        )
+    finally:
+        if hud is not None:
+            hud.stop()
+        broker.stop()
+
+
+    # --- HEARD AND CONFIRM: the last two plates, and the only two whose
+    # words come off a LATCH (A48).
+    #
+    # The three windows above hold five plates between them, and every one
+    # of them is a READING: `OutputState` believes a snapshot while the
+    # snapshots keep coming, `MicState` and `HealthState` read the heartbeat
+    # in front of them. Nothing above this line has a latch in it.
+    #
+    # These two do, and they are the only two in the HUD that do.
+    # `core/HeardState.qml` remembers a final transcript because partials
+    # ride the same topic and `bus.latest()` would blank the sentence the
+    # instant the user started the next one; `core/ConfirmState.qml`
+    # remembers a question because the ANSWER lands on the same topic and
+    # would erase it. Both remember an observation the bus no longer
+    # carries, and both hold it against a clock they arm themselves.
+    #
+    # Which is what makes re-publishing mean something different here. Up
+    # there a repeated frame re-evaluates a binding. Here it RE-TAKES THE
+    # LATCH: `transcript` and `request` are replaced by new envelopes,
+    # `transcriptKey` and `requestKey` change (`publish_shot` stamps a
+    # fresh `ts` on every frame, which is what a live publisher does),
+    # `armHold` and `armExpiry` run, `expired` is cleared again and a
+    # one-shot timer is restarted — once a second, forever, while the two
+    # sentences on screen do not move a pixel. A plate that did anything
+    # visible when its latch was re-taken would be invisible to all four
+    # windows above, and would cost a composite of three monitors for as
+    # long as the question stood.
+    #
+    # That is not a hypothetical edit. A21 and A22 are both open items
+    # about THIS plate — the confirm window shows that time is running and
+    # never how much is left, and the plate vanishes rather than leaving —
+    # and the obvious implementation of either is a number that ticks or a
+    # bar that shrinks. This is the only window in which `ConfirmPlate` is
+    # on screen at all.
+    #
+    # The window jv-act declares is 15 s and this publishes exactly that.
+    # Inflating it would have made the feed unnecessary and the measurement
+    # a picture of a machine that does not exist — the same refusal A43
+    # made about a heartbeat's `period_s`.
+    bus_addr = str(stage / "idle-ask.sock")
+    broker = Proc(
+        "jarvisd",
+        [os.environ["JARVISD_BIN"]],
+        stage / "idle-ask-jarvisd.log",
+        dict(os.environ, JARVIS_BUS=bus_addr),
+    )
+    hud = None
+    try:
+        broker.wait_for("jarvisd listening on")
+        hud = Proc(
+            "jv-hud",
+            [os.environ["JV_HUD_BIN"]],
+            stage / "idle-ask-hud.log",
+            dict(os.environ, JARVIS_BUS=bus_addr, WAYLAND_DEBUG="1"),
+        )
+        hud.wait_for("Configuration Loaded")
+        time.sleep(SETTLE_S)
+
+        ppm = stage / "idle-ask.ppm"
+        check_desk_is_bare(ppm, background, "before the heard-and-confirm window")
+
+        # Lit in two steps, like the two windows above and for the same
+        # reason: "the HUD drew something" is not the claim. The transcript
+        # alone lights `HeardPlate` — nothing is being asked yet — and then
+        # jv-act stops in front of the tool and the question arrives. The
+        # drawn region has to grow DOWNWARDS: `ConfirmPlate` sits ABOVE
+        # `HeardPlate` in the stack (a question you have fifteen seconds to
+        # answer must not appear under three other plates), so the top of
+        # the stack is the top of the stack either way, the heard line moves
+        # down to make room, and the union of the two is taller at the same
+        # top-right corner. Without that check this could be holding the
+        # transcript still while the question never appeared, and it would
+        # report exactly the same zero.
+        heard = [sheet.HEARD_FINAL]
+        asked = [sheet.HEARD_FINAL, sheet.CONFIRM_REQUEST]
+
+        mark = hud.mark()
+        publish_shot({"frames": heard}, bus_addr)
+        wait_for_drawing(
+            ppm,
+            background,
+            bus_addr,
+            heard,
+            "jv-ears published a final transcript and the HUD never showed "
+            "the words",
+        )
+        # Measured after a settle, never off the first capture that differs:
+        # §06's fade is a real animation and a region read half way through
+        # one is smaller than the plate, which would make the growth check
+        # below a coin flip.
+        feed_snapshots(IDLE_SETTLE_S, heard, bus_addr)
+        capture("primary", ppm)
+        heard_box = drawn_box(read_ppm(ppm), background)
+        log(f"  the words jv-ears took down: drawn at {heard_box}")
+
+        publish_shot({"frames": [sheet.CONFIRM_REQUEST]}, bus_addr)
+        wait_for_drawing(
+            ppm,
+            background,
+            bus_addr,
+            asked,
+            "jv-act stopped in front of a destructive tool and the HUD drew "
+            "no question",
+            differs_from=heard_box,
+        )
+        lighting, _ = sheet.surface_traffic(hud.since(mark))
+        feed_snapshots(IDLE_SETTLE_S, asked, bus_addr)
+        capture("primary", ppm)
+        box = drawn_box(read_ppm(ppm), background)
+        if not sheet.grew_downwards(heard_box, box):
+            raise Fail(
+                f"jv-act asking changed the drawn region from {heard_box} to "
+                f"{box}, which is not a plate ARRIVING at the same top-right "
+                "corner — the window below would be holding HeardPlate alone, "
+                "and ConfirmPlate would be untested"
+            )
+        if not lighting:
+            raise Fail(
+                "two plates reached the screen without a single surface commit "
+                "in the HUD's Wayland log — the log is not the HUD's, and the "
+                "window below would read zero no matter what it drew"
+            )
+        check_corner(
+            f"heard-and-confirm {sheet.output_by_role('primary')['name']}",
+            read_ppm(ppm),
+            background,
+            True,
+        )
+        log(
+            f"  and then jv-act asked: {box[3] - heard_box[3]} px taller at "
+            f"{box}, the pair costing {lighting} commits"
+        )
+
+        mark = hud.mark()
+        relatches = feed_snapshots(IDLE_WINDOW_S, asked, bus_addr)
+        commits, frames = sheet.surface_traffic(hud.since(mark))
+
+        # The box FIRST, and the commit count quoted in its message: a plate
+        # that left mid-window would have committed the traffic of LEAVING,
+        # and calling that "the shell is animating" would send the next
+        # reader looking for an animation that does not exist.
+        capture("primary", ppm)
+        after = drawn_box(read_ppm(ppm), background)
+        if after != box:
+            raise Fail(
+                f"the HUD drew at {box} before the heard-and-confirm window "
+                f"and {after} after it ({commits} commits under {relatches} "
+                "re-publishes), so the plates changed under the measurement "
+                "and their zero says nothing about stillness"
+            )
+        # The one way this window can go quietly vacuous, and it is window
+        # 4's way rather than window 3's. A latch outlives its own silence:
+        # ConfirmState holds the question for the 15 s jv-act declared and
+        # HeardState holds the line for 30, so a feed that never ran would
+        # leave both plates exactly where they are for the whole six seconds
+        # and turn this back into A34's lit window with more machinery in
+        # front of it. The re-publishes are therefore counted, and the
+        # re-taking of the latch IS the subject.
+        if relatches < 2:
+            raise Fail(
+                f"the heard-and-confirm window published {relatches} frames in "
+                f"{IDLE_WINDOW_S:.0f}s, so nothing arrived while it was "
+                "measuring: the latches would have held on their own and this "
+                "is A34's lit window wearing a different name"
+            )
+        if commits:
+            raise Fail(
+                f"a HUD showing a transcript and the question jv-act asked "
+                f"about it committed {commits} surface updates ({frames} frame "
+                f"callbacks) in {IDLE_WINDOW_S:.0f}s while receiving "
+                f"{relatches} re-publishes of the same two frames. Nothing a "
+                "user could see changed, so this is a re-render on the LATCH "
+                "being re-taken — ConfirmState.request and "
+                "HeardState.transcript replaced, their keys moved, their "
+                "one-shot timers re-armed — and §06 budgets the ambient scene "
+                "for signals, not for housekeeping"
+            )
+        log(
+            f"  heard and confirm: {commits} commits in {IDLE_WINDOW_S:.0f}s "
+            f"under {relatches} re-publishes, plates still at {after}"
         )
     finally:
         if hud is not None:

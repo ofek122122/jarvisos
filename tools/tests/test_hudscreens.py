@@ -19,6 +19,7 @@ the sheet is made. What IS here is everything that would make those checks
 run against the wrong machine, or not run at all.
 """
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -380,7 +381,7 @@ def test_the_idle_probe_reads_the_huds_own_wayland_log():
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
-    assert probe.count('WAYLAND_DEBUG="1"') == 4, (
+    assert probe.count('WAYLAND_DEBUG="1"') == 5, (
         "every jv-hud the idle probe starts must be started with "
         "WAYLAND_DEBUG=1, or the frames it is counting are not being logged"
     )
@@ -396,20 +397,20 @@ def test_each_idle_window_has_a_control():
     contain commits, counted the same way through the same log: the HUD
     being woken by a real frame after the quiet window, the blind plate
     arriving before the lit one, and a second plate arriving under the
-    first in each of the two live-lit ones.
+    first in each of the three that are fed.
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
     assert (
         "if not woke:" in probe
         and "if not arriving:" in probe
-        and probe.count("if not lighting:") == 2
+        and probe.count("if not lighting:") == 3
     ), (
         "the idle probe no longer insists on SEEING commits somewhere, so a "
         "broken instrument — an unset WAYLAND_DEBUG, a libwayland that "
         "renamed its objects — would report a flawless permanent zero"
     )
-    assert probe.count("sheet.surface_traffic(") == 8, (
+    assert probe.count("sheet.surface_traffic(") == 10, (
         "the controls have to be measured by the same counter as the windows "
         "they vouch for, or they vouch for nothing"
     )
@@ -520,8 +521,6 @@ def test_both_live_lit_frames_are_legal_bodies_for_their_topics():
     illegal body is measuring a machine that cannot exist. Checked here
     rather than trusted, because these two frames are hand-written.
     """
-    import json
-
     for frame in (sheet.VOICE_SPEAKING, sheet.SINK_MUTED, sheet.VOICE_DEFAULT_SINK):
         spec = frame["publish"]
         schema = json.loads(
@@ -640,8 +639,8 @@ def test_the_readme_says_which_windows_were_on_a_live_bus():
     difference legible — a zero is a zero either way.
     """
     readme = (SCREENS / "README.md").read_text("utf-8")
-    assert "four" in readme.lower(), (
-        "docs/hud/screens/README.md still describes three idle windows"
+    assert "five" in readme.lower(), (
+        "docs/hud/screens/README.md still describes four idle windows"
     )
     assert "OUTPUT MUTED" in readme, (
         "docs/hud/screens/README.md does not say which plate the live-lit "
@@ -652,6 +651,11 @@ def test_the_readme_says_which_windows_were_on_a_live_bus():
         "docs/hud/screens/README.md does not say which plates A43's window "
         "held on screen, so a reader cannot tell it apart from the one "
         "above it"
+    )
+    assert "CONFIRM" in readme, (
+        "docs/hud/screens/README.md does not say which plates A48's window "
+        "held on screen — and that window is the only one whose frames are "
+        "re-taken latches rather than re-read readings"
     )
 
 
@@ -814,6 +818,209 @@ def test_the_mic_and_health_window_proves_the_health_plate_arrived():
     )
 
 
+# ---------------------------------- the fifth window: heard and confirm (A48)
+#
+# The four windows above hold five plates, and every one of them is a
+# READING: OutputState believes a snapshot while the snapshots keep coming,
+# MicState and HealthState read the heartbeat in front of them. Nothing up
+# there has a latch in it.
+#
+# `HeardPlate` and `ConfirmPlate` are the last two plates in the stack that
+# had never been watched standing still, and they are the only two whose
+# words come off a LATCH — a final transcript remembered because partials
+# would blank it, a question remembered because the answer lands on the
+# same topic. Re-publishing therefore means something different here than
+# it does above: it RE-TAKES the latch. The envelope is replaced, the key
+# moves, `armHold`/`armExpiry` run and a one-shot timer restarts, once a
+# second, while the two sentences on screen do not move a pixel.
+#
+# These gates hold the three ways that window can go vacuous without
+# looking wrong: losing its broker, holding HeardPlate alone while the
+# question never arrived, and — the one it shares with A43's window and
+# not with A42's — letting the latches carry themselves through a silence.
+
+
+def heard_and_confirm() -> str:
+    return idle_window_text("HEARD AND CONFIRM")
+
+
+def test_the_heard_and_confirm_window_runs_on_a_real_broker():
+    """Same claim as the two windows above it and the same way of losing
+    it. The subject is a latch being re-taken by an arriving frame; with no
+    jarvisd nothing arrives, the latches simply sit there, and "a plate on
+    screen and nothing happening" is A34's measurement.
+    """
+    window = heard_and_confirm()
+    assert "JARVISD_BIN" in window, (
+        "A48's window starts no jarvisd — a HUD with no bus cannot have a "
+        "latch re-taken, and the whole subject of this window is what that "
+        "costs"
+    )
+    assert "sheet.HEARD_FINAL" in window and "sheet.CONFIRM_REQUEST" in window, (
+        "A48's window no longer publishes the two frames that light the two "
+        "plates it names, so whatever it is measuring is not them"
+    )
+
+
+def test_the_two_frames_light_exactly_the_plates_the_window_claims():
+    """core/HeardState.qml reads FINALS from jv-ears and nothing else;
+    core/ConfirmState.qml reads a `request` from jv-act. Any of those four
+    facts wrong and the window measures a bare desktop while reporting a
+    triumphant zero.
+    """
+    heard = sheet.HEARD_FINAL["publish"]
+    assert heard["topic"] == "audio.transcript" and heard["src"] == "jv-ears", (
+        "core/HeardState.qml reads jv-ears' transcript topic; a frame under "
+        "another src or topic is not one the HUD will draw"
+    )
+    assert heard["body"]["kind"] == "final", (
+        "A48's window publishes a PARTIAL. core/HeardState.qml refuses them "
+        "on purpose — they get rewritten — so HeardPlate would never light"
+    )
+    assert heard["body"]["text"].strip(), (
+        "a transcript that flattens to nothing is not a reading, and "
+        "core/HeardState.qml refuses it: the plate would stay dark"
+    )
+    assert heard["body"]["lang"] == "en", (
+        "A48's window claims jv-ears detected a language this machine does "
+        "not expect, which lights an extra line in HeardPlate (the pinned "
+        "ASR is English-only) and changes the box the window measures"
+    )
+    assert "conf" in heard and 0 < heard["conf"] < 1, (
+        "the transcript is published with a composed certainty. Invariant 4 "
+        "wants the producer's own number, and no ASR reports 1.0 — this one "
+        "is borrowed from the committed recording's final"
+    )
+    ask = sheet.CONFIRM_REQUEST["publish"]
+    assert ask["topic"] == "action.confirm" and ask["src"] == "jv-act", (
+        "only jv-act asks; core/ConfirmState.qml reads the topic and the "
+        "frame's own fields, and a question from anywhere else is not one"
+    )
+    assert ask["body"]["kind"] == "request", (
+        "A48's window publishes an ANSWER, which is the frame that CLOSES a "
+        "question — ConfirmPlate would never appear"
+    )
+    assert ask["body"]["request_id"], (
+        "a question with no request_id is one nothing could ever answer, and "
+        "core/ConfirmState.qml refuses to latch it"
+    )
+
+
+def test_the_confirm_window_is_the_one_jv_act_actually_declares():
+    """The temptation this window had and refused. `ConfirmState` arms its
+    expiry off the window the FRAME declares (A14: the service that enforces
+    a budget states it), so publishing 600 would hold the plate up for ten
+    minutes and make the feed below unnecessary. It would also be a picture
+    of a machine that does not exist — the same thing A43 refused to do to
+    a heartbeat's `period_s`.
+    """
+    declared = sheet.CONFIRM_REQUEST["publish"]["body"]["window_s"]
+    schema = json.loads(
+        (ROOT / "schemas" / "action.confirm.json").read_text("utf-8")
+    )
+    assert f"({declared:.0f}s)" in schema["description"], (
+        f"the harness publishes a {declared:.0f}s confirmation window and "
+        "schemas/action.confirm.json documents a different one — a frame no "
+        "jv-act would ever send, believed by core/ConfirmState.qml"
+    )
+    assert declared < 30, (
+        "a confirmation window long enough to outlast the measurement is "
+        "what makes the feed below decorative; jv-act's real one is short, "
+        "and the re-publish is the subject"
+    )
+
+
+def test_both_heard_and_confirm_frames_are_legal_bodies_for_their_topics():
+    """`schemas/` is bus law (invariant 2) and a harness that publishes an
+    illegal body is measuring a machine that cannot exist. Checked rather
+    than trusted, because both frames are hand-written.
+    """
+    for frame in (sheet.HEARD_FINAL, sheet.CONFIRM_REQUEST):
+        spec = frame["publish"]
+        schema = json.loads(
+            (ROOT / "schemas" / f"{spec['topic']}.json").read_text("utf-8")
+        )
+        body = spec["body"]
+        missing = set(schema["required"]) - set(body)
+        assert not missing, f"{spec['topic']}: body is missing {sorted(missing)}"
+        extra = set(body) - set(schema["properties"])
+        assert not extra, f"{spec['topic']}: body has unknown keys {sorted(extra)}"
+    for topic, field, value in (
+        ("audio.transcript", "kind", sheet.HEARD_FINAL["publish"]["body"]["kind"]),
+        ("action.confirm", "kind", sheet.CONFIRM_REQUEST["publish"]["body"]["kind"]),
+    ):
+        schema = json.loads((ROOT / "schemas" / f"{topic}.json").read_text("utf-8"))
+        assert value in schema["properties"][field]["enum"]
+
+
+def test_the_heard_and_confirm_window_proves_the_question_arrived():
+    """`HeardPlate` lights off the transcript alone, so "something is
+    drawn" is not evidence that ConfirmPlate is on screen — and
+    ConfirmPlate is the half of this window nothing else in the harness
+    ever holds still. Lit in two steps and measured: the region has to grow
+    DOWNWARDS, which is what the stack does when the question docks above
+    the heard line and pushes it down.
+    """
+    window = heard_and_confirm()
+    assert "heard_box" in window, (
+        "A48's window no longer measures the HUD before jv-act asks, so "
+        "there is nothing for the lit one to have grown from"
+    )
+    assert "sheet.grew_downwards(heard_box, box)" in window, (
+        "A48's window no longer insists the drawn region GREW when the "
+        "question arrived — whatever it holds still for six seconds may not "
+        "include ConfirmPlate at all"
+    )
+    assert "if after != box:" in window, (
+        "A48's window no longer re-measures the plates after it, so a pair "
+        "that changed under the measurement would go unnoticed"
+    )
+
+
+def test_the_heard_and_confirm_window_insists_frames_arrived():
+    """The way this one goes vacuous, and it is A43's way rather than
+    A42's. A latch outlives its own silence: ConfirmState holds the
+    question for the 15 s jv-act declared and HeardState holds the line for
+    30, so a feed that never ran would leave both plates exactly where they
+    are for the whole six seconds and the box check would pass.
+    """
+    window = heard_and_confirm()
+    assert re.search(r"relatches = feed_snapshots\(IDLE_WINDOW_S, asked", window), (
+        "A48's window no longer re-publishes for the length of the measured "
+        "window — and the re-taking of the latch IS its subject, so what is "
+        "left is a HUD with two plates on screen and nothing arriving"
+    )
+    assert "if relatches < 2:" in window, (
+        "A48's window no longer checks that anything arrived while it was "
+        "measuring. Both latches outlive a six-second silence on their own, "
+        "so a dead feed would report a perfect zero about an idle bus"
+    )
+
+
+def test_the_confirm_frame_is_stated_once():
+    """The `03-confirm` shot and A48's window photograph and measure the
+    same question. Two copies of it would drift — a summary edited in one
+    place is a different plate, a different box, and a test that still
+    passes while the two sheets describe different machines.
+    """
+    src = (ROOT / "tools" / "hudscreens" / "sheet.py").read_text("utf-8")
+    assert src.count('"topic": "action.confirm"') == 1, (
+        "tools/hudscreens/sheet.py writes the confirmation frame more than "
+        "once; CONFIRM_REQUEST is the one copy both the shot and the idle "
+        "window read"
+    )
+    for shot in sheet.SHOTS:
+        if shot["file"] == "03-confirm":
+            assert sheet.CONFIRM_REQUEST in shot["frames"], (
+                "03-confirm no longer photographs the frame A48's window "
+                "holds still, so the picture and the measurement are of two "
+                "different questions"
+            )
+            break
+    else:
+        raise AssertionError("the sheet no longer takes 03-confirm")
+
+
 # ------------------------------------------------- the shot that is a reading
 #
 # `04-unheard` (A44) is the first shot in this sheet whose subject is a
@@ -966,8 +1173,8 @@ def test_the_growth_rule_is_stated_once():
     looking at.
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
-    assert shoot.count("sheet.grew_downwards(") == 3, (
-        "the idle probe's two live-lit windows and the shot loop must all ask "
+    assert shoot.count("sheet.grew_downwards(") == 4, (
+        "the idle probe's three fed windows and the shot loop must all ask "
         "sheet.grew_downwards — an inline copy of the geometry is one the "
         "unit tests above do not cover"
     )
