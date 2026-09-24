@@ -302,7 +302,7 @@ Item {
       suite.send("guard.verdict", "jv-guard", {
         "sha256": "9f2c4b7a1e08d3c65a4fbe2170d9c8815b3e6a04f7d2c9b81e5a30f64c7b92d1",
         "verdict": "blocked",
-        "reasons": ["matched ClamAV signature Win.Trojan.Agent-9823041"],
+        "reasons": ["clamav signature: Win.Trojan.Agent-9823041"],
         "scanned_by": ["clamav"],
         "path": "/home/ofek/Downloads/rct3-setup.exe"
       });
@@ -333,6 +333,131 @@ Item {
         "sha256": "4d0d5d4bb6f8d63a0f0a08dd9e8d2f15b1d9c3a7e6b40f2c8a17d35e9b0c6a21",
         "error": "wine: could not load kernel32.dll, status c0000135"
       });
+    }
+
+    // COMPOSED, and the only shot here with TWO stories in it (A61). The
+    // two plates above are the two halves of invariant 8 — a binary
+    // refused, an install that failed — and no picture has ever shown them
+    // together, though the surface box was grown 624 -> 688 px on the
+    // argument that they co-occur. An argument no shot demonstrates is an
+    // argument nobody can check, so here is the case, and it is not the
+    // one A61 guessed at.
+    //
+    // A61 described a refusal followed by a RETRY: jv-guard blocks an
+    // installer, the user fetches a different build, that one fails. That
+    // sequence cannot produce this picture, and writing it out is how the
+    // reason surfaced — jv-guard screens the second build too, a `clean`
+    // verdict is newer news from the same screener, and
+    // `core/GuardState.qml` lets the refusal go the moment it lands. The
+    // refusal and the failure have to be about DIFFERENT binaries, and the
+    // refusal has to be the newer of the two screenings.
+    //
+    // Which is exactly what two overlapping installs look like, because an
+    // install takes minutes and a user does not sit and watch it:
+    //
+    //   t=0      `jv-compat install flstudio_win64_21.2.exe` — fingerprinted,
+    //            screened clean, prefix built, and then minutes of silence
+    //            while the installer runs inside bubblewrap.
+    //   t=200    the user, waiting, grabs something else off a download
+    //            site and installs that too. jv-guard matches a signature
+    //            in it; jv-compat refuses it and builds no prefix.
+    //   t=214    the FIRST install, still going, dies inside its prefix.
+    //
+    // Every frame here is one services/jv-compat/jv_compat/install.py and
+    // services/jv-guard really publish, in the order they publish them —
+    // including the `blocked` on `compat.install`, which is the one
+    // lifecycle event `core/InstallState.qml` reads as no news at all, and
+    // which lands here in the middle of another app's install where a
+    // clearing event would have wiped the failure that follows it.
+    //
+    // What the picture is FOR, beyond the fit: the corner is showing two
+    // different binaries at once and says nothing about that anywhere. The
+    // refused file and the failed app are two identities stacked 8 px
+    // apart, and a reader who assumes one story is reading the wrong one
+    // (PLAN A62).
+    function shot_guard_install() {
+      Bus.ingest('{"t":"link","up":true}');
+
+      // The long install. `nsis`, `x64` and the path ride the frame and
+      // reach no pixel — jv-compat publishes them, and the only element
+      // that reads this topic reads three fields of it.
+      const fl = "7c1e5a0b93d84f26ab705c3e1d9f8460b2a4c7d1e03f9658ba2d4c7e1f60539a";
+      suite.send("compat.install", "jv-compat", {
+        "event": "fingerprinted",
+        "app": "fl-studio",
+        "sha256": fl,
+        "path": "/home/ofek/Downloads/flstudio_win64_21.2.exe",
+        "installer": "nsis",
+        "arch": "x64"
+      }, undefined, 0.0);
+      // A clean screening draws nothing — the install proceeding IS the
+      // report that the binary passed. It matters anyway: it is the
+      // verdict the refusal below has to be NEWER than.
+      suite.send("guard.verdict", "jv-guard", {
+        "sha256": fl,
+        "verdict": "clean",
+        "reasons": [],
+        "scanned_by": ["clamav"],
+        "path": "/home/ofek/Downloads/flstudio_win64_21.2.exe"
+      }, undefined, 0.9);
+      suite.send("compat.install", "jv-compat", {
+        "event": "screened",
+        "app": "fl-studio",
+        "sha256": fl
+      }, undefined, 0.9);
+      suite.send("compat.install", "jv-compat", {
+        "event": "prefix_created",
+        "app": "fl-studio",
+        "sha256": fl,
+        "recipe": "fl-studio"
+      }, undefined, 1.2);
+
+      // Two minutes later, with that installer still running: a second
+      // binary, screened and refused. Its `fingerprinted` clears the
+      // install latch, which is holding nothing yet — the failure has not
+      // happened.
+      const pack = "b03f4d8c6e21a95704fd3b8e1c6a02975d4e8b13fa06c92d7e5b418a0c36f2d7";
+      suite.send("compat.install", "jv-compat", {
+        "event": "fingerprinted",
+        "app": "codec-pack",
+        "sha256": pack,
+        "path": "/home/ofek/Downloads/codec_pack_setup.exe",
+        "installer": "inno",
+        "arch": "x86"
+      }, undefined, 200.0);
+      suite.send("guard.verdict", "jv-guard", {
+        "sha256": pack,
+        "verdict": "blocked",
+        "reasons": ["clamav signature: Win.Adware.Bundler-7719234"],
+        "scanned_by": ["clamav"],
+        "path": "/home/ofek/Downloads/codec_pack_setup.exe"
+      }, undefined, 200.4);
+      // jv-compat's own word for the same refusal, on its own topic, in
+      // the frame it really publishes (install.py: blocked, never a
+      // prefix). InstallState passes it over: `blocked` is GuardPlate's
+      // story, and treating it as news would take the failure below off
+      // the screen.
+      suite.send("compat.install", "jv-compat", {
+        "event": "blocked",
+        "app": "codec-pack",
+        "sha256": pack,
+        "error": "clamav signature: Win.Adware.Bundler-7719234"
+      }, undefined, 200.4);
+
+      // And the first install, fourteen seconds later, gets nowhere.
+      suite.send("compat.install", "jv-compat", {
+        "event": "failed",
+        "app": "fl-studio",
+        "sha256": fl,
+        "error": "0009:err:mscoree:CLRRuntimeInfo_GetRuntimeHost Wine Mono is not installed"
+      }, undefined, 214.0);
+
+      // The heartbeat LAST, so the open microphone is as fresh as the
+      // failure above it. Every other shot here lives at one instant; this
+      // one spans three and a half minutes, and a heartbeat stamped at the
+      // start of it would be 214 s stale by the end — which is a picture of
+      // a jv-ears that stopped, not of a mic that is open.
+      suite.micOpen();
     }
 
     // The HUD admitting it cannot see the machine at all (A23). Every
@@ -384,7 +509,12 @@ Item {
       // not draw (A52 leaves the progress question to a human), so a
       // caption reading `install mic` and not `install install mic` is the
       // assertion that the happy path stayed invisible.
-      { "file": "11-install.png", "build": suite.shot_install, "plates": ["install", "mic"] }
+      { "file": "11-install.png", "build": suite.shot_install, "plates": ["install", "mic"] },
+      // TWO stories, three plates (A61): the refused binary and the failed
+      // install that the box grew to hold at the same time. Both halves of
+      // invariant 8, in one corner, from the frames two services really
+      // publish when two installs overlap.
+      { "file": "12-guard-install.png", "build": suite.shot_guard_install, "plates": ["guard", "install", "mic"] }
     ]
 
     function test_the_sheet() {
@@ -414,6 +544,19 @@ Item {
         // second, cheaper implementation of the same fact. They agree here
         // or one of them is wrong.
         compare(stack.anyLit, shot.plates.length > 0, shot.file + ": stack.anyLit");
+
+        // And it FITS. The box is 300x688 because plates that can be up
+        // TOGETHER have to be, and the growth has been justified four
+        // times now by an argument about co-occurrence (shell.qml carries
+        // all four). A stack taller than the surface is not a smaller
+        // sheet — it is a plate the compositor cuts in half on a panel
+        // floating over every window, and the only thing that has ever
+        // checked it is a person looking at a PNG and seeing nothing
+        // obviously wrong. The inset is the stack's own top margin, so
+        // this is the real constraint and not a stricter one.
+        verify(Theme.insetPx + stack.height <= root.height,
+               shot.file + ": the corner is " + stack.height + " px tall, "
+               + Theme.insetPx + " px down a " + root.height + " px surface");
 
         const img = grabImage(root);
         compare(img.width, root.width, shot.file + ": width");

@@ -57,9 +57,9 @@ one is evidence about the machine. Closing that gap is what B10/A28 ask for.
 Each shot also carries an **On screen:** line — the plates that are lit in it,
 top to bottom. That line is not prose: it is read off the harness by
 `tools/tests/test_hudshots.py` and checked against what the plates themselves
-report, because three of them (`health`, `action`, `guard`) draw the same two
-lines in the same severity colour in the same corner, and telling those apart
-in a PNG has always needed a person (PLAN A53).
+report, because four of them (`health`, `action`, `guard`, `install`) draw
+the same two lines in the same severity colour in the same corner, and
+telling those apart in a PNG has always needed a person (PLAN A53).
 
 ### 01 — all quiet
 
@@ -308,6 +308,59 @@ repaired, because a scrubbed identifier is another app's name, and the shot
 falls back to the sha256 prefix. Those cases are asserted in
 `shell/jv-hud/tests/tst_installstate.qml`, where a result can be compared;
 this shot is the ordinary one, which is what a sheet is for.
+
+### 12 — a refusal during an install
+
+![12-guard-install.png](12-guard-install.png)
+
+**On screen:** `guard` · `install` · `mic`
+
+`composed`. The two plates above this one, at the same time — which is the
+picture the surface box was grown for and the one nothing here had ever
+shown (PLAN A61). `shell.qml` went from 624 px to 688 px twice on the
+argument that a refused binary and a failed install can genuinely be up
+together; this is that argument, rendered, and the assertion under it is
+now that the whole stack fits the box rather than that it looks fine.
+
+**It is not the sequence A61 assumed, and finding that out is most of what
+this shot bought.** The obvious story is a refusal and a retry: jv-guard
+blocks an installer, you fetch a different build, that one fails. It cannot
+produce this picture. jv-guard screens the second build too, and a `clean`
+verdict is newer news from the same screener — `core/GuardState.qml` reports
+*the last binary screened*, so the refusal is gone from the corner before the
+retry ever gets as far as failing. For both plates to be up, the refusal has
+to be the NEWER screening and the failure has to belong to some other binary.
+
+Which is exactly what two overlapping installs look like, because
+`jv-compat install` takes minutes and nobody watches it:
+
+```
+t=0      jv-compat install flstudio_win64_21.2.exe
+         fingerprinted → guard.verdict clean → screened → prefix_created
+         … and then minutes of silence while the installer runs in its prefix
+t=200    a second binary off a download site, installed while that one runs:
+         fingerprinted → guard.verdict BLOCKED → compat.install blocked
+t=214    the first install, still going, dies inside its prefix: failed
+```
+
+Every frame is one `services/jv-compat/jv_compat/install.py` and
+`services/jv-guard` really publish, in the order they publish them. The
+`blocked` on `compat.install` at t=200 is the interesting one: it lands in
+the middle of another app's lifecycle, and `core/InstallState.qml` reads it
+as no news at all — a clearing event there would have wiped the failure that
+arrives fourteen seconds later, and a *failure* there would have put the
+wrong app's name on the plate. That rule is asserted in
+`shell/jv-hud/tests/tst_installstate.qml`; this is the first time the shape
+that makes it matter has been on a screen.
+
+**What this picture shows that no test asked for: the corner is describing
+two different binaries and says so nowhere.** `codec_pack_setup.exe` was
+refused; `fl-studio` failed; they have nothing to do with each other, and
+they are stacked 8 px apart in the same colour. A reader who assumes one
+story reads it as "the thing that was blocked then failed", which is the one
+sentence these two frames do not support. Every plate in this HUD is true on
+its own and the corner has no grammar for relating two of them — that is
+PLAN A62, and it is visible here rather than argued about.
 
 ## Regenerating
 
