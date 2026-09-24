@@ -3155,3 +3155,113 @@ Mutations — 11 run, 11 caught, TWO REAL SURVIVORS fixed:
   six numbers wide — fold it into the same visit as B10/A28's recording
   and A13/A27's two minutes at the screen. Track A unblocks the moment
   a human spends ten minutes at ares; until then this loop has Track B.
+
+## 2026-09-24 — iteration 32 — A34: the HUD's idle cost stops being an argument
+
+PLAN.md had no doable item left. Track A is six items deep in questions
+that need a human at ares or an opinion on a still picture (A13, A21,
+A22, A25, A27, A31); Track B's four open items are all "when a second
+caller exists" or "when the human decides which span the budget names";
+`docs/optimization-backlog.md` is human-review-required from top to
+bottom. So this took the one §06 claim that was still resting on an
+argument rather than a number.
+
+Invariant 10 and §06 both say the ambient scene costs "< 2 ms of GPU per
+frame, 0 fps when idle". A30 and A32 turned three of invariant 10's
+promises into measurements — no space reserved, the keyboard never
+moves, a click passes through — and left this one, because the argument
+for it is genuinely good: Qt Quick renders on change, `shell.qml` unmaps
+the surface when the stack has nothing to say, therefore zero. Both
+halves are true. Neither is a measurement, and what would break them is
+not a bad argument but one ordinary edit: a plate that pulses, a
+duration that counts up, a `NumberAnimation` left on
+`loops: Animation.Infinite`. Each of those looks correct in a diff, is
+invisible in a photograph, and costs a composite of three monitors
+forever.
+
+`probe_idle_frames` counts the HUD's own Wayland commits — libwayland's
+`WAYLAND_DEBUG` log, read off the client side of the socket. A commit is
+the thing that actually costs a composite, and counting the protocol
+needs no cooperation from Qt and no compositor feature. Two windows, six
+seconds each, because §06 claims this of two different states: QUIET (a
+live bus with nothing on it, surface unmapped) and LIT (a plate on
+screen, nothing new to say). Measured: 0 and 0.
+
+**The controls are the whole design, not a garnish.** A probe that
+passes on zero fails open: an unset env var, a libwayland that renames
+its objects, a log that turns out not to be the HUD's — every one of
+those reads exactly like a perfectly still HUD. So each window is paired
+with a stretch that MUST contain commits, counted by the same code
+through the same log: a real jv-ears heartbeat waking the quiet HUD
+(44 commits), and the blind plate arriving before the lit window
+(42 commits). Both of them bit for real during this iteration:
+
+  · the first version's pattern was `wl_surface@\d+\.commit\(\)`, which
+    is how libwayland has always printed object ids and is NOT how the
+    build under this harness prints them — it writes `wl_surface#41`.
+    The quiet window reported a flawless 0 and the control killed the
+    run on the next line. Without it this would have been committed as
+    a green measurement of nothing. The pattern now takes both, and the
+    comment says why the controls exist.
+  · deleting `WAYLAND_DEBUG` from the lit stage fails at the second
+    control rather than reporting zero.
+
+The headline mutation is the bug this exists to catch: a 4 px ember
+square inside `LinkPlate` on `loops: Animation.Infinite`. It passes
+qmllint, passes all 347 QML tests, passes `nix build .#jv-hud`, and is
+invisible in every photograph the sheet takes. The lit window reads
+**1110 commits (1113 frame callbacks) in 6 s** — ~62 fps on each of
+three surfaces, on a desktop where nothing is happening.
+
+That mutation also proved the quiet window is nearly tautological: with
+the HUD animating at 62 fps, QUIET still read 0, because an unmapped
+surface cannot commit whatever the scene graph is doing. All the work is
+done by the lit window (A35 follows from that).
+
+The instrument itself — `COMMIT_RE`, `FRAME_RE`, `surface_traffic()` —
+moved into `tools/hudscreens/sheet.py`, for the same reason
+`sway_config()` lives there: shoot.py needs numpy and a compositor, and
+an instrument nothing can execute is one nobody can check. Two of the
+new tools tests run the counter over verbatim log lines from a real run
+(both `@` and `#` forms) and over the traffic it must NOT count —
+`xdg_surface.commit`, `wl_surface.destroy`, `wl_callback.done`.
+
+Also here, since it is the same paragraph of §06: the README and the
+driver header now state which half was measured. Only "0 fps when idle".
+This compositor renders with pixman, in software, on a headless backend;
+no frame here took any time on a 1660 SUPER, and calling this a GPU
+budget measurement would be the exact over-trust every other page of
+that sheet is written against (A36).
+
+Three small things came out of it: `Proc.mark()`/`Proc.since()` (a
+measurement over a stretch of a log still being written),
+`wait_for_blind_plate()` extracted from the click probe, which now has
+two callers, and `check_desk_is_bare()` extracted from `main()`, which
+now says which of its two claims it is asking. No PNG changed: nothing
+in `shell/jv-hud` was touched, so the pictures are of the same HUD and
+re-rendering them would have been a diff of antialiasing noise.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 89 (was 83).
+  `bash ops/ralph/qmltest.sh` — 347, untouched but run because the
+  mutation lived in a plate. `bash ops/ralph/hudscreens.sh` — the whole
+  sheet green end to end, three times: once for the fix, once after the
+  instrument moved, once final. Two mutations, two caught, plus the
+  regex defect the control caught on its own.
+- build: `nix build .#jv-hud` ok (qmllint + 347 QML tests in its
+  checkPhase), `nixos-rebuild build --flake .#ares` ok. Never
+  test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin touched.
+- files: tools/hudscreens/shoot.py, tools/hudscreens/sheet.py,
+  tools/tests/test_hudscreens.py, ops/ralph/hudscreens.sh,
+  docs/hud/screens/README.md
+- next: **A35** is the real successor — only ONE lit state can be held
+  still long enough to measure (LinkPlate with no bus), because every
+  other plate is a frame ageing out, so confirm / heard / state / mic /
+  health have never been watched standing still. It becomes urgent the
+  day A21 or A25 is answered "yes, let it move", since that is the day
+  a plate is deliberately given an animation and someone has to say how
+  much it costs. **A36** is the other half of the §06 sentence and is
+  not yet a question: there is no ambient scene to price. And the human
+  asks are unchanged and now number five (A13/A27 together, A21/A22/A25
+  together, B10+A28+B17 together, B13/B15) — this loop has built every
+  measurement it can build without them.

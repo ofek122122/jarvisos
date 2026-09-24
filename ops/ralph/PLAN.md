@@ -850,7 +850,58 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       measurement from sway's routing into the client's own log). Worth
       it the day the mask is ever edited; not before. Discovered in A32.
 
+- [x] A34. "0 fps when idle" stops being an argument about how Qt works.
+      — d420e24
+      (`probe_idle_frames` in tools/hudscreens/shoot.py counts the HUD's
+      own Wayland commits — libwayland's `WAYLAND_DEBUG` log, client side,
+      which is what actually costs a composite and needs no cooperation
+      from Qt — over two six-second windows: a live bus with nothing on it
+      (surface unmapped) and a plate on screen with no further input. Both
+      read ZERO. The instrument moved into `sheet.py` so a test with no
+      compositor can execute it over real log lines. The point of the
+      whole thing is the two CONTROLS, because every way of breaking a
+      probe that passes on zero also returns zero: each window is paired
+      with a stretch that MUST contain commits — a real jv-ears heartbeat
+      waking the HUD (44), the blind plate arriving (42) — counted by the
+      same code through the same log. Both controls bit for real: the
+      first version's pattern expected `wl_surface@41` where this
+      libwayland writes `wl_surface#41`, and deleting `WAYLAND_DEBUG` from
+      the lit stage fails there rather than reporting a perfect zero. The
+      headline mutation — a 4 px ember square on `loops:
+      Animation.Infinite` inside LinkPlate, which qmllint, 347 QML tests
+      and every photograph accept without complaint — reads 1110 commits
+      in 6 s. 89 tools tests (was 83). Tests:
+      `bash ops/ralph/runtests.sh tools`, `bash ops/ralph/hudscreens.sh`.)
+
+- [ ] A35. The QUIET window is very nearly tautological, and the pulsing
+      mutation proved it: with a HUD animating at ~62 fps on three
+      surfaces, the quiet window still read 0, because an unmapped surface
+      cannot commit whatever the scene graph is doing. All the work is
+      done by the LIT window — and there is exactly ONE lit state that can
+      be held still long enough to measure: LinkPlate with no bus. Every
+      other plate is a frame ageing out (a heartbeat speaks for two of its
+      own periods, a confirmation for jv-act's window), so ConfirmPlate,
+      HeardPlate, StatePlate, MicPlate and HealthPlate have never been
+      watched standing still. A heartbeat with a long `period_s` would buy
+      the mic and health plates; the other three need a frame clock the
+      harness can hold. Worth building the day a second element is allowed
+      to move, which is exactly what A21/A25 are asking for. Discovered in
+      A34.
+
+- [ ] A36. The probe counts frames and never milliseconds. §06 budgets the
+      ambient scene at "< 2 ms of GPU per frame AND 0 fps when idle", and
+      only the second half is measurable here: sway renders with pixman,
+      in software, on a headless backend, so no frame in this harness took
+      any time on a 1660 SUPER. The first half is also not yet a question
+      — there IS no ambient scene; the whole HUD is static glass, and the
+      parallax/reticle layers §06 budgets are Phase 5 wgpu work that no
+      sensor feeds yet. Re-read this the day the first moving layer lands,
+      and measure it on ares rather than here. Discovered in A34.
+
 ## Done
+- A34 — the HUD renders nothing while nothing changes, counted off its own
+  Wayland socket instead of argued from how Qt Quick works
+  (d420e24, 2026-09-24)
 - B14 — `respond` stops being one number over two services: split at the
   final transcript into `hear` (ASR) and `think` (the brain), and the
   broker's first heartbeat stops being a scheduling race
