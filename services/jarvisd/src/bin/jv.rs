@@ -236,7 +236,7 @@ async fn main() -> anyhow::Result<()> {
                     let src = cli::get_str(&frame, "src").unwrap_or_default();
                     let seq = cli::get_f64(&frame, "seq").unwrap_or(-1.0) as i64;
                     let hop_ms = (now - ts) * 1e3;
-                    println!("{topic:<20} {src:<12} seq={seq:<8} hop={hop_ms:8.2}ms");
+                    println!("{}", cli::hop_line(&topic, &src, seq, hop_ms));
                     stats.hop(&topic, hop_ms);
                 } else {
                     println!("{}", cli::to_json(&frame));

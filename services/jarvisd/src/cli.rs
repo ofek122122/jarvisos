@@ -126,12 +126,65 @@ impl HopStats {
 
         let frames: usize = rows.iter().map(|r| r.1).sum();
         let mut out = format!("--- hop latency: {frames} frames, {} topics\n", rows.len());
-        out.push_str(&format!("{:<22} {:>5} {:>10} {:>10} {:>10}\n", "topic", "n", "p50", "p95", "max"));
+        out.push_str(&format!(
+            "{:<t$} {:>5} {:>10} {:>10} {:>10}\n",
+            "topic",
+            "n",
+            "p50",
+            "p95",
+            "max",
+            t = TOPIC_COLUMNS,
+        ));
         for (topic, n, p50, p95, max) in &rows {
-            out.push_str(&format!("{topic:<22} {n:>5} {p50:>8.2}ms {p95:>8.2}ms {max:>8.2}ms\n"));
+            out.push_str(&format!(
+                "{:<t$} {n:>5} {p50:>8.2}ms {p95:>8.2}ms {max:>8.2}ms\n",
+                clip(topic, TOPIC_COLUMNS),
+                t = TOPIC_COLUMNS,
+            ));
         }
         out
     }
+}
+
+/// The widest a topic prints inside a line `jv tap --latency` writes.
+///
+/// One cap for BOTH views of a topic — the per-frame stream and the summary
+/// table under it — because the value of either is that its columns line up,
+/// and a label wider than its column breaks the table's alignment exactly as
+/// it breaks the stream's width budget. 22 because the table was already
+/// built to it; the longest topic any schema declares is `audio.transcript`
+/// at 16, so nothing on this bus today is clipped at all.
+///
+/// The cost is `short_id`'s cost: two topics sharing their first 19
+/// characters print alike. The whole topic is one `jv sub '*'` away — that
+/// view prints frames, which are raw data and are as wide as they are.
+pub const TOPIC_COLUMNS: usize = 22;
+
+/// The widest a publisher's name prints inside one of those lines.
+///
+/// 13 is `jv-hud-bridge`, the longest `src` on this bus. Like the topic it
+/// is CLIPPED rather than assumed, because `validate_envelope` bounds a
+/// src's emptiness and never its length: both of these strings are chosen by
+/// a remote process, and the one thing a report line may not do is let one
+/// of those decide how wide it is.
+pub const SRC_COLUMNS: usize = 13;
+
+/// One frame, as `jv tap --latency` streams it above the two tables.
+///
+/// Here rather than in `bin/jv.rs` so the width test that covers every other
+/// line the tap writes as a report can reach this one too (PLAN B23).
+///
+/// `seq` is signed because the tap reads it defensively — a frame the broker
+/// would have rejected prints `-1` rather than being dropped from the
+/// measurement silently.
+pub fn hop_line(topic: &str, src: &str, seq: i64, ms: f64) -> String {
+    format!(
+        "{:<t$} {:<s$} seq={seq:<8} hop={ms:8.2}ms",
+        clip(topic, TOPIC_COLUMNS),
+        clip(src, SRC_COLUMNS),
+        t = TOPIC_COLUMNS,
+        s = SRC_COLUMNS,
+    )
 }
 
 /// jv-ears, and the gauge on its heartbeat that says how long it sits in
@@ -363,13 +416,17 @@ pub struct Turn {
 /// Every line `jv tap` prints ABOUT a turn fits this many columns.
 ///
 /// Not the frames — those are raw data and are as wide as they are — but
-/// every line the tap writes as a REPORT: the `turn` ladder, the hop table,
-/// and the latency summary. 80 because it is the floor every terminal has,
-/// and because the summary table was already built to it.
+/// every line the tap writes as a REPORT: the `turn` ladder, the per-frame
+/// hop line, the hop table, and the latency summary. 80 because it is the
+/// floor every terminal has, and because the summary table was already built
+/// to it.
 ///
-/// Nothing enforces this at runtime; `every_line_a_turn_prints_fits_eighty
-/// _columns` enforces it at the widest input that can reach these lines,
-/// and names the one bound it assumes rather than enforces.
+/// Nothing enforces this at runtime; three tests enforce it at the widest
+/// input that can reach each kind of line — `every_line_a_turn_prints_fits
+/// _eighty_columns`, `the_summary_table_and_the_hop_table_fit_the_same
+/// _eighty_columns`, `the_streamed_hop_line_fits_eighty_columns_whatever_a
+/// _publisher_is_called` — and each names the bounds it assumes rather than
+/// enforces.
 pub const TAP_COLUMNS: usize = 80;
 
 /// The widest an utterance id may print inside one of those lines.
@@ -388,12 +445,24 @@ pub const ID_COLUMNS: usize = 11;
 /// Short ids are never touched, so an id that fits is never made longer by
 /// being abbreviated — the same shape `echo_raw` uses for audit lines.
 pub fn short_id(id: &str) -> String {
-    if id.chars().count() <= ID_COLUMNS {
-        return id.to_string();
+    clip(id, ID_COLUMNS)
+}
+
+/// A string as one of these lines carries it: verbatim when it already fits
+/// `columns`, otherwise its first characters and `...` to say what happened.
+///
+/// Counts CHARACTERS, because the budget is columns and not bytes. `columns`
+/// must leave room for the marker; every caller here passes a column from a
+/// named constant, and the assertion is what would catch a future one that
+/// does not.
+fn clip(s: &str, columns: usize) -> String {
+    debug_assert!(columns >= 4, "{columns} columns cannot hold a clipped string");
+    if s.chars().count() <= columns {
+        return s.to_string();
     }
-    let mut s: String = id.chars().take(ID_COLUMNS - 3).collect();
-    s.push_str("...");
-    s
+    let mut out: String = s.chars().take(columns - 3).collect();
+    out.push_str("...");
+    out
 }
 
 /// A span as every one of these lines prints it. None is `?` and is never a
@@ -3085,6 +3154,67 @@ mod tests {
             let w = line.chars().count();
             assert!(w <= TAP_COLUMNS, "{w} columns: {line}");
         }
+    }
+
+    /// The per-frame line `jv tap --latency` writes above those tables, at
+    /// inputs no publisher is stopped from producing.
+    ///
+    /// This is the one report line the CLI wrote from `jv.rs`, where the
+    /// end-to-end width test could not reach it (B23), and the one whose
+    /// width is set by a string a REMOTE process chose. `validate_envelope`
+    /// bounds a topic's alphabet and a src's emptiness and neither one's
+    /// LENGTH, so both are clipped here rather than assumed — the two rows
+    /// below are `audio.transcript` (the longest topic any schema declares)
+    /// and a topic and a src from a service that does not exist yet.
+    ///
+    /// What is assumed rather than enforced, said out loud: `seq` is eight
+    /// digits and the hop is eight columns, which leaves this line 16 short
+    /// of the budget. A 4.2-billion seq (ten digits) and a 99-second hop
+    /// still fit; a hop wide enough to break this is a publisher stamping
+    /// wall-clock `ts` on a monotonic bus, and printing that number whole is
+    /// the report, not a formatting fault.
+    #[test]
+    fn the_streamed_hop_line_fits_eighty_columns_whatever_a_publisher_is_called() {
+        let rows = [
+            ("audio.transcript", "jv-ears", 12_345_678i64, 999_999.99f64),
+            ("jv-hud-bridge is the longest src today", "jv-hud-bridge", 0, 0.0),
+            (&"a.".repeat(60), &"s".repeat(120)[..], i64::MAX, -1.0),
+        ];
+        for (topic, src, seq, ms) in rows {
+            let line = hop_line(topic, src, seq, ms);
+            let w = line.chars().count();
+            assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+            // The control: a line far under the budget would mean this test
+            // stopped building the worst case. Every one of these is 64+.
+            assert!(w >= 60, "{w} columns is not a worst case: {line}");
+        }
+        // A topic too long to print is clipped and SAYS it was, with the same
+        // `...` short_id uses; one that fits is never touched.
+        let long = hop_line(&"a.".repeat(60), "jv-ears", 1, 1.0);
+        assert!(long.starts_with("a.a.a.a.a.a.a.a.a.a..."), "the clip is not marked: {long}");
+        assert!(hop_line("audio.vad", "jv-ears", 1, 1.0).starts_with("audio.vad  "));
+        // All three views of a topic — the stream, the table's header and its
+        // rows — end that column in the same place, which is the one cap
+        // `TOPIC_COLUMNS` exists to serve and what lets a reader trace a
+        // topic out of one view into the other.
+        //
+        // Each is checked at the first character PAST the column rather than
+        // against a padded copy of the topic: the table's next field is right
+        // aligned, so a narrower column and a wider pad are the same string
+        // and only what follows them tells the two apart.
+        let mut hops = HopStats::default();
+        for _ in 0..3 {
+            hops.hop("audio.transcript", 2.0);
+        }
+        let table = hops.summary();
+        let head = table.lines().nth(1).expect("the table header");
+        let row = table.lines().nth(2).expect("the table's one row");
+        let stream = hop_line("audio.transcript", "jv-ears", 1, 2.0);
+        let n_at = TOPIC_COLUMNS + 1 + 4; // `{:>5}`, so the value's last digit
+        assert_eq!(head.as_bytes()[n_at], b'n', "the header's count column moved:\n{head}");
+        assert_eq!(row.as_bytes()[n_at], b'3', "the row's count column moved:\n{row}");
+        assert_eq!(stream.as_bytes()[TOPIC_COLUMNS], b' ', "no gap after the topic: {stream}");
+        assert_eq!(stream.as_bytes()[TOPIC_COLUMNS + 1], b'j', "the src does not start there: {stream}");
     }
 
     #[test]

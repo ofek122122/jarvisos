@@ -702,9 +702,30 @@ fn turn_ladders(out: &Out) -> Vec<Vec<&str>> {
 /// it is checking would pass on any number at all.
 const TERMINAL_COLUMNS: usize = 80;
 
-/// Every `>>> ` line in this output, at a real terminal's width.
+/// Where a hop line's columns fall: `cli::TOPIC_COLUMNS` and the offset of
+/// the `seq=` label past `cli::SRC_COLUMNS` behind it.
+///
+/// Restated here for the same reason `TERMINAL_COLUMNS` is, and load-bearing
+/// for a second one: a width test alone passes on `bin/jv.rs` keeping its own
+/// narrower `format!`, because every topic on a real bus is short enough to
+/// fit either. This is what says the binary is printing `cli::hop_line` and
+/// not a copy of it.
+const TOPIC_COLUMNS: usize = 22;
+const SEQ_AT: usize = TOPIC_COLUMNS + 1 + 13 + 1;
+
+/// Every line this output writes as a REPORT, at a real terminal's width.
+///
+/// The `>>> ` turn ladder, and — under `--latency` — the per-frame hop line,
+/// which used to be formatted in `bin/jv.rs` where this test could not see it
+/// (PLAN B23). It is `cli::hop_line` now, covered by a unit test at inputs no
+/// publisher is stopped from producing; this is the half that proves the
+/// binary still calls it.
 fn every_reported_line_fits(out: &Out) {
-    let reported: Vec<&str> = out.stdout.lines().filter(|l| l.starts_with(">>> ")).collect();
+    let reported: Vec<&str> = out
+        .stdout
+        .lines()
+        .filter(|l| l.starts_with(">>> ") || l.contains(" hop="))
+        .collect();
     assert!(!reported.is_empty(), "nothing was reported:\n{}", out.stdout);
     for l in reported {
         let w = l.chars().count();
@@ -755,6 +776,16 @@ async fn a_turn_is_reported_split_at_the_boundaries_jv_ears_published() {
     assert!(head.contains("hold=20ms"), "the hold must be the one ears published: {head:?}");
 
     let s = &out.stdout;
+    // The per-frame stream really is in this output, so the width filter
+    // above is not quietly matching nothing in the only mode that emits it.
+    let hops: Vec<&str> = s.lines().filter(|l| l.contains(" hop=")).collect();
+    assert!(!hops.is_empty(), "no per-frame hop line was streamed:\n{s}");
+    for l in &hops {
+        assert!(l.ends_with("ms"), "a hop line does not end in its number: {l}");
+        assert_eq!(l.as_bytes()[TOPIC_COLUMNS], b' ', "the topic column is not {TOPIC_COLUMNS} wide: {l}");
+        assert!(l[TOPIC_COLUMNS..].starts_with(" jv-"), "no publisher after the topic: {l}");
+        assert_eq!(&l[SEQ_AT..SEQ_AT + 4], "seq=", "the src column moved: {l}");
+    }
     assert!(s.contains("--- turn latency:"), "{s}");
     for span in ["spoke", "hold", "hear", "think", "respond", "total"] {
         assert!(s.contains(&format!("\n{span:<10} ")), "no {span} row:\n{s}");
