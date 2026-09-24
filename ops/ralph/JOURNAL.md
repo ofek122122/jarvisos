@@ -2275,3 +2275,161 @@ new producer and a schema, so it is a proposal before it is a build.
   contained a `speaking` frame, a `sys.health` one, an `action.confirm`
   one, or a link that dropped, so four of the HUD's five plates cannot be
   replayed at all.
+
+## 2026-09-24 — iteration 25 — A26: the HUD says what it heard (+ A24 as a proposal)
+
+Track A opened this iteration with every remaining item blocked: A11 on a
+schema review, A13/A21/A22/A25 on a human eye that has now been asked for
+twenty-four times, A18 on a topic that does not exist yet, and A24 on
+being a proposal rather than a build. So the iteration did A24's actual
+deliverable — **proposal R5**, written up in the backlog — and then took
+the ladder's "brainstorm a new UI item and pick one" branch rather than
+inventing work in a track that is genuinely done.
+
+The gap it picked is the one the HUD had never had a word for. It could
+say the microphone was open (A4), that a wake word fired and that Jarvis
+was working (A3/A12), and it could say it had gone blind (A23). It could
+not say **what it heard** — so the commonest failure of a voice assistant
+was invisible until it came back as a wrong answer, and "it misheard me",
+"it never heard me" and "it is just slow" were the same dark corner.
+
+`core/HeardState.qml` decides; `HeardPlate.qml` draws jv-ears' transcript
+verbatim, teal-dotted (theme.toml reserves the cooler voice for YOUR state
+— the open mic is yours, and so are these words), directly under the state
+plate. For the stretch `StatePlate` says THINKING, the sentence it is
+thinking about is beside it.
+
+Four decisions are the whole of this element, and three of them were made
+by something other than taste.
+
+**Finals only** is the schema's own line: "Partials are provisional and may
+be rewritten; only finals are acted on." A partial that got rewritten a
+breath later would have shown the user a sentence Jarvis never acted on,
+which is a more expensive wrong than showing nothing. It is also what
+forces a LATCH — partials ride the same topic, so `bus.latest()` replaces
+the final with the next utterance's first partial, and a derived reading
+would blank itself the instant the user started speaking again, which is to
+say at the busiest moment of a conversation. `hey-jarvis-pause` rewrites
+itself seven times before it settles, and the replay test walks every one
+of those rewrites past the element to prove none of them reaches a screen.
+
+**The exit is a real signal, not a timer.** The line leaves when Jarvis
+starts answering, because from that moment the answer is the better report
+on whether you were heard. This matters beyond this plate: A22 flagged "on
+screen for a fixed duration" as a NEW rule for this HUD, worth deciding
+deliberately rather than as a side effect, and nothing here enters that
+territory. `holdS` is only the backstop for a turn nobody ever answers —
+and a new tools gate fails the build if it drifts from SpeechState's
+`thinkWindowS`, because the two are the same claim about the same turn.
+The harmful direction is named in the test: words outliving the THINKING
+that says they are still live. VERIFIED the gate bites.
+
+**No confidence bar**, and this is the one I expected to decide the other
+way. Invariant 4 says handle low-confidence input, and the obvious handling
+is a doubt marker — until you look at what the ASR actually produces. The
+three real finals in `harness/fixtures/sessions/` carry 0.886 (quiet room),
+0.863 (a mid-sentence pause) and 0.739 (a music bed), and **all three
+transcribe their sentence correctly**. So every bar inside that spread
+flags a word-perfect transcript, and every bar below it never fires:
+exp(avg_logprob) is measuring the room, not whether the words are right.
+A doubt marker that fires on correct transcripts is one the user learns to
+ignore — LinkPlate's cry-wolf failure with better manners. The handling is
+therefore to require a numeric `conf` and show the words, and
+`tst_sessionreplay` pins the numbers so that changing the decision costs an
+argument with real data rather than an edit. The one qualifier that stayed
+is `lang`, and only because there is a known gap behind it: the pinned ASR
+is English-only, so a frame claiming Hebrew is a frame disagreeing with the
+model that produced it (backlog item 12).
+
+**The privacy line.** The bridge's own comment has said since A12 that the
+words crossing this pipe are a deliberate choice and not a thing that
+happens, and A20 set the precedent by rendering jv-act's question. What
+makes this one defensible is upstream: jv-ears transcribes ONLY wake-gated
+utterances, so everything on `audio.transcript` was said TO Jarvis after a
+wake word. The room's ordinary conversation is seen by the VAD and never
+reaches an ASR, let alone a screen. `speech-no-wake` — a real room, real
+speech, no wake word, no transcript at all — is replayed through the
+element to assert exactly that, and is the test that fires first if ears
+ever starts transcribing ungated speech. It is not an argument; it is a
+recording.
+
+Writing the tests turned up the thing I would not have predicted: the
+FIRST frame a HUD ever sees necessarily lands at age zero. BusModel pins
+its clock offset from the frames themselves and keeps the largest estimate,
+so there is no such thing as a stale first frame — which quietly made two
+of my backstop tests assert nothing at all. They now pin the clock with an
+unrelated frame first.
+
+Four mutation survivors out of 25, two real and two equivalences:
+  · an `idle` jv-voice read as an answer. Only `speaking` and
+    `interrupted` mean the reply began; jv-voice publishes on every
+    transition, and an `idle` landing between the transcript and the first
+    word — an errored say, a cancelled turn — is the answer NOT starting.
+    Reading any state as an answer takes the words away at precisely the
+    moment the user is still waiting for one.
+  · a final with no `ts` DISPLACING a good line. Without a `ts` there is
+    no age and so no backstop, and the envelope check refuses it — but
+    nothing said what that refusal COSTS. Refusing to read a frame is
+    never the same as being answered, and it must not blank the sentence
+    already on screen either.
+  · `root.linked &&` in the `heard` binding, which no reachable path can
+    distinguish: `onLinkedChanged` nulls the latch first. Kept, because
+    ConfirmState is built the same way for the same reason — the gate
+    states the rule where the rule is read, and the latch-clear enforces
+    it. One of the two would be the thing deleted in a file that had only
+    one of them; the sibling element having both is what makes this
+    consistency rather than redundancy.
+  · `stringOf` reading by type instead of by truthiness. `frame` already
+    guarantees all three fields are strings, so nothing reachable reaches
+    it with a number. Kept: it is what stops `flatten` throwing inside a
+    binding — where the only symptom is a warning nobody reads — the day
+    that guard is relaxed.
+
+**A24 is done as a proposal, which was its whole deliverable.** R5 asks for
+one new frozen topic, `sys.roster`, published by **jarvisd**: the services
+this generation expects and the ones holding a bus connection right now.
+Worth recording what the writing turned up — the item's premise was half
+wrong. A service that DIED is already caught: `HealthState` expires a
+heartbeat at `period_s * 2` and says so. What is invisible is a service
+that NEVER STARTED, which is absent from a roster built out of "who has
+spoken" and therefore indistinguishable from a well machine. jarvisd is
+proposed as the publisher because it is the only process that already knows
+who is connected and gains no privilege by saying so; two other shapes were
+considered and rejected in writing (baking the list into the HUD at build
+time answers only the half that never changes; jv-context polling systemd
+answers "the unit is active" when the question is "can it speak on the
+bus").
+
+- tests: `bash ops/ralph/qmltest.sh` — 347 green (was 306), 41 new. 25
+  mutations on HeardState, 21 caught first pass, 23 after the two real
+  survivors were fixed, 2 recorded as equivalences above.
+  `bash ops/ralph/runtests.sh tools` — 59 (was 58), the new gate VERIFIED
+  to bite from the drift side; `... jv-hud-bridge` — 25 green (the topic
+  list grew, its tests read it rather than copying it).
+- build: `nix build .#jv-hud` ok (qmllint -W 0 clean, 347 QML tests in the
+  checkPhase), `nixos-rebuild build --flake .#ares` ok, `nix flake check
+  --no-build` ok. Never test/switch. No schema change, no jv-act change,
+  no boot path, no NVIDIA/kernel/flake pin touched.
+- files: shell/jv-hud/core/HeardState.qml (new),
+  shell/jv-hud/HeardPlate.qml (new),
+  shell/jv-hud/tests/tst_heardstate.qml (new),
+  shell/jv-hud/tests/tst_sessionreplay.qml, shell/jv-hud/shell.qml,
+  shell/jv-hud/qmldir + core/qmldir (generated), tools/gen_theme_qml.py,
+  tools/tests/test_gen_theme_qml.py,
+  services/jv-hud-bridge/jv_hud_bridge/bridge.py,
+  docs/optimization-backlog.md (R5), ops/ralph/PLAN.md
+- commit: d7ac325
+- next: **A27** and **A28**, both discovered here and both pointing at the
+  same human. A27 is the sharper version of A13 — the heard line is drawn
+  on every monitor and it is the user's OWN words, with no way to turn it
+  off; that is one decision with A13, not two. A28 is why **B10** is now
+  worth more than it was: the heard line's EXIT is a `speech.state`
+  `speaking` frame, and nothing committed has ever contained one, so the
+  departure is the half of this element that only hand-written frames can
+  test. The standing ask is TWENTY-FIVE iterations old and has grown by
+  one item: one sitting at ares to (1) look at the HUD — `JV_HUD_SELFTEST=1
+  jv-hud`, a real wake word (which now puts your own sentence on screen —
+  say whether that is wanted at all), a destructive action for the confirm
+  plate, and five seconds with jarvisd stopped for the blind plate;
+  (2) say whether the labels are JetBrains Mono; (3) **B10** — record one
+  real spoken turn off the live bus (`harness/record.py`).

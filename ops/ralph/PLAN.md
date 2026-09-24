@@ -553,15 +553,77 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       path could reach, deleted. Tests: `bash ops/ralph/qmltest.sh`,
       `bash ops/ralph/runtests.sh tools`.)
 
-- [ ] A24. `LinkPlate` reports the pipe; nothing reports the PROCESSES.
-      A bus that is up says only that jarvisd is up — jv-ears can be dead
-      and the HUD's roster (A6) cannot tell a service that died from one
-      that was never started, because nothing on the bus announces who is
-      supposed to be running. The obvious source is the systemd units the
-      flake already declares, which is the only place that list exists;
-      reading them from the HUD would mean a new producer and a schema, so
-      it is a proposal, not a build. Write it up before building anything.
-      Discovered in A23.
+- [x] A24. `LinkPlate` reports the pipe; nothing reports the PROCESSES.
+      **Written up as proposal R5** in `docs/optimization-backlog.md`; the
+      build stays blocked on a human. No code: the deliverable IS R5.
+      (A bus that is up says only that jarvisd is up, and the HUD's roster
+      (A6) is "who has spoken": a service that DIED is caught — HealthState
+      expires a heartbeat at `period_s * 2` — but one that never started is
+      absent, and absent is indistinguishable from not installed and from a
+      well machine. R5 proposes one new frozen topic, `sys.roster`,
+      published by jarvisd: the services this generation expects (written
+      into jarvisd's config by the module that declares the units, so the
+      list is a property of the running generation) and the ones holding a
+      bus connection right now. jarvisd because it is the only process that
+      already knows the second list and gains no privilege by saying so.
+      Two shapes were considered and rejected in writing: baking the roster
+      into the HUD at build time, which answers only the half that never
+      changes and puts a fact about the system inside a view; and jv-context
+      polling systemd, which answers "the unit is active" when the question
+      is "can it speak on the bus".)
+
+- [x] A26. The HUD stops being unable to say what it heard. — d7ac325
+      (`core/HeardState.qml` decides — 34 QML tests, 25 mutations run
+      through them — and `HeardPlate.qml` draws jv-ears' transcript
+      verbatim, teal-dotted, under the state plate. Until now the commonest
+      failure of a voice assistant was the one thing this screen had no
+      word for: "it misheard me", "it never heard me" and "it is just slow"
+      were the same dark corner, and the user found out only when a wrong
+      answer came back. FINALS ONLY, which is the schema's own line —
+      partials are provisional and only finals are acted on — and it is why
+      the line must be LATCHED: partials ride the same topic, so a derived
+      reading would blank itself the instant the user started speaking
+      again. The exit is a REAL SIGNAL and deliberately not a timer: the
+      line leaves when Jarvis starts answering, because from then on the
+      answer is the better report on whether you were heard. That is what
+      keeps this out of the "on screen for a fixed duration" territory A22
+      flagged as needing a human decision. `holdS` is only the backstop for
+      a turn nobody ever answers, and a new tools gate fails the build if it
+      ever drifts from SpeechState's `thinkWindowS` — the two are the same
+      claim about the same turn. NO CONFIDENCE BAR, and the recordings are
+      why: the three real finals in `harness/fixtures/sessions/` carry
+      0.886, 0.863 and 0.739 and all three transcribe their sentence
+      correctly, so any bar inside that spread flags a word-perfect
+      transcript and any bar below it never fires — exp(avg_logprob) is
+      measuring the room. `tst_sessionreplay` pins that against the real
+      numbers, so changing the decision costs an argument with data. The
+      privacy line held because jv-ears transcribes ONLY wake-gated
+      utterances: everything on this topic was said TO Jarvis, and
+      `speech-no-wake` — a real room, real speech, no wake word, no
+      transcript at all — is replayed through the element to say so. Two
+      mutation survivors were real: an `idle` jv-voice read as an answer
+      (the words would vanish while the user was still waiting), and a
+      final with no `ts` DISPLACING a good line instead of being refused at
+      the door. Two more survive as equivalences and are recorded in the
+      journal. Tests: `bash ops/ralph/qmltest.sh`,
+      `bash ops/ralph/runtests.sh tools`, `... jv-hud-bridge`.)
+
+- [ ] A27. The heard line is drawn on EVERY monitor, and it is the user's
+      own words — which makes A13's question ("three copies of LISTENING
+      across three screens: right, or noise?") sharper rather than new.
+      There is also no way to turn it off. Both are the same human call and
+      should be answered together with A13, at the machine, by someone
+      looking at it. Nothing was built toward either answer: the plate is
+      one `HeardPlate {}` in the stack and a `personality/` switch would be
+      the obvious shape if the answer is "sometimes". Discovered in A26.
+
+- [ ] A28. B10 would now buy more than it did. A live-bus recording of one
+      real turn is the only way to replay the heard line LEAVING: the exit
+      is a `speech.state` `speaking` frame, and nothing committed has ever
+      contained one. Today `tst_sessionreplay` can prove the words arrive
+      and can only prove the departure with hand-written frames — which is
+      exactly the gap B9 set out to close. Same ask, more to gain.
+      Discovered in A26.
 
 - [ ] A25. The blind plate cannot say how long the HUD has been blind, for
       the same reason A21's window cannot shorten: a duration on screen is
@@ -577,6 +639,10 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       ares before it is worth changing. Discovered in A3.
 
 ## Done
+- A26 — the HUD says what it heard: HeardState/HeardPlate, and the
+  recordings that refused it a confidence bar (d7ac325, 2026-09-24)
+- A24 — "which services are supposed to be running" written up as proposal
+  R5 rather than built (2026-09-24)
 - A1 — jv-hud Quickshell layer-shell skeleton (49046db, 2026-09-23)
 - A2 — theme tokens in personality/theme.toml -> generated Theme singleton
   (6c0eafb, 2026-09-24)
