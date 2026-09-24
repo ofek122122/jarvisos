@@ -4639,3 +4639,116 @@ for a shared record reader because there is no second record.
   B17/B20 are unchanged and still want a human at a terminal; B15 and B13
   still want the one conversation about which span the 2.5 s budget names.
   A52/A53/A47 and A50 are unchanged.
+
+## 2026-09-24 — iteration 46 — the HUD stops being something only a human can check
+
+Two commits, one theme: the corner of the screen had two claims about it
+that nothing but a person's eye could verify.
+
+**`GuardPlate.qml` was in the tree as a binary blob** (`88878de`). It landed
+in ecc89c5 as `Bin 0 -> 8407 bytes` — 226 lines of a surface that floats
+above every window, the one element whose job is to say this machine refused
+to run something, committed with no diff for anybody to object to. Cause:
+two bytes. The plate joins three fields into a change key and two of them
+are attacker-influenced (a file name jv-guard was handed, a hash), so it
+needs a joiner neither can contain; `\0` typed as the BYTE works perfectly
+at runtime, and git decides text-or-binary by looking for a NUL in the first
+8 kB. Written as the escape it is the same string and the file is text.
+`test_no_qml_file_is_a_file_git_calls_binary` now holds that for every
+`.qml` under shell/, tools/, pkgs/ and harness/ — the claim is that a source
+file is REVIEWABLE, which is a property of a text file and not of QML, so
+the harness stages are covered on the same terms as the shipped shell. That
+commit is itself still `Binary files differ`, because git compares both
+sides and one of them is the old blob; every diff after it is text, which
+the second commit demonstrates.
+
+Worth naming the general shape: a gate that reads a file's CONTENT (and
+almost every gate in tools/tests does) cannot tell you the file is one a
+human could have read. Nothing here was watching that, and the thing it
+missed was not subtle.
+
+**A53 — the sheet asserts its caption** (`754a49b`). `anyLit` answers the
+only question the surface needs — is anything on screen — so every external
+check could prove that SOMETHING was drawn and never what. The contact
+sheet's one per-shot assertion was that bit, and nine of ten shots answer it
+identically; three plates in this stack draw the same two lines in the same
+severity colour in the same corner (`health` lost a service, `action` failed
+a tool, `guard` refused a binary), so a harness that fed a plate something
+it refused and photographed a different plate would have gone green with a
+README that misnames its own pictures.
+
+Each plate now declares `plateName`, pinned to its own file name by a tools
+gate so it cannot drift into a confident lie, and `PlateStack` collects
+`litNames`: the plates on screen, in reading order, as the plates themselves
+report it. `anyLit` is untouched — it is what maps the surface and the only
+safety-critical answer here — and a test holds the two to agreeing in every
+case, because two implementations of one fact drift. An unaskable child
+contributes `"?"` rather than being skipped, the same fail-safe direction
+`anyLit` takes: the surface counts it as drawing, so the list must admit
+something is there.
+
+Three things that fell out of it and are worth more than the mechanism:
+
+  · `07-no-bus.png` is now checked for the argument it exists to make. It
+    expects `link` ALONE — every plate under it gates on the bus whose loss
+    it reports, so the open microphone from a second ago is gone rather than
+    left up as a stale claim about the room. That is A23's whole point and
+    it had only ever been looked at.
+  · a plate the sheet RENDERS but never LIGHTS now fails a test. The older
+    gate proved each plate is in the scene's stack, which only says it was
+    built — every plate draws nothing until a real frame gives it something,
+    so one could sit in all ten shots and appear in none. That is exactly
+    how an element gets added, rendered, committed and never looked at.
+  · `docs/hud/README.md` carries a machine-checked `**On screen:**` line per
+    shot. A reader believes the README, and prose can drift into naming the
+    wrong element.
+
+All ten expected plate lists were right on the first run, which is a weaker
+result than it sounds — so each was mutation-checked rather than accepted:
+10-guard.png expecting `action` instead of `guard` FAILS now, and passed
+before with only the picture to tell them apart.
+
+**A53 is done; A47 is narrowed, not closed.** This closes one of its five
+instances. The other four are in tools/hudscreens, which photographs the
+REAL `.#jv-hud` under a real compositor — nothing there can read a QML
+property, so `grows_from`, A42's live-lit window, A48's three idle windows
+and A49's shrink check still prove only that something arrived or left. The
+honest options there remain OCR (at 11 px, unreliable) or an IPC seam in the
+shipped shell (which stages something in production code for a test's
+benefit, and this harness's whole value is that it stages nothing). Left
+open deliberately.
+
+- tests: `bash ops/ralph/qmltest.sh` — 487 (was 476); eleven new PlateStack
+  tests, FIVE mutations run through them, all five caught: a quiet plate
+  staying in the list, reading order reversed, the unaskable child skipped
+  instead of admitted, an unnamed plate reported as `""`, a fading plate
+  dropping out. `bash ops/ralph/runtests.sh tools` — 130 (was 125); SIX more
+  mutations, all caught: the NUL byte put back, a name drifting from its
+  file, a plate declaring none, the README naming the wrong plate, a shot
+  falling back to the one-bit flag, a plate no shot lights.
+  `bash ops/ralph/hudshots.sh` — 10 shots, byte-identical to the committed
+  ones, so nothing about the look moved.
+- build: `nix build .#jv-hud` ok (qmllint + the QML suite in its checkPhase),
+  `nixos-rebuild build --flake .#ares` ok, run against BOTH commits
+  separately. Never test/switch. No schema change, no jv-act change, no boot
+  path, no NVIDIA/kernel/flake pin. The HUD is still a read-only consumer.
+- files: shell/jv-hud/GuardPlate.qml and the other eight *Plate.qml,
+  shell/jv-hud/core/PlateStack.qml, shell/jv-hud/tests/tst_platestack.qml,
+  tools/hudshots/scene/tst_shots.qml, tools/tests/test_gen_theme_qml.py,
+  tools/tests/test_hudshots.py, docs/hud/README.md
+- next: **A54** is the cheap thing `litNames` just made possible and this
+  iteration did not take: `tst_sessionreplay.qml` walks recorded sessions
+  through the whole stack and can now assert WHICH plates the HUD puts up at
+  each moment of a real turn, which is a stronger claim than any shot —
+  a shot is one settled instant, a replay is the sequence, and the sequence
+  is where a plate that arrives one frame too late or leaves one frame too
+  early would show. **A55**: the same property is what a `jv hud` subcommand
+  would print — "what is the HUD showing right now" is currently answerable
+  only by looking at the screen, and B-track has wanted a terminal view of
+  the HUD's state since B15 asked which span the 2.5 s budget names. Both
+  are additive and neither needs a human.
+  A47 is narrowed as above and still wants one decision from a human: OCR,
+  an IPC seam, or leave the four hudscreens checks saying what they say.
+  A52 is unchanged and still wants the progress-indicator decision first.
+  A50/A13/A27/A21/A22/A25/A31/A38/A39 are unchanged and still want a human
+  at ares. B21/B22/B17/B20/B15/B13 unchanged.

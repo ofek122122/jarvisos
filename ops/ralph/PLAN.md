@@ -1289,13 +1289,46 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       "what is jv-compat doing right now" may be a progress indicator,
       which is a shape §06 does not have yet. Discovered in A51.
 
-- [ ] A53. `10-guard.png` is a picture only a human can tell apart from a
-      picture of `ActionPlate`: same corner, same two-line shape, same
-      severity colour, and the screens harness's growth checks would say
-      the identical thing about either. That is A47's complaint with a
-      fifth instance, and the answer is still OCR or a QML-side probe.
-      Worth writing down so nobody reads the new shot as proof that the
-      new plate is what arrived. Discovered in A51.
+- [x] A53. `10-guard.png` is a picture only a human can tell apart from a
+      picture of `ActionPlate`. — 754a49b
+      (Answered with the QML-side probe, which turned out to be cheap where
+      it counts: every plate declares `plateName`, pinned to its own file
+      name by a tools gate so it cannot drift into a confident lie, and
+      `core/PlateStack.qml` collects `litNames` — the plates on screen, in
+      reading order, as the plates themselves report it. `anyLit` is
+      untouched: it maps the surface, it is the only safety-critical answer
+      here, and a test holds the two to agreeing in every case. The contact
+      sheet now asserts its CAPTION per shot instead of one bit that nine
+      of ten shots answered identically; `07-no-bus.png` is checked for
+      A23's actual argument (`link` ALONE, every plate under it gone rather
+      than stale); a plate the sheet renders but never LIGHTS fails a test;
+      and `docs/hud/README.md` carries a machine-checked `**On screen:**`
+      line per shot. Mutation-checked with the exact confusion this item
+      names: 10-guard.png expecting `action` FAILS now and passed before.
+      Tests: `bash ops/ralph/qmltest.sh` (487), `... runtests.sh tools`
+      (130), `bash ops/ralph/hudshots.sh` (10 shots, byte-identical).)
+
+- [ ] A54. `tst_sessionreplay.qml` walks recorded sessions through the
+      whole stack and asserts what the state elements decided; now that
+      `litNames` exists (A53) it can assert WHICH PLATES the HUD puts up at
+      each moment of a real turn. That is a stronger claim than any shot: a
+      shot is one settled instant, a replay is the sequence, and the
+      sequence is where a plate that arrives one frame late or leaves one
+      frame early would show — which is precisely the class of bug the
+      corner stack can have and no still picture can catch. Additive, needs
+      no human, and the recordings are already committed. Discovered in A53.
+
+- [ ] A55. "What is the HUD showing right now" is answerable only by
+      looking at the screen. `litNames` is the string a `jv hud` subcommand
+      would print, and the B track has wanted a terminal view of the HUD's
+      state since B15 asked which span the 2.5 s budget names — a `jv tap`
+      that can say the corner went from `state heard mic` to `state mic` is
+      a latency measurement of the LAST hop, not just of the bus. The
+      obstacle is real and worth stating: the HUD is the only bus consumer
+      that is a separate process with no way to be asked anything, so this
+      is the same seam A47 wants for hudscreens and it should be decided
+      ONCE, for both. Do not build it before A47 is answered. Discovered
+      in A53.
 
 - [ ] A47. The growth check proves a plate ARRIVED, never WHICH plate.
       `grows_from` (A44) and A42's live-lit window both measure the same
@@ -1316,6 +1349,21 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       A49 makes it four, and adds a mirror image: its shrink check proves
       something LEFT the screen and is equally unable to say what. The
       answer is the same for both, and so is the cost of getting one.
+      **A53 closed the fifth instance and NARROWED this one** (754a49b):
+      the QML-side probe exists now — `plateName` on every plate,
+      `litNames` on the stack — and it answers completely inside
+      `tools/hudshots`, where the scene is built by a QML test that can
+      read a property. What remains is `tools/hudscreens` ONLY, and it is
+      the harder half by construction: it photographs the real `.#jv-hud`
+      binary under a real compositor with `grim`, so there is no QML engine
+      to ask. Two honest options and neither is cheap — OCR (the captions
+      are 11 px mono; tesseract is unreliable there), or an IPC seam in the
+      SHIPPED shell that reports `litNames`, which stages something in
+      production code for a test's benefit and this harness's whole value
+      is that it stages nothing. **One human decision: OCR, an IPC seam, or
+      leave those four checks saying exactly what they say.** Until then the
+      four measurements are correct about growth and silent about identity,
+      and `tools/hudscreens/shoot.py` says so.
 
 - [x] A45. `docs/hud/screens/*.png` are not byte-reproducible, and the
       README now says so with numbers. — 3052b8f

@@ -121,6 +121,22 @@ def grew_downwards(before, after):
     It lives here, with the frame counter and the compositor config,
     because a rule the harness measures with is one a test with no
     compositor should be able to run.
+
+    WHAT IT DOES NOT SAY (PLAN A47). It proves that something arrived under
+    the thing above it, and it can never say WHAT. A `HealthPlate` reporting
+    a lost service grows this stack downwards by a similar number of pixels
+    from the same pinned corner as the plate any given caller is waiting
+    for, and that is not hypothetical — it is exactly what the idle probe
+    hit when a heartbeat lapsed mid-window. The sheet's captions are read by
+    a person, which is fine for a sheet; a caller that treats a True here as
+    proof of an identity is claiming more than the geometry knows.
+
+    The HUD can now answer the identity question itself — every plate
+    declares `plateName` and `core/PlateStack.qml` collects `litNames`
+    (A53) — and the contact sheet in tools/hudshots asserts exactly that,
+    because its scene is built by a QML test. Nothing here can: this harness
+    runs the real `.#jv-hud` binary under a real compositor and measures it
+    with `grim`, so there is no engine to ask. A47 holds the open decision.
     """
     if before is None or after is None:
         return False
