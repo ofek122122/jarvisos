@@ -1583,3 +1583,114 @@ second) were all written because a mutation was aimed at them first.
   work. The standing item, unchanged and now EIGHTEEN iterations old: nobody
   has ever LOOKED at this HUD on ares. `JV_HUD_SELFTEST=1 jv-hud`, then a
   real wake word.
+
+---
+
+## 2026-09-24 — iteration 19 — **B3: the harness finally has something recorded in it**
+
+Track A is still human-blocked (nobody has looked at the HUD on ares), so
+Track B, and the honest pick was the one the last entry named: **B3**, the
+oldest unstarted item in the plan. The blueprint says the replay harness is
+built in Phase 3 and used forever — *recorded sensor sessions are the test
+fixtures for all perception work*. It has existed since Phase 3 with
+**nothing recorded in it**. `record.py` could write a session, `replay.py`
+could play one back, and the only session either had ever seen was the
+three synthetic frames the roundtrip test makes and deletes.
+
+The cost of that is not abstract. `services/jv-ears/tests/test_pipeline_fixtures.py`
+is the only place jv-ears' end-to-end behaviour is asserted, and it needs
+~1 GB of ONNX and `pytest.skip`s loudly without it. So on any machine
+without the weights, the whole of perception has zero coverage, and
+everything DOWNSTREAM of ears — the HUD's state machine, jv-brain's turn
+taking — has no example of what perception actually looks like to be
+tested against. Every such test to date has hand-written the frames it
+wished it had.
+
+**`harness/fixtures/sessions/` now holds four recordings**: what the real
+pipeline — real openWakeWord, real Silero VAD, real faster-whisper —
+published while listening to each committed fixture WAV. 7, 7, 11 and 2
+frames; 8 KB in total. The requirements `REVIEW-ears.md` states are now
+asserted twice: there against the live models when they are installed, and
+in `harness/tests/test_sessions.py` against the recording, always.
+
+**The sample clock is the whole trick.** `EarsPipeline` already decided
+everything on samples-consumed rather than the wall clock ("the same
+fixture always produces the same events, which is what makes CI
+meaningful") — but that clock was a private `_t()` with zero callers.
+Publishing it as `EarsPipeline.clock()` is what makes a session reproduce
+to the sample: regenerating twice produced byte-identical frames modulo
+the UUIDs. A diff on these files therefore means the pipeline changed, not
+that the machine was busy.
+
+It is also why the header's `boot_id` is the **`sample-clock` sentinel**
+rather than a real one. `boot_id` exists to prove a session's monotonic
+`ts` came from this boot and can be lined up against another session's.
+These `ts` cannot. Borrowing a real boot_id would be a claim, in the exact
+field that exists to check the claim, that they can — the same class of
+lie as a faked sensor indicator, at a much smaller scale.
+
+**`harness/session.py` is now the only thing that knows the format** —
+`load`, `dump`, both header makers, and `problems()`. A committed fixture
+is worth having only while it is still LEGAL: the moment a schema moves
+under it, every test built on it keeps passing while asserting yesterday's
+law. So `problems()` checks envelope keys, closed bodies, required fields,
+`v` against the schema's current version, and per-`(src, topic)` `ts` and
+`seq` ordering — all read off the **generated** bindings
+(`jarvis_bus.schema`, which CI already gates against drift), never a
+hand-copy of `schemas/*.json` here. A hand-copy is the thing that rots;
+with one, a v2 envelope would leave two truths in the repo and no way to
+tell which one a fixture was recorded against. The one regex I would have
+had to copy (the topic pattern) is simply not checked — what is checked is
+what the README states in prose and the bindings cannot: no wildcard in a
+published topic.
+
+Two things are deliberately NOT problems, and it is the B5 rule again:
+**never refuse to show what you merely do not recognise.** An unknown
+topic is accepted as-is (adding a topic is an ordinary reviewed commit; an
+old harness rejecting a recording of a newer one is the `--outcome denyed`
+mistake), and a `seq` gap is accepted (a gap is the slow-consumer policy
+working — that is what `seq` is FOR). Ordering is per `(src, topic)` and
+not global, because two publishers are two clocks read at two moments and
+can legitimately land out of order; one publisher's own frames on one
+topic cannot.
+
+**Nothing lets the recordings rot quietly.** A fixture nothing re-derives
+has already rotted and not told anyone, so when the models ARE installed
+jv-ears re-records every WAV through the same `frames_for()` the generator
+uses and compares. What it compares is chosen: which frames arrived, at
+what `ts`, in what state (`event`/`kind`), plus the finals normalized for
+case and punctuation. NOT model scores and NOT partial texts — those are
+the last digits of a float on the machine that ran it, and a fixture that
+fails because CI has a different CPU teaches people to regenerate without
+reading the diff. Segmentation, gating and timing are what these files are
+for, and all three are in the comparison.
+
+Also here, because the format now has one home: `record.py` no longer
+writes its own header (`session.live_header()`), `replay.py` no longer has
+its own loader, and the `jarvisd`-spawning fixture moved to a
+`conftest.py` both bus tests share.
+
+- tests: `bash ops/ralph/runtests.sh harness` — 78 green (was 3: 30 on the
+  format, 45 on the committed sessions, including one that replays a real
+  recording onto a real jarvisd and gets every frame back). `bash
+  ops/ralph/runtests.sh jv-ears` — 36 green (was 32).
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no new topic, no jv-act change, no boot path, no pins.
+- files: harness/session.py (new), harness/tests/conftest.py (new),
+  harness/tests/test_session_format.py (new), harness/tests/test_sessions.py
+  (new), harness/fixtures/sessions/{README.md,generate_sessions.py,4×.jsonl}
+  (new), harness/record.py, harness/replay.py,
+  harness/tests/test_record_replay.py, services/jv-ears/jv_ears/pipeline.py,
+  services/jv-ears/tests/test_pipeline_fixtures.py
+- commit: d2f9634
+- next: the fixtures exist so something downstream can be tested on them —
+  and the obvious first consumer is the HUD, whose QML tests hand-type the
+  JSON lines the bridge writes. **B9** (new): feed a committed session
+  through `core/BusModel` + `SpeechState` in `tst_speechstate.qml` and
+  assert the state trajectory against a real recording. That needs the
+  session files reachable from the jv-hud build (`src` is `shell/jv-hud`
+  only today — the theme toml is already wired in as an extra input, so
+  there is a pattern). **B8** (one shared audit reader) still waits for a
+  second real caller. **A18** remains a note. The standing item, unchanged
+  and now NINETEEN iterations old: nobody has ever LOOKED at this HUD on
+  ares. `JV_HUD_SELFTEST=1 jv-hud`, then a real wake word.

@@ -242,11 +242,43 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       actually reads them, not before — a gauge nobody consumes is noise
       on the bus and a second thing to keep true. Noted so the next
       hand-copied constant is recognised as one. Discovered in A14.
-- [ ] B3. More replay-harness fixtures for perception (recorded-session tests).
-      **The oldest unstarted item in this plan, and the next one to take**
-      while Track A is human-blocked: the blueprint says the harness is
-      built in Phase 3 and used forever, and every perception test after it
-      depends on there being fixtures.
+- [x] B3. More replay-harness fixtures for perception (recorded-session
+      tests). — d2f9634
+      (The harness had existed since Phase 3 with nothing recorded in it.
+      `harness/fixtures/sessions/` now holds four: what the REAL pipeline
+      — real openWakeWord, real Silero VAD, real faster-whisper —
+      published while listening to each committed fixture WAV, so the
+      requirements REVIEW-ears.md states are asserted twice: against the
+      live models when installed, and against the recording ALWAYS, on a
+      machine with no weights. `ts` is `EarsPipeline.clock()` (the sample
+      clock, formerly a private `_t()` with no callers), so a session
+      reproduces to the sample and a diff means perception changed rather
+      than the machine being busy — and the header's `boot_id` is the
+      `sample-clock` SENTINEL, because borrowing a real one would claim,
+      in the field that exists to check the claim, that these ts line up
+      against a live recording. `harness/session.py` is now the only
+      reader of the format and can be asked `problems()`: envelope keys,
+      closed bodies, required fields, `v`, and per-`(src, topic)` ts/seq
+      ordering — all off the GENERATED bindings, never a hand-copy of
+      schemas/. An unknown topic and a seq gap are deliberately NOT
+      problems (the B5 rule: never refuse to show what you merely do not
+      recognise). Nothing rots quietly: with models installed jv-ears
+      re-records every WAV through the generator's own `frames_for()` and
+      compares which frames arrived, when, and in what state, plus the
+      normalized finals — not model scores, not partial texts, which are
+      float noise from the machine that ran it. 78 harness tests green
+      (was 3), 36 jv-ears (was 32). Tests:
+      `bash ops/ralph/runtests.sh harness`, `... jv-ears`.)
+
+- [ ] B9. The HUD's QML tests hand-type the JSON lines the bridge writes;
+      B3 means there are now REAL recordings to hand them instead. Feed a
+      committed session through `core/BusModel` + `SpeechState` in
+      `tst_speechstate.qml` and assert the state trajectory against a real
+      perception session rather than against frames written by the same
+      person who wrote the expectation. Needs the session files reachable
+      from the jv-hud build — `src` is `shell/jv-hud` only today, but
+      `themeToml`/`themeGen` are already wired in as extra inputs, so
+      there is a pattern to copy. Discovered in B3.
 
 ## Track C — Creative (within blueprint + invariants)
 - [ ] C1. Propose and add genuinely new, on-brand capabilities here before building
