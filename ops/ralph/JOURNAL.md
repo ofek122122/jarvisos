@@ -5361,7 +5361,7 @@ when somebody fetches a second build of the thing that was blocked.
   tools/hudscreens/{sheet,shoot}.py, ops/ralph/hudscreens.sh,
   services/jv-hud-bridge/jv_hud_bridge/bridge.py, docs/hud/README.md,
   docs/hud/*.png, docs/hud/screens/*.png
-- commit: PENDING
+- commit: caa7c75
 - next: **A60 is the interesting one and it is a human's**: the progress
   question this iteration deliberately did not answer, with three options
   written out. **A61** is cheap and concrete — no shot has ever shown

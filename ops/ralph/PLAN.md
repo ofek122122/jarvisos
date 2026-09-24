@@ -1325,7 +1325,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `.#jv-hud`).)
 
 - [x] A52. The HUD reads jv-compat now, and says which app did not get
-      installed. — PENDING
+      installed. — caa7c75
       (`core/InstallState.qml` decides — 36 QML tests, 14 mutations run
       through them — and `InstallPlate.qml` draws INSTALL FAILED over the
       app's slug, in `risk`, under GuardPlate: the two halves of invariant
