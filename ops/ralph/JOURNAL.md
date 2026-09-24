@@ -525,3 +525,101 @@ everything here (and every commit) since the last time you asked. Format per ent
   say whether that is right). A10 is unchanged and still wants a grep-shaped
   gate. And the HUD has now earned a human eyeball on ares: A1's "it maps" is
   still verified by construction, and A3 is the first thing worth looking at.
+
+## 2026-09-24 — iteration 8 — A4: the recording light
+
+- built **A4**, the live microphone indicator: `MicPlate.qml` (pixels) +
+  `core/MicState.qml` (the decision, tested) + the signal underneath it in
+  jv-ears. Invariant 10 calls the mic indicator "not optional and not
+  fakeable"; those are two different jobs and this iteration did both.
+- the trap A3 left a note about held: the mic is NOT `listening`. jv-ears
+  runs VAD continuously, so `listening` answers "is Jarvis attending to me"
+  and the recording light answers "is audio being captured at all". Two
+  signals, two elements, and neither derived from the other. The plate is
+  lit whenever the device is open, including while nobody is talking.
+- what I could NOT do truthfully with today's bus, and what I did instead:
+  nothing on the bus said whether the microphone was open. `sys.health`
+  from jv-ears proves the PROCESS is alive, which is exactly what stayed
+  cheerful through the 2026-09-15 field bug (PortAudio opened nothing, the
+  stream delivered silence forever, everything downstream looked fine). An
+  indicator fed by that would have been lit through the whole outage.
+  So jv-ears now counts what the DEVICE hands it — `CaptureMeter` wraps the
+  audio source, stamps a clock per chunk, and reports on its own heartbeat.
+  The gauges ride in `metrics`, which schemas/sys.health.json declares
+  free-form and service-local: **no schema change, nothing frozen touched**
+  (checked against the guardrail before writing a line of it).
+- `capture_age_s` is ABSENT until the device has ever delivered, never
+  infinity. The bridge serializes with `json.dumps`, which writes a bare
+  `Infinity`; that line would fail `JSON.parse` in BusModel and be dropped
+  whole, so one un-delivered chunk would blind the HUD to the frame that
+  says so. Worth knowing for every future gauge.
+- the asymmetry the tests are written around: claiming a microphone that is
+  closed is noise; going dark over an open one is the failure that costs
+  trust. So "I cannot tell" never collapses into "off" — dropped link,
+  heartbeat older than two of its own `period_s` (the schema's own
+  presumed-dead rule), body `service` disagreeing with envelope `src`,
+  hedged `conf`, wrong `v`, or a jv-ears too old to report gauges all read
+  `unknown`. `off` and `unknown` both draw nothing, for different reasons.
+- `stalled` earns its own state: the device is open (privacy-relevant, so
+  the plate stays lit) and delivering nothing (Jarvis is deaf, so it says
+  `MIC NO AUDIO` in `warn`, not teal). jv-ears calls the same condition
+  `degraded` on the heartbeat, so `jv tap sys.health` tells the same story.
+- two things fell out of building it:
+  · `BusModel.latestFrom(topic, src)`. `sys.health` has one publisher per
+    service, so `latest("sys.health")` answers "whoever spoke last" — a
+    jv-brain heartbeat would have been read as evidence about the mic.
+  · jv-ears published NO heartbeat at all when the pipeline ended
+    immediately: the health task was cancelled before the event loop ever
+    ran it. It now says hello before the frame loop. Found by the test that
+    checks main() is actually wired to the unit-tested body — the unit
+    tests were all green while the service published nothing.
+- the bug this iteration nearly shipped: `Bus.qml` did not forward
+  `latestFrom`, and MicState's defensive `typeof bus.latestFrom ===
+  "function"` guard turned that into a HUD that shows nothing, forever,
+  silently. qmllint cannot see it (the call is on an injected `var`) and
+  the headless tests cannot (they drive a BusModel directly). Caught while
+  writing the README table. There is now a tools test that fails the build
+  if BusModel offers a function Bus.qml does not forward — verified it
+  bites by deleting the forwarder.
+- proving the tests bite: 17 mutations, 17 caught. QML — `unknown`
+  collapsing to `off`, reading a stale heartbeat, ignoring the stall
+  budget, accepting a body/src disagreement, accepting a hedged `conf` or a
+  wrong `v`, arming a whole life instead of the remainder, `healthStale`
+  ignoring the timer, `latestFrom` ignoring the publisher, a link drop
+  keeping the source cache. Python — publishing the age as infinity, a
+  stalled mic staying `ok`, stamping the clock once, not counting samples,
+  a `--wav` run reporting a microphone, the heartbeat dropping `metrics`,
+  and removing the pre-loop hello.
+- **A8 was the plan's "ten-minute commit" and it is not one — descoped with
+  the research written down.** theme.toml names Archivo, and nixpkgs has no
+  `archivo`: the only packaged source is `google-fonts`, whose src is
+  **1.1 GiB to download and 2.7 GiB unpacked** for one family, on a machine
+  that never garbage-collects. The alternatives are a small pinned
+  derivation from upstream (Omnibus-Type/Archivo, a few MB) or changing the
+  face in theme.toml, which is identity and a human's call (invariant 9).
+  JetBrains Mono is already in nixpkgs and is the face actually on screen
+  today — every HUD element is mono. Written into PLAN A8 so the next
+  iteration decides in one minute instead of researching it again.
+- tests: 117 QML green (26 new), also green INSIDE the nix sandbox; 26
+  jv-ears (15 new); 23 tools (1 new); 25 jv-hud-bridge unchanged and green.
+- build: `nix build .#jv-hud` ok (qmllint clean at -W 0, tests ran in the
+  checkPhase); `nixos-rebuild build --flake .#ares` ok. Never test/switch.
+  No schema, no jv-act, no boot path, no pins.
+- files: services/jv-ears/jv_ears/audio.py, services/jv-ears/jv_ears/main.py,
+  services/jv-ears/tests/test_capture_meter.py (new),
+  shell/jv-hud/MicPlate.qml (new), shell/jv-hud/core/MicState.qml (new),
+  shell/jv-hud/tests/tst_micstate.qml (new), shell/jv-hud/core/BusModel.qml,
+  shell/jv-hud/tests/tst_busmodel.qml, shell/jv-hud/Bus.qml,
+  shell/jv-hud/shell.qml, shell/jv-hud/README.md, tools/gen_theme_qml.py,
+  tools/tests/test_gen_theme_qml.py, qmldirs (generated)
+- commit: 6796579
+- next: **A6** (the `sys.health` glance) is now the cheapest real element —
+  `latestFrom` is exactly what it needed, and jv-ears' `degraded` gives it
+  something true to show on day one. **A12** (a `thinking` state) is still
+  one line in the bridge's topic list plus one branch in SpeechState.
+  New follow-up **A14**: the HUD now mirrors TWO jv-ears constants by hand
+  (`wakeWindowS` 8 s, `stallS` 1 s) because nothing publishes ears'
+  configuration; ears could report both in the same free-form `metrics` it
+  now uses, and the HUD could stop guessing. And the HUD has earned a human
+  eyeball on ares more than ever: there are two stacked plates now, on three
+  monitors (A13), and nobody has ever seen one.

@@ -35,12 +35,25 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       refused rather than guessed at — wrong schema `v`, a wake under its own
       threshold, a hedged `conf`, no numeric `ts`. Teal for listening (the open
       mic is yours), ember for speaking. Tests: `bash ops/ralph/qmltest.sh`.)
-- [ ] A4. Live mic indicator from `audio.vad`/`audio.wake` — truthful, not fakeable;
-      off when no signal. (Camera indicator waits for a vision-phase signal.)
-      A3 already reads both topics in `core/SpeechState.qml`; the mic
-      indicator is a DIFFERENT claim (is the mic capturing?) and must not be
-      derived from `listening` — jv-ears' VAD runs continuously whether or
-      not a wake window is open.
+- [x] A4. Live mic indicator — truthful, not fakeable; nothing on screen when
+      no microphone is open. (Camera indicator waits for a vision-phase
+      signal.) — 6796579
+      (NOT from `audio.vad`/`audio.wake` as this line used to say: those are
+      a claim about attention, and jv-ears' VAD runs continuously whether or
+      not a wake window is open. The mic is its own claim and needed its own
+      signal, so jv-ears now counts what the DEVICE delivers —
+      `CaptureMeter` — and reports `mic_open` / `capture_age_s` /
+      `captured_s` in sys.health's FREE-FORM `metrics`; no schema change.
+      A process being alive is not evidence about a device: that is exactly
+      what stayed cheerful through the 2026-09-15 mic outage.
+      `core/MicState.qml` decides — 26 new QML tests, 17 mutations caught —
+      and refuses rather than guesses: "I cannot tell" never collapses into
+      "off". `MicPlate.qml` draws a teal dot and `MIC`, or `warn` and
+      `MIC NO AUDIO` when the device is open but silent. Nothing pulses.
+      Also landed: `Bus.latestFrom(topic, src)` (sys.health has one
+      publisher per service) and a tools test that fails the build if
+      Bus.qml forgets to forward a BusModel function. Tests:
+      `bash ops/ralph/qmltest.sh`, `bash ops/ralph/runtests.sh jv-ears`.)
 - [x] A5. A tiny bus client for QML so HUD elements subscribe to the Unix-socket
       bus without violating invariant 1 (consumer only). — bae8e03
       (`services/jv-hud-bridge` writes one JSON line per envelope; `Bus.qml`
@@ -62,7 +75,23 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `bash ops/ralph/qmltest.sh`, `bash ops/ralph/runtests.sh tools`.)
 - [ ] A8. Font packaging: theme.toml names Archivo + JetBrains Mono, but nothing
       declares them in the system yet — a missing font silently becomes a
-      different look. Add both to `fonts.packages` (its own small commit).
+      different look. Add them to `fonts.packages` (its own small commit),
+      plus `fontconfig.defaultFonts` so the generic families resolve to
+      them, plus a tools test asserting every `[type] family_*` in
+      theme.toml is declared (or the gate does not bite).
+      **Researched 2026-09-24, and it is NOT the ten-minute commit it looks
+      like — decide this before writing code:** nixpkgs has no `archivo`.
+      The only packaged source is `google-fonts`, and even overridden to one
+      family its src is **1.1 GiB to download / 2.7 GiB unpacked**, on a
+      machine that never garbage-collects (the runtime closure is small; the
+      source is not, and ares builds its own system). Options: (a) pay it,
+      (b) a small pinned derivation from upstream Omnibus-Type/Archivo — a
+      few MB, network works, needs a rev + hash, (c) change `family_sans` to
+      a face nixpkgs already carries, which is IDENTITY and a human's call
+      (invariant 9), not Ralph's. Recommendation: (b).
+      JetBrains Mono is already in nixpkgs (grub-theme uses it) and is the
+      only face on screen today — every HUD element is mono, so the mono
+      half is pure win and can land whatever is decided about the sans.
 - [x] A9. Headless QML tests for the HUD, wired into jv-hud's checkPhase.
       — 4c7c048
       (Quickshell links its QML plugin into its own binary, so its types can
@@ -128,6 +157,14 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `brain.request`/`brain.response` are frozen schemas the bridge does not
       subscribe to. One line in `DEFAULT_TOPICS` plus one branch in
       `core/SpeechState.qml`. No schema change needed. Discovered in A3.
+- [ ] A14. The HUD mirrors TWO jv-ears constants by hand — `wakeWindowS`
+      (8 s, ears' `wake_timeout_s`) and `stallS` (1 s, ears'
+      `CaptureMeter.STALL_S`) — because nothing publishes ears'
+      configuration. Both are "keep this at or below what ears is tuned
+      to" comments waiting to rot. ears already publishes free-form
+      `metrics` on sys.health; reporting its own budgets there would let
+      the HUD read them instead of guessing, with no schema change. Small,
+      and it deletes two footguns. Discovered in A4.
 - [ ] A13. `StatePlate` is drawn on EVERY monitor, because every surface
       builds one. Three copies of "LISTENING" across three screens may be
       right (you see it wherever you look) or noise. Needs a human eye on
@@ -145,3 +182,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   stops an element from animating around it (245926e, 2026-09-24)
 - A3 — the first data-backed element: SpeechState + StatePlate, the HUD's
   first pixels that mean something (769dcdd, 2026-09-24)
+- A4 — the recording light: CaptureMeter in jv-ears + MicState/MicPlate,
+  and the counters that make it honest (6796579, 2026-09-24)
