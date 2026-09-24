@@ -12,7 +12,7 @@ from jarvis_bus import BusClient
 
 from .compositor import CompositorBackend, WindowEvent
 from .config import ContextConfig
-from .system import AudioProbe, snapshot
+from .system import AudioProbe, GpuProbe, snapshot
 
 
 def redact_title(
@@ -60,14 +60,16 @@ class ContextService:
         backend: CompositorBackend,
         audio: AudioProbe,
         cfg: Optional[ContextConfig] = None,
+        gpu: Optional[GpuProbe] = None,
     ) -> None:
         self.bus = bus
         self.backend = backend
         self.audio = audio
+        self.gpu = gpu
         self.cfg = cfg or ContextConfig()
         self._started = time.monotonic()
-        # None while the snapshot is being taken; the reason it is not,
-        # otherwise. Read by the heartbeat, written by the system pump.
+        # None while the snapshot is whole; the note to beat out, when it
+        # is not. Read by the heartbeat, written by the system pump.
         self._system_fault: Optional[str] = None
         # Set when that answer CHANGES, so the heartbeat does not have to
         # wait out its period to say so.
@@ -102,25 +104,36 @@ class ContextService:
         """
         while True:
             try:
-                body = await asyncio.get_running_loop().run_in_executor(
-                    None, snapshot, self.audio
+                snap = await asyncio.get_running_loop().run_in_executor(
+                    None, snapshot, self.audio, self.gpu
                 )
             except Exception as exc:  # noqa: BLE001 - report, stay alive
-                self._set_fault(f"{type(exc).__name__}: {exc}")
+                self._set_fault(
+                    f"no context.system snapshot: {type(exc).__name__}: {exc}"
+                )
             else:
-                self._set_fault(None)
-                await self.bus.publish("context.system", body)
+                # A whole frame can still be missing an OPTIONAL field, and
+                # `gpu_vram_free_mb` absent because nobody could read the
+                # card looks exactly like a machine that has none. The
+                # frame goes out either way; the difference is said here.
+                self._set_fault(snap.gpu_note)
+                await self.bus.publish("context.system", snap.body)
             await asyncio.sleep(self.cfg.system_period_s)
 
     def _set_fault(self, fault: Optional[str]) -> None:
-        """Record what the snapshot is doing, and wake the heartbeat if
+        """Record what the snapshot is doing — as the note to publish,
+        not as a reason to be wrapped later — and wake the heartbeat if
         that CHANGED. schemas/sys.health.json asks for a beat every
         period "and immediately on state change"; on a 5 s beat, a
         jv-context that had just gone blind was up to 5 s of silence
         about itself. Only the transition wakes it — a probe failing the
         same way twice running is not news, and a beat per failed tick
         would put jv-context's 1 Hz onto a topic that is meant to be
-        quiet (invariant 5).
+        quiet (invariant 5). A fault whose TEXT changes while the state
+        does not (the card goes quiet while the mixer already had) waits
+        for the next periodic beat: the bus already says `degraded`, and
+        waking on every new string is how a message that embeds a
+        changing number becomes a 1 Hz heartbeat.
         """
         if (fault is None) != (self._system_fault is None):
             self._health_now.set()
@@ -135,9 +148,11 @@ class ContextService:
             "period_s": self.cfg.health_period_s,
         }
         if fault is not None:
-            # `degraded` = alive but impaired, which is exactly this: the
-            # window half of jv-context is still running.
-            body["notes"] = f"no context.system snapshot: {fault}"
+            # `degraded` = alive but impaired, which is exactly this:
+            # either the window half of jv-context is still running while
+            # the snapshot is not, or the snapshot is running a field
+            # short. The note says which.
+            body["notes"] = fault
         return body
 
     async def _pump_health(self) -> None:

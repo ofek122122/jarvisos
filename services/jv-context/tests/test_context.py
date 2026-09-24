@@ -17,9 +17,12 @@ from jv_context.compositor import MockBackend, WindowEvent
 from jv_context.config import ContextConfig
 from jv_context.service import ContextService, redact_title, window_body
 from jv_context.system import (
+    NvidiaSmiProbe,
     ProbeUnavailable,
     StubAudioProbe,
+    StubGpuProbe,
     WpctlProbe,
+    parse_nvidia_smi_vram,
     parse_wpctl_volume,
     snapshot,
 )
@@ -73,7 +76,7 @@ def test_redacted_window_body_carries_null_title_and_flag():
 
 
 def test_snapshot_shape():
-    body = snapshot(StubAudioProbe(vol=0.5, muted=False))
+    body = snapshot(StubAudioProbe(vol=0.5, muted=False)).body
     sys_ = from_body(ContextSystem, body)
     assert sys_.audio_volume == 0.5
     assert 0 <= sys_.mem_used_pct <= 100
@@ -184,6 +187,114 @@ def test_snapshot_publishes_nothing_rather_than_half_a_machine():
     no legal partial frame — snapshot() raises instead of substituting."""
     with pytest.raises(ProbeUnavailable):
         snapshot(FailingProbe())
+
+
+# ------------------------------------------- the GPU nobody ever read
+
+
+@pytest.mark.parametrize(
+    "text,mb",
+    [
+        ("5432\n", 5432.0),
+        (" 1024 \n", 1024.0),
+        ("0\n", 0.0),  # a real, full GPU still reads as zero
+        ("5432\n7000\n", 5432.0),  # one line per GPU; ares has one
+    ],
+)
+def test_nvidia_smi_parses_what_nvidia_smi_actually_prints(text, mb):
+    assert parse_nvidia_smi_vram(text) == mb
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",  # nvidia-smi printed nothing at all
+        "\n\n",
+        "[N/A]\n",  # what it prints when a device cannot answer the query
+        "[Not Supported]\n",
+        "nan\n",  # float() takes it; it is not a measurement
+        "inf\n",
+        "-1\n",  # below the schema's own minimum
+        "Failed to initialize NVML: Driver/library version mismatch\n",
+    ],
+)
+def test_nvidia_smi_never_invents_a_reading(text):
+    with pytest.raises(ProbeUnavailable):
+        parse_nvidia_smi_vram(text)
+
+
+def test_a_machine_with_no_driver_is_not_a_fault_and_stops_forking(monkeypatch):
+    """`gpu_vram_free_mb` is OPTIONAL and documented as absent when there
+    is no GPU — so a missing nvidia-smi is an ANSWER (None), not a fault.
+    And it is a permanent one: the PATH is a store path fixed when the
+    unit started, so re-asking once a second is ~86k processes a day
+    spent re-learning it (backlog 14)."""
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(a)
+        raise FileNotFoundError(2, "No such file or directory", "nvidia-smi")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    probe = NvidiaSmiProbe()
+    assert probe.vram_free_mb() is None
+    assert probe.vram_free_mb() is None
+    assert probe.vram_free_mb() is None
+    assert len(calls) == 1, f"latched off, yet forked {len(calls)} times"
+
+
+@pytest.mark.parametrize(
+    "fail",
+    [
+        # a number on stdout AND a non-zero exit: nvidia-smi can answer for
+        # one device and fail for another. Only the exit code says so.
+        lambda *a, **k: subprocess.CompletedProcess(a, 9, "5109\n", "no perms\n"),
+        lambda *a, **k: subprocess.CompletedProcess(a, 2, "", "unrecognized\n"),
+        lambda *a, **k: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(cmd="nvidia-smi", timeout=5)
+        ),
+        lambda *a, **k: (_ for _ in ()).throw(PermissionError(13, "denied")),
+    ],
+)
+def test_a_driver_that_stops_answering_is_a_fault(monkeypatch, fail):
+    """The binary is there, so this machine HAS a GPU — and invariant 6
+    calls VRAM a scheduling problem. A scheduler flying blind is not the
+    same thing as a machine with no GPU, and must not read as one."""
+    monkeypatch.setattr(subprocess, "run", fail)
+    with pytest.raises(ProbeUnavailable):
+        NvidiaSmiProbe().vram_free_mb()
+
+
+def test_nvidia_smi_happy_path_reads_the_card(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, "5109\n", ""),
+    )
+    assert NvidiaSmiProbe().vram_free_mb() == 5109.0
+
+
+def test_the_vram_field_is_present_only_when_something_measured_it():
+    read = snapshot(StubAudioProbe(), StubGpuProbe(5109.0))
+    assert read.body["gpu_vram_free_mb"] == 5109.0
+    assert read.gpu_note is None
+    from_body(ContextSystem, read.body)
+
+    none = snapshot(StubAudioProbe(), StubGpuProbe(None))
+    assert "gpu_vram_free_mb" not in none.body
+    assert none.gpu_note is None, "no GPU is not a fault"
+    from_body(ContextSystem, none.body)
+
+
+def test_an_unreadable_gpu_costs_the_field_and_never_the_frame():
+    """The mirror image of the audio probe: `gpu_vram_free_mb` is
+    optional, so its failure must not take the four required fields off
+    the bus with it — but it must not vanish in silence either."""
+    read = snapshot(StubAudioProbe(vol=0.3), StubGpuProbe(ProbeUnavailable("nvidia-smi exited 9")))
+    assert "gpu_vram_free_mb" not in read.body
+    assert read.gpu_note and "nvidia-smi exited 9" in read.gpu_note
+    assert read.body["audio_volume"] == 0.3
+    from_body(ContextSystem, read.body)
 
 
 # ------------------------------------------------------------ e2e on bus
@@ -353,3 +464,87 @@ async def test_the_snapshot_returns_and_the_heartbeat_says_so(bus_addr):
     # and every snapshot on the bus is a whole one
     for body in snaps:
         from_body(ContextSystem, body)
+
+
+async def test_a_blind_gpu_is_degraded_while_the_snapshot_keeps_flowing(bus_addr):
+    """The mixer's failure takes the whole frame off the bus; the GPU's
+    takes one optional field. Neither may be silent — invariant 6 calls
+    VRAM a scheduling problem, and a ladder with no number behind it is
+    the B35 pathology one level down."""
+    watcher = await watch(bus_addr, ["context.*", "sys.health"])
+    gpu = StubGpuProbe(ProbeUnavailable("nvidia-smi exited 9"))
+    svc_bus = await BusClient.connect(bus_addr, src="jv-context")
+    svc = ContextService(
+        svc_bus, MockBackend([], linger_s=0.8), StubAudioProbe(), BLIND_CFG, gpu=gpu
+    )
+    await svc.run()
+
+    frames = await drain(watcher, 0.5)
+    await svc_bus.close()
+    await watcher.close()
+
+    snaps = [f["body"] for f in frames if f["topic"] == "context.system"]
+    assert snaps, "an optional field took the whole snapshot down"
+    for body in snaps:
+        assert "gpu_vram_free_mb" not in body
+        from_body(ContextSystem, body)
+
+    beats = [f["body"] for f in frames if f["topic"] == "sys.health"]
+    degraded = [b for b in beats if b["state"] == "degraded"]
+    assert degraded, f"nothing on the bus says the card went quiet: {beats}"
+    assert "gpu_vram_free_mb" in degraded[0]["notes"]
+    # said once, on the transition — not at the snapshot's 1 Hz (invariant 5)
+    assert [b["state"] for b in beats] == ["ok", "degraded"], beats
+
+
+async def test_a_machine_with_no_gpu_is_a_healthy_machine(bus_addr):
+    """`gpu_vram_free_mb` is documented as absent where there is no GPU.
+    A laptop without one must not spend its life reporting degraded."""
+    watcher = await watch(bus_addr, ["context.*", "sys.health"])
+    svc_bus = await BusClient.connect(bus_addr, src="jv-context")
+    svc = ContextService(
+        svc_bus,
+        MockBackend([], linger_s=0.5),
+        StubAudioProbe(),
+        BLIND_CFG,
+        gpu=StubGpuProbe(None),
+    )
+    await svc.run()
+
+    frames = await drain(watcher, 0.5)
+    await svc_bus.close()
+    await watcher.close()
+
+    assert [f["body"]["state"] for f in frames if f["topic"] == "sys.health"] == ["ok"]
+    snaps = [f["body"] for f in frames if f["topic"] == "context.system"]
+    assert snaps and all("gpu_vram_free_mb" not in b for b in snaps)
+
+
+async def test_the_card_comes_back_and_the_heartbeat_says_so(bus_addr):
+    watcher = await watch(bus_addr, ["context.*", "sys.health"])
+    gpu = StubGpuProbe(ProbeUnavailable("nvidia-smi exited 9"))
+    svc_bus = await BusClient.connect(bus_addr, src="jv-context")
+    svc = ContextService(
+        svc_bus, MockBackend([], linger_s=0.8), StubAudioProbe(), BLIND_CFG, gpu=gpu
+    )
+
+    async def heal_later():
+        await asyncio.sleep(0.4)
+        gpu.answer = 5109.0
+
+    healer = asyncio.create_task(heal_later())
+    await svc.run()
+    await healer
+
+    frames = await drain(watcher, 0.5)
+    await svc_bus.close()
+    await watcher.close()
+
+    states = [f["body"]["state"] for f in frames if f["topic"] == "sys.health"]
+    assert "degraded" in states
+    assert states.index("degraded") < states.index("ok", states.index("degraded"))
+    assert any(
+        b["body"].get("gpu_vram_free_mb") == 5109.0
+        for b in frames
+        if b["topic"] == "context.system"
+    ), "the field never came back"

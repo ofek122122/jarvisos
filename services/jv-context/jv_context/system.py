@@ -3,6 +3,7 @@ wpctl/nvidia-smi on the machine; stubs serve dev and CI."""
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import subprocess
 from typing import Optional
@@ -84,27 +85,132 @@ class StubAudioProbe(AudioProbe):
         return self._v, self._m
 
 
-def gpu_vram_free_mb() -> Optional[float]:
+class GpuProbe:
+    """Free VRAM, or an honest silence.
+
+    `gpu_vram_free_mb` is OPTIONAL in schemas/context.system.json, and
+    that optionality has a specific meaning — "free VRAM IF A GPU IS
+    PRESENT". It does not mean "absent whenever the reading did not work
+    out", so this seam has three answers rather than two:
+
+      None              there is no GPU here. Not a fault; the field is
+                        simply absent, which is what the schema says a
+                        GPU-less machine looks like.
+      float             a measurement.
+      ProbeUnavailable  there IS a GPU and it stopped answering.
+                        Invariant 6 calls 6 GB of VRAM a scheduling
+                        problem; a scheduler flying blind is a
+                        degradation somebody should hear about, and it
+                        must not be indistinguishable from a machine
+                        that never had a card.
+    """
+
+    def vram_free_mb(self) -> Optional[float]:  # pragma: no cover - interface
+        raise NotImplementedError
+
+
+def parse_nvidia_smi_vram(text: str) -> float:
+    """`nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits`
+    stdout -> free MiB.
+
+    One line per GPU; ares has one, and the first line is it. `[N/A]` and
+    `[Not Supported]` are what nvidia-smi prints when a device cannot
+    answer the query, and NVML's own initialisation errors arrive on
+    stdout the way wpctl's do. None of those is a number — and neither is
+    `nan`, which float() accepts happily and which would reach the bus as
+    a value that compares false to its own schema minimum.
+    """
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    if not lines:
+        raise ProbeUnavailable("nvidia-smi printed nothing")
     try:
-        out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if out.returncode == 0:
-            return float(out.stdout.strip().splitlines()[0])
-    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
-        pass
-    return None
+        mb = float(lines[0])
+    except ValueError as exc:
+        raise ProbeUnavailable(f"nvidia-smi said {lines[0]!r}") from exc
+    if not math.isfinite(mb) or mb < 0:
+        raise ProbeUnavailable(f"nvidia-smi VRAM {mb!r} is out of range")
+    return mb
 
 
-def snapshot(audio: AudioProbe) -> dict:
-    """One context.system body, or ProbeUnavailable.
+class NvidiaSmiProbe(GpuProbe):
+    """Reads the first GPU through the driver's own CLI.
+
+    `nvidia-smi` ships in the NVIDIA driver's `bin` output, not in this
+    service's closure — and until modules/jarvis-services.nix named it on
+    the unit path, not on the unit's PATH either, so this field had never
+    once been on the bus on the machine whose whole VRAM ladder depends
+    on it.
+
+    A missing binary LATCHES the probe off. That PATH is a store path
+    fixed when the unit started, so "there is no driver here" cannot stop
+    being true while this process lives, and asking again once a second
+    is ~86k processes a day spent re-learning it (backlog 14). Every
+    other failure is a fault, because the binary being there means this
+    machine has a driver and the silence is new.
+    """
+
+    def __init__(self) -> None:
+        self._absent = False
+
+    def vram_free_mb(self) -> Optional[float]:
+        if self._absent:
+            return None
+        try:
+            out = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.free",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except FileNotFoundError:
+            self._absent = True
+            return None
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ProbeUnavailable(f"nvidia-smi did not run: {exc}") from exc
+        if out.returncode != 0:
+            raise ProbeUnavailable(f"nvidia-smi exited {out.returncode}")
+        return parse_nvidia_smi_vram(out.stdout)
+
+
+class StubGpuProbe(GpuProbe):
+    """`answer` is what the card says: a number, None for no card, or an
+    exception instance to raise."""
+
+    def __init__(self, answer: object = None) -> None:
+        self.answer = answer
+
+    def vram_free_mb(self) -> Optional[float]:
+        if isinstance(self.answer, BaseException):
+            raise self.answer
+        return self.answer  # type: ignore[return-value]
+
+
+@dataclasses.dataclass(frozen=True)
+class Snapshot:
+    """One frame, plus why it is missing an optional field when that
+    absence needs saying. The note travels WITH the body because the
+    caller publishes both — the frame on context.system and the note on
+    sys.health — and the two must describe the same tick."""
+
+    body: dict
+    gpu_note: Optional[str] = None
+
+
+def snapshot(audio: AudioProbe, gpu: Optional[GpuProbe] = None) -> Snapshot:
+    """One context.system frame, or ProbeUnavailable.
 
     Optional fields degrade to ABSENT (no GPU, no battery — the schema
     allows both). Required ones cannot: if the mixer will not answer
     there is no frame to publish, and the caller publishes nothing.
+
+    So the GPU's failure costs exactly one field and never the other
+    four. It does not cost the truth either: an unreadable card leaves a
+    note for the heartbeat rather than looking like a machine that never
+    had one.
     """
     try:
         load1 = psutil.getloadavg()[0]
@@ -121,9 +227,14 @@ def snapshot(audio: AudioProbe) -> dict:
         "audio_volume": float(vol),
         "audio_muted": bool(muted),
     }
-    if (vram := gpu_vram_free_mb()) is not None:
-        body["gpu_vram_free_mb"] = vram
+    gpu_note: Optional[str] = None
+    if gpu is not None:
+        try:
+            if (vram := gpu.vram_free_mb()) is not None:
+                body["gpu_vram_free_mb"] = float(vram)
+        except ProbeUnavailable as exc:
+            gpu_note = f"context.system without gpu_vram_free_mb: {exc}"
     batt = psutil.sensors_battery() if hasattr(psutil, "sensors_battery") else None
     if batt is not None:
         body["battery_pct"] = float(batt.percent)
-    return body
+    return Snapshot(body, gpu_note)
