@@ -180,6 +180,31 @@ def test_every_core_component_on_disk_is_registered_and_vice_versa():
         assert name == file[: -len(".qml")], "the type name is the file name"
 
 
+def test_bus_forwards_every_function_busmodel_offers():
+    """`Bus` is BusModel plus the Quickshell half, and elements see only it.
+
+    A function added to core/BusModel.qml and not forwarded is invisible to
+    every element — and invisible *quietly*: a defensive element checks
+    `typeof bus.fn === "function"` and falls back to knowing nothing, so the
+    HUD goes blank rather than breaking. That happened once while building
+    A4. qmllint cannot catch it (the call is on an injected `var`), the
+    headless tests cannot catch it (they drive a BusModel directly), so it
+    is caught here.
+
+    The two lines that take the bridge's input are not element API — that
+    asymmetry is the point of the file and is listed, not guessed.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    not_element_api = {"ingest", "applyLink", "elapsed"}
+    fns = set(re.findall(r"^\s*function\s+(\w+)\(", (hud / "core" / "BusModel.qml").read_text("utf-8"), re.M))
+    bus = (hud / "Bus.qml").read_text("utf-8")
+    missing = sorted(f for f in fns - not_element_api if f"function {f}(" not in bus)
+    assert not missing, (
+        "core/BusModel.qml offers functions that Bus.qml never forwards, so no "
+        "element can reach them: " + ", ".join(missing)
+    )
+
+
 def test_core_imports_nothing_but_qtquick():
     """shell/jv-hud/core is the half that headless QML tests can load.
 

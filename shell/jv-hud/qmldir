@@ -12,3 +12,4 @@ singleton Bus 1.0 Bus.qml
 singleton Motion 1.0 Motion.qml
 Ease 1.0 Ease.qml
 StatePlate 1.0 StatePlate.qml
+MicPlate 1.0 MicPlate.qml

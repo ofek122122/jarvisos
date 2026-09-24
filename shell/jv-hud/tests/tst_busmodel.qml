@@ -320,4 +320,77 @@ TestCase {
     fuzzyCompare(m.ageOf(m.latest("a")), 1, 1e-9);
     compare(m.ageOf(m.latest("b")), Infinity);
   }
+
+  // --- who said it, not just what was said ----------------------------
+
+  function test_latest_from_is_null_for_a_publisher_never_heard() {
+    const m = makeModel(true);
+    compare(m.latestFrom("sys.health", "jv-ears"), null);
+    m.ingest(frameLine("sys.health", {
+      "src": "jv-brain"
+    }));
+    compare(m.latestFrom("sys.health", "jv-ears"), null, "jv-brain is not jv-ears");
+  }
+
+  function test_publishers_on_one_topic_do_not_overwrite_each_other() {
+    // The reason this cache exists: every service heartbeats on
+    // sys.health, so `latest()` answers "whoever spoke last". An element
+    // asking about the microphone must get the mic service's frame.
+    const m = makeModel(true);
+    m.ingest(frameLine("sys.health", {
+      "src": "jv-ears",
+      "body": {
+        "service": "jv-ears"
+      }
+    }));
+    m.ingest(frameLine("sys.health", {
+      "src": "jv-brain",
+      "body": {
+        "service": "jv-brain"
+      }
+    }));
+    compare(m.latestFrom("sys.health", "jv-ears").body.service, "jv-ears");
+    compare(m.latestFrom("sys.health", "jv-brain").body.service, "jv-brain");
+    compare(m.latest("sys.health").body.service, "jv-brain", "latest() is still last-heard");
+  }
+
+  function test_a_newer_frame_from_the_same_publisher_replaces_its_own() {
+    const m = makeModel(true);
+    m.ingest(frameLine("sys.health", {
+      "src": "jv-ears",
+      "seq": 1,
+      "body": {
+        "state": "starting"
+      }
+    }));
+    m.ingest(frameLine("sys.health", {
+      "src": "jv-ears",
+      "seq": 2,
+      "body": {
+        "state": "ok"
+      }
+    }));
+    compare(m.latestFrom("sys.health", "jv-ears").body.state, "ok");
+  }
+
+  function test_link_down_forgets_who_said_what_too() {
+    // A stale heartbeat from a bus we can no longer see would let the HUD
+    // keep claiming a microphone is open. The cache goes with the link.
+    const m = makeModel(true);
+    m.ingest('{"t":"link","up":true}');
+    m.ingest(frameLine("sys.health", {
+      "src": "jv-ears"
+    }));
+    verify(m.latestFrom("sys.health", "jv-ears") !== null);
+    m.ingest('{"t":"link","up":false,"err":"gone"}');
+    compare(m.latestFrom("sys.health", "jv-ears"), null);
+  }
+
+  function test_a_frame_with_no_src_is_heard_but_not_attributed() {
+    const m = makeModel(true);
+    m.ingest('{"t":"frame","frame":{"topic":"sys.health","ts":100,"seq":1,"conf":1,"v":1,"body":{}}}');
+    compare(m.received, 1, "an unattributed frame is still a frame");
+    verify(m.latest("sys.health") !== null);
+    compare(m.latestFrom("sys.health", "undefined"), null, "it is nobody's frame");
+  }
 }

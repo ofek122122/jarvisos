@@ -9,8 +9,10 @@ fakes sensor state (invariant 10).
 `shell.qml` maps one layer-shell surface per connected monitor, and that
 surface is **unmapped unless an element has something true to draw** — the
 default state of the screen is your work and nothing else, and an unmapped
-surface renders at 0 fps. Today the one element is `StatePlate` (A3), which
-draws only while Jarvis is listening, speaking, or was interrupted.
+surface renders at 0 fps. Today it stacks two elements in the top-right
+corner: `StatePlate` (A3), which draws only while Jarvis is listening,
+speaking or was interrupted, and `MicPlate` (A4), the recording light,
+which draws only while the microphone is actually open.
 
 The skeleton pins the properties that make the HUD safe by construction:
 
@@ -103,6 +105,7 @@ What an element uses:
 |---|---|
 | `Bus.linkUp` | gate every piece of content on this |
 | `Bus.latest(topic)` | last envelope, or `null` if unheard |
+| `Bus.latestFrom(topic, src)` | last envelope **from one publisher** — `sys.health` has one per service |
 | `Bus.ageOf(env)` | seconds since capture, or `Infinity` if not yet knowable |
 | `Bus.frameReceived(topic, env)` | per-frame signal |
 
@@ -258,7 +261,65 @@ construction. The expiry timer is armed only while a window is actually
 open, and with whatever is *left* of it (a frame delayed in flight is
 already partway through its own window), so an idle HUD runs no timer.
 
+## The microphone (A4)
+
+The privacy indicator, and the only element on screen that is **not
+optional** (invariant 10): `MicPlate.qml` is lit for as long as the device
+is open, whether or not Jarvis is listening and whether or not anyone is
+talking. `core/MicState.qml` decides, and is where the tests are.
+
+| state | comes from | on screen |
+|---|---|---|
+| `unknown` | no link, no heartbeat, a heartbeat too old, or gauges we cannot read — **draws nothing** | — |
+| `off` | jv-ears is here and has no microphone open (a `--wav` run) — **draws nothing** | — |
+| `live` | the device is open **and** delivering audio | teal dot · `MIC` |
+| `stalled` | the device is open and has gone silent | warn dot · `MIC NO AUDIO` |
+
+It is a different question from `listening` and is never derived from it:
+jv-ears runs its VAD continuously, so `listening` answers *is Jarvis
+attending to me* while this answers *is audio being captured at all*. Two
+signals, two elements.
+
+**What makes it not fakeable.** A process being alive is not evidence about
+a device — that is exactly the 2026-09-15 field bug, where PortAudio opened
+nothing, jv-ears stayed up and cheerful, and the stream delivered silence
+forever. So jv-ears now counts what the device actually hands it
+(`CaptureMeter`, wrapping the audio source) and reports it on its own
+heartbeat, in the `metrics` section `sys.health` declares free-form and
+service-local — no schema change, nothing frozen touched:
+
+| gauge | meaning |
+|---|---|
+| `mic_open` | `1` for a real microphone, `0` for a `--wav` run |
+| `capture_age_s` | seconds since the device last delivered audio — **absent** until it ever has |
+| `captured_s` | total audio delivered since start |
+
+A live microphone that has delivered nothing for longer than
+`CaptureMeter.STALL_S` also turns the heartbeat itself `degraded`, so `jv
+tap sys.health` tells the same story the HUD is telling.
+
+`capture_age_s` is absent rather than infinite on purpose: the bridge
+serializes frames with `json.dumps`, which writes a bare `Infinity` that no
+JSON parser accepts, and the HUD would drop the whole line.
+
+The two ways this element can lie are not equally bad — claiming a
+microphone that is closed is noise, while going dark over an open one is the
+failure that costs trust. So *"I cannot tell" never collapses into "off"*: a
+dropped link, a heartbeat older than two of its own `period_s` (the
+schema's own "presumed dead" rule), a body whose `service` disagrees with
+the envelope `src`, a hedged `conf`, a wrong schema `v`, or a jv-ears too
+old to report the gauges all read as `unknown`.
+
+Nothing pulses. A breathing dot would spend GPU every frame to say what a
+still one already says (§06: 0 fps when nothing is happening).
+
+```sh
+jv tap sys.health --for 12          # the same heartbeats the HUD reads
+bash ops/ralph/runtests.sh jv-ears  # CaptureMeter + the heartbeat body
+```
+
 ## Next
 
-`A4` — the live microphone indicator from `audio.vad` / `audio.wake`, and
-`A6` — the `sys.health` glance.
+`A6` — the `sys.health` glance (service health + llm rung), which now has
+`Bus.latestFrom` to build on, and `A12` — a `thinking` state between the
+end of your utterance and Jarvis's first word.

@@ -14,8 +14,11 @@
 // the respawn timer, and the monotonic clock. Keep it that way — logic that
 // lands in this file is logic no test can reach.
 //
-// Everything an element uses — `linkUp`, `frames`, `latest()`, `ageOf()`,
-// `frameReceived` — is forwarded below, so consumers still see one `Bus`.
+// Everything an element uses — `linkUp`, `frames`, `latest()`,
+// `latestFrom()`, `ageOf()`, `frameReceived` — is forwarded below, so
+// consumers still see one `Bus`. A tools test fails the build if this file
+// ever forgets one: an unforwarded function is invisible to every element,
+// and invisible quietly.
 pragma Singleton
 
 import QtQuick
@@ -43,6 +46,13 @@ Singleton {
   // anything about it (or the link is down and the cache was cleared).
   function latest(topic: string): var {
     return model.latest(topic);
+  }
+
+  // The last envelope `src` published on `topic`, or null. Most topics
+  // have exactly one publisher and `latest()` is enough; `sys.health` has
+  // one per service, and "the newest heartbeat" is somebody else's answer.
+  function latestFrom(topic: string, src: string): var {
+    return model.latestFrom(topic, src);
   }
 
   // Seconds since a frame was captured, or Infinity when that is not

@@ -8,3 +8,4 @@
 BusModel 1.0 BusModel.qml
 MotionPolicy 1.0 MotionPolicy.qml
 SpeechState 1.0 SpeechState.qml
+MicState 1.0 MicState.qml

@@ -70,28 +70,49 @@ ShellRoot {
       // The edge inset is baked into the surface rather than into
       // `margins`: quickshell's `margins` grouped property has no
       // resolvable type in its qmltypes, and a clean qmllint is worth more
-      // than two pixels of layout sugar. The box is one plate plus its
-      // inset, with room for the longest state word — a surface no bigger
-      // than what it may ever draw.
+      // than two pixels of layout sugar. The box is the stack of plates
+      // plus its inset, with room for the longest word any of them draws —
+      // a surface no bigger than what it may ever draw.
       implicitWidth: 260
-      implicitHeight: 62
+      implicitHeight: 120
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
       // Mapped only while something is genuinely on screen — including
       // while a plate is fading out, or the exit would be a surface
       // vanishing out from under it rather than an element evaporating.
-      visible: surface.selfTest || statePlate.shown || statePlate.lit
+      visible: surface.selfTest || statePlate.shown || statePlate.lit || micPlate.shown || micPlate.lit
 
-      // What Jarvis is doing, from speech.state + audio.wake + audio.vad.
-      // Draws nothing while idle or while the bus cannot be seen.
-      StatePlate {
-        id: statePlate
-
+      // The corner stack. Every plate in it draws nothing until it has
+      // something true to say, and a Column skips children that are not
+      // visible — so an empty plate costs no gap, and the survivors close
+      // up rather than leaving a hole where a signal used to be.
+      Column {
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.topMargin: Theme.insetPx
         anchors.rightMargin: Theme.insetPx
+        spacing: Theme.gapPx
+
+        // What Jarvis is doing, from speech.state + audio.wake + audio.vad.
+        // Draws nothing while idle or while the bus cannot be seen.
+        StatePlate {
+          id: statePlate
+
+          anchors.right: parent.right
+          visible: statePlate.lit
+        }
+
+        // Whether the microphone is open, from jv-ears' own capture
+        // counters. Below the state plate on purpose: what Jarvis is doing
+        // changes minute to minute, while the recording light is a
+        // standing fact about the room and belongs where it can sit still.
+        MicPlate {
+          id: micPlate
+
+          anchors.right: parent.right
+          visible: micPlate.lit
+        }
       }
 
       // Built only under the self-test, in the opposite corner: it is a

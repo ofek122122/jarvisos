@@ -14,11 +14,33 @@ from typing import Optional
 
 from jarvis_bus import BusClient
 
-from .audio import MicSource, WavSource
+from .audio import CaptureMeter, MicSource, WavSource
 from .config import EarsConfig
 from .pipeline import EarsPipeline
 
 HEALTH_PERIOD_S = 5.0
+
+
+def health_body(meter: CaptureMeter, uptime_s: float) -> dict:
+    """One heartbeat, carrying what the microphone is actually doing.
+
+    `metrics` is the schema's free-form numeric section (service-local by
+    design), so the mic gauges cost no schema change — invariant 2 stays
+    intact. `state` is the frozen enum: a live mic that has stopped
+    delivering audio is `degraded`, which is exactly what the 2026-09-15
+    field bug looked like from the outside and what nothing reported.
+    """
+    state, notes = meter.health()
+    body = {
+        "service": "jv-ears",
+        "state": state,
+        "uptime_s": uptime_s,
+        "period_s": HEALTH_PERIOD_S,
+        "metrics": meter.metrics(),
+    }
+    if notes:
+        body["notes"] = notes
+    return body
 
 
 async def amain(argv: Optional[list[str]] = None) -> int:
@@ -47,6 +69,11 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     source = WavSource(args.wav, cfg.chunk_samples) if args.wav else MicSource(
         cfg.chunk_samples, cfg.sample_rate
     )
+    # Everything the pipeline hears passes through the meter, so the
+    # heartbeat can report what the DEVICE delivered rather than what this
+    # process hoped it would (see CaptureMeter). This is what makes the
+    # HUD's live-mic indicator a reading instead of a guess.
+    meter = CaptureMeter(source, mic=args.wav is None, sample_rate=cfg.sample_rate)
     pipeline = EarsPipeline(cfg, publish)
 
     # A pipeline death must become a non-zero exit, or systemd's
@@ -57,7 +84,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
 
     def run_pipeline() -> None:
         try:
-            pipeline.run(source)
+            pipeline.run(meter)
         except Exception:
             pipeline_failed.set()
             traceback.print_exc()
@@ -85,18 +112,19 @@ async def amain(argv: Optional[list[str]] = None) -> int:
 
     state_task = asyncio.create_task(follow_speech_state())
 
+    async def beat() -> None:
+        await bus.publish("sys.health", health_body(meter, time.monotonic() - started))
+
+    # Say hello BEFORE the frame loop, not on the loop's first yield: a
+    # pipeline that ends immediately (--wav with nothing to read) used to
+    # let the health task be cancelled before it had ever run, so jv-ears
+    # came and went without the bus — and the HUD — ever hearing of it.
+    await beat()
+
     async def health() -> None:
         while not done.is_set():
-            await bus.publish(
-                "sys.health",
-                {
-                    "service": "jv-ears",
-                    "state": "ok",
-                    "uptime_s": time.monotonic() - started,
-                    "period_s": HEALTH_PERIOD_S,
-                },
-            )
             await asyncio.sleep(HEALTH_PERIOD_S)
+            await beat()
 
     health_task = asyncio.create_task(health())
     try:

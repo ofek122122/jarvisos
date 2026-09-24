@@ -29,6 +29,11 @@ QtObject {
   // topic -> the last envelope seen on it. Replaced wholesale (never
   // mutated in place) so bindings actually re-evaluate.
   property var frames: ({})
+  // topic + "|" + src -> the last envelope from THAT publisher. Most
+  // topics have exactly one, but `sys.health` has one per service, and
+  // "the newest heartbeat" is not the same claim as "jv-ears' heartbeat".
+  // An element asking about a specific sensor must be able to say so.
+  property var sourced: ({})
   // Frames that arrived while nothing was listening still count as heard:
   // this is how an element added later knows the HUD has been awake. It
   // survives a link drop — the cache goes stale, the past does not.
@@ -48,6 +53,13 @@ QtObject {
   // anything about it (or the link is down and the cache was cleared).
   function latest(topic: string): var {
     const env = root.frames[topic];
+    return env === undefined ? null : env;
+  }
+
+  // The last envelope `src` published on `topic`, or null. Same rules as
+  // `latest()` — a dropped link means nothing is known about anyone.
+  function latestFrom(topic: string, src: string): var {
+    const env = root.sourced[topic + "|" + src];
     return env === undefined ? null : env;
   }
 
@@ -118,6 +130,17 @@ QtObject {
       next[key] = root.frames[key];
     next[env.topic] = env;
     root.frames = next;
+    // The per-publisher cache, for topics more than one service speaks on.
+    // A frame with no `src` is still a frame on its topic (`latest` has
+    // it); it is just not attributable, and an element that asked for one
+    // publisher must not be handed another's.
+    if (typeof env.src === "string" && env.src.length > 0) {
+      let bySrc = {};
+      for (const key in root.sourced)
+        bySrc[key] = root.sourced[key];
+      bySrc[env.topic + "|" + env.src] = env;
+      root.sourced = bySrc;
+    }
     root.received += 1;
     root.frameReceived(env.topic, env);
   }
@@ -125,6 +148,8 @@ QtObject {
   function applyLink(up: bool, err: string): void {
     if (!up && Object.keys(root.frames).length > 0)
       root.frames = ({}); // nothing observed means nothing shown
+    if (!up && Object.keys(root.sourced).length > 0)
+      root.sourced = ({}); // ... and that includes who said it
     root.linkUp = up;
     root.linkError = up ? "" : err;
   }
