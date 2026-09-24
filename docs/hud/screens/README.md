@@ -88,17 +88,73 @@ QML engine can answer:
 
 - **The HUD renders nothing while nothing changes.** Commits are counted
   on the HUD's own side of the Wayland socket (libwayland's
-  `WAYLAND_DEBUG` log) over two six-second windows: a live bus with
-  nothing on it, where the surface is unmapped, and a plate on screen with
-  no further input. Both must be **zero**. Measured: 0 and 0; the fade-in
-  that put the plate there cost 42 commits across the three surfaces and
-  then stopped. *Verified that this cannot go vacuous: each window is
-  paired with a stretch that must contain commits — the HUD being woken by
-  a real jv-ears heartbeat, and the blind plate arriving — counted by the
-  same code through the same log. That control is not decoration: it is
-  what caught the first version of this probe, whose pattern expected
-  `wl_surface@41` where this libwayland writes `wl_surface#41`, and which
-  would otherwise have reported a flawless zero forever.*
+  `WAYLAND_DEBUG` log) over **three** six-second windows, all of which
+  must be **zero**:
+
+  1. **quiet** — a live bus carrying a `context.system` snapshot every
+     second that the HUD has nothing to say about. The surface is
+     unmapped, and the question is whether a frame *arriving* is a frame
+     *drawn*.
+  2. **lit** — a plate on screen with no further input at all: no
+     `jarvisd`, `LinkPlate` after `LinkState`'s grace. The first
+     measurement of stillness as a property of what the elements *do*.
+  3. **live and lit** — both at once, which is the state the HUD is
+     actually in on a running machine. `jv-voice` says it is speaking and
+     a muted snapshot arrives every second, so **SPEAKING** and
+     **OUTPUT MUTED** sit on screen for the whole window while `seq` moves,
+     `OutputState`'s expiry timer re-arms, and every binding downstream of
+     the snapshot re-evaluates to the same value. A commit here would be a
+     re-render on *bookkeeping* — the one way of spending the budget that
+     neither window above can see.
+
+  Measured: 0, 0 and 0. The fade-in that put the blind plate there cost 42
+  commits across the three surfaces and then stopped; lighting SPEAKING and
+  then OUTPUT MUTED under it cost 82 across the two steps, and the plate
+  that arrived was 41 px taller than the one above it alone.
+
+  Window 3 was impossible before A40. Every other lit state in this HUD is
+  a frame ageing out — a heartbeat speaks for two of its own periods, a
+  confirmation for the window `jv-act` declared — so the only thing a
+  harness could hold still was a HUD with **no bus at all**, and that
+  zero is partly a fact about the silence. `OutputState` is a live reading
+  of two topics rather than a latch, so it stays true for exactly as long
+  as the frames keep coming.
+
+  *Verified that none of the three can go vacuous.* Each is paired with a
+  stretch that must contain commits — the HUD being woken by a real
+  jv-ears heartbeat, the blind plate arriving, the speaking/muted pair
+  arriving — counted by the same code through the same log. That control
+  is not decoration: it is what caught the first version of this probe,
+  whose pattern expected `wl_surface@41` where this libwayland writes
+  `wl_surface#41`, and which would otherwise have reported a flawless zero
+  forever. The live-lit window carries two more guards of its own, because
+  it has two more ways to lie. It is lit in **two steps** — an audible
+  sink first, then the mute — and the drawn region then has to grow
+  *downwards* with its top and right edges unmoved, which is what a plate
+  arriving under another one looks like on a stack docked to the top-right.
+  Otherwise the thing being held still might be `StatePlate` alone, with
+  `OutputPlate` never having appeared. (The left edge does travel outwards:
+  OUTPUT MUTED is a longer line than SPEAKING. The first version of the
+  check called that a failure.) And the region is
+  re-measured after the window and must be identical, because
+  `OutputState` stops believing a snapshot after three of `jv-context`'s
+  periods: a window that stopped feeding would watch the plate leave, and
+  an unmapped surface commits nothing. *Both were verified by mutation:
+  replacing the feed with a plain sleep fails on the box, which had shrunk
+  back to SPEAKING alone.*
+
+  *Verified that window 3 catches what windows 1 and 2 cannot.* The
+  mutation is a "freshness" fade — the dot's opacity bound to the age of
+  the snapshot, which is the kind of considerate edit nobody would look at
+  twice. There is no animation in it and no timer: the binding re-runs
+  only when a new frame lands, which is once a second, forever, on a
+  running machine. The drawn box never moves and the photographs are
+  identical. The quiet window read **0** (the surface is unmapped), A34's
+  lit window read **0** (no bus, so no snapshots), and the live-lit window
+  read **18** — three surfaces times six seconds. An infinite
+  `SequentialAnimation` inside the same plate, by contrast, is caught by
+  the lit window too: an animation runs whether or not anyone can see it,
+  and that is the failure the first two windows were already built for.
 
   This is invariant 10's cost claim — §06 budgets the ambient scene at
   "under 2 ms of GPU per frame and near-zero when nothing changed", and

@@ -380,7 +380,7 @@ def test_the_idle_probe_reads_the_huds_own_wayland_log():
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
-    assert probe.count('WAYLAND_DEBUG="1"') == 2, (
+    assert probe.count('WAYLAND_DEBUG="1"') == 3, (
         "every jv-hud the idle probe starts must be started with "
         "WAYLAND_DEBUG=1, or the frames it is counting are not being logged"
     )
@@ -399,12 +399,16 @@ def test_each_idle_window_has_a_control():
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
-    assert "if not woke:" in probe and "if not arriving:" in probe, (
+    assert (
+        "if not woke:" in probe
+        and "if not arriving:" in probe
+        and "if not lighting:" in probe
+    ), (
         "the idle probe no longer insists on SEEING commits somewhere, so a "
         "broken instrument — an unset WAYLAND_DEBUG, a libwayland that "
         "renamed its objects — would report a flawless permanent zero"
     )
-    assert probe.count("sheet.surface_traffic(") == 4, (
+    assert probe.count("sheet.surface_traffic(") == 6, (
         "the controls have to be measured by the same counter as the windows "
         "they vouch for, or they vouch for nothing"
     )
@@ -425,4 +429,180 @@ def test_the_readme_says_what_the_idle_probe_proved_and_what_it_did_not():
         "docs/hud/screens/README.md claims the HUD costs nothing when idle "
         "without saying that no GPU millisecond was measured — this "
         "compositor renders in software and its timings are about no machine"
+    )
+
+
+# --------------------------------------------- the live-lit window (A42)
+#
+# A34's lit window could only be held still by `LinkPlate` with NO BUS AT
+# ALL, because every other lit state in this HUD is a frame ageing out. So
+# "0 fps with a plate on screen" had, for two iterations, only ever been
+# measured on a HUD that could see nothing — and a HUD that can see nothing
+# is a HUD with nothing arriving to make it re-render. The interesting
+# question was never asked: a mapped surface, a live bus, a frame a second,
+# and nothing on screen changing.
+#
+# A40's `OutputState` made it possible, because it is a LIVE READING of two
+# topics rather than a latch. These gates hold the two ways that window can
+# go vacuous without looking wrong: losing its broker (back to A34's
+# measurement under a new name), or letting the plate expire mid-window
+# (a zero that is about an unmapped surface again).
+
+
+def idle_probe_text() -> str:
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    return shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
+
+
+def test_the_live_lit_window_feeds_the_pair_that_actually_keeps_a_plate_lit():
+    """core/OutputState.qml draws only while jv-voice is speaking AND the
+    default sink is silent. Either frame wrong and the window measures a
+    bare desktop while reporting a triumphant zero — which is A34's quiet
+    window with more machinery in front of it.
+    """
+    assert sheet.VOICE_SPEAKING["publish"]["topic"] == "speech.state"
+    assert sheet.VOICE_SPEAKING["publish"]["src"] == "jv-voice", (
+        "core/OutputState.qml reads speech.state from jv-voice; a frame under "
+        "another src is not one the HUD will believe"
+    )
+    assert sheet.VOICE_SPEAKING["publish"]["body"]["state"] == "speaking", (
+        "the live-lit window needs an utterance IN FLIGHT — `idle` and "
+        "`interrupted` both draw nothing, so the plate would never light"
+    )
+    assert sheet.SINK_MUTED["publish"]["topic"] == "context.system"
+    assert sheet.SINK_MUTED["publish"]["src"] == "jv-context"
+    assert sheet.SINK_MUTED["publish"]["body"]["audio_muted"] is True, (
+        "the live-lit window's snapshot is no longer muted, so OutputPlate "
+        "has nothing to say and the window is measuring an unmapped surface"
+    )
+    # And the quiet window's snapshot must stay the opposite of it, or that
+    # window stops being about a HUD with nothing to say.
+    assert sheet.SINK_OK["publish"]["body"]["audio_muted"] is False, (
+        "the quiet window's snapshot is muted, so the HUD now has something "
+        "true to say during a window that insists it draws nothing"
+    )
+
+
+def test_both_live_lit_frames_are_legal_bodies_for_their_topics():
+    """`schemas/` is bus law (invariant 2) and a harness that publishes an
+    illegal body is measuring a machine that cannot exist. Checked here
+    rather than trusted, because these two frames are hand-written.
+    """
+    import json
+
+    for frame in (sheet.VOICE_SPEAKING, sheet.SINK_MUTED):
+        spec = frame["publish"]
+        schema = json.loads(
+            (ROOT / "schemas" / f"{spec['topic']}.json").read_text("utf-8")
+        )
+        body = spec["body"]
+        missing = set(schema["required"]) - set(body)
+        assert not missing, f"{spec['topic']}: body is missing {sorted(missing)}"
+        extra = set(body) - set(schema["properties"])
+        assert not extra, f"{spec['topic']}: body has unknown keys {sorted(extra)}"
+    enum = json.loads(
+        (ROOT / "schemas" / "speech.state.json").read_text("utf-8")
+    )["properties"]["state"]["enum"]
+    assert sheet.VOICE_SPEAKING["publish"]["body"]["state"] in enum
+
+
+def test_the_live_lit_window_runs_on_a_real_broker():
+    """The whole point of it. A34's lit window starts NO jarvisd, on
+    purpose — it needs a state that cannot expire, and a bus the HUD cannot
+    see is the only one it says forever. This window's claim is the
+    opposite: a HUD that is receiving frames the entire time still renders
+    nothing. Without a broker it is A34's window again.
+    """
+    probe = idle_probe_text()
+    live = probe.split("LIVE AND LIT")[-1]
+    assert "LIVE AND LIT" in probe, (
+        "the idle probe no longer has a live-lit window, so '0 fps with a "
+        "plate on screen' is once again only measured on a HUD with no bus"
+    )
+    assert "JARVISD_BIN" in live, (
+        "the live-lit window starts no jarvisd — a HUD with no bus is A34's "
+        "lit window, and the thing this one exists to add is the traffic"
+    )
+    assert "sheet.VOICE_SPEAKING" in live and "sheet.SINK_MUTED" in live, (
+        "the live-lit window no longer publishes the pair that lights "
+        "OutputPlate, so whatever it is measuring is not a lit HUD"
+    )
+
+
+def test_the_live_lit_window_keeps_feeding_and_proves_the_plate_stayed():
+    """The sneakiest way for this window to report a perfect zero: stop
+    feeding. core/OutputState.qml believes one 1 Hz snapshot for three of
+    its own periods, so a window that publishes once and then waits six
+    seconds watches the plate leave — and an unmapped surface commits
+    nothing, which is exactly the zero the probe was hoping for.
+
+    Two things stop that: the feed runs FOR the length of the window, and
+    the drawn box is re-measured afterwards and must be identical.
+    """
+    probe = idle_probe_text()
+    live = probe.split("LIVE AND LIT")[-1]
+    assert "feed_snapshots(" in live, (
+        "the live-lit window no longer publishes for the length of the "
+        "window; OutputState stops believing a snapshot after three of "
+        "jv-context's periods and the plate would expire under it"
+    )
+    assert re.search(r"IDLE_WINDOW_S,\s*\[sheet\.SINK_MUTED\]", live), (
+        "the live-lit window's feed no longer covers the measured window"
+    )
+    assert "if after != box:" in live, (
+        "the live-lit window no longer re-measures the plate after the "
+        "window, so a plate that expired mid-measurement would report a "
+        "zero about an unmapped surface"
+    )
+
+
+def test_the_live_lit_window_proves_it_is_holding_the_output_plate():
+    """`StatePlate` has said SPEAKING since A3 and lights on the jv-voice
+    frame alone, so "something is drawn" is not evidence that A40's plate
+    is on screen. A window holding only StatePlate still would report the
+    very same zero while OutputPlate went unmeasured — and OutputPlate is
+    the entire reason this window can exist on a live bus.
+
+    So the probe lights it in two steps: an AUDIBLE sink first (StatePlate
+    and nothing else), then the mute, and the drawn region has to grow
+    downwards from the same top-left corner. That is a plate arriving
+    UNDER another one, measured in pixels.
+    """
+    live = idle_probe_text().split("LIVE AND LIT")[-1]
+    assert "sheet.SINK_OK" in live, (
+        "the live-lit window no longer lights StatePlate on an audible sink "
+        "first, so nothing distinguishes 'OutputPlate arrived' from 'the HUD "
+        "drew the word SPEAKING'"
+    )
+    assert "speaking_box" in live and "box[3] <= speaking_box[3]" in live, (
+        "the live-lit window no longer insists the drawn region GREW when the "
+        "sink went muted — whatever it holds still for six seconds may not "
+        "include OutputPlate at all"
+    )
+    # The stack is docked to the TOP-RIGHT, so those are the two edges that
+    # pin it; the left one legitimately travels outwards, because OUTPUT
+    # MUTED is a longer line than SPEAKING.
+    assert (
+        "box[1] != speaking_box[1]" in live and "box[2] != speaking_box[2]" in live
+    ), (
+        "the live-lit window no longer insists the top and right edges stayed "
+        "put, so a plate that REPLACED the one above it — or a stack that moved "
+        "— would pass as one arriving under it"
+    )
+
+
+def test_the_readme_says_the_third_window_is_on_a_live_bus():
+    """The distinction is the whole value of the window, and it is the one
+    a reader will otherwise collapse: two of these zeros are from a HUD
+    that could see nothing happening, and one is from a HUD watching a
+    frame arrive every second.
+    """
+    readme = (SCREENS / "README.md").read_text("utf-8")
+    assert "three" in readme.lower(), (
+        "docs/hud/screens/README.md still describes two idle windows"
+    )
+    assert "OUTPUT MUTED" in readme, (
+        "docs/hud/screens/README.md does not say which plate the live-lit "
+        "window held on screen — without it a reader cannot tell whether "
+        "the measurement was of a HUD with a bus or without one"
     )

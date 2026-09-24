@@ -33,7 +33,8 @@ asked things no QML engine knows:
     idle" was an argument about how Qt Quick works, and the thing that
     breaks it is one ordinary edit — a pulse, a counter, an animation
     left looping. `probe_idle_frames` counts commits on the HUD's own
-    side of the Wayland socket, quiet and lit, with a control for each.
+    side of the Wayland socket over three windows — quiet, lit, and lit
+    on a bus that never stops talking (A42) — with a control for each.
 
 Nothing here asserts a pixel COLOUR: a font ships a new version, Qt
 changes its rasteriser, and a byte comparison fails in a way nobody can
@@ -266,6 +267,32 @@ def publish_shot(shot: dict, bus_addr: str) -> None:
     asyncio.run(go())
 
 
+def feed_snapshots(seconds: float, frames: list, bus_addr: str) -> int:
+    """Publish `frames` at jv-context's own 1 Hz for `seconds`; return how
+    many times.
+
+    The idle probe's two live-bus windows both need this, for opposite
+    reasons. The quiet one needs traffic the HUD has NOTHING to say about,
+    to ask whether a frame arriving costs a frame drawn. The live-lit one
+    (A42) needs traffic that keeps a plate TRUE: core/OutputState.qml
+    believes a snapshot for three of jv-context's periods, so a window that
+    published once and then waited would watch the plate expire — and an
+    unmapped surface commits nothing, which is exactly the zero the probe
+    was hoping to see.
+
+    1 Hz because that is the rate schemas/context.system.json states for
+    the topic. The cadence is the point: it is what a HUD on a running
+    machine is actually subjected to, all day, forever.
+    """
+    sent = 0
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        publish_shot({"frames": frames}, bus_addr)
+        sent += 1
+        time.sleep(max(0.0, min(1.0, deadline - time.monotonic())))
+    return sent
+
+
 # --------------------------------------------------------------------- pixels
 
 
@@ -432,6 +459,40 @@ def wait_for_blind_plate(ppm: Path, background: np.ndarray, label: str):
     )
 
 
+def wait_for_drawing(
+    ppm: Path,
+    background: np.ndarray,
+    bus_addr: str,
+    keepalive: list,
+    complaint: str,
+    differs_from=None,
+):
+    """Wait until the primary monitor's drawn region exists (and differs
+    from `differs_from`, when given), re-publishing `keepalive` while we
+    look.
+
+    The keepalive is not politeness. Every live-bus state in this HUD is a
+    frame ageing out — core/OutputState.qml stops believing a snapshot
+    after three of jv-context's own periods — and a capture of a 2560x1440
+    screen plus a numpy compare is slow enough to outlast that. Without it
+    this loop could watch the plate it is waiting for expire, then time out
+    and blame the element.
+
+    Returns the box. Raises with `complaint` if it never arrives.
+    """
+    deadline = time.monotonic() + BLIND_TIMEOUT_S
+    while time.monotonic() < deadline:
+        capture("primary", ppm)
+        box = drawn_box(read_ppm(ppm), background)
+        if box is not None and box != differs_from:
+            return box
+        feed_snapshots(1.0, keepalive, bus_addr)
+    raise Fail(
+        f"{complaint} in {BLIND_TIMEOUT_S:.0f}s, so the idle window below "
+        "would be measuring a bare desktop and calling it stillness"
+    )
+
+
 # The idle probe's two windows. The settle is past §06's longest ease with
 # room to spare, so a fade that is still finishing is never counted as the
 # HUD failing to stop; the window is long enough that a 60 fps scene would
@@ -454,7 +515,8 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
     monitors, forever, on a desktop where nothing is happening.
 
     So the frames are counted, from the HUD's own side of the Wayland
-    socket. Two windows, because §06 claims this of two different states:
+    socket. Three windows, because they are three different claims and the
+    HUD can fail each one without failing the others:
 
       · QUIET — a live bus CARRYING TRAFFIC the HUD subscribes to and has
         nothing to say about: one context.system snapshot per second, an
@@ -464,16 +526,29 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         subscriber, jv-context heartbeats at 1 Hz all day, and the thing
         worth knowing is that a frame arriving is not a frame drawn.
       · LIT — a plate on screen, saying something true, with no further
-        input. This is the interesting one: stillness here is a property
-        of what the elements DO, not of the surface being absent.
+        input at all: no broker, LinkPlate after LinkState's grace. The
+        first measurement of stillness as a property of what the elements
+        DO rather than of an absent surface — and, on its own, partly a
+        fact about the silence, because a HUD with no bus has nothing
+        arriving to make it re-render.
+      · LIVE AND LIT (A42) — both at once, which is the state the HUD is
+        actually in on a running machine: two plates on screen, a real
+        broker, and a snapshot arriving every second for the whole window.
+        Every second the `seq` moves, OutputState's expiry timer re-arms
+        and every binding downstream of the snapshot re-evaluates — to the
+        same values. A commit here is a re-render on BOOKKEEPING, which is
+        the one way of spending §06's budget that neither window above can
+        see. It was impossible until A40: OutputState is the first element
+        that stays lit on a LIVE bus for as long as it is fed.
 
     Each window has a control, because a probe that reads an empty log
     cannot tell "the HUD drew nothing" from "nobody was listening". The
     quiet window is followed by a real frame that lights the mic plate,
-    and the lit window is preceded by the blind plate arriving; both
-    stretches MUST contain commits, measured by the same regex, through
-    the same log. If the instrument breaks, it fails there rather than
-    reporting a perfect idle.
+    the lit window is preceded by the blind plate arriving, and the
+    live-lit one by two plates arriving; every one of those stretches MUST
+    contain commits, measured by the same regex, through the same log. If
+    the instrument breaks, it fails there rather than reporting a perfect
+    idle.
 
     WHAT THIS IS NOT. Not milliseconds of GPU: this compositor is pixman
     on a headless backend and its timings say nothing about a 1660 SUPER.
@@ -509,12 +584,7 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         # jv-context's own cadence, for the length of the window. Every one
         # of these reaches the HUD — it is a subscribed topic — and not one
         # of them is anything to draw.
-        snapshots = 0
-        deadline = time.monotonic() + IDLE_WINDOW_S
-        while time.monotonic() < deadline:
-            publish_shot({"frames": [sheet.SINK_OK]}, bus_addr)
-            snapshots += 1
-            time.sleep(max(0.0, min(1.0, deadline - time.monotonic())))
+        snapshots = feed_snapshots(IDLE_WINDOW_S, [sheet.SINK_OK], bus_addr)
         commits, frames = sheet.surface_traffic(hud.since(mark))
         if commits:
             raise Fail(
@@ -613,6 +683,166 @@ def probe_idle_frames(stage: Path, background: np.ndarray) -> None:
         log(f"  lit and still: {commits} commits in {IDLE_WINDOW_S:.0f}s")
     finally:
         hud.stop()
+
+    # --- LIVE AND LIT: a plate on screen, a real broker, and a frame
+    # arriving every second for the whole window (A42).
+    #
+    # The window above is the one A34 could hold still, and its limit is
+    # worth stating plainly: a HUD with no bus has nothing arriving to make
+    # it re-render, so its zero is partly a fact about the silence. The
+    # quiet window has the traffic and no plate; the lit window has the
+    # plate and no traffic. This one has both, which is the state the HUD
+    # is actually in on a running machine.
+    #
+    # `OutputState` is what makes it possible, and it is the first element
+    # that could: it is a LIVE READING of two topics rather than a latch
+    # (A40), so it stays true exactly as long as the frames keep coming.
+    # One `speaking` from jv-voice, which does not expire on its own, plus a
+    # muted snapshot re-published at 1 Hz, and two plates sit on screen
+    # indefinitely — SPEAKING above, OUTPUT MUTED under it.
+    #
+    # What could go wrong here that neither window above would catch: the
+    # HUD re-rendering on BOOKKEEPING. Every second the snapshot's `seq` and
+    # `ts` change, `OutputState.pairKey` changes, its expiry timer re-arms,
+    # and every binding downstream of the snapshot re-evaluates — to the
+    # same values, because the mixer is still muted and the words are the
+    # same words. If Qt commits a frame for that, §06's budget is being
+    # spent on nothing a user could see.
+    bus_addr = str(stage / "idle-live.sock")
+    broker = Proc(
+        "jarvisd",
+        [os.environ["JARVISD_BIN"]],
+        stage / "idle-live-jarvisd.log",
+        dict(os.environ, JARVIS_BUS=bus_addr),
+    )
+    hud = None
+    try:
+        broker.wait_for("jarvisd listening on")
+        hud = Proc(
+            "jv-hud",
+            [os.environ["JV_HUD_BIN"]],
+            stage / "idle-live-hud.log",
+            dict(os.environ, JARVIS_BUS=bus_addr, WAYLAND_DEBUG="1"),
+        )
+        hud.wait_for("Configuration Loaded")
+        time.sleep(SETTLE_S)
+
+        ppm = stage / "idle-live.ppm"
+        check_desk_is_bare(ppm, background, "before the live-lit window")
+
+        # Lit in TWO steps, because "something is drawn" is not the claim.
+        # StatePlate has said SPEAKING since A3 and would light on the
+        # jv-voice frame alone — so a window that only checked for pixels
+        # could be holding StatePlate still while OutputPlate never
+        # appeared, and it would report exactly the same zero. So: first an
+        # AUDIBLE sink, which lights StatePlate and nothing else, then the
+        # mute, and the drawn region has to GROW DOWNWARDS. That is
+        # OutputPlate arriving under it, measured in pixels, and it is also
+        # the first time A40's decision — this line exists only while the
+        # sink is silent — has been checked through a compositor.
+        mark = hud.mark()
+        publish_shot({"frames": [sheet.VOICE_SPEAKING, sheet.SINK_OK]}, bus_addr)
+        wait_for_drawing(
+            ppm,
+            background,
+            bus_addr,
+            [sheet.SINK_OK],
+            "jv-voice said it was speaking and the HUD drew nothing",
+        )
+        # Both boxes are read AFTER a settle, never off the first capture
+        # that differs: §06's fade is a real animation and a region measured
+        # half way through one is a smaller region than the plate. Comparing
+        # two mid-fade boxes would make the growth check below a coin flip.
+        feed_snapshots(IDLE_SETTLE_S, [sheet.SINK_OK], bus_addr)
+        capture("primary", ppm)
+        speaking_box = drawn_box(read_ppm(ppm), background)
+        log(f"  speaking into an audible sink: drawn at {speaking_box}")
+
+        publish_shot({"frames": [sheet.SINK_MUTED]}, bus_addr)
+        wait_for_drawing(
+            ppm,
+            background,
+            bus_addr,
+            [sheet.SINK_MUTED],
+            "the sink went muted mid-utterance and the HUD drew nothing",
+            differs_from=speaking_box,
+        )
+        lighting, _ = sheet.surface_traffic(hud.since(mark))
+        feed_snapshots(IDLE_SETTLE_S, [sheet.SINK_MUTED], bus_addr)
+        capture("primary", ppm)
+        box = drawn_box(read_ppm(ppm), background)
+        # What "a plate arrived UNDER another one" is, in this geometry. The
+        # stack is docked to the top-right, so the top edge and the RIGHT
+        # edge are the ones that must not move; the bottom must grow. The
+        # left edge may travel outwards and does — OUTPUT MUTED is a longer
+        # line than SPEAKING, so the region widens leftwards, which the
+        # first version of this check called a failure.
+        moved = (
+            box is None
+            or box[1] != speaking_box[1]
+            or box[2] != speaking_box[2]
+            or box[0] > speaking_box[0]
+        )
+        if moved or box[3] <= speaking_box[3]:
+            raise Fail(
+                f"muting the sink changed the drawn region from {speaking_box} "
+                f"to {box}, which is not a plate ARRIVING UNDER another one at "
+                "the same top-right corner — the window below would be holding "
+                "something else still, and OutputPlate would be untested"
+            )
+        if not lighting:
+            raise Fail(
+                "two plates reached the screen without a single surface commit "
+                "in the HUD's Wayland log — the log is not the HUD's, and the "
+                "window below would read zero no matter what it drew"
+            )
+        check_corner(
+            f"live-lit {sheet.output_by_role('primary')['name']}",
+            read_ppm(ppm),
+            background,
+            True,
+        )
+        log(
+            f"  and then into a muted one: {box[3] - speaking_box[3]} px taller "
+            f"at {box}, the pair costing {lighting} commits"
+        )
+
+        mark = hud.mark()
+        snapshots = feed_snapshots(IDLE_WINDOW_S, [sheet.SINK_MUTED], bus_addr)
+        commits, frames = sheet.surface_traffic(hud.since(mark))
+
+        # The box FIRST, and the commit count is quoted in its message: a
+        # plate that expired mid-window would have committed the traffic of
+        # LEAVING, and reporting that as "the shell is animating" would send
+        # the next reader looking for an animation that does not exist.
+        capture("primary", ppm)
+        after = drawn_box(read_ppm(ppm), background)
+        if after != box:
+            raise Fail(
+                f"the HUD drew at {box} before the live-lit window and {after} "
+                f"after it ({commits} commits under {snapshots} snapshots), so "
+                "the plate changed under the measurement — most likely the feed "
+                "did not keep it true, and its zero would have been about an "
+                "unmapped surface"
+            )
+        if commits:
+            raise Fail(
+                f"a HUD with two plates on screen committed {commits} surface "
+                f"updates ({frames} frame callbacks) in {IDLE_WINDOW_S:.0f}s "
+                f"while receiving {snapshots} context.system snapshots that said "
+                "exactly what the ones before them said. Nothing a user could "
+                "see changed, so this is a re-render on bookkeeping — a `seq` "
+                "moving, a timer re-arming — and §06 budgets the ambient scene "
+                "for signals, not for housekeeping"
+            )
+        log(
+            f"  live and lit: {commits} commits in {IDLE_WINDOW_S:.0f}s under "
+            f"{snapshots} snapshots, plate still at {after}"
+        )
+    finally:
+        if hud is not None:
+            hud.stop()
+        broker.stop()
 
 
 def probe_click_through(stage: Path, background: np.ndarray) -> None:

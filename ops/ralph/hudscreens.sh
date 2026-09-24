@@ -18,7 +18,8 @@
 # it claims on EVERY monitor, that a quiet HUD leaves the desktop
 # pixel-identical, that a click over a painted plate reaches an ordinary
 # window underneath it (A32), and that the HUD commits no Wayland frames
-# at all while nothing changes — quiet OR with a plate on screen (A34).
+# at all while nothing changes — quiet, with a plate on screen, and with
+# a plate on screen while a frame arrives every second (A34/A42).
 # Those were all "verified by construction" for thirty iterations, which
 # is a polite way of saying nobody had tried them.
 #

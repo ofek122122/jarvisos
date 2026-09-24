@@ -185,6 +185,50 @@ SINK_OK = {
 }
 
 
+# The other half of the same snapshot: the sink MUTED. Together with the
+# frame below it is the one pair in this whole HUD that keeps a plate on
+# screen for as long as a harness cares to feed it, on a bus that never
+# stops talking — which is what the idle probe's live-lit window (A42) is
+# for.
+#
+# Nothing else here can do that. Every other lit state is a frame ageing
+# out: a heartbeat speaks for two of its own periods, a confirmation for
+# the window jv-act declared, a heard line for HeardState's hold. The only
+# state A34 could hold still was `LinkPlate` with NO BUS AT ALL, so "0 fps
+# with a plate on screen" had only ever been measured on a HUD that could
+# see nothing. core/OutputState.qml is a live reading of two topics, and
+# re-publishing this snapshot at jv-context's own 1 Hz keeps it true
+# indefinitely.
+SINK_MUTED = {
+    "publish": {
+        "topic": "context.system",
+        "src": "jv-context",
+        "body": {
+            "net_online": True,
+            "load1": 1.9,
+            "mem_used_pct": 37.5,
+            "audio_volume": 0.62,
+            "audio_muted": True,
+        },
+    }
+}
+
+
+# jv-voice with an utterance in flight. core/OutputState.qml reads
+# `speech.state` verbatim (not SpeechState's answer), and it does not
+# expire on its own — jv-voice publishes `idle` when it finishes, and the
+# element's 30 s backstop is the only other exit. So ONE of these plus a
+# fresh SINK_MUTED is a lit HUD that stays lit, saying two true things:
+# SPEAKING above (StatePlate, since A3) and OUTPUT MUTED under it.
+VOICE_SPEAKING = {
+    "publish": {
+        "topic": "speech.state",
+        "src": "jv-voice",
+        "body": {"state": "speaking", "say_id": "say-6c1d0f42"},
+    }
+}
+
+
 SHOTS = [
     {
         "file": "01-quiet",
