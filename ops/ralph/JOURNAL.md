@@ -5372,3 +5372,102 @@ when somebody fetches a second build of the thing that was blocked.
   human at ares. **B10/A28 — one live recording of one spoken turn on ares
   — remains the biggest thing a human can hand this loop.** B7/B12/B15/B17/
   B20/B23 unchanged.
+
+## 2026-09-24 — iteration 53 — A61: the two halves of invariant 8 get
+## photographed together
+
+- built: **`12-guard-install.png` — a refused binary and a failed install in
+  one corner, which is the picture the surface box was grown for and the one
+  nothing had ever taken.** `shell.qml` went 624 -> 688 px twice, once for
+  GuardPlate (A51) and once for InstallPlate (A52), and both times the
+  justification written into the binding was co-occurrence: these two plates
+  can genuinely be up together, so the box has to hold them. Eleven shots
+  later, no picture showed it. An argument nobody can check is an argument,
+  and the box is the one number in this HUD that gets cropped by a
+  compositor rather than caught by a test.
+
+**A61's own story turned out to be impossible, and that is most of what this
+bought.** The item described a refusal and a RETRY: jv-guard blocks an
+installer, the user fetches a different build, that one fails inside its
+prefix. Writing the frames out is what showed it cannot happen — jv-guard
+screens the second build too, `core/GuardState.qml` reports *the last binary
+screened*, and a `clean` verdict is newer news from the same screener, so
+the refusal is off the corner before the retry gets as far as failing. For
+both plates to be lit the refusal has to be the NEWER screening and the
+failure has to belong to a DIFFERENT binary.
+
+Which is not a contrivance — it is the ordinary shape of two overlapping
+installs, and an install is the one thing on this bus that takes minutes:
+t=0 a long installer is fingerprinted, screened clean and given a prefix;
+t=200 the user, still waiting, grabs something else off a download site and
+jv-guard matches a signature in it; t=214 the first install, still going,
+dies inside its prefix. Every frame is one `install.py` and `jv-guard`
+really publish, in the order they publish them, with real timestamps — the
+heartbeat goes in LAST so the open mic is as fresh as the failure above it
+rather than 214 s stale.
+
+The `blocked` on `compat.install` at t=200 is the frame worth having a
+picture of. It lands in the middle of ANOTHER app's lifecycle, and
+`InstallState` reads it as no news at all: a clearing event there would have
+wiped the failure that arrives fourteen seconds later, and a failure there
+would have put `codec-pack` on the plate instead of `fl-studio`. A52's tests
+assert that rule; this is the first time the situation that makes it matter
+has been on a screen.
+
+**The sheet also stopped taking the fit on faith.** Every shot now asserts
+that `insetPx + stack.height <= surface height` — the real constraint, not a
+stricter one. A stack taller than the box is not a smaller sheet; it is a
+plate the compositor cuts in half on a panel floating over every window, and
+until now the only thing that had ever checked it was a person looking at a
+PNG and seeing nothing obviously wrong. Mutation: a 170 px surface fails on
+`03-heard.png` at 161 px tall and passed before.
+
+**What the picture shows that nothing asked for (A62).** The corner is
+describing two unrelated binaries and says so nowhere: `codec_pack_setup.exe`
+was refused, `fl-studio` failed, and they are stacked 8 px apart in the same
+severity colour. A reader who assumes one story reads "the thing that was
+blocked then failed" — the one sentence these frames do not support. Every
+plate here is true alone and the corner has no grammar for relating two of
+them. That is now written down rather than argued about.
+
+Two more things this iteration found and did not build. The fit check passes
+with 507 px of slack: the new shot is now the tallest committed one at 165 px
+of corner inside a 688 px box, and no shot lights more than three plates — so
+the case the box is actually sized for is still unphotographed and
+unasserted (A63). And `jv-guard`'s `decide()` returns only `clean` or
+`blocked` — no heuristic engine exists — so the `suspicious` verdict the
+policy sanctions, the override path `install.py` prints instructions for,
+and `GuardPlate`'s entire `warn` branch are unreachable on this machine
+today (A64). The `warn` colour was very nearly photographed this iteration
+before that came to light; a composed frame no code path can produce is a
+picture of an intention, which is the one thing this sheet must not quietly
+become.
+
+- tests: `bash ops/ralph/hudshots.sh` — 12 shots (was 11) and 15 cases, with
+  the other ELEVEN PNGs byte-identical, which is the check that the new
+  entry changed nothing else. One mutation run through the new fit check
+  (a 170 px surface box: FAILS now, passed before).
+  `bash ops/ralph/runtests.sh tools` — 131, and the two README gates failed
+  exactly as designed until the twelfth section was written (`shows
+  12-guard-install.png in 0 sections`).
+  `bash ops/ralph/qmltest.sh` — 536, unchanged: no file under
+  `shell/jv-hud` was touched.
+- build: `nix build .#jv-hud` ok, `nixos-rebuild build --flake .#ares` ok.
+  Never test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin.
+- files: tools/hudshots/scene/tst_shots.qml, docs/hud/README.md,
+  docs/hud/12-guard-install.png (new)
+- commit: 542797a
+- next: **A64 is the sharpest of the new three** and it is small: either
+  jv-guard grows the heuristic engine its own policy describes, or the HUD's
+  `warn` branch and `install.py`'s override message are documented as
+  waiting on one — right now three files describe a verdict nothing can
+  publish. A62 is a design question (does the corner need a grammar for
+  "these two are unrelated", or is that a thing §06 refuses?) and belongs to
+  a human. A63 wants one composed shot of a crowded corner, which is cheap
+  but wants A62 answered first or it is a picture of the exact confusion A62
+  names. **A60 is still the interesting one and still a human's.** A50/A55/
+  A47/A56/A59 unchanged and still want a decision; A21/A22/A25/A27/A31/A38/
+  A39 still want a human at ares. **B10/A28 — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this
+  loop.** B7/B12/B15/B17/B20/B23 unchanged.

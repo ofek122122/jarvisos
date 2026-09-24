@@ -1369,18 +1369,74 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       stack; (c) a genuinely new §06 shape, which is a design decision
       and not an implementation one. Discovered in A52.
 
-- [ ] A61. `10-guard.png` and `11-install.png` are the two halves of one
-      story and no picture has ever shown them together, though the pair
-      is exactly what a real refusal-then-retry produces: jv-guard blocks
-      an installer, the user fetches a different build, and that one
-      fails inside its prefix. Both plates would be up, and the box was
-      grown for precisely that case — so the growth is justified by an
-      argument no shot demonstrates. It is one more entry in
-      `tools/hudshots/scene/tst_shots.qml` (two topics, two frames each,
-      a caption of `guard install mic`), and worth taking the day
-      somebody is editing that file anyway. The same gap exists for every
-      other pair in a ten-plate stack; this is the one the box grew for.
-      Discovered in A52.
+- [x] A61. `10-guard.png` and `11-install.png` are the two halves of one
+      story and no picture has ever shown them together, though the box
+      was grown for precisely that case. — 542797a
+      (`12-guard-install.png`, caption `guard install mic`. The
+      refusal-then-retry this item described CANNOT produce it: jv-guard
+      screens the retried build too, and a `clean` verdict is newer news
+      from the same screener, so `GuardState` lets the refusal go before
+      the retry can fail. The refusal has to be the NEWER screening about
+      a DIFFERENT binary — which is just two overlapping installs, and an
+      install takes minutes: a long installer gets its prefix, the user
+      installs something else while waiting and jv-guard refuses it, and
+      the first install dies fourteen seconds later. Every frame is one
+      `install.py`/`jv-guard` really publish, in order, at real
+      timestamps, including the `blocked` on `compat.install` that lands
+      mid-lifecycle and that `InstallState` reads as no news — the shape
+      that makes A52's rule matter, on a screen for the first time. The
+      sheet also stopped taking the FIT on faith: every shot now asserts
+      `insetPx + stack.height <= surface height`, mutation-checked with a
+      170 px box. Tests: `bash ops/ralph/hudshots.sh` (12 shots, the
+      other eleven byte-identical), `... runtests.sh tools` (131),
+      `... qmltest.sh` (536, untouched).)
+
+- [ ] A62. The corner can show two plates about two unrelated things and
+      has no way to say so. `12-guard-install.png` is the first picture of
+      it: `codec_pack_setup.exe` was refused, `fl-studio` failed, the two
+      have nothing to do with each other, and they are stacked 8 px apart
+      in the same severity colour. A reader who assumes one story reads
+      "the thing that was blocked then failed", which is the one sentence
+      those frames do not support. Every plate in this HUD is true alone
+      and the stack has no grammar for relating two of them — and the pair
+      that reads MOST like one story (guard + install, joined in the
+      schemas by a sha256) is the pair that most often is not. This is a
+      design question and a human's: (a) leave it — a HUD is a list of
+      facts and the voice is where relationships live; (b) join what can
+      be joined (the sha256 IS in both frames, so "same binary" is
+      knowable and "different binary" therefore assertable); (c) a §06
+      shape for grouping, which is new design. Do not build (b) before
+      answering (a). Discovered in A61.
+
+- [ ] A63. The new fit check passes with over 500 px to spare, because no
+      shot lights more than three plates. The box is 300x688 and the
+      tallest committed shot is now A61's own, at 165 px of corner inside
+      it — so the case the box is actually SIZED for, six or eight plates
+      up at once, is neither
+      photographed nor asserted, and the four co-occurrence arguments in
+      `shell.qml`'s height binding are still arguments. A composed shot
+      that lights six or eight plates would close it and is cheap, but it
+      is a picture of exactly the confusion A62 names, so it wants A62
+      answered first. Discovered in A61.
+
+- [ ] A64. `GuardPlate`'s entire `warn` branch is unreachable on this
+      machine. `jv-guard`'s `decide()` returns `clean` or `blocked` and
+      nothing else — the `suspicious` rung of the approved policy needs a
+      heuristic engine, and the only scanners that exist are ClamAV (a
+      signature engine) and the test mock. So three files describe a
+      verdict nothing can publish: `schemas/guard.verdict.json`'s policy
+      note, `install.py`'s "override requires explicit confirmation — not
+      wired in v0" message, and the HUD's second colour for this plate.
+      Nearly photographed in A61 before it came to light, which is the
+      real cost: a composed frame no code path can produce would have put
+      a picture of an intention in a sheet whose value is that it is not
+      one. Two honest ways out and both are small: give jv-guard one
+      heuristic (PE entropy, missing Authenticode — both local, both
+      hash-free) so the rung exists, or label the `warn` branch and the
+      override message as waiting on one. The first is a jv-guard change
+      with its own tests; the second is three comments. Discovered in
+      A61.
+
 
 - [x] A53. `10-guard.png` is a picture only a human can tell apart from a
       picture of `ActionPlate`. — 754a49b
