@@ -39,8 +39,13 @@ def window_body(cfg: ContextConfig, ev: WindowEvent) -> dict:
         "app_id": ev.app_id,
         "title": title,
     }
+    # Absent, not empty: the schema's `workspace`/`monitor` are optional
+    # and a window whose workspace nothing has described says nothing
+    # about where it is rather than guessing.
     if ev.workspace is not None:
         body["workspace"] = ev.workspace
+    if ev.monitor is not None:
+        body["monitor"] = ev.monitor
     if ev.focused:
         body["focused"] = True
     if redacted:
