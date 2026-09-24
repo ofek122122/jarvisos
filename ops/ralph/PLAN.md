@@ -184,12 +184,38 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
 - [ ] C1. Propose and add genuinely new, on-brand capabilities here before building
       them — one line each, so a human can veto in the next `updates` read.
 
-- [ ] A12. A "thinking" state: between `audio.vad` speech_end and jv-voice's
-      `speaking` frame, Jarvis is working and the HUD says `idle`. That
-      under-claims (the safe direction), but the real signal exists —
-      `brain.request`/`brain.response` are frozen schemas the bridge does not
-      subscribe to. One line in `DEFAULT_TOPICS` plus one branch in
-      `core/SpeechState.qml`. No schema change needed. Discovered in A3.
+- [x] A12. A "thinking" state for the gap between Jarvis hearing you and you
+      hearing anything back. — 7eca614
+      (It used to read `idle`, which draws NOTHING, so the HUD went dark at
+      the one moment the user was waiting on it. Nothing on the bus says
+      "the brain accepted this", so the prompt is RECOGNISED: a wake-gated
+      utterance ending (ears disarms and transcribes there; jv-brain answers
+      every transcript final) or a `brain.request` from the non-voice
+      frontends. Ungated speech in the room is not a prompt — ears' VAD runs
+      continuously. It ends on `brain.response` (the only thing that can for
+      a silent or errored reply), on the first `speaking` frame after it, or
+      on a 30 s floor that mirrors no service's constant on purpose.
+      `listening` still outranks everything, and what jv-voice says is
+      AUDIBLE outranks thinking — observations beat inferences. The "we
+      already heard this answer start" fact is a LATCH, not a binding:
+      `bus.latest()` keeps only the newest frame per topic, so the
+      `speaking` frame is gone once the idle after it lands, and jv-brain
+      speaks one sentence per speech.say — derived, it flipped the word back
+      to `thinking` once per sentence. No schema change; the bridge just
+      subscribes to two already-frozen topics. 31 new QML tests, 18
+      mutations run through them. Tests: `bash ops/ralph/qmltest.sh`,
+      `bash ops/ralph/runtests.sh jv-hud-bridge`.)
+
+- [ ] A16. jv-voice publishes a `speaking`→`idle` PAIR per SENTENCE, because
+      jv-brain streams one `speech.say` per sentence. So a single answer
+      makes StatePlate blink off and on once per sentence, which §06 calls
+      churn rather than information. A12 stopped that gap from LYING (it no
+      longer claims idle) but not from flickering. jv-voice already tracks
+      `reply_group` to drop a whole turn on barge-in, so it can know a
+      streamed reply is ONE utterance and stay `speaking` across it —
+      publishing idle when the group drains, not when a sentence does. A
+      jv-voice change (permitted: not jv-act, not a schema), and it wants
+      care around barge-in and the urgent-preempt path. Discovered in A12.
 - [ ] A14. The HUD mirrors TWO jv-ears constants by hand — `wakeWindowS`
       (8 s, ears' `wake_timeout_s`) and `stallS` (1 s, ears'
       `CaptureMeter.STALL_S`) — because nothing publishes ears'
@@ -230,3 +256,5 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
   (3a3e8ec, 2026-09-24)
 - A6 — the sys.health glance: HealthState/HealthPlate, a corner that stays
   empty until something is actually wrong (7406009, 2026-09-24)
+- A12 — "thinking": the HUD stops going dark while Jarvis is working
+  (7eca614, 2026-09-24)

@@ -803,3 +803,99 @@ everything here (and every commit) since the last time you asked. Format per ent
   element that forgets to add itself will be invisible and nothing will
   notice. And the standing one, unchanged and unfixable by tests: nobody
   has ever LOOKED at this HUD on ares (A13).
+
+## 2026-09-24 — iteration 11 — A12: "thinking", the state the HUD was missing
+
+Picked A12 off the ladder (UI first; last three iterations were A6/B4/A4, so
+UI was still the first choice, and the previous entry's `next:` pointed here).
+
+- the hole: between Jarvis having your words and you hearing anything back,
+  `SpeechState` answered `idle` — and `StatePlate` draws NOTHING for idle.
+  So the one moment the user is actually waiting on the HUD was the one
+  moment it went dark. It now says `thinking`, and only ever while it can
+  point at a frame.
+- nothing on the bus announces "the brain accepted this", so the prompt has
+  to be RECOGNISED. Exactly two things are recognisable as one:
+  a wake-gated utterance ENDING — jv-ears disarms and transcribes at that
+  boundary, and jv-brain answers every transcript final, so it is a question
+  in flight — and a `brain.request`, which is how the non-voice frontends
+  (jv CLI, the replay harness) ask. A `speech_end` with no wake behind it is
+  just speech in the room (ears' VAD runs continuously, per A4) and means
+  nothing here; a test pins that, because it is the difference between a HUD
+  that reports Jarvis working and one that reports anyone talking.
+- three things end it: `brain.response` — the ONLY thing that can for a
+  `speak:false` CLI query or a reply that errored and was never spoken; the
+  first `speaking` frame after it; and `thinkWindowS` (30 s) under a brain
+  that died mid-turn. That constant deliberately mirrors NO service's
+  configuration, so it does not join A14's pile of hand-copied budgets: it
+  is a policy about how long the HUD is willing to assert work it cannot
+  see, and past it we fall back to jv-voice, which under-claims. The CPU
+  rung that explains a genuinely slow answer is already on screen (A6).
+- precedence, written down because it is the whole design: `listening`
+  first (the microphone is the costly claim, so re-asking mid-answer reads
+  as listening), then whatever jv-voice says is audible RIGHT NOW, then
+  thinking. `speaking`/`interrupted` are observations and thinking is an
+  inference; the inference must not talk over the observation.
+- one real design bug, found by the tests: "the user has heard this answer
+  START" cannot be derived. `bus.latest()` holds only the newest frame per
+  topic, so the `speaking` frame is GONE the moment jv-voice publishes the
+  idle after it — and since jv-brain publishes one speech.say per SENTENCE,
+  a derived version forgot between every pair of sentences and flipped the
+  word back to `thinking` once per sentence. It is a latch now, and it is
+  set on both edges that can make it true: a speech frame arriving, and the
+  prompt changing under an already-speaking Jarvis. The second edge is not
+  hypothetical — frames queue behind a slow consumer, so the answer can
+  arrive before the boundary that opened the window it closes, and a
+  `repliedAloud` binding would never have fired for it at all.
+- a known under-claim, recorded rather than fixed: two prompts in quick
+  succession can have the first one's reply close the second one's window,
+  because matching is by `ts` and not by id. `brain.response.in_reply_to`
+  names the audio.transcript final for the voice path, and the HUD does not
+  subscribe to transcripts (partials would flood the pipe for nothing). It
+  errs toward showing less, which is the direction this file always errs in.
+- no schema change. `brain.request`/`brain.response` were already frozen;
+  the bridge just subscribes. They are the first topics it carries whose
+  bodies hold conversation TEXT — that stays on this machine like everything
+  else (invariant 7), and no element reads those bodies: the HUD uses only
+  the fact that a frame exists and when. Said so in the bridge, so a future
+  element that wants the words makes that choice deliberately.
+- `StatePlate` needed no code at all — `thinking` falls into the quiet
+  branch of `dotColor`, so it is a word and not a third accent. §06 spends
+  the ember on Jarvis speaking and the teal on your open microphone;
+  working is neither.
+- proving the tests bite: 18 mutations, 17 caught. Both latch edges, the
+  latch failing to reset for a new prompt, any speech_end opening a window,
+  brain.response unable to close one, a reply answering a prompt it
+  predates, the older of two prompts owning the window, thinking outranking
+  what is audible, the window never timing out, a late prompt getting a
+  whole fresh window, an unaged prompt counting as fresh, an empty or
+  sourceless or hedged request being believed, an unreadable reply counting
+  as a reply, an unknown state word falling back to idle, and thinking
+  earning an accent.
+  The ONE survivor: dropping topic+src from `promptKey`, leaving seq@ts.
+  Equivalent in practice — the key exists only to detect a CHANGE, and a
+  cross-publisher `seq` collision (jv-ears and jv-cli both start at 0) would
+  also need an identical monotonic `ts`, which the clock does not hand out
+  twice. Kept anyway, because it costs one string concat and the reasoning
+  above is the kind that stops being true quietly.
+- tests: `bash ops/ralph/qmltest.sh` — 189 green, was 158 (31 new).
+  `bash ops/ralph/runtests.sh jv-hud-bridge` — 25. `bash
+  ops/ralph/runtests.sh tools` — 23. All also green INSIDE the nix sandbox
+  via jv-hud's checkPhase (qmllint then qmltestrunner).
+- build: `nix build .#jv-hud` ok; `nixos-rebuild build --flake .#ares` ok.
+  Never test/switch. No schema change, no jv-act, no boot path, no pins.
+- files: shell/jv-hud/core/SpeechState.qml,
+  shell/jv-hud/tests/tst_speechstate.qml, shell/jv-hud/StatePlate.qml,
+  services/jv-hud-bridge/jv_hud_bridge/bridge.py
+- commit: 7eca614
+- next: **A16**, discovered while building this and the most valuable thing
+  on the board now — jv-voice publishes a speaking/idle PAIR per sentence,
+  so one answer makes StatePlate blink off and on once per sentence. A12
+  stops that gap from lying, not from flickering, and §06 calls flicker
+  churn. jv-voice already tracks `reply_group` for barge-in, so it can know
+  a streamed reply is ONE utterance; that is a jv-voice change (permitted —
+  not jv-act, not a schema) and it wants care around barge-in and the
+  urgent-preempt path. Otherwise **A14** (ears publishing its own budgets
+  on sys.health, deleting two hand-mirrored constants) is still the best
+  non-UI slice. And the standing one, unchanged and unfixable by tests:
+  nobody has ever LOOKED at this HUD on ares (A13, A10).
