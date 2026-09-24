@@ -7924,3 +7924,115 @@ SEE what the mutant looked like.
   **B43/B47/B54** are one question asked three times, and **B10/A28** —
   one live recording of one spoken turn on ares — remains the biggest
   thing a human can hand this loop.
+
+## 2026-09-25 — iteration 78 — B55: the five relations the grader kept refusing to grade
+
+Track A is unchanged and still one human look at `docs/hud/` away from
+unblocking ten items; every remaining A item is either a human decision
+or carries its own "do NOT build this until X is answered", and the
+optimization backlog is human-review-required end to end. B55 was the
+one open item that was the loop's own, and it was raised as "a real
+design question rather than a flag", which is what this is about.
+
+**The gap, stated exactly.** Invariant 1 forbids one service importing
+another. So every claim this repo makes about a relation BETWEEN two
+services is made by reading the other's source and matching a line in it.
+There are five:
+
+- jv-compat's `VERDICT_TIMEOUT_S` against jv-guard's clamscan budget (B50)
+- the HUD's wake-window fallback against `jv_ears/config.py`
+- the HUD's capture-stall fallback against `jv_ears/audio.py`
+- LinkPlate's grace against `jv_hud_bridge/bridge.py`'s first backoff
+- LinkPlate's grace against `shell/jv-hud/Bus.qml`'s respawn interval
+
+The harness declined to grade every one of them, and the refusal was
+right: its canary makes the target impossible to LOAD, a suite that only
+greps it never notices, the canary lives, and the run aborts rather than
+printing a score it cannot stand behind. Both arms of B50's relation were
+therefore checked by hand — edit, run, restore — which is the practice
+B48 was written to delete.
+
+**The design.** A canary for a source-read relation has to make the file
+unMATCHABLE, not unloadable. So a file is offered its controls strongest
+first — unloadable, then ERASED — and whichever kills the suite IS the
+relation. Measured, never declared. That distinction is then carried all
+the way into the report, because the two are genuinely different
+sentences: a survivor on an executed file means "no test asserts this
+line"; on a read file it means "no test matches this text". And it is not
+only about survivors — "4 of 4 caught" against a file the suite greps is
+a claim about a regex, so the summary says `the suite reads <file> — it
+never runs it` whether or not anything survived.
+
+Three decisions inside that, each with the alternative rejected in place:
+
+1. **Erasure is EMPTY, not a marker.** Anything left in the file is
+   something a regex somewhere might still find, and a canary that can be
+   matched is not a canary. Its honest limit is the mirror of the Rust
+   canary's and is written down rather than discovered later: a NEGATIVE
+   claim ("this source contains nothing that looks like X") is green on
+   an empty file too, so the harness will refuse to grade it. That is the
+   refusing direction, which is the safe one — it declines to claim
+   rather than claiming wrongly.
+2. **The suffix stops being a refusal and becomes a choice of control.**
+   `--runner tests` on a `.qml` used to be an error before any suite ran,
+   and that error was wrong about a real case: the tools suite really
+   does match a line in `shell/jv-hud/Bus.qml`. What the old rule was
+   actually protecting — a Python `raise` appended to QML parses as
+   nothing, so the canary would live for a reason that says nothing about
+   the suite — is kept exactly: an off-language file is offered the ONE
+   control it could ever fail, and never the wrong language's canary.
+3. **A file that survives every control still aborts**, in two different
+   sentences, because two different things went wrong. Both canaries
+   lived = the suite has no relation with this file at all. Off-language
+   and the erasure lived = the only relation this runner could have had
+   is a read, and it does not read it. Naming an execution that was never
+   on the table would send the reader looking for the wrong thing. Both
+   live-canary runs are named now, not just the last — two live canaries
+   are two suite logs, and which one you open depends on which relation
+   you thought you had.
+
+**Graded for real, which is the whole point.**
+
+- `--runner tests jv-compat`, both arms of B50's relation, machine-run
+  for the first time: **2/2 caught**. run002 is the load canary living on
+  `scan.py` (10 passed), run003 the erasure killing it. The same grading
+  put `install.py` through ONE canary, because it is imported — so both
+  relations appear in one run and the summary distinguishes them.
+- `--runner tests tools`, all four theme/budget mirrors **including the
+  off-language `shell/jv-hud/Bus.qml`**: **4/4 caught**, 13 suite runs
+  against a printed floor of 10. The three extra runs are exactly the
+  three in-language files whose load canary had to be seen to live before
+  erasure was the honest thing to try; `Bus.qml` cost one canary, not two.
+
+The printed count says "at least" now for that reason.
+
+- tests: `runtests.sh tools` **254 green, was 245** — nine new, plus
+  three existing ones rewritten for a real behaviour change (the two that
+  asserted "wrong grader" now assert which controls the suffix chooses,
+  and the run-naming one asserts BOTH canary runs are named and the
+  baseline is not). Graded with the harness on itself: **9 mutations, 9
+  caught** — an erasure that left the file alone, an erasure that left a
+  matchable marker, both directions of a `controls_for` that ignores the
+  suffix, a relation reported as an execution whichever canary killed the
+  suite, the summary's relation line dropped, the survivor caveat
+  dropped, the read control handed the load canary, and an abort that
+  names only its last run. Canary red, closing baseline green, tree swept.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins, no production code at all.
+- files: tools/mutate.py, tools/tests/test_mutate.py, ops/ralph/mutate.sh
+- commit: 2c9800d
+- next: **B57** raised — the harness can now grade a relation it could
+  not, and grading four of the five in one run surfaced the next
+  question: the erasure canary on `bridge.py` made FIVE tools tests fail,
+  not one, so "the suite reads this file" is true of more than the
+  relation being graded, and nothing distinguishes a suite that reads a
+  file for one reason from one that reads it for five. Not a defect —
+  the control proves what it claims — but it is the shape of the next
+  overclaim if anyone reads the relation line as naming a single test.
+  Otherwise unchanged and now several iterations old: **Track A is one
+  human look at `docs/hud/` away from unblocking ten items** (A47, A55,
+  A62, A63, A68 and the A21/A22/A25 cluster are two questions asked five
+  ways), **B27** needs one decision between three named options,
+  **B43/B47/B54** are one question asked three times, and **B10/A28** —
+  one live recording of one spoken turn on ares — remains the biggest
+  thing a human can hand this loop.

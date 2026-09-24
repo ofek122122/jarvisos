@@ -1306,22 +1306,46 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       and this one was taken because refusing a clean binary is the worse
       failure. Discovered in B50.
 
-- [ ] B55. The mutation harness cannot grade a relation between two files
-      when one of them is READ rather than imported. `--runner tests
-      jv-compat` correctly refused to grade a mutation of
-      `services/jv-guard/jv_guard/scan.py`: its canary made that file
-      impossible to load, jv-compat's suite stayed green (it never imports
-      it — it regexes the source, per invariant 1), and the harness said so
-      and exited 2 instead of claiming anything. The refusal is right and
-      the coverage gap is real: this is the same shape as
-      `RECONNECT_CADENCES` and `BUDGET_MIRRORS` in
-      tools/tests/test_gen_theme_qml.py, so there are already three
-      source-read relations in this repo that the grader declines to grade,
-      and both arms of B50's new one had to be checked by hand (edit,
-      run, restore). A canary for a source-read reference is a different
-      control — the file must be made unMATCHABLE, not unloadable, and the
-      suite must go red — which is a real design question rather than a
-      flag. Discovered in B50.
+- [x] B55. The mutation harness could not grade a relation between two
+      files when one of them is READ rather than imported. — 2c9800d
+      (There were FIVE, not three: jv-compat's copy of jv-guard's scan
+      budget, the HUD's two fallback budgets against jv-ears', and
+      LinkPlate's grace against both reconnect cadences. A file is now
+      offered its controls strongest first — unloadable, then ERASED — and
+      whichever kills the suite IS the relation, measured rather than
+      declared, and carried into the report: a survivor on an executed
+      file means "no test asserts this line", on a read file "no test
+      matches this text", and the summary says `the suite reads <file> —
+      it never runs it` whether or not anything survived, because "4 of 4
+      caught" against a file the suite greps is a claim about a regex.
+      Erasure is EMPTY and not a marker (anything kept is something a
+      regex might still find) with its limit written down: a NEGATIVE
+      claim is green on an empty file too, so the harness refuses — the
+      safe direction. The suffix stopped being a refusal and became a
+      choice of control, because the refusal was wrong about a real case:
+      the tools suite really does match a line in `shell/jv-hud/Bus.qml`.
+      An off-language file gets the one control it could ever fail, so a
+      Python `raise` is never appended to QML. Graded for real: B50's
+      relation 2/2 caught, all four theme/budget mirrors 4/4 including the
+      off-language one, 13 runs against a printed floor of 10. Tests:
+      `bash ops/ralph/runtests.sh tools` 254, was 245; 9 mutations, 9
+      caught.)
+
+- [ ] B57. "The suite reads this file" is true of more than the relation
+      being graded, and nothing distinguishes the two. The erasure canary
+      on `services/jv-hud-bridge/jv_hud_bridge/bridge.py` made FIVE tools
+      tests fail, not the one that holds `RECONNECT_CADENCES` — so the
+      control proves the suite depends on that file's text somehow, which
+      is exactly what it claims and is weaker than a reader will assume.
+      A relation line naming a single test would be a stronger and
+      different claim, and the harness cannot make it: it knows which
+      suite went red, never which assertion. Two honest ways: leave it and
+      say so where the line is printed (it already says "reads", not
+      "asserts"), or have the runner report WHICH tests the erasure killed
+      and intersect that with the tests the mutation killed — real work,
+      and per-runner, since only pytest names them cheaply. Worth deciding
+      the day a read relation reports a survivor nobody can explain.
+      Discovered in B55.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
