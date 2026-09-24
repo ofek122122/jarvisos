@@ -8,6 +8,13 @@
 # after any change to shell/jv-hud and commit the diff — a HUD whose look
 # changed and whose sheet did not is a HUD nobody looked at.
 #
+# It also runs the one suite that needs this same stage and takes no
+# pictures: tst_sequence.qml (A54) replays the recorded sessions through the
+# real plates and asserts the corner's TRAJECTORY — which plates go up, in
+# what order, at which second of a real turn. A shot is one settled instant;
+# a plate that arrives a frame late or leaves a frame early only shows in
+# the sequence.
+#
 # WHY THERE IS A STAGING COPY. The plates reach for two singletons that
 # import Quickshell — `Bus` (it runs the bridge child through
 # Quickshell.Io) and `Motion` (it reads one environment variable through
@@ -54,11 +61,16 @@ rm -f "$stage/shell.qml"
 # …with the two Quickshell-bound singletons replaced, and nothing else.
 cp "$root/tools/hudshots/stub/Bus.qml" "$stage/Bus.qml"
 cp "$root/tools/hudshots/stub/Motion.qml" "$stage/Motion.qml"
-# The driver sits in a subdirectory with no qmldir of its own, so the
-# recordings next to it resolve by plain directory import — the same shape
-# shell/jv-hud/tests uses, and the same generated file.
+# The drivers sit in a subdirectory with no qmldir of its own, so the
+# recordings and the shared corner next to them resolve by plain directory
+# import — the same shape shell/jv-hud/tests uses, and the same generated
+# file. Both drivers run: tst_shots.qml writes the contact sheet, and
+# tst_sequence.qml asserts the corner's trajectory across a whole recorded
+# turn (A54) — which plates go up, in what order, at which second. It needs
+# the same stage and nothing else, so it runs here rather than in a second
+# copy of this assembly.
 mkdir -p "$stage/shots"
-cp "$root/tools/hudshots/scene/tst_shots.qml" "$stage/shots/"
+cp "$root"/tools/hudshots/scene/*.qml "$stage/shots/"
 cp "$root/shell/jv-hud/tests/Sessions.qml" "$stage/shots/"
 
 # The faces theme.toml names, pinned rather than borrowed from whatever
@@ -92,16 +104,17 @@ for family in "JetBrains Mono" "Archivo"; do
 done
 
 # The linter the jv-hud build runs, over the thing that will actually be
-# rendered. The stubs and the driver live outside shell/jv-hud, so this is
-# the only place they are ever linted; without it they would be the one
-# corner of the HUD with no gate on it.
+# rendered. The stubs, the shared corner and both drivers live outside
+# shell/jv-hud, so this is the only place they are ever linted; without it
+# they would be the one corner of the HUD with no gate on it.
 "$qtdecl/bin/qmllint" -W 0 --uncreatable-type disable \
   -I "$qtdecl/lib/qt-6/qml" \
   $(find "$stage" -name '*.qml' | sort)
 
 mkdir -p "$out"
-# The driver writes relative to the working directory: a QML test cannot
-# read an environment variable, so this is how it is told where to look.
+# The sheet's driver writes relative to the working directory: a QML test
+# cannot read an environment variable, so this is how it is told where to
+# look. The runner takes the whole directory, so both drivers run.
 cd "$out"
 export QT_QPA_PLATFORM=offscreen
 export HOME="$stage"

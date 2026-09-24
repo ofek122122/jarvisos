@@ -34,6 +34,17 @@ the zero exclusive zone, focus behaviour and the three real monitors are
 `shell.qml`'s, and only a human at ares can confirm them. This is the
 CONTENT of one surface.
 
+**And not a sequence.** Every picture here is one settled instant, so the
+class of bug it cannot show is the one this corner can actually have: a plate
+that arrives a frame late, leaves a frame early, blinks in the middle of an
+utterance, or comes up in the wrong order relative to the plate it qualifies.
+That part is asserted rather than photographed —
+`tools/hudshots/scene/tst_sequence.qml` (PLAN A54) replays the same recordings
+through the same plates and checks the corner's whole trajectory: which plates
+go up, in what order, at which second of a real turn. It runs beside the sheet
+in `ops/ralph/hudshots.sh`, and both drivers build the same corner
+(`tools/hudshots/scene/Corner.qml`, pinned to `shell.qml`'s stack by a test).
+
 ## The sheet
 
 Frames are either **recorded** — replayed verbatim from

@@ -25,7 +25,12 @@ SHELL = ROOT / "shell" / "jv-hud"
 SHOTS = ROOT / "tools" / "hudshots"
 SHEET = ROOT / "docs" / "hud"
 
-SCENE = SHOTS / "scene" / "tst_shots.qml"
+SCENE_DIR = SHOTS / "scene"
+SCENE = SCENE_DIR / "tst_shots.qml"
+# The corner stack both drivers build: the sheet (A29) and the sequence
+# replay (A54). One copy of shell.qml's stack, in one file, so that "the
+# harness stacks what the shell stacks" is one claim and not one per driver.
+CORNER = SCENE_DIR / "Corner.qml"
 
 # Every member a QML file offers its consumers: properties (including
 # aliases), functions and signals, declared at any depth — the HUD writes
@@ -67,19 +72,38 @@ def sheet() -> list[tuple[str, list[str]]]:
     return out
 
 
-def test_the_sheet_stacks_the_same_plates_the_shell_does():
-    """The scene is a copy of shell.qml's corner stack, and a copy of a list
-    is a list that goes stale. A plate the shell shows and the sheet does not
-    is a plate nobody has ever seen a picture of — which is the exact thing
-    this whole harness exists to prevent.
+def test_the_harness_stacks_the_same_plates_the_shell_does():
+    """Corner.qml is a copy of shell.qml's corner stack, and a copy of a list
+    is a list that goes stale. A plate the shell shows and the harness does
+    not is a plate nobody has ever seen a picture of — nor asserted a
+    trajectory for (A54) — which is the exact thing this harness exists to
+    prevent. The ORDER matters as much as the membership: it is the reading
+    order of the corner, and both drivers assert `litNames` against it.
     """
     shell = plate_stack_children((SHELL / "shell.qml").read_text("utf-8"))
-    scene = plate_stack_children(scene_text())
-    assert scene == shell, (
-        "tools/hudshots/scene/tst_shots.qml stacks "
-        f"{scene} but shell.qml stacks {shell} — regenerate the scene (and "
+    corner = plate_stack_children(CORNER.read_text("utf-8"))
+    assert corner == shell, (
+        "tools/hudshots/scene/Corner.qml stacks "
+        f"{corner} but shell.qml stacks {shell} — regenerate the corner (and "
         "then the sheet: bash ops/ralph/hudshots.sh)"
     )
+
+
+def test_no_driver_keeps_its_own_copy_of_the_corner():
+    """There was one copy of the stack per harness until Corner.qml (A54), and
+    the sequence replay would have made a second. Copies of a list are the
+    failure this file exists to catch, so the drivers must not hold one: a
+    plate declared inside a driver is a plate that is in one harness and not
+    the other, and the check above would not see it.
+    """
+    for driver in sorted(SCENE_DIR.glob("tst_*.qml")):
+        stray = re.findall(
+            r"^\s*(\w+Plate)\s*\{", strip_qml_comments(driver.read_text("utf-8")), re.M
+        )
+        assert not stray, (
+            f"{driver.name} declares {sorted(set(stray))} itself — stack plates "
+            "in Corner.qml, which is the one file pinned to shell.qml"
+        )
 
 
 def test_the_stub_bus_offers_everything_the_real_one_does():

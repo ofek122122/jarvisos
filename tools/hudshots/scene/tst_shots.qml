@@ -36,7 +36,6 @@
 import QtQuick
 import QtTest
 import ".."
-import "../core"
 
 Item {
   id: root
@@ -62,55 +61,24 @@ Item {
     color: root.backdrop
   }
 
-  // The corner stack, as shell.qml composes it: same order, same anchors,
-  // same margins. It is a copy, and a copy is a thing that drifts, so
-  // tools/tests/test_hudshots.py reads the plate list out of both files
-  // and fails if they stop matching — a new plate that never appears in
-  // the sheet would be a new plate nobody ever looked at.
-  PlateStack {
+  // The corner stack, as shell.qml composes it: same plates, same order,
+  // same self-anchoring. It lives in Corner.qml next door because the
+  // sequence replay (A54) drives the same stack, and two harnesses with
+  // two copies of it would be two things to keep matching shell.qml.
+  // tools/tests/test_hudshots.py reads the plate list out of Corner.qml and
+  // out of shell.qml and fails if they stop matching — a new plate that
+  // never appears in the sheet would be a new plate nobody ever looked at.
+  //
+  // The inset is here rather than in Corner: the shot is the whole surface
+  // box, so the plates have to sit where they sit on it, and the replay
+  // next door has no box at all.
+  Corner {
     id: stack
 
     anchors.top: parent.top
     anchors.right: parent.right
     anchors.topMargin: Theme.insetPx
     anchors.rightMargin: Theme.insetPx
-    spacing: Theme.gapPx
-
-    LinkPlate {
-      anchors.right: parent.right
-    }
-
-    ConfirmPlate {
-      anchors.right: parent.right
-    }
-
-    StatePlate {
-      anchors.right: parent.right
-    }
-
-    OutputPlate {
-      anchors.right: parent.right
-    }
-
-    HeardPlate {
-      anchors.right: parent.right
-    }
-
-    ActionPlate {
-      anchors.right: parent.right
-    }
-
-    GuardPlate {
-      anchors.right: parent.right
-    }
-
-    MicPlate {
-      anchors.right: parent.right
-    }
-
-    HealthPlate {
-      anchors.right: parent.right
-    }
   }
 
   // The recorded sessions, compiled to QML by tools/gen_sessions_qml.py
