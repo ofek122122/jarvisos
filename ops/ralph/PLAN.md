@@ -661,7 +661,55 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       right (you see it wherever you look) or noise. Needs a human eye on
       ares before it is worth changing. Discovered in A3.
 
+- [x] A29. The HUD can be looked at without sitting at ares. — fea019c
+      (`docs/hud/*.png`: seven shots of one real surface at its real size,
+      written by `ops/ralph/hudshots.sh`. The plates are the real files,
+      the theme is generated from `personality/theme.toml`, the faces are
+      JetBrains Mono and Archivo pinned from the flake, and every frame
+      goes in through the same `core/BusModel.qml` the running HUD uses —
+      three shots replay `harness/fixtures/sessions` verbatim (B3) and the
+      rest are composed, which `docs/hud/README.md` states per shot,
+      because a composed picture is a picture of an intention and only a
+      recorded one is evidence about the machine. The harness STAGES a
+      copy of `shell/jv-hud` with exactly two files replaced — `Bus.qml`
+      and `Motion.qml`, the only two that import Quickshell, whose QML
+      plugin is linked into the quickshell binary — so `pkgs/jv-hud` is
+      untouched and the shipped shell has no idea this exists. Three
+      duplications are gated in `tools/tests/test_hudshots.py` (the scene's
+      plate stack against shell.qml's, the stubs' members against the real
+      singletons', the shots taken against the shots committed); all four
+      gates were mutation-checked. The PNGs are not byte-compared — a pixel
+      assertion breaks when a font ships a new version. Tests:
+      `bash ops/ralph/runtests.sh tools`.)
+
+- [ ] A30. The sheet is the CONTENT of one surface and nothing else:
+      layer-shell, the empty input mask, the zero exclusive zone, focus
+      behaviour and the three real monitors are all `shell.qml`'s, and
+      A13/A27 — three copies of one plate across three screens — is exactly
+      the question a single-surface photograph cannot answer. A headless
+      wlroots compositor (cage, or sway with `WLR_BACKENDS=headless`) plus
+      `grim` could photograph the REAL quickshell surface, on three
+      outputs at ares' real resolutions, and would answer A13/A27 without
+      anybody being at the machine. Deliberately not attempted in A29: a
+      compositor inside the loop's sandbox is a much larger and flakier
+      thing than a QML engine, and a flaky gate is worse than an honest
+      gap. Worth one iteration of its own. Discovered in A29.
+
+- [ ] A31. A29 cannot photograph time. A21 (the confirm window shortening),
+      A22 (granted / denied / timed out leaving differently) and A25 (how
+      long the HUD has been blind) are all questions about what a plate
+      does over seconds, and a still frame answers none of them — the sheet
+      makes those three EASIER to reason about and no closer to decided.
+      The honest still-image version is a strip: the same shot at fade
+      start, mid and settled, side by side, which is a picture of a
+      transition without pretending to be motion. Cheap once A29 exists
+      (one more loop in the driver); worth building only if the human
+      answering A21/A22/A25 says the stills were not enough. Discovered in
+      A29.
+
 ## Done
+- A29 — the HUD, photographed: docs/hud contact sheet rendered from the
+  real plates (fea019c, 2026-09-24)
 - B11 — `jv health --check`: the machine can be asked whether it is well,
   and answers with its exit code (c8b2967, 2026-09-24)
 - A26 — the HUD says what it heard: HeardState/HeardPlate, and the

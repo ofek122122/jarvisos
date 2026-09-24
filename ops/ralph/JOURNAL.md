@@ -2533,3 +2533,125 @@ backend=cpu`, `1 not well`, exit 1.
   record one real spoken turn off the live bus (`harness/record.py`). That
   sitting is now cheaper to prepare for: `jv health --check` tells the
   person whether the machine is ready before they start.
+
+## 2026-09-24 — iteration 27 — A29: the HUD, photographed
+
+Track A is almost entirely human-blocked and has been for three
+iterations. A11 waits on schemas (R1), A18 waits on a topic that does not
+exist yet, and A13/A21/A22/A25/A27 all wait on the same sentence, now
+twenty-six iterations old: *somebody has to sit at ares and look at it.*
+Track B is in the same shape — B7 says not yet, B8 says not until there is
+a second caller, B10 needs a person at the microphone, B12 needs
+`sys.roster` to exist. The backlog in docs/optimization-backlog.md is, by
+its own title, human-review-required end to end.
+
+So the highest-value thing available was not another element. It was to
+attack the blocker itself.
+
+**What was built.** `ops/ralph/hudshots.sh` renders the HUD to PNG and
+`docs/hud/` holds the result: seven shots of one surface at its real size
+(300x560, the box shell.qml asks the compositor for), with a README that
+says, per shot, where its frames came from. The plates are the real files.
+Theme is the generated one. The faces are JetBrains Mono and Archivo,
+pinned out of the flake and checked with `fc-match` before anything
+renders, because a sheet drawn in DejaVu would be a picture of a fallback.
+Every frame goes in as a JSON line through `core/BusModel.qml` — the same
+state machine the running HUD uses.
+
+Three of the seven replay `harness/fixtures/sessions` verbatim (B3): the
+LISTENING shot is the real wake at 1.44 s, and the HEARD shot carries the
+words faster-whisper actually returned off a committed WAV. Four are
+composed. **The README says which, per shot, and that line is the whole
+value of the sheet** — a composed picture is a picture of an intention,
+and only a recorded one is evidence about the machine. The composed frame
+that matters is `speaking`: nothing in this repo has ever recorded
+jv-voice answering, which is exactly what B10/A28 have been asking a human
+for, and now there is a picture of the assumption.
+
+**How it can exist at all.** The plates reach for two singletons that
+import Quickshell — `Bus` (it runs the bridge child through Quickshell.Io)
+and `Motion` (it reads one environment variable through Quickshell.env) —
+and quickshell links its QML plugin into its own binary, so no other
+engine can resolve either. QML resolves a singleton through the
+directory's qmldir, so the only way to substitute one is to *be* that
+directory: the script stages a copy of `shell/jv-hud` and replaces exactly
+those two files. Everything else is verbatim, and the staged tree is
+linted with the jv-hud build's own qmllint invocation — the only gate the
+stubs and the driver have, since they live in `tools/hudshots/` on purpose
+so that `pkgs/jv-hud` and the shipped shell are untouched by any of this.
+
+**Three duplications, three gates, all four mutation-checked.** Every one
+of these fails silently, which is why each is a test rather than a note:
+
+- a plate added to shell.qml and not to the scene still renders six
+  perfectly good pictures of a HUD that no longer exists;
+- a member the stub `Bus` forgot reads as `undefined`, and a plate that
+  gets `undefined` decides it has nothing to say — a correct plate,
+  photographed blank;
+- a shot taken and never committed is one nobody can look at without
+  running the harness, and an orphaned PNG is a photograph of a HUD that
+  has since changed.
+
+Plus a fourth: the grey behind the plates must not be a `theme.toml`
+colour. The real surface is transparent, the PNG has to put *something*
+behind it or the 0.86 plate opacity is invisible, and if that something
+were ever a palette entry a reader would have no way to tell the
+photograph's paper from Jarvis's own colours.
+
+Two decisions worth stating.
+
+**The PNGs are not byte-compared against anything.** The obvious next move
+is a golden-image test, and it is wrong here: a pixel assertion breaks when
+a font ships a new version or Qt changes its rasterizer, and it would fail
+in a way nobody can read. The point of this directory is a picture a person
+can look at, not a comparison a machine can make. What IS asserted is
+`stack.anyLit` per shot — a contact sheet of seven empty rectangles would
+look exactly like a HUD with earned emptiness and would actually be a
+broken harness, and that one line is what tells the two apart.
+
+**The sheet is the CONTENT of one surface and says so loudly.** Layer-shell,
+the empty input mask, the zero exclusive zone, focus behaviour and the
+three real monitors are all `shell.qml`'s, and none of them are exercised
+here. That means A13/A27 — three copies of one plate across three screens
+— is precisely the question a single-surface photograph cannot answer.
+Claiming otherwise would have made this worse than nothing, so the README
+and the scene's own header both refuse the claim, and A30 records the way
+to actually get it: a headless wlroots compositor (cage, or sway with
+`WLR_BACKENDS=headless`) plus `grim`, photographing the REAL quickshell
+surface on three outputs at ares' real resolutions. That was deliberately
+not attempted today — a compositor inside this sandbox is a much larger
+and flakier thing than a QML engine, and a flaky gate is worse than an
+honest gap.
+
+A31 records the other half of what a still cannot do: A21, A22 and A25 are
+all questions about what a plate does over *seconds*, and the sheet makes
+them easier to reason about without bringing any of them closer to decided.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 66 (was 60). Four mutations
+  run through the new gates, four caught: a plate in shell.qml's stack and
+  not the scene's, a function dropped from the stub Bus, a shot renamed so
+  its PNG is not committed, and the backdrop set to a palette colour.
+  `bash ops/ralph/qmltest.sh` — 347, untouched and green.
+- build: `nix build .#jv-hud` ok (unchanged — nothing in `shell/jv-hud`
+  was edited), `nixos-rebuild build --flake .#ares` ok. Never test/switch.
+  No schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin touched.
+- files: ops/ralph/hudshots.sh, tools/hudshots/{stub/Bus.qml,
+  stub/Motion.qml, scene/tst_shots.qml}, tools/tests/test_hudshots.py,
+  docs/hud/{README.md, 01..07*.png}, ops/ralph/PLAN.md
+- commit: fea019c
+- next: **look at `docs/hud/`.** That is the ask, and it is now four
+  minutes of scrolling rather than a seat at the machine. Specifically:
+  is 01 (all quiet) the right amount of nothing; does 05 want a shortening
+  hairline for its 15 s window (A21) and a word on the way out (A22); does
+  07 want "NO BUS FOR 4 MIN" (A25). Those three are one human opinion, not
+  three. Still genuinely needing the machine, and unchanged: (1) the
+  layer-shell behaviour the sheet cannot show — no focus stolen, clicks
+  passing through, the surface yielding to fullscreen — which is
+  `JV_HUD_SELFTEST=1 jv-hud` and five seconds of looking; (2) whether
+  three copies of one plate across three screens is right or noise
+  (A13/A27), or **A30**, which would answer it without anyone being there;
+  (3) **B10** — one real spoken turn recorded off the live bus
+  (`harness/record.py`), which would turn shot 04 from an assumption into
+  a recording. `jv health --check` (B11) will tell you whether the machine
+  is ready before you start.
