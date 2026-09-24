@@ -2433,3 +2433,103 @@ bus").
   plate, and five seconds with jarvisd stopped for the blind plate;
   (2) say whether the labels are JetBrains Mono; (3) **B10** — record one
   real spoken turn off the live bus (`harness/record.py`).
+
+## 2026-09-24 — iteration 26 — B11: the machine can be asked whether it is well
+
+Track A is where it was: A11 waits on a schema review, A13/A21/A22/A25/A27
+on a human eye that has now been asked for twenty-five times, A28 and B10
+on one recorded utterance off the live bus, A18 on a topic that does not
+exist yet. The last three iterations were all UI, which is the ladder's own
+signal to take a feature instead — and `docs/optimization-backlog.md` has
+nothing to offer (B1 settled that: all 27 findings are human-review-gated).
+So this one went to the debug CLI, which is where the standing human ask
+actually gets easier: the person who finally sits at ares needs a way to
+ask this machine a question and get an answer, not a stream to read.
+
+`jv health` could only FOLLOW. One line per heartbeat, forever, until
+Ctrl-C — fine to watch, impossible to ask and impossible to script. There
+was no command anywhere in this repo that answers "is Jarvis well right
+now", and the only thing that knew was a QML element on a surface nobody
+has ever seen.
+
+`jv health --check` listens for one window and answers once: a line per
+service heard from, worst first, then the footer, then an exit code that
+IS the answer. That last part is the point — `jv health --check || notify`
+is a thing a human can put in a shell.
+
+Three rules hold it to the truth, and they are deliberately the SAME three
+as the HUD's `core/HealthState.qml`, because they are properties of
+`sys.health` rather than of either reader:
+
+- **The roster is who has spoken.** Nothing on the bus says which services
+  are supposed to be running (that is proposal R5, still unreviewed), so a
+  service that never started is ABSENT from the report, not failed. The
+  footer therefore always states the window — "heard from 4 services in
+  6.0s" — because the count means nothing without the listening time, and
+  because absence is the half of the answer this command may not give.
+- **A heartbeat expires.** The schema grants a frame two of its own
+  periods; past that it is `lost`, and its `notes` are dropped, because
+  they described a moment that has passed.
+- **Unreadable is not fine.** A wrong `v`, a hedged `conf`, a body naming
+  a service other than the one the broker saw publish it, a missing or
+  non-positive `period_s`, a state word outside the frozen enum: all
+  `unknown`, all printed, all non-zero exit. `lost` and `unknown` rank
+  ABOVE `degraded` — a service that told us it is impaired is in better
+  shape than one we cannot hear or cannot read.
+
+Two decisions beyond the port:
+
+**Silence is not an all-clear.** A bus nobody heartbeats on prints "heard
+from no service in 6.0s" and exits 1. The tempting alternative — nothing
+wrong was found, so exit 0 — is the exact failure this whole command
+exists to prevent, and it is the one a script would believe.
+
+**`--check` and `--count` cannot both be asked.** They are two different
+exit policies for one status: `-n` means "non-zero if I did not get N
+frames", `--check` means "non-zero if the machine is not well". Clap
+refuses the combination, so a usage error stays exit 2 and can never be
+read as "not well". `--for` is not a conflict — it IS the window, and the
+default 6 s is one nominal heartbeat period plus a margin. Ctrl-C ends the
+window early and still answers, for as long as it listened, which the
+footer states.
+
+The llm rung came along because it is the single number that explains why
+Jarvis got slow: read off jv-brain's own heartbeat BY NAME (not from
+whoever published `llm_rung` last), suppressed entirely when the brain is
+unreadable or expired, and never rendered as "gpu" on a guess — a half-known
+gauge prints `backend=?` rather than a reassuring word.
+
+Verified against a real broker and the real binaries, not only the test
+harness: a lone `jarvisd` reads `all well` / exit 0, and a pumped degraded
+brain reads `jv-brain degraded ... fell back to CPU` first, `llm rung=4
+backend=cpu`, `1 not well`, exit 1.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 51 unit (was 36) and 27
+  integration (was 21), 22 mutations run through them. TWO survived the
+  first pass and both were real: a `period_s` of 0 or less was believed,
+  which made `lost()` fire instantly and report a perfectly talkative
+  service as having gone quiet (it is an unreadable body — the schema says
+  exclusiveMinimum 0 — and now reads `unknown`); and `starting`/`stopping`
+  exited 0 when they were the only finding, which would tell a caller right
+  after boot that a service still coming up is ready. Both now have their
+  own test; 22/22 caught on the re-run.
+- build: `nix build .#jarvisd` ok (its checkPhase runs the suite),
+  `nixos-rebuild build --flake .#ares` ok, `nix flake check --no-build` ok.
+  Never test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin touched.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs, ops/ralph/PLAN.md
+- commit: c8b2967
+- next: **B12**, discovered here and the sharper half of what this command
+  cannot do. `--check` can say a service is not well and can never say one
+  is MISSING, so on a machine where jv-ears died at boot it prints a short,
+  clean, exit-0 report — which is R5's gap arriving in a second reader, and
+  the second reader is what R5 said it was waiting for. Worth noting the
+  proposal now has two callers, not one. Beyond that the standing ask is
+  unchanged and TWENTY-SIX iterations old: one sitting at ares to (1) look
+  at the HUD — `JV_HUD_SELFTEST=1 jv-hud`, a real wake word, a destructive
+  action for the confirm plate, five seconds with jarvisd stopped for the
+  blind plate; (2) say whether the labels are JetBrains Mono; (3) **B10** —
+  record one real spoken turn off the live bus (`harness/record.py`). That
+  sitting is now cheaper to prepare for: `jv health --check` tells the
+  person whether the machine is ready before they start.

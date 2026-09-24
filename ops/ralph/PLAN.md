@@ -319,6 +319,29 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       "nobody has looked at the HUD" item, so ask for both together.
       Discovered in B9.
 
+- [x] B11. `jv health` can be asked a question. — c8b2967
+      (`jv health --check` listens for one window — `--for SECS`, default 6,
+      a nominal heartbeat period plus a margin — then prints one line per
+      service HEARD FROM, worst first, the llm rung when jv-brain reports
+      it, and a footer; exit 0 only when every service heard from is `ok`.
+      Built on the same three rules as `core/HealthState.qml`, because they
+      belong to `sys.health` and not to either reader: the roster is who has
+      spoken, a heartbeat speaks for two of its own periods, and unreadable
+      is `unknown` and ranks above `degraded`. Silence is NOT an all-clear —
+      a bus nobody heartbeats on exits 1 — and `--check` conflicts with
+      `--count` so a usage error (exit 2) is never read as "not well". 51
+      unit + 27 integration tests, 22 mutations, 22 caught after two real
+      survivors were fixed. Tests: `bash ops/ralph/cargotest.sh jarvisd`.)
+
+- [ ] B12. `jv health --check` can say a service is not well and can never
+      say one is MISSING: on a machine where jv-ears died at boot it prints
+      a short, clean, exit-0 report. That is exactly R5's gap, now arriving
+      in a SECOND reader — which is what R5 said it was waiting for, so the
+      proposal is worth a human's attention with two callers behind it
+      rather than one. Nothing to build until `sys.roster` exists; when it
+      does this is one more section in the report and one more reason to
+      exit 1. Discovered in B11.
+
 ## Track C — Creative (within blueprint + invariants)
 - [ ] C1. Propose and add genuinely new, on-brand capabilities here before building
       them — one line each, so a human can veto in the next `updates` read.
@@ -639,6 +662,8 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       ares before it is worth changing. Discovered in A3.
 
 ## Done
+- B11 — `jv health --check`: the machine can be asked whether it is well,
+  and answers with its exit code (c8b2967, 2026-09-24)
 - A26 — the HUD says what it heard: HeardState/HeardPlate, and the
   recordings that refused it a confidence bar (d7ac325, 2026-09-24)
 - A24 — "which services are supposed to be running" written up as proposal
