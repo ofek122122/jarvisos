@@ -460,6 +460,53 @@ Item {
       suite.micOpen();
     }
 
+    // COMPOSED, and the first picture of the middle rung (A66). Until
+    // jv-guard grew a shape engine (A64), `decide()` could only ever
+    // return `clean` or `blocked` — so `GuardPlate`'s `warn` branch was a
+    // colour with no producer, and a shot of it would have been a picture
+    // of an intention rather than of anything this machine does.
+    //
+    // It has a producer now, and this is what it looks like: not malware.
+    // A decade-old widescreen patch for a game, which its author ran UPX
+    // over to make it one small download, in which ClamAV recognises
+    // nothing at all — and which is shaped, byte for byte, exactly like
+    // something hiding. That is the case the middle rung is FOR, and it is
+    // also why the rung has to be a rung: `blocked` would be a lie about
+    // this file and `clean` would be a promise nothing here can make.
+    //
+    // Every string in this frame is one services/jv-guard really produces
+    // for a binary of this shape. tools/tests/test_hudshots.py builds a
+    // UPX-shaped PE, runs the real `PEHeuristicScanner` and the real
+    // `decide()` over it, and compares the verdict, the three reasons and
+    // `scanned_by` to this literal — so the sentences photographed here
+    // cannot drift away from the sentences jv-guard says.
+    //
+    // Those reasons reach NO pixel, and that is this plate's rule rather
+    // than this shot's omission: `core/GuardState.qml` never reads
+    // `reasons`, because schemas/guard.verdict.json says they are spoken
+    // on request. What differs between this picture and 10-guard.png is
+    // one word and one colour — `SUSPICIOUS` in `warn` where that one says
+    // `BLOCKED` in `risk` — and what the colour is carrying is whether
+    // anything can still be done about it. Today: not from here and not
+    // from anywhere. The override goes through a confirmation flow nobody
+    // has wired to this verdict yet (A65), so what you are looking at is
+    // an install that stopped in front of a door with no handle on it.
+    function shot_suspicious() {
+      Bus.ingest('{"t":"link","up":true}');
+      suite.micOpen();
+      suite.send("guard.verdict", "jv-guard", {
+        "sha256": "3ac10e7f5d92b48061c3fa2e7b5d0498f16a2c7d3e8b90154fa6c2d71e08b93f",
+        "verdict": "suspicious",
+        "reasons": [
+          "pe-shape: executable section 'UPX0' has no bytes in the file but claims 512 KiB at run time (unpacks itself)",
+          "pe-shape: executable section 'UPX1' is also writable (W+X: it can rewrite the code it runs)",
+          "pe-shape: executable section 'UPX1' looks packed or encrypted: entropy 7.98 of a possible 8.00 over all of it"
+        ],
+        "scanned_by": ["clamav", "pe-shape"],
+        "path": "/home/ofek/Downloads/nfs2se-widescreen-patch.exe"
+      });
+    }
+
     // The HUD admitting it cannot see the machine at all (A23). Every
     // plate below refuses to guess, and a refusal draws the same nothing a
     // calm machine draws — so without this line a dark recording light
@@ -514,7 +561,12 @@ Item {
       // install that the box grew to hold at the same time. Both halves of
       // invariant 8, in one corner, from the frames two services really
       // publish when two installs overlap.
-      { "file": "12-guard-install.png", "build": suite.shot_guard_install, "plates": ["guard", "install", "mic"] }
+      { "file": "12-guard-install.png", "build": suite.shot_guard_install, "plates": ["guard", "install", "mic"] },
+      // The middle rung, photographed for the first time (A66): the same
+      // element as 10-guard.png, one word and one colour apart, and
+      // unreachable code until jv-guard grew something that could say
+      // `suspicious` out loud.
+      { "file": "13-suspicious.png", "build": suite.shot_suspicious, "plates": ["guard", "mic"] }
     ]
 
     function test_the_sheet() {

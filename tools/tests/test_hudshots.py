@@ -13,13 +13,34 @@ that no longer exists. Nothing errors. These are the gates that make that
 loud instead.
 """
 
+import hashlib
+import json
 import re
+import sys
+import tempfile
 from pathlib import Path
 
 # One parser for the HUD's QML, not two: the theme gates already had to read
 # shell.qml's plate stack, and a second implementation of "what is inside
 # this block" would be a second thing to be subtly wrong.
 from test_gen_theme_qml import ROOT, plate_stack_children, strip_qml_comments
+
+# jv-guard's own scanner, its own verdict logic and its own PE fixture
+# builder — three imports, no copies. The sheet photographs one verdict that
+# a service composes in words (13-suspicious.png), and the only way to keep
+# a picture of a sentence honest is to go and ask the thing that says it;
+# see test_the_suspicious_shot_photographs_a_verdict_jv_guard_can_produce.
+# Nothing here is a service talking to a service (invariant 1): this is a
+# test reading a module, the way the gates above read shell.qml.
+GUARD = ROOT / "services" / "jv-guard"
+sys.path[:0] = [str(GUARD), str(GUARD / "tests")]
+from jv_guard.heuristics import PEHeuristicScanner  # noqa: E402
+from jv_guard.scan import ClamAVScanner, ScanReport, decide  # noqa: E402
+from test_pe_heuristics import MEM_EXECUTE, MEM_READ, MEM_WRITE, build_pe  # noqa: E402
+
+# A section the CPU may execute, that is also writable: the unpacker-stub
+# shape, and what both of UPX's sections really carry.
+RWX = MEM_EXECUTE | MEM_READ | MEM_WRITE
 
 SHELL = ROOT / "shell" / "jv-hud"
 SHOTS = ROOT / "tools" / "hudshots"
@@ -273,3 +294,104 @@ def test_the_sheet_tells_the_reader_which_plates_each_shot_shows():
             f"docs/hud/README.md says {name} shows {got}; the scene asserts "
             f"{plates}. The README is what a reader believes the picture is of."
         )
+
+
+def packed_deterministically(n: int) -> bytes:
+    """`n` bytes with the flat histogram a compressed payload has, from a
+    fixed seed.
+
+    jv-guard's own fixtures use `os.urandom`, which is right for a
+    threshold test and wrong here: the reason string this gate compares
+    carries the entropy to two decimals, so the bytes have to be the same
+    bytes on every machine and every run.
+
+    The zero tail is not padding for its own sake. A real UPX1 section is
+    a compressed payload plus the unpacker's stub and its alignment slack,
+    which is why a packed section measures 7.9-something rather than a
+    flat 8.00 — a fixture that measured 8.00 would put a number in the
+    sheet that no real binary produces.
+    """
+    tail = 8192
+    out = bytearray()
+    digest = hashlib.sha256(b"jarvisos-hudshots-13-suspicious").digest()
+    while len(out) < n - tail:
+        out += digest
+        digest = hashlib.sha256(digest).digest()
+    return bytes(out[: n - tail]) + b"\x00" * tail
+
+
+def json_object_after(text: str, at: int) -> dict:
+    """The brace-balanced object literal starting at or after `at`, read as
+    JSON. The scene writes its frame bodies as plain double-quoted
+    literals, so they are JSON — one of them, `shot_guard_install`'s, uses
+    a `const` for a hash it repeats and is deliberately not read here.
+    """
+    start = text.index("{", at)
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start : i + 1])
+    raise AssertionError("unbalanced braces in the scene")
+
+
+def test_the_suspicious_shot_photographs_a_verdict_jv_guard_can_produce():
+    """A66. `13-suspicious.png` is the sheet's only picture of the approved
+    policy's middle rung, and every word in the frame behind it was typed
+    into a QML file by hand.
+
+    That is ordinarily fine — most of this sheet is composed and the README
+    says so per shot. It is not fine here, because this frame is the one
+    place in the repo where the HUD asserts what ANOTHER service says. Until
+    jv-guard grew a shape engine, `decide()` could not return `suspicious`
+    at all, and a shot of `GuardPlate`'s `warn` branch would have been a
+    picture of an intention. The distance between "a colour with no
+    producer" and "a colour with one" is exactly this test: build a binary
+    of the shape the engine is looking for, run the REAL engine and the
+    REAL `decide()` over it, and hold the composed frame to what comes
+    back.
+
+    What it does not check: the sha256, which is the hash of a file that
+    does not exist and could not be anything else.
+    """
+    scene = strip_qml_comments(scene_text())
+    assert "function shot_suspicious" in scene, (
+        "the scene no longer takes a `suspicious` shot, so the only picture "
+        "of GuardPlate's warn branch is gone"
+    )
+    at = scene.index("function shot_suspicious")
+    frame = json_object_after(scene, scene.index('"guard.verdict"', at))
+
+    # The UPX shape, in a real PE: a section with virtual space and no bytes
+    # on disk to unpack into, and a writable executable one holding the
+    # compressed payload. jv-guard's own builder, so a change to what it
+    # emits reaches this gate rather than going around it.
+    blob = build_pe(
+        [
+            ("UPX0", RWX, b"", 512 * 1024),
+            ("UPX1", RWX, packed_deterministically(512 * 1024), None),
+        ]
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        exe = Path(tmp) / "nfs2se-widescreen-patch.exe"
+        exe.write_bytes(blob)
+        shape = PEHeuristicScanner().scan(exe)
+
+    # ClamAV ran and recognised nothing. It has to be in the list: the shape
+    # engine is ADVISORY, it may raise suspicion and may never grant trust,
+    # and `decide()` returns no verdict at all when no authoritative engine
+    # ran. A `suspicious` verdict is therefore always two engines' work, and
+    # `scanned_by` in the photographed frame has to say so.
+    real = decide(frame["sha256"], [ScanReport(ClamAVScanner.name, ran=True), shape])
+    assert real is not None, "no authoritative engine in this fixture's reports"
+
+    assert frame["verdict"] == real.verdict
+    assert frame["scanned_by"] == real.scanned_by
+    assert frame["reasons"] == real.reasons, (
+        "the reasons in 13-suspicious.png are not the sentences jv-guard "
+        "produces for a packed binary any more. Update the scene's frame and "
+        "re-run bash ops/ralph/hudshots.sh."
+    )

@@ -362,6 +362,63 @@ sentence these two frames do not support. Every plate in this HUD is true on
 its own and the corner has no grammar for relating two of them — that is
 PLAN A62, and it is visible here rather than argued about.
 
+### 13 — a binary that only looks wrong
+
+![13-suspicious.png](13-suspicious.png)
+
+**On screen:** `guard` · `mic`
+
+`composed`. The same element as shot 10, one word and one colour apart — and
+until very recently, a branch of `GuardPlate` that nothing on this machine
+could reach. The approved policy has three rungs, `clean` / `suspicious` /
+`blocked`, and for months `decide()` could return only the outer two: the
+middle one existed in the schema's policy note, in jv-compat's override
+message and in this plate's `warn` colour, and in no code path at all. A
+picture of it would have been a picture of an intention.
+
+`jv-guard` grew a local, hash-free **shape** engine (PLAN A64), and now it
+has a producer. The file here is the case the rung is for: not malware — a
+decade-old widescreen patch for a game, which its author ran UPX over to
+make it one small download. ClamAV recognises nothing in it. It is also, byte
+for byte, shaped like something hiding:
+
+```
+pe-shape: executable section 'UPX0' has no bytes in the file but claims
+          512 KiB at run time (unpacks itself)
+pe-shape: executable section 'UPX1' is also writable
+          (W+X: it can rewrite the code it runs)
+pe-shape: executable section 'UPX1' looks packed or encrypted:
+          entropy 7.98 of a possible 8.00 over all of it
+```
+
+`blocked` would be a lie about this file and `clean` would be a promise
+nothing here can make, which is the whole argument for a middle rung.
+
+**Those three sentences reach no pixel, and that is the plate's rule rather
+than this shot's omission.** `core/GuardState.qml` never reads `reasons` —
+`schemas/guard.verdict.json` says they are spoken on request, and they are
+the one string on this topic written by a scanner rather than fixed by a
+schema. What a glance gets you is that a binary was refused, which one, and
+in which of two colours. They are quoted here because a reader of the sheet
+deserves to know what the machine has to say when asked.
+
+**The frame is composed and its words are not.**
+`tools/tests/test_hudshots.py` builds a PE of exactly this shape, runs the
+real `PEHeuristicScanner` and the real `decide()` over it, and compares the
+verdict, the three reasons and `scanned_by` to the literal in the scene. The
+picture cannot drift into showing a sentence jv-guard no longer says. Note
+`scanned_by` in that frame: `clamav` **and** `pe-shape`, always both — the
+shape engine is advisory, it may raise suspicion and may never grant trust,
+so a `suspicious` verdict is by construction two engines' work.
+
+**And the door in this picture has no handle.** `warn` rather than `risk`
+means *the confirmation flow may still override this* — that is what the
+colour is carrying, and it is what separates this shot from shot 10. Today
+nothing has wired that override to this verdict, so a packed installer stops
+here and the only thing on offer is a confirmation nobody can give. That is
+invariant 8 behaving exactly as written (untrusted by default, fail closed),
+and it is PLAN A65 asking a human which of three ways out to take.
+
 ## Regenerating
 
 ```
