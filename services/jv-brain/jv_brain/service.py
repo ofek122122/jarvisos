@@ -25,7 +25,7 @@ from jarvis_bus import BusClient
 
 from . import onboarding
 from .config import BrainConfig
-from .launcher import UNREADABLE, RungRecord, read_rung_file
+from .launcher import MEASURED, UNREADABLE, RungRecord, describe_rung, read_rung_file
 from .profile import Profile
 from .tools import load_tools, openai_tool_defs
 
@@ -56,6 +56,49 @@ _INTERRUPTED_SILENT = "[interrupted by the user before any of this was said]"
 def interrupted_record(said: str) -> str:
     said = said.strip()
     return f"{said} {_INTERRUPTED_NOTE}" if said else _INTERRUPTED_SILENT
+
+
+def rung_finding(rec: RungRecord) -> Optional[str]:
+    """What this heartbeat has to SAY about the rung llama-server was
+    launched on — or None when there is nothing a reader should act on.
+
+    Two cases are findings, and a human can act on both the same way:
+    free some VRAM and restart jv-llm.
+
+    * The brain is on the CPU rung while this machine HAS a card.
+      `sys.health`'s own schema uses that as its worked example of
+      `degraded` ("brain fell back to CPU"), invariant 6 exists to keep
+      the 8B Q4 brain resident, and an 8B on this i5 answers in the time
+      a GPU rung takes to finish. It is also what ares does on an
+      ordinary day, with the desktop and a browser holding the 6 GB —
+      which is exactly why it must be said out loud rather than left as
+      `llm_rung=4.0` in a gauge nobody decodes.
+    * The ladder was walked blind (B39): nvidia-smi was there and would
+      not answer, so the rung underneath is the floor holding, not a
+      choice anyone made.
+
+    Everything else is quiet. A machine with no card at all is a machine
+    with no card, not an impairment (B39), and rungs 1-3 gave something
+    up deliberately while staying on the GPU — a note every 5 s for a
+    ladder working as designed teaches a reader to skip the field the
+    real fault will one day appear in.
+    """
+    blind = rec.vram.source == UNREADABLE
+    fell = rec.backend == "cpu" and rec.vram.source in (MEASURED, UNREADABLE)
+    if not (blind or fell):
+        return None
+    # Never "rung ?": a rung the file did not record is said as an
+    # unrecorded rung, and the finding stands on the rest of the sentence.
+    where = describe_rung(rec) or "an unrecorded rung"
+    if blind:
+        why = "VRAM unreadable at launch" + (
+            f": {rec.vram.detail}" if rec.vram.detail else ""
+        )
+    else:
+        why = f"{rec.vram.free_mb} MiB VRAM free at launch"
+    if fell:
+        return f"llm on {where} — no GPU layers, replies will be slow; {why}"
+    return f"llm on {where}, chosen blind — {why}"
 
 
 def _is_number(value: object) -> bool:
@@ -801,18 +844,11 @@ class BrainService:
 
     async def _health(self, state: str = "ok", notes: Optional[str] = None) -> None:
         rec = self._rung()
-        if rec.vram.source == UNREADABLE:
-            # The ladder was walked blind: nvidia-smi was there and would
-            # not answer, so rung 4 was the floor holding, not a choice.
-            # "no card" reads identically in every other field, which is
-            # why it must not read identically here — and why this is
-            # degraded (invariant 6's scheduler is flying) while a machine
-            # that genuinely has no GPU is simply a machine with no GPU.
-            blind = (
-                f"llm rung chosen blind — VRAM unreadable at launch"
-                f"{f': {rec.vram.detail}' if rec.vram.detail else ''}"
-            )
-            notes = blind if not notes else f"{notes}; {blind}"
+        if (finding := rung_finding(rec)) is not None:
+            # The rung, in words, and only when the words are a finding.
+            # A worse note keeps its place at the front and its state:
+            # this appends detail, it never overwrites a report.
+            notes = finding if not notes else f"{notes}; {finding}"
             if state == "ok":
                 state = "degraded"
         body: dict = {

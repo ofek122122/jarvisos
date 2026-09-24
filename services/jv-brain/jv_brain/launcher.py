@@ -188,6 +188,29 @@ class RungRecord:
     index: Optional[int]
     backend: str
     vram: VramReading
+    #: The ladder's own words for this rung, as the launcher wrote them.
+    #: Empty when the file predates `label=` or was torn mid-write — an
+    #: empty label is said as an empty label, never guessed back from the
+    #: index (a reader that re-derived it would be quoting THIS process's
+    #: ladder about a choice made by a different one).
+    label: str = ""
+
+
+def describe_rung(rec: RungRecord) -> str:
+    """The rung in words: `rung 4 (CPU fallback)`.
+
+    `llm_rung=4.0` on the bus is decodable only by a reader who has
+    Ofek's ladder memorised, and the launcher is the one process that
+    knows which rung it picked AND what that rung is called. Falls back
+    to the backend word when the file carried no label, and says nothing
+    at all about a rung it never read — an empty string, so a caller
+    cannot splice "rung ?" into a sentence and have it read as a fact.
+    A negative index is one of those: it is this parser's sentinel for a
+    file with no `rung=` line, never a rung the launcher wrote.
+    """
+    if rec.index is None or rec.index < 0:
+        return ""
+    return f"rung {rec.index} ({rec.label or rec.backend})"
 
 
 def write_rung_file(path: Path, rung: Rung, vram: VramReading) -> None:
@@ -210,11 +233,20 @@ def read_rung_file(path: Path) -> RungRecord:
     None, which is how jv-brain has always spelled "llama-server has not
     told me anything yet"."""
     try:
-        data = dict(
-            line.split("=", 1)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if "=" in line
-        )
+        # Keys and values are stripped, not taken raw: `backend` now
+        # decides a STATE (jv-brain's rung finding), and `backend = cpu`
+        # — which is what a hand-edited file looks like — would otherwise
+        # read as a word equal to neither "cpu" nor "gpu", quietly
+        # answering "no" to both questions. (Line endings need no such
+        # care: read_text() translates CRLF on the way in.)
+        data = {
+            k.strip(): v.strip()
+            for k, sep, v in (
+                line.partition("=")
+                for line in path.read_text(encoding="utf-8").splitlines()
+            )
+            if sep and k.strip()
+        }
         index: Optional[int] = int(data.get("rung", -1))
     except (OSError, ValueError):
         return RungRecord(None, "gpu", VramReading())
@@ -235,6 +267,7 @@ def read_rung_file(path: Path) -> RungRecord:
             source=source,
             detail=data.get("vram_note") if source == UNREADABLE else None,
         ),
+        label=" ".join(data.get("label", "").split()),
     )
 
 

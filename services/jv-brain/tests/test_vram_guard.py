@@ -20,6 +20,7 @@ from jv_brain.launcher import (
     UNREADABLE,
     VramReading,
     VramUnreadable,
+    describe_rung,
     launch,
     parse_nvidia_smi_vram_mb,
     probe_free_vram_bytes,
@@ -270,3 +271,153 @@ async def test_a_measured_rung_is_quiet(tmp_path: Path):
     _, body = bus.published[-1]
     assert body["state"] == "ok" and "notes" not in body
     assert body["metrics"]["llm_rung"] == 1.0 and body["metrics"]["llm_gpu"] == 1.0
+
+
+# --- the rung, in words ----------------------------------------------
+#
+# `llm_rung=4.0` is a number that only means something to a reader who has
+# the ladder memorised. The launcher writes the one human-readable string
+# there is (`label=`), and until now nobody read it.
+
+
+def test_the_record_carries_the_label_the_launcher_wrote(tmp_path: Path):
+    p = tmp_path / "llm-rung"
+    write_rung_file(p, LADDER[-1], VramReading(943 * MB, MEASURED))
+    assert read_rung_file(p).label == LADDER[-1].label == "CPU fallback"
+
+
+def test_a_file_without_a_label_never_invents_one(tmp_path: Path):
+    """Written before `label=` existed, or torn. An empty label is the
+    only honest answer; `describe_rung` must fall back to the backend."""
+    p = tmp_path / "llm-rung"
+    p.write_text("rung=4\nbackend=cpu\nfree_vram_mb=943\nvram=measured\n")
+    rec = read_rung_file(p)
+    assert rec.label == ""
+    assert describe_rung(rec) == "rung 4 (cpu)"
+
+
+def test_describe_rung_says_the_rung_and_its_label(tmp_path: Path):
+    p = tmp_path / "llm-rung"
+    write_rung_file(p, LADDER[1], VramReading(5800 * MB, MEASURED))
+    assert describe_rung(read_rung_file(p)) == "rung 1 (KV q8)"
+
+
+def test_describe_rung_has_no_words_for_a_rung_it_never_read(tmp_path: Path):
+    assert describe_rung(read_rung_file(tmp_path / "nope")) == ""
+
+
+async def test_a_cpu_rung_on_a_machine_with_a_card_is_degraded_and_says_why(
+    tmp_path: Path,
+):
+    """ares today: a healthy GTX 1660 SUPER, 943 MiB of its 6 GB free
+    because the desktop and a browser own the rest, and an 8B Q4 brain
+    that therefore runs on the CPU. `sys.health`'s own schema names this
+    exact case as the example of 'degraded' — and until now jv-brain
+    published `ok` and a number nobody can decode."""
+    bus, svc = brain(
+        tmp_path,
+        "rung=4\nlabel=CPU fallback\nbackend=cpu\nfree_vram_mb=943\nvram=measured\n",
+    )
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert body["state"] == "degraded"
+    notes = body["notes"]
+    assert "rung 4 (CPU fallback)" in notes
+    assert "slow" in notes, "the consequence, not just the rung"
+    assert "943" in notes, "why it fell — the reading it fell on"
+
+
+async def test_the_blind_note_now_says_which_rung_too(tmp_path: Path):
+    bus, svc = brain(
+        tmp_path,
+        "rung=4\nlabel=CPU fallback\nbackend=cpu\nfree_vram_mb=-1\n"
+        "vram=unreadable\nvram_note=nvidia-smi exited 9\n",
+    )
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert body["state"] == "degraded"
+    assert "rung 4 (CPU fallback)" in body["notes"]
+    assert "nvidia-smi exited 9" in body["notes"]
+    assert "943" not in body["notes"], "there is no reading to quote"
+    assert "-1" not in body["notes"], "and -1 is not one either"
+
+
+async def test_a_gpu_less_machine_still_says_nothing(tmp_path: Path):
+    """No card is not an impairment, so there is no finding to word —
+    the CPU rung was the whole ladder, not a fall down it."""
+    bus, svc = brain(tmp_path, "rung=4\nlabel=CPU fallback\nbackend=cpu\nvram=absent\n")
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert body["state"] == "ok" and "notes" not in body
+
+
+async def test_a_gpu_rung_is_still_quiet_even_though_it_has_a_label(tmp_path: Path):
+    """Rungs 1-3 gave something up, but they gave it up on purpose and
+    the brain is still on the card. A note every 5 s for a ladder working
+    as designed teaches a reader to skip the field the fault will appear
+    in."""
+    bus, svc = brain(
+        tmp_path, "rung=2\nlabel=ctx 2k\nbackend=gpu\nfree_vram_mb=3000\nvram=measured\n"
+    )
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert body["state"] == "ok" and "notes" not in body
+
+
+async def test_a_worse_note_still_comes_first_and_keeps_the_worse_state(
+    tmp_path: Path,
+):
+    bus, svc = brain(
+        tmp_path,
+        "rung=4\nlabel=CPU fallback\nbackend=cpu\nfree_vram_mb=943\nvram=measured\n",
+    )
+    await svc._health("error", notes="llm error: connection refused")
+    await svc.close()
+    _, body = bus.published[-1]
+    assert body["state"] == "error"
+    assert body["notes"].startswith("llm error: connection refused")
+    assert "rung 4 (CPU fallback)" in body["notes"]
+
+
+def test_a_negative_rung_is_not_a_rung(tmp_path: Path):
+    """`-1` is the parser's sentinel for a file with no `rung=` line. The
+    launcher writes 0..4 and nothing else, so there are no words for it."""
+    p = tmp_path / "llm-rung"
+    p.write_text("backend=cpu\nfree_vram_mb=943\nvram=measured\n")
+    rec = read_rung_file(p)
+    assert rec.index == -1 and describe_rung(rec) == ""
+
+
+async def test_an_unrecorded_rung_still_reports_the_fall(tmp_path: Path):
+    bus, svc = brain(tmp_path, "backend=cpu\nfree_vram_mb=943\nvram=measured\n")
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert body["state"] == "degraded"
+    assert "unrecorded rung" in body["notes"] and "943" in body["notes"]
+    assert "rung ?" not in body["notes"]
+
+
+def test_a_padded_label_arrives_as_one_clean_line(tmp_path: Path):
+    """`jv health` renders notes as one line of a table, so the label is
+    flattened on the way in as well as on the way out."""
+    p = tmp_path / "llm-rung"
+    p.write_text("rung=4\nlabel=  CPU  fallback  \nbackend=cpu\n")
+    assert read_rung_file(p).label == "CPU fallback"
+
+
+async def test_a_hand_edited_rung_file_still_reports_the_fall(tmp_path: Path):
+    """`backend` and `vram` decide a state now, so ` cpu` must not read
+    as a word that is neither cpu nor gpu and answers 'no' to every
+    question asked of it."""
+    bus, svc = brain(
+        tmp_path, "rung = 4\nbackend = cpu\nfree_vram_mb = 943\nvram = measured\n"
+    )
+    await svc._health()
+    await svc.close()
+    _, body = bus.published[-1]
+    assert body["state"] == "degraded" and "943" in body["notes"]
