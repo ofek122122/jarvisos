@@ -14,7 +14,9 @@ corner: `StatePlate` (A3), which draws only while Jarvis is listening,
 speaking or was interrupted, and `MicPlate` (A4), the recording light,
 which draws only while the microphone is actually open.
 
-The skeleton pins the properties that make the HUD safe by construction:
+The skeleton pins the properties that make the HUD safe by construction,
+and `tools/tests/test_gen_theme_qml.py` fails the build if any of them is
+changed, dropped, or forgotten on a surface added later:
 
 | property | why |
 |---|---|
@@ -22,6 +24,7 @@ The skeleton pins the properties that make the HUD safe by construction:
 | `ExclusionMode.Ignore` | zero exclusive zone — no window is resized around it |
 | `mask: Region {}` | empty input region — clicks pass through to what's below |
 | `WlrLayer.Top` | over ordinary windows, yields to fullscreen and the lock screen |
+| `color: "transparent"` | the window paints nothing; each plate brings its own ground |
 
 ## Running it
 

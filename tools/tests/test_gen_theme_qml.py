@@ -248,6 +248,180 @@ def test_every_plate_in_the_stack_answers_for_itself():
         )
 
 
+# --- A10: invariant 10, asserted rather than assumed ----------------------
+
+# Quickshell's window types. Each one puts a surface on the compositor, and
+# every surface the HUD maps has to be safe the same way — so this gate is
+# written against the TYPE, not against shell.qml, and a second surface added
+# tomorrow is covered the day it is written.
+WINDOW_TYPES = ("PanelWindow", "FloatingWindow", "PopupWindow")
+
+# Invariant 10 spelled in Quickshell, with the ONE value each property may
+# have. Until now these lines were asserted by nobody: qmllint checks that
+# `WlrKeyboardFocus.None` RESOLVES, and would be just as happy with
+# `.Exclusive`. Every one of them is a property whose wrong value is
+# invisible on a surface that is unmapped most of the time — you would find
+# out because the HUD ate a click, or took your keyboard mid-sentence.
+SAFE_SURFACE = {
+    # cannot take the keyboard, so it can never steal focus from your work
+    "WlrLayershell.keyboardFocus": "WlrKeyboardFocus.None",
+    "focusable": "false",
+    # zero exclusive zone: no window is ever resized or pushed around by it
+    "exclusionMode": "ExclusionMode.Ignore",
+    # over ordinary windows, UNDER fullscreen and the lock screen. Overlay
+    # would put sensor state on top of a locked session.
+    "WlrLayershell.layer": "WlrLayer.Top",
+    # the window itself paints nothing; each plate brings its own ground.
+    # An opaque colour here is a 300x260 box over your work every time a
+    # plate has something to say.
+    "color": '"transparent"',
+}
+
+
+def strip_qml_comments(text: str) -> str:
+    """Drop `//` comments, leaving braces and code intact.
+
+    A `//` inside a string literal is not a comment, so only one with an even
+    number of quotes before it on its line counts. (`/* */` is not handled
+    because the HUD does not use it; a file that grows one will show up as a
+    parse the gates disagree about, not as a silent pass.)
+    """
+    out = []
+    for line in text.splitlines():
+        i = line.find("//")
+        while i != -1:
+            if line.count('"', 0, i) % 2 == 0:
+                line = line[:i]
+                break
+            i = line.find("//", i + 2)
+        out.append(line)
+    return "\n".join(out)
+
+
+def window_bodies(text: str) -> list[tuple[str, str]]:
+    """(type, body) for every Quickshell window block in `text`.
+
+    The body is the window's OWN lines only. A nested element's properties
+    are its own business — the self-test marker's `color: Theme.ground` is
+    not the surface's colour, and a file-wide grep would happily confuse the
+    two and then pass forever.
+    """
+    depth, bodies, out = 0, {}, []
+    for line in strip_qml_comments(text).splitlines():
+        start = depth
+        if start in bodies:
+            bodies[start][1].append(line)
+        opening = re.match(r"\s*(\w+)\s*\{\s*$", line)
+        depth += line.count("{") - line.count("}")
+        if opening and opening.group(1) in WINDOW_TYPES:
+            bodies[start + 1] = (opening.group(1), [])
+        for d in [d for d in bodies if d > depth]:
+            name, acc = bodies.pop(d)
+            out.append((name, "\n".join(acc)))
+    for d in sorted(bodies):
+        out.append((bodies[d][0], "\n".join(bodies[d][1])))
+    return out
+
+
+def assigned(body: str, prop: str) -> list[str]:
+    """Every value bound to `prop` at this block's own level."""
+    return [v.strip() for v in re.findall(rf"^\s*{re.escape(prop)}\s*:(.+)$", body, re.M)]
+
+
+def hud_qml_files() -> list[Path]:
+    hud = ROOT / "shell" / "jv-hud"
+    return [q for q in sorted(hud.rglob("*.qml")) if not q.is_relative_to(hud / "tests")]
+
+
+def test_every_hud_surface_pins_the_properties_that_make_it_safe():
+    """A10: the last corner of invariant 10 that nothing was watching.
+
+    `core/` cannot hold these — they ARE Quickshell types, and the offscreen
+    window a headless test gets is never exposed, so it cannot answer a
+    surface question either. That leaves the source, read strictly: not "the
+    word appears in the file" but "this window binds exactly this value and
+    no other".
+    """
+    surfaces = 0
+    for qml in hud_qml_files():
+        for name, body in window_bodies(qml.read_text("utf-8")):
+            surfaces += 1
+            where = f"{qml.relative_to(ROOT)}'s {name}"
+            for prop, value in SAFE_SURFACE.items():
+                assert assigned(body, prop) == [value], (
+                    f"{where} must bind `{prop}: {value}` exactly once — "
+                    f"got {assigned(body, prop)}. This is invariant 10, and a "
+                    f"surface that gets it wrong is wrong quietly."
+                )
+            mask = assigned(body, "mask")
+            assert len(mask) == 1 and re.fullmatch(r"Region\s*\{\s*\}", mask[0]), (
+                f"{where} must bind `mask: Region {{}}` — an EMPTY input "
+                f"region, so every click, scroll and hover passes through to "
+                f"the window underneath. Got {mask}."
+            )
+            zone = assigned(body, "exclusiveZone")
+            assert zone in ([], ["0"]), (
+                f"{where} asks for an exclusive zone of {zone}; the HUD never "
+                f"takes screen space away from your windows."
+            )
+    assert surfaces, (
+        "found no Quickshell window in shell/jv-hud — either the HUD stopped "
+        "mapping a surface, or this gate stopped being able to see one"
+    )
+
+
+# Every way a QML file can reach for the keyboard. The layer-shell property
+# above already tells the compositor not to offer it, so these are inert
+# today — which is exactly why one would get committed. If the HUD ever
+# needs to take the keyboard (a command palette, a text field), that is a
+# human's decision about invariant 10 and it starts by changing
+# `keyboardFocus`, not by adding a widget that quietly assumes it.
+KEYBOARD_GRABS = (
+    r"\bforceActiveFocus\b",
+    r"\bfocus\s*:\s*true\b",
+    r"\bactiveFocusOnTab\s*:\s*true\b",
+    r"\bKeys\s*[.{]",
+    r"\b(?:TextInput|TextEdit|TextField|TextArea|FocusScope)\s*\{",
+    r"WlrKeyboardFocus\.(?:Exclusive|OnDemand)",
+)
+
+# With `mask: Region {}` the surface receives no pointer events at all, so
+# any of these is a handler that can never fire: dead code that reads like a
+# feature, and the kind of thing someone later "fixes" by opening the mask.
+POINTER_SINKS = (
+    r"\b(?:MouseArea|HoverHandler|TapHandler|DragHandler|PinchHandler"
+    r"|WheelHandler|PointHandler)\s*\{",
+)
+
+
+def scan_hud(patterns: tuple[str, ...]) -> list[str]:
+    hits = []
+    for qml in hud_qml_files():
+        code = strip_qml_comments(qml.read_text("utf-8"))
+        for n, line in enumerate(code.splitlines(), 1):
+            for pat in patterns:
+                if re.search(pat, line):
+                    hits.append(f"{qml.relative_to(ROOT)}:{n}: {line.strip()}")
+    return hits
+
+
+def test_nothing_in_the_hud_asks_for_the_keyboard():
+    hits = scan_hud(KEYBOARD_GRABS)
+    assert not hits, (
+        "invariant 10: the HUD never steals focus. Taking the keyboard is a "
+        "human's call and starts at `keyboardFocus`, not here:\n"
+        + "\n".join(hits)
+    )
+
+
+def test_nothing_in_the_hud_waits_for_a_pointer_it_can_never_receive():
+    hits = scan_hud(POINTER_SINKS)
+    assert not hits, (
+        "the surface's input region is empty, so these handlers can never "
+        "fire — a promise the HUD cannot keep:\n" + "\n".join(hits)
+    )
+
+
 def test_core_qmldir_registers_every_component_and_no_module_name():
     qmldir = gen.render_core_qmldir()
     assert "BusModel 1.0 BusModel.qml" in qmldir

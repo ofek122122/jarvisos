@@ -13,6 +13,17 @@
 //     hover passes straight through to the window underneath.
 //   · visible is false whenever nothing is on screen. Earned emptiness is
 //     the default state, and an unmapped surface costs exactly 0 fps.
+//
+// And something checks (A10): qmllint only proves that
+// `WlrKeyboardFocus.None` RESOLVES — it would be just as happy with
+// `.Exclusive`. tools/tests/test_gen_theme_qml.py reads each binding above
+// and pins its ONE permitted value — on every Quickshell window in this
+// directory, not just this one. It also refuses a HUD file that reaches for
+// the keyboard or waits on a pointer the empty mask can never deliver. A
+// surface that got any of this wrong would be wrong QUIETLY: the HUD is
+// unmapped most of the time, so you would find out by having a click eaten
+// or your keyboard taken mid-sentence.
+//
 // Anything that moves goes through `Ease`/`Motion` (A7), which carries §06's
 // reduced-motion switch — so stillness is one setting, not a promise every
 // element has to keep on its own.
