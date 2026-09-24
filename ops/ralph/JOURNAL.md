@@ -3981,3 +3981,93 @@ diff of 2 px in each is noise in the history.
   untouched and still small. A13/A27/A38 remain the oldest open question
   and are still one two-minute human opinion — and `04-unheard` gives
   that human a fourth plate to have the opinion about.
+
+## 2026-09-24 — iteration 39 — B18: `jv health --check` answers "is
+## generation slow right now?"
+
+Three iterations of HUD work in a row (A42, A41, A44), so this one is a
+feature off PLAN.md instead — and the cheapest one on the board, because
+the data was already on the wire and already in front of a reader that
+was ignoring it.
+
+B16 gave jv-brain a gauge, `llm_first_say_ms`, that says how much of a
+turn's `think` was the model. It had exactly ONE reader: `jv tap
+--latency`, which means the only way to ask how fast generation is right
+now was to start a tap and then speak to the machine. `jv health
+--check` already subscribes to `sys.health`, already reads jv-brain's
+heartbeat by name, and already prints the rung off it. The gauge is on
+that same frame. B7's rule — a gauge is worth publishing once a SECOND
+reader wants it — is satisfied here for free.
+
+**The number alone would have been a lie waiting to happen.** jv-brain
+sets `_first_say_ms` once and never clears it, so every periodic beat
+for the rest of the process's life re-states the same number. A reader
+that printed it would answer "is generation slow right now?" with a
+measurement that may be an hour old — a brain nobody has spoken to since
+breakfast reading as one that just took 412 ms. That is a number quietly
+stopping meaning what its label says, which is the failure this whole
+CLI is written against, and it is why B18 was written as a wording
+problem rather than a plumbing one.
+
+**The age is the load-bearing half, and it comes off the count.**
+`llm_first_says` rises once per measured turn, so a window of heartbeats
+can say one of two things and must say which: the count ROSE while we
+listened, so the turn is the frame that raised it and its age is a
+measurement (`turn_age=1.5s`); or it never moved, so the turn predates
+the first brain heartbeat we read and the only honest statement is a
+LOWER BOUND (`turn_age>=6.0s`). The `>=` is the whole feature. A reader
+deciding whether the number describes right now needs to see, in the
+line itself, whether it is a reading or a bound.
+
+**Three more refusals, each with a test that fails without it.** The
+FIRST count a window sees is recorded and never treated as fresh — it
+may describe a turn from before `--check` connected, which is the same
+rule the tap loop already follows for the same reason. A count going
+BACKWARDS is jv-brain restarted (the counter starts at 1 again), not a
+newer turn, so the window starts over on it rather than reading a
+smaller number as progress. And a readable heartbeat that stopped
+carrying the gauge takes the number with it, because "the newest thing a
+service said wins" is already the rule the report follows when the
+newest frame is unreadable, and keeping a superseded reading alive would
+be this instrument inventing a measurement that is no longer on the
+wire. Two more shapes are pinned: the gauge is worth a line on its own
+(`llm rung=? backend=? first_say=412ms turn_age>=1.0s` — a brain that
+has not said which rung it picked has still said how long its last turn
+took), and it never outlives its heartbeat, because a `lost` brain
+prints no llm line at all.
+
+**`turn_age`, not "idle".** A turn that ran TOOLS publishes no gauge —
+tool time, confirm window included, is inside `think` and is not the
+model's — so the last MEASURED turn can be older than the last turn. The
+field name is the only place that distinction fits on one line; the doc
+comment carries the rest.
+
+**The integration test taught me its own premise.** First version
+started the brain pump and the reader at the same moment and asserted an
+exact age; it printed `turn_age>=0.6s` and failed, correctly — the
+reader had never seen the count before the rise, so the rise was its
+first reading. The pump now holds a steady count for 0.6 s of a 1.2 s
+window and rises inside it, and the helper's doc comment says why,
+because the obvious way to write that test proves the opposite of what
+it claims.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 89 lib + 8 bus + 36 cli
+  (was 84+8+34; 7 new). Five mutations run through them, all caught:
+  first-count-is-fresh, a backwards count counted as a new turn, a
+  gauge-less beat keeping the old number, the exact age measured off the
+  wrong frame, and the bound printed as a reading.
+- build: `nix build .#jarvisd` ok, `nixos-rebuild build --flake .#ares`
+  ok. Never test/switch. No schema change (`metrics` is free-form and
+  service-local, same as B16), no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin, no HUD change.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/tests/cli.rs,
+  PHASE1-STATUS.md
+- next: **B20** — nothing has read this line on a real turn either, which
+  is the same complaint B17 makes about `>>> turn`, and both are now
+  waiting on the same two minutes of a human's attention at a terminal.
+  B19 (dividing a tool turn's `think`) is unblocked by none of this and
+  still wants B17 answered first. A46 (declaring
+  `JARVIS_VOICE_OUTPUT_DEVICE` in `modules/jarvis-services.nix`) is
+  still the smallest untouched item on the board. A43 is still the four
+  plates nobody has watched stand still, and A47 still says the growth
+  check proves a plate arrived and not which one.

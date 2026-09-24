@@ -418,15 +418,33 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       pinned. Tests: `bash ops/ralph/runtests.sh jv-brain`,
       `bash ops/ralph/cargotest.sh jarvisd`.)
 
-- [ ] B18. The same gauge would let `jv health` answer "is generation slow
-      right now?" — `llm_first_say_ms` is on jv-brain's heartbeat and
-      `jv health --check` already reads that heartbeat and prints the llm
-      rung off it. That is a SECOND reader of the gauge, which is exactly
-      what B7 says a gauge needs before it is worth publishing, and it
-      arrives free. The care needed is in the wording: the number is the
-      most recent DIVISIBLE turn's, so a report must not present it as a
-      current condition — a brain that has been idle for an hour would
-      otherwise read as one that just took 4 seconds. Discovered in B16.
+- [x] B18. `jv health --check` answers "is generation slow right now?"
+      without starting a tap and speaking to the machine. — 4bd95fd
+      (The `llm` line gained `first_say=<ms> turn_age=<s>`, the gauge's
+      second reader, which is what B7 says a gauge needs. The wording
+      care this item asked for became the feature: jv-brain re-states the
+      same number on every periodic beat forever, so the AGE is
+      load-bearing, and it comes off `llm_first_says`. The count rose
+      inside the window -> the turn is the frame that raised it and the
+      age is a measurement (`turn_age=1.5s`); it never moved -> the turn
+      predates the first heartbeat we read and the only honest statement
+      is a lower bound (`turn_age>=6.0s`). Three more refusals, each with
+      a test: the FIRST count is never fresh (it may predate the
+      connection — the tap loop's rule), a count going BACKWARDS is a
+      restart and not a newer turn, and a readable beat that dropped the
+      gauge takes the number with it. `turn_age` and not "idle" because a
+      tool turn publishes no gauge. jarvisd 89+8+36 (was 84+8+34); five
+      mutations, all caught. Tests:
+      `bash ops/ralph/cargotest.sh jarvisd`.)
+
+- [ ] B20. Nothing has read the new `llm ... first_say= turn_age=` line
+      on a real turn — the same complaint B17 makes about `>>> turn`, and
+      now from the same missing two minutes of a human at a terminal. The
+      two questions worth answering together: does `turn_age>=` read as
+      "we could not date this" or as noise, and is the line still one
+      terminal width once a rung, a backend, a number and an age are on
+      it. Cheap to change afterwards — it is one `format!` and its
+      tests — and not worth guessing at beforehand. Discovered in B18.
 
 - [ ] B19. A tool turn's `think` is now the only span in the table with no
       decomposition at all, and it is the longest one a user can hit (a
@@ -1161,6 +1179,10 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       plugs in a dedicated speaker. Discovered in A41.
 
 ## Done
+- B18 — `jv health --check` answers "is generation slow right now?": the
+  brain's own gauge beside the rung, dated off its turn counter so a
+  re-stated number can never pass as a current condition (4bd95fd,
+  2026-09-24)
 - A44/A45 — the screen sheet photographs the state where two plates
   disagree about whether Jarvis is working, and stops being mistaken for
   a fixture (3052b8f, 2026-09-24)
