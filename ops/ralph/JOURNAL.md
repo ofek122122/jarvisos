@@ -4752,3 +4752,132 @@ open deliberately.
   A52 is unchanged and still wants the progress-indicator decision first.
   A50/A13/A27/A21/A22/A25/A31/A38/A39 are unchanged and still want a human
   at ares. B21/B22/B17/B20/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 47 — A54: the corner gets watched through a whole turn
+
+Everything that has ever checked the HUD's corner checked ONE SETTLED
+INSTANT. The contact sheet takes ten of them and, since A53, asserts which
+plates each picture is of; the headless suites in `shell/jv-hud/tests` drive
+one state element at a time and assert what it decided. Between those two
+sits exactly the class of bug the corner stack can actually have: a plate
+that arrives one frame late, leaves one frame early, blinks in the middle of
+an utterance, or comes up in the wrong ORDER relative to the plate it is
+supposed to qualify. None of those is a state. Every one of them is a
+sequence, and a still picture of the settled end of a turn cannot see any of
+them.
+
+`tools/hudshots/scene/tst_sequence.qml` replays the committed recordings (B3)
+through the REAL plates and asserts the corner's whole trajectory — every
+change to `litNames` with the `ts` of the frame that caused it, which is what
+`trajectory()` in `tst_sessionreplay.qml` does for one state machine's word:
+
+    hey-jarvis-clean  (dark) -> state@1.44 -> state heard@3.76
+    hey-jarvis-music  (dark) -> state@1.44 -> state heard@4.16
+    hey-jarvis-pause  (dark) -> state@1.36 -> state heard@6.64
+    speech-no-wake    (dark)
+
+Three things that were arguments in a comment until now are facts about a
+recording in these four lines:
+
+  · the VAD opening at 0.80 s puts NOTHING on screen. Speech in the room is
+    not speech to Jarvis, and the corner is dark for the whole 0.64 s before
+    the wake word lands.
+  · `hey-jarvis-pause` holds 1.2 s of real silence inside one sentence and
+    rewrites itself seven times across it. Every one of those provisional
+    sentences was on the bus and causes ZERO extra entries. A flicker is two
+    more entries, in both directions, and there is nowhere for it to hide in
+    a string.
+  · `speech-no-wake` is a real utterance nobody addressed to Jarvis. The
+    corner is dark for every frame of it — invariant 10 as a sequence rather
+    than as a photograph.
+
+Past the strings, four claims that only a sequence can make: no recording
+may light a plate that no service in it reported (a `MicPlate` that took
+`audio.vad` for a capture counter would be a recording light lit by the room
+rather than by the device); the words are never up without the state plate
+above them, which is an ordering claim about meaning and not about layout;
+an unanswered turn empties the corner on its own; and losing the bus mid-turn
+takes every plate down BEFORE the link plate arrives — the five seconds of
+grace `07-no-bus.png` can never hold, because it settles past them.
+
+**Why motion is off in that file**, since it is the one thing that makes any
+of this measurable. A plate's `lit` is `opacity > 0`, eased over 140 ms, so
+with fades running "when did this plate arrive" is a question about how long
+the test process happened to block. The file switches on the REAL
+reduced-motion path (`Motion.policy.envOverride = "1"`, parsed in
+`core/MotionPolicy.qml`, the same thing `JV_HUD_REDUCED_MOTION=1` does on
+ares), under which `Ease` is disabled outright and every opacity is
+ASSIGNED: a plate is on screen in the same frame the bus gave it something to
+say. One test asserts that property directly, because if it ever stopped
+holding every trajectory here would silently become a measurement of this
+process's scheduling. The fades themselves are watched standing still by the
+shots (A43/A48/A49), where a duration can be looked at rather than raced.
+The restore in `cleanupTestCase` is proven by the ten shots coming out
+byte-identical: `HudSequence` runs before `HudShots`, and a sheet rendered
+with motion left off would not be the same file.
+
+**One copy of the corner, not one per driver.** The sequence replay needs the
+same nine plates in the same order the sheet does, and the sheet already held
+a copy of `shell.qml`'s stack. Two copies would have been two things to keep
+matching the shell, so the stack moved to
+`tools/hudshots/scene/Corner.qml`; both drivers build it, and the tools gate
+pins it to `shell.qml` — membership AND order, because the order IS the
+reading order both drivers assert against. A second gate fails any driver
+that declares a plate of its own again.
+
+**What this iteration deliberately did not do.** The suite runs in
+`ops/ralph/hudshots.sh` and not in `nix build .#jv-hud`. Making it a build
+gate means a second implementation of the stage (the derivation cannot run a
+script that shells out to nix), and a staging assembly that exists twice is
+one that drifts — the sheet and the gate would eventually be photographing
+and asserting different HUDs. Left as a stated choice rather than an
+oversight; A56 records it for whoever disagrees.
+
+Also found and NOT fixed here, because fixing it is a behaviour change to a
+shipped element and belongs in its own reviewed commit (A57): the two windows
+that hold this pair of plates up are pinned equal at 30 s, but they keep time
+differently. `SpeechState` expires on a frame's AGE; `HeardState` arms a
+one-shot Timer when the line arrives. The transcript arrives after the VAD
+boundary it followed, by however long the ASR took, so on ares the state
+plate lets go first and the words sit alone for that gap. Small, real, and
+invisible to every test that existed before this one.
+
+- tests: `bash ops/ralph/hudshots.sh` — 15 (was 3): twelve new sequence
+  cases, plus the 10 shots byte-identical to the committed ones. EIGHT
+  mutations run through the new suite, all caught: `HeardPlate` and
+  `StatePlate` swapped in the stack, a plate dropped from the corner,
+  `MicPlate` lit by `audio.vad`, `HeardState` accepting partials, the held
+  line not forgotten when the link drops, the motion guard switched off, the
+  state plate arriving only at `thinking`, and the thinking window never
+  closing. One mutation was NOT caught, and it is worth stating rather than
+  hiding: dropping `root.linked` from `HeardState.heard` changes nothing,
+  because `onLinkedChanged` already clears the line — that term is
+  belt-and-braces, not a second mechanism, and the suite proves the
+  mechanism that does the work.
+  `bash ops/ralph/runtests.sh tools` — 131 (was 130); TWO mutations, both
+  caught: the corner drifting from `shell.qml`, and a driver keeping its own
+  plate. `bash ops/ralph/qmltest.sh` — 487, unchanged, since nothing in
+  `shell/jv-hud` was touched.
+- build: `nix build .#jv-hud` ok (qmllint + the QML suite in its checkPhase;
+  the new files are linted by `hudshots.sh` over the stage, as the stubs
+  always have been), `nixos-rebuild build --flake .#ares` ok. Never
+  test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin, and not one line of `shell/jv-hud` changed — the
+  HUD itself is untouched and still a read-only consumer.
+- files: tools/hudshots/scene/tst_sequence.qml (new),
+  tools/hudshots/scene/Corner.qml (new), tools/hudshots/scene/tst_shots.qml,
+  tools/tests/test_hudshots.py, ops/ralph/hudshots.sh, docs/hud/README.md
+- next: **A57** is the cheapest real finding above — make `HeardState` time
+  its hold the way `SpeechState` does (a frame age, not a wall clock) so the
+  two windows that describe one turn close together, or have a human decide
+  the gap does not matter. It is a one-line change to a shipped element with
+  an existing headless suite around it, and the sequence file above is where
+  the result would show. **A28/B10** got more valuable again: every
+  trajectory here stops at `thinking` because no recording has ever contained
+  jv-voice, so the second half of a turn — the answer starting, the words
+  leaving, the ember lighting — has no recorded sequence at all. One real
+  utterance at the machine would give it one. **A55** is now half-built in
+  the sense that matters (the corner's state is a string something can
+  print), but it still wants A47's decision about an IPC seam first.
+  A47/A52/A50/A13/A27/A21/A22/A25/A31/A38/A39 unchanged and still want a
+  human at ares. B21/B22/B17/B20/B15/B13 unchanged.

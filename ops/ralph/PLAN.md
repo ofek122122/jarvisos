@@ -1308,15 +1308,54 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       Tests: `bash ops/ralph/qmltest.sh` (487), `... runtests.sh tools`
       (130), `bash ops/ralph/hudshots.sh` (10 shots, byte-identical).)
 
-- [ ] A54. `tst_sessionreplay.qml` walks recorded sessions through the
-      whole stack and asserts what the state elements decided; now that
-      `litNames` exists (A53) it can assert WHICH PLATES the HUD puts up at
-      each moment of a real turn. That is a stronger claim than any shot: a
-      shot is one settled instant, a replay is the sequence, and the
-      sequence is where a plate that arrives one frame late or leaves one
-      frame early would show — which is precisely the class of bug the
-      corner stack can have and no still picture can catch. Additive, needs
-      no human, and the recordings are already committed. Discovered in A53.
+- [x] A54. The corner is only ever checked at one settled instant, and a
+      plate that arrives one frame late or leaves one frame early is a
+      SEQUENCE bug no still picture can catch. — 8b2fa24
+      (Answered where the real plates can actually be built: the shot
+      harness's stage. `tools/hudshots/scene/tst_sequence.qml` replays the
+      committed recordings through the real nine-plate corner and asserts
+      the whole trajectory — every `litNames` change with the `ts` of the
+      frame that caused it — plus four claims only a sequence can make: no
+      recording lights a plate no service in it reported, the words are
+      never up without the state plate above them, an unanswered turn
+      empties the corner by itself, and losing the bus takes every plate
+      down BEFORE the link plate arrives (the 5 s of grace `07-no-bus.png`
+      settles past). Motion is suppressed through the real reduced-motion
+      path so a plate's arrival is a frame and not a fade; one test holds
+      that. Both drivers now build ONE corner —
+      `tools/hudshots/scene/Corner.qml`, pinned to `shell.qml` for
+      membership and ORDER, with a second gate against a driver keeping its
+      own copy. Tests: `bash ops/ralph/hudshots.sh` (15, and the 10 shots
+      byte-identical), `... runtests.sh tools` (131). Eight mutations
+      caught; one honest miss reported in the journal.)
+
+- [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
+      `nix build .#jv-hud`, so the strongest assertion about what the HUD
+      shows is not in the build gate. The obstacle is real: the plates need
+      the stage (two Quickshell singletons substituted), the stage is
+      assembled by a shell script that shells out to nix, and a derivation
+      cannot run that — so gating it means a SECOND implementation of the
+      staging, which is a thing that drifts, and the drift would mean the
+      sheet and the gate photograph and assert different HUDs. Options, for
+      a human: (a) accept it — the loop runs `hudshots.sh` on every HUD
+      iteration; (b) move the staging into a small generator both the script
+      and the derivation call; (c) put the stubs in the shell as build-only
+      files so no staging is needed at all (invites a stub reaching a real
+      screen, and is probably wrong). Discovered in A54.
+
+- [ ] A57. The two windows that hold up the pair of plates a turn puts on
+      screen are pinned equal at 30 s and keep time DIFFERENTLY.
+      `SpeechState` expires on a frame's age (`ageOf(prompt) >
+      thinkWindowS`); `HeardState` arms a one-shot Timer when the line
+      arrives. The transcript arrives after the VAD boundary that preceded
+      it, by however long faster-whisper took, so the state plate lets go
+      first and the words sit on screen alone for that gap — a transcript
+      with nothing above it saying why it is still there. Small and real.
+      The fix is to measure the hold the way `SpeechState` does, and it is a
+      behaviour change to a shipped element, so it wants its own commit and
+      its own argument (the headless `tst_heardstate.qml` is where it would
+      be proved, and `tst_sequence.qml` is where it would show). Or a human
+      decides the gap does not matter. Discovered in A54.
 
 - [ ] A55. "What is the HUD showing right now" is answerable only by
       looking at the screen. `litNames` is the string a `jv hud` subcommand
