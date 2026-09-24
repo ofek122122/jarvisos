@@ -4964,3 +4964,108 @@ that comparison. One rule, one mechanism. And corrected the plate table in
   between its three options. **A55** still waits on **A47**'s decision about
   an IPC seam. A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and still
   want a human at ares. B21/B22/B17/B20/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 49 — A58: the recordings stop saying that hearing is free
+
+Last iteration fixed a HUD bug (A57: the transcript and the "THINKING"
+above it kept different time) and reported, as the finding worth keeping,
+that no committed recording could have shown it. This closes that.
+
+`harness/fixtures/sessions/generate_sessions.py` stamped every frame at
+`EarsPipeline.clock()`, the sample clock — samples consumed over rate.
+No samples are consumed while faster-whisper runs, and jv-ears publishes
+the final transcript from inside `_on_speech_end`, immediately after
+`asr.transcribe()` returns. So on a real bus jarvisd stamps that frame
+however long the transcribe took AFTER the `speech_end` beside it, and in
+the recordings the two were the same number. The ASR was instantaneous in
+all four files; the gap between "the turn ended" and "the words arrived"
+was exactly zero everywhere in this repo, which is why five suites built
+on these recordings were structurally unable to see A57.
+
+The generator now adds `ASR_LATENCY_S` to a final's `ts`. 2.2 s, and the
+number is not invented: PHASE1-STATUS.md records "ASR is ~2.2 s fixed
+(faster-whisper distil-small, CPU, runs after speech_end)" as a live
+measurement on ares, and it is the same span `jv tap --latency` already
+calls `hear`. It is a DECLARED constant rather than a measurement taken
+while generating, on purpose — a recording whose numbers depended on how
+busy the generating machine was would stop being reproducible to the
+sample, which is the property everything else in that file protects.
+
+Partials are deliberately left alone, and the README says so rather than
+leaving the asymmetry to be discovered. Each partial costs a transcribe
+too, but nothing has measured one, and modelling it honestly means
+modelling the sample clock falling BEHIND the room and catching up — the
+transcribe runs inline on the one thread that feeds wake and VAD
+(optimization-backlog §6) — which would move every other frame in these
+files instead of one, and would be inventing a timeline rather than
+recording one. A59 records that.
+
+**How the files were changed, stated plainly because it matters.** The
+loop's machine has no model weights, so the pipeline could not be re-run.
+The three finals were restamped in place by the same `asr_delay()` the
+generator now applies — one number per recording, headers untouched, so
+`wall_time_utc` still dates the real recording rather than the edit. The
+diff is three lines. What proves a regeneration lands in the same place is
+`test_the_committed_session_is_what_the_pipeline_still_does`, which
+compares `ts` frame by frame and needs the weights: the first jv-ears run
+on a machine that has them is the check, and it is in the build's path,
+not in this loop's.
+
+What the gap immediately bought. `tst_sessionreplay` now reads A57's
+anchor off a real recording rather than off frames whose author also
+wrote the expectation, and pairs a real `SpeechState` with a real
+`HeardState` on one bus with real timers; the numbers there are
+load-bearing and the comment does the arithmetic (both windows 3 s, both
+starting at the boundary, the words 2.2 s in, so the anchored hold has
+0.8 s left and a hold timed from the transcript would have 3 s — 1.6 s is
+the budget that separates the two readings rather than racing them). The
+sequence suite's three trajectories move to the second the words really
+arrive (`state heard@5.96` for the clean recording, was `@3.76`), and its
+unanswered-turn test had to grow its shortened window from 200 ms to 3 s:
+a budget under the ASR expires the line before it is ever shown, so that
+test would have gone green over a corner the reader never saw. 200 ms was
+only ever legal while the recordings said hearing was free.
+
+One unrelated brittleness fixed on the way, because it cost real
+debugging time here: that test shortened two windows and restored them on
+its last line, so the `compare` in the middle of it meant four later
+tests ran against a HUD with a 200 ms memory and failed for a reason that
+was not theirs. The restore is now a `cleanup()`.
+
+- tests: `bash ops/ralph/runtests.sh harness` — 88 (was 78): three new
+  cases, one per recording that contains a final, plus per-recording
+  checks that every partial is stamped while its utterance is still open
+  and that file order is time order (replay.py sleeps the delta between
+  consecutive lines and clamps at zero, so a frame written out of order
+  would replay with its gap silently lost). `bash ops/ralph/qmltest.sh` —
+  498 (was 495). `bash ops/ralph/hudshots.sh` — 15, and the 10 shots
+  byte-identical, which is the expected answer: no plate draws a `ts`.
+  `bash ops/ralph/runtests.sh tools` — 131, unchanged. `bash
+  ops/ralph/runtests.sh jv-ears` — 37, with the staleness check skipping
+  for want of weights. FOUR mutations run through the suites, all caught:
+  the hold anchored back on the transcript (caught by the new paired
+  replay test with a message, not a race), the declared latency back to
+  zero, the delay applied to partials as well as finals, and a frame
+  written out of time order.
+- build: `nix build .#jv-hud` ok (qmllint + the QML suite + the two
+  generators with `--check` in its checkPhase), `nixos-rebuild build
+  --flake .#ares` ok. Never test/switch. No schema change, no jv-act
+  change, no boot path, no NVIDIA/kernel/flake pin. The HUD is still a
+  read-only consumer.
+- files: harness/fixtures/sessions/generate_sessions.py,
+  harness/fixtures/sessions/{hey-jarvis-clean,hey-jarvis-music,hey-jarvis-pause}.jsonl,
+  harness/fixtures/sessions/README.md, harness/tests/test_sessions.py,
+  shell/jv-hud/core/HeardState.qml, shell/jv-hud/tests/Sessions.qml,
+  shell/jv-hud/tests/tst_sessionreplay.qml, shell/jv-hud/README.md,
+  tools/hudshots/scene/tst_sequence.qml
+- next: **A28/B10** is now the clearly biggest thing a human can unlock —
+  one real utterance recorded at the machine would give the second half of
+  a turn (the answer starting, the ember lighting) a recording at all, and
+  would carry a REAL ASR instead of a declared one; every trajectory in
+  the repo still stops at `thinking`. **A59** is the honest follow-up to
+  this commit: the partial latency, which wants either a measurement or a
+  decision to leave it. **A56** (the sequence suite is not in the build
+  gate) is unchanged and wants a human's pick between its three options.
+  **A55** still waits on **A47**'s decision about an IPC seam.
+  A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and still want a
+  human at ares. B21/B22/B17/B20/B15/B13 unchanged.

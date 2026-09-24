@@ -1359,21 +1359,42 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the fixture generator stamps the final at the same `ts` as the
       speech_end, so every replay has an instantaneous ASR — see A58.)
 
-- [ ] A58. Every committed recording has an INSTANTANEOUS ASR, and that is
-      why A57 lived through five suites. `harness/fixtures/sessions/
-      generate_sessions.py` stamps each `audio.transcript` final at the
-      same `ts` as the `audio.vad speech_end` before it, so the one number
-      that distinguishes "when the turn ended" from "when the words
-      arrived" is zero in every replay, and every test built on those
-      recordings is blind to the gap between them. Real faster-whisper on
-      the CPU rung takes a few hundred ms. The fix is a delay in the
-      generator — which means REGENERATING the four recordings, which the
-      contact sheet asserts byte-for-byte and `tst_sessionreplay` pins
-      numbers out of, so it is a commit of its own with a shot diff to
-      look at. Worth it: it is the only way any replay-driven suite can
-      ever catch this class of bug (A28's live recording would too, and
-      would be better, but needs a human at the machine). Discovered
-      in A57.
+- [x] A58. Every committed recording had an INSTANTANEOUS ASR, and that is
+      why A57 lived through five suites. — 746166e
+      (`generate_sessions.asr_delay()` adds `ASR_LATENCY_S` = 2.2 s to a
+      final transcript's `ts` — the figure measured on ares,
+      PHASE1-STATUS.md's "ASR is ~2.2 s fixed", the same span `jv tap
+      --latency` calls `hear`. A declared constant and not a measurement
+      taken while generating: the recordings stay reproducible to the
+      sample. Partials are deliberately NOT delayed — see A59. The three
+      finals were restamped in place, one number per recording, because
+      the loop's machine has no weights; the weights-gated staleness
+      check is what proves a regeneration agrees. `tst_sessionreplay`
+      now reads A57's anchor off a real recording and pairs the two real
+      elements on one bus (498, was 495); `tst_sequence`'s three
+      trajectories moved to the second the words arrive and its
+      shortened window grew from 200 ms to 3 s, which a budget under the
+      ASR could not be. The 10 shots came out byte-identical. Four
+      mutations caught. Tests: `runtests.sh harness` 88 (was 78),
+      `qmltest.sh` 498, `hudshots.sh` 15, `runtests.sh tools` 131.)
+
+- [ ] A59. The recordings model the FINAL's ASR and not the partials',
+      and the asymmetry is stated rather than resolved. Every partial
+      also costs a `transcribe()` and also reaches the bus after it
+      returns, so a live partial is late too — but nothing has measured
+      by how much, and modelling it honestly means modelling the sample
+      clock falling BEHIND the room and catching up, because the
+      transcribe runs inline on the one thread that feeds wake and VAD
+      (docs/optimization-backlog.md §6: a live mic backs its queue up and
+      drops). That would move every other frame in these recordings
+      instead of one, so it is a different and larger claim than A58 was.
+      Two honest ways out: measure it on ares alongside the 2.2 s (a
+      human at the machine, and it pairs with A28), or decide the
+      partials are close enough to free to leave alone and say so in one
+      place instead of two. What must NOT happen is a second invented
+      constant. `test_a_provisional_sentence_is_stamped_while_the_
+      utterance_is_still_open` is the guard that holds until then.
+      Discovered in A58.
 
 - [ ] A55. "What is the HUD showing right now" is answerable only by
       looking at the screen. `litNames` is the string a `jv hud` subcommand
