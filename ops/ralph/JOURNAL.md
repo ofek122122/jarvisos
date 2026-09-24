@@ -5666,3 +5666,112 @@ describing a policy this machine does not have.
   A21/A22/A25/A27/A31/A38/A39 still want a human at ares. **B10/A28 — one
   live recording of one spoken turn on ares — remains the biggest thing a
   human can hand this loop.** B7/B12/B15/B17/B20/B23 unchanged.
+
+## 2026-09-24 — iteration 56 — A67: the sheet stops quoting services that could not have said it
+
+A66 closed the gap for one frame: a composed picture of a `suspicious`
+verdict, held to what jv-guard really produces for a binary of that shape.
+A67 was the observation that it is not the only frame in the sheet that
+puts words in another service's mouth — `05-confirm.png` carries a question
+jv-act asks, `08-action.png` a tool call and one of jv-act's error words,
+`06-health.png` jv-brain's rung, `11-install.png` and `12-guard-install.png`
+jv-compat's lifecycle — and that nothing checked any of them. The README
+labels each shot `recorded` or `composed`, and that label is a claim about
+PROVENANCE, not about plausibility: it says nobody recorded this, and says
+nothing at all about whether the named service could ever have said it.
+
+**Four gates, all reading producers rather than running them.**
+`jv_brain.config.LADDER` and `jv_compat.fingerprint` are imported;
+`jv_compat/install.py` is parsed for its event vocabulary and for the extra
+fields each call site attaches; jv-act's registry is TOML and its Rust is
+read for the tool names, argument names, capabilities, error words, the
+confirmation window, the `kind` literal and the question's format string.
+Nothing here is a service talking to a service (invariant 1) and nothing
+was written into `services/jv-act` — it is read, the way the older gates in
+this file read `shell.qml`.
+
+**The refusal in shot 12 is the gate worth copying.** The first version
+compared jv-compat's `blocked` error to `"; ".join(reasons)` computed in the
+test, and a mutation that made `install.py` prefix the sentence with
+`clamav: ` went straight through green — a copy of a rule is a rule that
+drifts, which is the exact failure this file exists to catch. It now lifts
+every `error=` expression out of the three `blocked` call sites with `ast`
+and evaluates jv-compat's own code over the verdict jv-guard is shown
+giving in the same picture. Both directions fail now.
+
+**Three frames were wrong, and all three in `08-action.png`.** The intent
+passed `args.name` where the registry declares `app` — the real jv-act
+answers `invalid_args` and never reaches an executor. It omitted the
+`needs_confirmation` jv-brain always derives from the capability. And the
+detail quoted `exec: "obsidian": executable file not found in $PATH`, which
+is a Go runtime's sentence about execing a binary directly; jv-act is Rust
+and `app.launch` plans `gtk-launch -- <app>`, so it never execs the
+application at all. Not one of the three reaches a pixel, which is exactly
+why they survived thirteen shots and five iterations of looking at this
+sheet: the picture was right and the machine behind it was fiction.
+
+**The one that changed on screen is `05-confirm.png`, and it got worse,
+which is the point.** It read *move 14 files in ~/Downloads to the trash*.
+jv-act does not compose a sentence about the invocation — `service.rs`
+sends `format!("{} — yes or no?", spec.description)`, which is the tool's
+REGISTRY description plus a fixed tail: the same question for every
+invocation of that tool, forever. The old frame was a picture of a machine
+that tells you what it is about to touch, and this one does not have that
+machine. A21's human is now judging the question that will really be on
+screen. It also makes a genuinely new thing visible, which is logged as
+A68: a confirmation that cannot name its object may be one a user cannot
+answer, and whether that is jv-act's summary to widen (its own commit,
+human-reviewed) or the HUD's `args` to draw (privacy: `args` is content,
+not vocabulary, and no core element may name it today) is a decision.
+
+The scene and the README now also say, for this sheet, what
+`tools/hudscreens/sheet.py` has said since A49: `fs.trash` is not in
+jv-act's registry. v0 is observe+benign only and the confirmation rule is
+structural, so no tool on this machine could produce an `action.confirm` at
+all; asked for `fs.trash` the real jv-act answers `unknown_tool`. The
+machinery is built and reviewed and the tool it is holding is not granted.
+A test fails if the disclaimer leaves, and fails with "good news, delete
+this branch" if the registry ever gains the tool.
+
+**What is deliberately still only plausible**, said per shot in the README
+rather than pinned: free text. An installer's stderr (11), a service's
+`notes` (06), the composed registry description (05) and gtk-launch's
+not-found message (08). Those are shaped like the real thing and are not
+the real thing, and no reviewed source in this repo fixes them.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 136 (was 132). Fifteen
+  mutations run through the new gates, in both directions. From the scene:
+  an event jv-compat does not publish, a `prefix_created` carrying an
+  `error`, an arch the fingerprinter cannot report, a refusal reworded, a
+  CPU rung claiming the GPU, a rung off the ladder, an arg the registry
+  does not declare, a `needs_confirmation` the capability denies, a detail
+  naming a program jv-act never runs, a window jv-act does not open, a
+  question jv-act cannot compose, the disclaimer leaving — twelve, each
+  failing exactly one test. From the producers: jv-compat renaming a
+  lifecycle event, rewording a refusal, shortening its stderr tail, the
+  fingerprinter renaming an arch, and the ladder's floor moving onto the
+  GPU — five, each failing the tools suite, which is the proof these point
+  at the real producers and not at copies of them. All producer files were
+  restored from backups and `git diff -- services/` is empty. jv-act was
+  mutation-tested by READING only (guardrails: never modify it); what the
+  gate parses out of it was printed and checked by hand instead — registry
+  11 tools, error words {capability_mismatch, confirm_timeout, denied,
+  execution_failed, invalid_args, timeout, unknown_tool}, window 15.0,
+  kind `request`, format `{} — yes or no?` from `spec.description`,
+  `app.launch` → `gtk-launch`.
+- `bash ops/ralph/hudshots.sh` — 13 shots + 11 sequence assertions; only
+  `05-confirm.png` changed, the other twelve byte-identical.
+  `bash ops/ralph/qmltest.sh` — 536, untouched.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin.
+- files: docs/hud/05-confirm.png, docs/hud/README.md,
+  tools/hudshots/scene/tst_shots.qml, tools/tests/test_hudshots.py
+- next: **A68 is the new one and it is a human's** — the confirmation
+  question is generic by construction, and a picture of it now exists to
+  argue over. A62 (does the corner need a grammar for "these two plates
+  are unrelated") still gates A63. A65/A60/A50/A55/A47/A56/A59 still want a
+  decision; A21/A22/A25/A27/A31/A38/A39 still want a human at ares.
+  **B10/A28 — one live recording of one spoken turn on ares — remains the
+  biggest thing a human can hand this loop**, and it would retire the
+  composed half of four shots at once. B7/B12/B15/B17/B20/B23 unchanged.

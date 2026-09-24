@@ -1492,7 +1492,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `bash ops/ralph/hudshots.sh` (13 shots, the other twelve
       byte-identical).)
 
-- [ ] A67. Shot 13 is the only composed frame in the sheet whose words
+- [x] A67. Shot 13 is the only composed frame in the sheet whose words
       are pinned to the service that would say them, and it is not the
       only one that QUOTES a service. `08-action.png` carries jv-act's
       `execution_failed` and an exec error, `11-install.png` carries a
@@ -1506,7 +1506,53 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       expensive where it needs a running service, so this is a per-frame
       judgement rather than one sweep: do the cheap ones, and say in the
       README which quotations are still only plausible. Discovered in
-      A66.
+      A66. — fa08188
+      (All four cheap ones done, and three frames turned out to be
+      wrong. jv-brain's ladder and jv-compat's fingerprinter are
+      imported; `install.py` is parsed for its event vocabulary and for
+      the fields each call site attaches; jv-act's registry is TOML and
+      its Rust is read for tool names, arg names, capabilities, error
+      words, the 15 s window, the `kind` literal and the question's
+      format string. jv-act was READ only — never written to. The gate
+      worth copying is shot 12's refusal: comparing against
+      `"; ".join(reasons)` computed in the test went green when
+      `install.py` was mutated to reword it, so it now lifts every
+      `error=` expression out of the three `blocked` call sites with
+      `ast` and evaluates jv-compat's own code over the verdict in the
+      picture. `08-action.png` was wrong three ways — `args.name` where
+      the registry declares `app`, no `needs_confirmation`, and a Go
+      runtime's `exec: ... not found in $PATH` where jv-act is Rust and
+      plans `gtk-launch -- <app>` — none of which reaches a pixel, which
+      is why nobody caught them. `05-confirm.png` changed on screen and
+      got worse: jv-act sends
+      `format!("{} — yes or no?", spec.description)`, so the question is
+      generic by construction and the old frame was a picture of a
+      machine that names what it is about to touch. Free text stays
+      free text, per shot, in the README. Tests:
+      `bash ops/ralph/runtests.sh tools` (136, was 132; fifteen
+      mutations, five of them to the producers),
+      `bash ops/ralph/hudshots.sh` (13 shots, twelve byte-identical),
+      `... qmltest.sh` (536, untouched).)
+
+- [ ] A68. **Human decision, discovered by photographing it.** A
+      confirmation cannot name its object. jv-act's question is
+      `format!("{} — yes or no?", spec.description)` — the tool's
+      registry description and nothing about the invocation — so the
+      plate can only ever read "Move files to the trash — yes or no?"
+      whether it is two files or four hundred, and the thing the user is
+      being asked to authorise is in `intent.action.args`, which no
+      element under `shell/jv-hud/core` may name (invariant 7: args are
+      content, not vocabulary). Three ways out, and they are not equal:
+      (a) widen jv-act's summary to include the args it was given — its
+      own commit, human-reviewed, and the only one where the sentence
+      stays a sentence jv-act says; (b) have the HUD draw `args` beside
+      the question, which is a privacy decision about the one plate
+      whose whole job is to be read before you answer; (c) leave it —
+      the voice has the detail, the plate is a prompt and not a
+      contract. Nothing should be built before (a)/(b)/(c) is answered.
+      Note that A21 (the window closing) and A22 (how it ends) are about
+      the same plate, so whoever looks at `05-confirm.png` can answer
+      all three at once. Discovered in A67.
 
 
 - [x] A53. `10-guard.png` is a picture only a human can tell apart from a
