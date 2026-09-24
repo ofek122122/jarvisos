@@ -2,8 +2,11 @@
 
 Design (departure Q&A + announced defaults):
 - VAD events publish continuously — free presence signal for later phases.
-- Whisper transcribes ONLY wake-gated utterances; wake word required
-  every time (v0, no follow-up window).
+- Whisper transcribes ONLY gated utterances. The gate is the wake word,
+  every time — with ONE approved exception: while a `dialog.listen`
+  window is open, an utterance may start without one (see dialog.py).
+  The window is bounded, requested by another service, and closed by
+  nothing but time.
 - All timing decisions use the SAMPLE clock (samples consumed / rate),
   never the wall clock — the same fixture always produces the same
   events, which is what makes CI meaningful.
@@ -21,6 +24,7 @@ import numpy as np
 
 from .asr import Transcriber
 from .config import EarsConfig
+from .dialog import ListenWindow
 from .vad import SileroVad
 from .wake import WakeDetector
 
@@ -52,6 +56,10 @@ class EarsPipeline:
         self._suppress_req = False
         self._suppress_release_pending = False
         self._suppress_until = -1
+        # The bounded no-wake window (dialog.listen). Armed from the bus
+        # thread, opened and closed on this one's sample clock.
+        self.listen = ListenWindow(cfg.sample_rate)
+        self._listen_open = False
         # wake state
         self._armed_at: Optional[int] = None
         self._last_wake: int = -(10**12)
@@ -118,6 +126,16 @@ class EarsPipeline:
             "vad_min_silence_s": self._min_silence / self.cfg.sample_rate,
         }
 
+    def request_listen(self, body: object, conf: object = 1.0, v: object = 1) -> bool:
+        """A scoped no-wake window, from the bus thread (main.follow_bus).
+
+        The whole frame, not just its body: `conf` and `v` are refusal
+        grounds. Returns whether it was accepted, which is what makes the
+        refusals testable from out here. All the deciding is in
+        dialog.ListenWindow — one place, with the tests.
+        """
+        return self.listen.request(body, conf=conf, v=v)
+
     def set_suppressed(self, value: bool) -> None:
         """Half-duplex gate: True while jv-voice is speaking. Blocks only
         utterance-open; wake detection stays live — that's barge-in."""
@@ -147,7 +165,11 @@ class EarsPipeline:
         self._in_speech = True
         self._utt_id = str(uuid.uuid4())
         self._utt_started_at = self._pos
-        self._utt_gated = self._armed_at is not None
+        # A wake, or a window some service asked for. Read as of this
+        # chunk: a window that closed before you opened your mouth is
+        # shut, and one that closes while you are talking is not a reason
+        # to throw the sentence away (it governs where you may START).
+        self._utt_gated = self._armed_at is not None or self._listen_open
         # utterance audio begins pre-roll earlier than the confirm point
         self._utt_audio = self._ring[-(self._pre_roll + self._min_speech) :].copy()
         self._next_partial = self._pos + self._partial_hop
@@ -197,6 +219,13 @@ class EarsPipeline:
             self._suppress_release_pending = False
             self._suppress_until = self._pos + self._suppress_tail
         gate_closed = self._suppress_req or self._pos < self._suppress_until
+
+        # The no-wake window, on the same sample clock as everything else
+        # here. Advanced before the VAD runs, so an utterance confirmed in
+        # this chunk is judged against the window as it is NOW. It cannot
+        # reach past `gate_closed`: while Jarvis is speaking nothing opens
+        # an utterance, window or no window.
+        self._listen_open = self.listen.advance(self._pos)
 
         # Wake — continuous, with refractory.
         score = self.wake.feed(chunk)

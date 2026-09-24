@@ -64,7 +64,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
 
     cfg = EarsConfig()
     bus = await BusClient.connect(args.bus, src="jv-ears")
-    await bus.subscribe(["speech.state"])
+    await bus.subscribe(["speech.state", "dialog.listen"])
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     started = time.monotonic()
@@ -102,22 +102,36 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     worker = threading.Thread(target=run_pipeline, name="ears-pipeline", daemon=True)
     worker.start()
 
-    async def follow_speech_state() -> None:
-        """Half-duplex: close the pipeline's utterance gate while jv-voice
-        speaks — Jarvis must not hear Jarvis (see pipeline.set_suppressed)."""
+    async def follow_bus() -> None:
+        """The two things another service can say to the ears.
+
+        `speech.state` — half-duplex: close the pipeline's utterance gate
+        while jv-voice speaks, because Jarvis must not hear Jarvis (see
+        pipeline.set_suppressed).
+
+        `dialog.listen` — the bounded no-wake window jv-act and jv-brain
+        ask for when they need an answer (see pipeline.request_listen).
+        The whole frame goes down, envelope and all: `conf` and `v` are
+        grounds for refusing to open a microphone, and this loop is not
+        where that is decided.
+        """
         while True:
             frame = await bus.next_frame()
             if frame is None:
                 return
-            if frame["topic"] != "speech.state":
-                continue
-            state = frame["body"].get("state")
-            if state == "speaking":
-                pipeline.set_suppressed(True)
-            elif state in ("idle", "interrupted"):
-                pipeline.set_suppressed(False)
+            topic = frame["topic"]
+            if topic == "speech.state":
+                state = frame["body"].get("state")
+                if state == "speaking":
+                    pipeline.set_suppressed(True)
+                elif state in ("idle", "interrupted"):
+                    pipeline.set_suppressed(False)
+            elif topic == "dialog.listen":
+                pipeline.request_listen(
+                    frame.get("body"), conf=frame.get("conf"), v=frame.get("v")
+                )
 
-    state_task = asyncio.create_task(follow_speech_state())
+    bus_task = asyncio.create_task(follow_bus())
 
     async def beat() -> None:
         await bus.publish(
@@ -146,7 +160,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
             await bus.publish(topic, body, conf=conf, v=v)
     finally:
         health_task.cancel()
-        state_task.cancel()
+        bus_task.cancel()
         await bus.close()
     return 1 if pipeline_failed.is_set() else 0
 
