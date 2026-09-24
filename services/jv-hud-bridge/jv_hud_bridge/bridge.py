@@ -107,6 +107,18 @@ from jarvis_bus import BusError
 # — but GuardState sanitises it first, and that is a rule about the HUD
 # rather than about this pipe, which forwards the envelope whole.
 #
+# compat.install is the sixth (PLAN A52), and the other half of the same
+# story: jv-guard says whether a binary may run at all, and jv-compat says
+# what happened when it did. It is the only LIFECYCLE on this list — six
+# events for one install, minutes apart — and the HUD draws exactly one of
+# them, `failed`. core/InstallState.qml reads the `event` (a frozen enum),
+# the `app` slug and the `sha256`, and NOT the `error`: on a failed frame
+# that field is the last 500 bytes of the confined Windows installer's own
+# stdout, which is free text written by the one thing invariant 8 calls
+# untrusted outright. Same call as the scanner's `reasons` and jv-act's
+# `detail` — it rides this pipe because the envelope is forwarded whole,
+# and it reaches no pixel.
+#
 # `intent.action.args` is the most sensitive body on this list: it is
 # whatever the tool was asked to operate on, a path or a search string or
 # a window title. It rides this pipe because the envelope is forwarded
@@ -127,6 +139,7 @@ DEFAULT_TOPICS: Sequence[str] = (
     "action.result",
     "context.system",
     "guard.verdict",
+    "compat.install",
 )
 
 # Exactly the envelope (schemas/envelope.json). Forwarding the whole thing

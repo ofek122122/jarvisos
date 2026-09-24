@@ -5254,3 +5254,121 @@ change; the tolerance is now `<=` with the arithmetic written down.
   partials alone. **A56** and **A55/A47** unchanged and want a human's pick.
   A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and still want a human at
   ares. B7/B12/B15 unchanged.
+
+## 2026-09-24 — iteration 52 — A52: the install you walked away from gets to
+## tell you it failed
+
+- built: **`core/InstallState.qml` + `InstallPlate.qml` — the Windows app
+  jv-compat could not finish installing.** A51 gave the HUD half of
+  invariant 8: jv-guard's refusal, the one moment JarvisOS says NO to
+  something its user asked for. This is the other half — what happens to the
+  binaries it lets THROUGH. `jv-compat install ~/Downloads/thing.exe` builds
+  a bubblewrapped prefix and runs the installer inside it silently, for
+  minutes, and it is the only fire-and-forget command on this machine: by
+  the time it fails the terminal that started it is behind three windows and
+  the user is somewhere else. The report was an exit code nobody was looking
+  at. The HUD, which is on top of every window, now says `INSTALL FAILED`
+  and names the app.
+
+**FAILURES ONLY, and that is how the open question stayed open.** The topic
+carries the whole lifecycle — fingerprinted, screened, prefix_created,
+installed, failed, blocked — and A52 said outright that the interesting
+decision came first: an install takes MINUTES, every plate in this stack is
+about a moment, and "what is jv-compat doing right now" would be a progress
+indicator, which is a shape §06 does not have. So nothing here anticipates
+one. The happy path draws NOTHING, the way an action that worked (A37) and a
+service that is well (A6) draw nothing, and the question is written down as
+**A60** for a human with three ways out rather than answered by a loop that
+felt like building something. The sheet asserts that silence: `11-install.png`
+publishes a `prefix_created` AND a `failed`, and its caption is `install mic`
+— one plate out of two frames.
+
+**NOT `blocked`.** That event is how the SCREENING ended, and GuardPlate
+already draws that refusal from jv-guard's own `guard.verdict`, joined to
+this lifecycle by the same sha256. Two plates for one refusal would be the
+HUD saying the same thing twice in two vocabularies, and the witness that
+reads the screener directly is the better one. Passed over as NO NEWS —
+ActionState's rule for the confirmation outcomes it declines — so a refusal
+landing after a real failure cannot silently take it off the screen.
+
+**NOT the error text.** On a `failed` frame, `compat.install.error` is
+`detail[-500:]` of the confined installer's own stdout: free text written by
+the one thing invariant 8 calls untrusted outright, and likely carrying
+paths out of this filesystem. Same call as the scanner's `reasons` (A51) and
+jv-act's `detail` (A37), drawn harder — the element does not expose the
+field at all, so no plate can render what it never received, and a test
+asserts the absence rather than trusting the QML.
+
+**THE SLUG MUST LOOK LIKE ONE, and this is where the element parts company
+with GuardState.** `app` is the prefix DIRECTORY name, built by jv-compat
+out of a file name its author chose. GuardState sanitises a file name and
+draws it, which is right: a name is a thing to LOOK at, so stripping the
+invisible characters out of one still leaves the name its author typed. A
+slug is an IDENTIFIER — the directory, the thing you would type to try
+again — and a repaired identifier is another app's name. So it is sieved,
+not scrubbed: drawn only if it still has the shape of a directory name (one
+line, no separators, no spaces, 40 characters), REFUSED outright otherwise,
+and the sha256 prefix shown instead. A failure whose slug and whose hash are
+both unusable is still reported, nameless, because an install that failed is
+news whether or not the HUD can say which.
+
+**A gate came out, and the mutation harness is why.** The first version had
+the family's "is that a word I know" check on the frozen enum, copied from
+GuardState. The mutation that deletes it changed NOTHING: `apply()` acts on
+two allow-lists (the exact string `failed`, and four clearing events), so a
+word jv-compat invents tomorrow already does nothing at all. GuardState
+needs its check because its clearing branch is "everything that is not a
+refusal"; this one does not, and a guard no test can tell the presence of is
+a guard nothing is holding up. It was removed and the reasoning written
+where the next reader will be — and the one remaining belt-and-braces check
+(`event` is a string) is labelled as such IN the test that covers its
+outcome, so nobody mistakes a passing test for proof of a line.
+
+The HUD is ten plates and a 688 px box now (624 -> 688, four other files
+carry the number and `test_the_surface_box_is_the_one_shell_qml_declares`
+pins the measuring one). The growth is real co-occurrence, not margin: a
+refused binary and a failed install are the pair jv-compat itself produces
+when somebody fetches a second build of the thing that was blocked.
+
+- tests: `bash ops/ralph/qmltest.sh` — 536 (was 498; 36 new), with FOURTEEN
+  mutations run through them and thirteen caught: `blocked` added to the
+  clearing list (1 fail), `blocked` latched like a failure (2), everything
+  that is not a failure clearing the plate (2), the slug drawn as the
+  publisher sent it (4), a long slug truncated instead of refused (1), a
+  newer install not clearing the old failure (3), the envelope floor
+  dropping the schema version (2), the hash shortened whatever it is (1),
+  the hash left in whatever case it arrived in (1), the backstop never
+  firing (4), a dropped link that keeps the failure (1 — and only a
+  RECONNECT can show that one, since `failed` is already false while the
+  link is down), and the installer's stdout exposed as a property (1). The
+  fourteenth is the one that escaped and took the redundant gate with it.
+  `bash ops/ralph/runtests.sh tools` — 131 (was 128 + the three that failed
+  until the sheet and its README caught up). `... jv-hud-bridge` — 25.
+  `bash ops/ralph/hudshots.sh` — 11 shots, all rewritten at the new box
+  height, `11-install.png` new, and the sequence suite (A54) green at ten
+  plates. `bash ops/ralph/hudscreens.sh` — 7 screens, every window and probe
+  green against the REAL `.#jv-hud` that now carries this plate; the five
+  screens that moved are A45's documented 2-5 px glyph drift.
+- build: `nix build .#jv-hud` ok (qmllint -W 0 + the QML suite in its
+  checkPhase), `nixos-rebuild build --flake .#ares` ok. Never test/switch.
+  No schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin.
+- files: shell/jv-hud/core/InstallState.qml (new),
+  shell/jv-hud/InstallPlate.qml (new),
+  shell/jv-hud/tests/tst_installstate.qml (new), shell/jv-hud/shell.qml,
+  shell/jv-hud/qmldir, shell/jv-hud/core/qmldir, tools/gen_theme_qml.py,
+  tools/hudshots/scene/{Corner,tst_shots,tst_sequence}.qml,
+  tools/hudscreens/{sheet,shoot}.py, ops/ralph/hudscreens.sh,
+  services/jv-hud-bridge/jv_hud_bridge/bridge.py, docs/hud/README.md,
+  docs/hud/*.png, docs/hud/screens/*.png
+- commit: PENDING
+- next: **A60 is the interesting one and it is a human's**: the progress
+  question this iteration deliberately did not answer, with three options
+  written out. **A61** is cheap and concrete — no shot has ever shown
+  GuardPlate and InstallPlate together, which is the pair the box grew for.
+  The A13/A27 "every plate on every monitor" question now has a fifth
+  instance and is no closer to an answer. A50/A55/A47/A56/A59 unchanged and
+  still want a human's decision; A21/A22/A25/A27/A31/A38/A39 still want a
+  human at ares. **B10/A28 — one live recording of one spoken turn on ares
+  — remains the biggest thing a human can hand this loop.** B7/B12/B15/B17/
+  B20/B23 unchanged.

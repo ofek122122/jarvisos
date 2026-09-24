@@ -12,7 +12,7 @@ something to look at without sitting at the machine.
 
 ## What you are looking at
 
-Each PNG is **one HUD surface, at its real size** — 300 × 624 px, the box
+Each PNG is **one HUD surface, at its real size** — 300 × 688 px, the box
 `shell.qml` asks the compositor for, anchored top-right. The empty two thirds
 is not a crop artifact; it is §06's earned emptiness, and it is most of what
 this HUD looks like most of the time.
@@ -263,6 +263,51 @@ that is reported as no name at all — which falls back to the hash. Those
 cases are asserted in `shell/jv-hud/tests/tst_guardstate.qml`, where a
 result can be compared; this shot is the ordinary one, which is what a sheet
 is for.
+
+### 11 — an install that failed
+
+![11-install.png](11-install.png)
+
+**On screen:** `install` · `mic`
+
+`composed`. The other half of the shot above it. jv-guard let this installer
+through, jv-compat built it a confined prefix, ran it silently inside — and
+Wine could not load a DLL it wanted. `jv-compat install` is a
+fire-and-forget command that takes minutes, so by the time that happens the
+terminal that started it is behind three windows and the user is somewhere
+else entirely. The HUD is not.
+
+`INSTALL FAILED` is the schema's own event word, in `risk` like every other
+line in this HUD that reports something stopped. Under it is the app's
+slug — `notepad-plus-plus`, the name of the Wine prefix jv-compat built and
+the thing you would type to try again.
+
+**Two frames went in and one plate came out.** The scene also publishes the
+`prefix_created` that preceded the failure, and it draws nothing: an install
+that is merely *running* is invisible here, along with `fingerprinted`,
+`screened` and `installed`. That is `§06`'s earned emptiness, and it is also
+a question left deliberately open — an install is the one thing on this bus
+that takes minutes, so "what is jv-compat doing right now" may well deserve
+a progress indicator, and what that should look like is a decision for a
+human (PLAN A52) rather than a shape to arrive at by accident.
+
+**What is deliberately not here: the installer's own words.** This frame's
+`error` field reads `wine: could not load kernel32.dll, status c0000135`,
+and it reaches no pixel. On a `failed` frame that field is the last 500
+bytes of the confined Windows binary's stdout — free text written by the one
+thing invariant 8 calls untrusted outright, likely carrying paths out of
+this filesystem. `core/InstallState.qml` does not expose it at all, so no
+plate can draw it; asking *why* is what your voice is for.
+
+**And one thing that is not visible in this picture:** the slug is checked
+rather than trusted. jv-compat builds it out of the installer's file name,
+which is a string its author chose, so the element draws it only if it still
+has the shape of a prefix directory name — one line, no separators, short
+enough to be a directory. Anything else is refused outright rather than
+repaired, because a scrubbed identifier is another app's name, and the shot
+falls back to the sha256 prefix. Those cases are asserted in
+`shell/jv-hud/tests/tst_installstate.qml`, where a result can be compared;
+this shot is the ordinary one, which is what a sheet is for.
 
 ## Regenerating
 

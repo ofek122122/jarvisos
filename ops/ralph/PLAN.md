@@ -1091,7 +1091,9 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `ActionPlate {}` in the stack, and a `personality/` switch is the
       obvious shape if the answer is "sometimes". Answer it with A13/A27,
       not separately. Discovered in A37. **A40 added a fourth instance
-      (`OutputPlate`), which does not change the question.**
+      (`OutputPlate`), which does not change the question.** **A52 added a
+      fifth (`InstallPlate`) — three copies of "the app did not install",
+      one per monitor — and does not change it either.**
 
 - [ ] A39. A22 now has a ready-made shape if the human answering it wants
       one. `ActionState` deliberately passes over `denied` and
@@ -1322,19 +1324,63 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `bash ops/ralph/hudscreens.sh` (7 screens, green against the real
       `.#jv-hud`).)
 
-- [ ] A52. The HUD reads jv-guard and not jv-compat, so it can say a
-      binary was REFUSED and nothing else about an install: a prefix build
-      that failed, an install abandoned after the refusal it photographed,
-      or the app SLUG (`compat.install.app`) that a reader would recognise
-      where GuardPlate currently shows a file name. The whole lifecycle is
-      on the bus already — `compat.install` carries
-      fingerprinted/screened/prefix_created/installed/failed/blocked — and
-      `sha256` threads it to the verdict, which is the same join
-      discipline ActionState uses for a request_id. One topic, one
-      element, and a decision to make first: an install is a MINUTES-long
-      process and every other plate in this stack is about a moment, so
-      "what is jv-compat doing right now" may be a progress indicator,
-      which is a shape §06 does not have yet. Discovered in A51.
+- [x] A52. The HUD reads jv-compat now, and says which app did not get
+      installed. — PENDING
+      (`core/InstallState.qml` decides — 36 QML tests, 14 mutations run
+      through them — and `InstallPlate.qml` draws INSTALL FAILED over the
+      app's slug, in `risk`, under GuardPlate: the two halves of invariant
+      8 said by the two processes that enforce it. Four decisions.
+      FAILURES ONLY, which is also how the progress question was left
+      alone rather than answered — see A60. NOT `blocked`, because that is
+      how the SCREENING ended and GuardPlate already draws it from
+      jv-guard's own frame; passed over as NO NEWS, so a refusal cannot
+      clear a real failure. NOT the `error` text, which on a failed frame
+      is the last 500 bytes of a confined Windows installer's stdout — the
+      element does not expose the field, so no plate can draw it. And THE
+      SLUG MUST LOOK LIKE ONE: `app` is an identifier, so it is drawn only
+      if it still has the shape of a prefix directory name and REFUSED
+      rather than repaired otherwise (a scrubbed identifier is another
+      app's name), falling back to the sha256 prefix — which is the one
+      place this element parts company with GuardState, where a file NAME
+      is sanitised and drawn. `compat.install` joined the bridge's topics;
+      the surface box grew 624 -> 688 and four other files carry that
+      number. Tests: `bash ops/ralph/qmltest.sh` (536, was 498),
+      `... runtests.sh tools` (131), `... jv-hud-bridge` (25),
+      `bash ops/ralph/hudshots.sh` (11 shots, `11-install.png` new),
+      `bash ops/ralph/hudscreens.sh` (7 screens, green against the real
+      `.#jv-hud`).)
+
+- [ ] A60. **Human decision, and the half of A52 deliberately left
+      undone.** An install is the only thing on this bus that takes
+      MINUTES, and the HUD now draws exactly one of its six events. So
+      "what is jv-compat doing right now" is still unanswerable from the
+      screen: `fingerprinted`, `screened` and `prefix_created` go by
+      invisibly, and a user who ran `jv-compat install` and walked away
+      cannot tell a running install from one that never started. The
+      shape is the problem, not the data — every plate in this stack is
+      about a MOMENT, and a progress indicator is a thing §06 does not
+      have: it would be the first element on screen for minutes at a
+      time, the first whose whole point is that it changes, and the first
+      that competes with the voice turn for the corner. Three ways out
+      for whoever answers: (a) leave it — the terminal that started the
+      install is the progress indicator, and the HUD is for what you
+      would otherwise miss; (b) a one-line plate that says the app and
+      the stage and nothing else, holding the rhythm of the rest of the
+      stack; (c) a genuinely new §06 shape, which is a design decision
+      and not an implementation one. Discovered in A52.
+
+- [ ] A61. `10-guard.png` and `11-install.png` are the two halves of one
+      story and no picture has ever shown them together, though the pair
+      is exactly what a real refusal-then-retry produces: jv-guard blocks
+      an installer, the user fetches a different build, and that one
+      fails inside its prefix. Both plates would be up, and the box was
+      grown for precisely that case — so the growth is justified by an
+      argument no shot demonstrates. It is one more entry in
+      `tools/hudshots/scene/tst_shots.qml` (two topics, two frames each,
+      a caption of `guard install mic`), and worth taking the day
+      somebody is editing that file anyway. The same gap exists for every
+      other pair in a ten-plate stack; this is the one the box grew for.
+      Discovered in A52.
 
 - [x] A53. `10-guard.png` is a picture only a human can tell apart from a
       picture of `ActionPlate`. — 754a49b

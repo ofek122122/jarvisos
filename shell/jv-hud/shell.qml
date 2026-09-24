@@ -41,7 +41,10 @@
 // long as Jarvis has not started answering them; `ActionPlate` (A37) —
 // what jv-act tried to do to this machine and could not; `GuardPlate`
 // (A51) — the Windows binary jv-guard refused to let onto it, which is
-// the one time JarvisOS says no to something you asked for; `MicPlate`
+// the one time JarvisOS says no to something you asked for;
+// `InstallPlate` (A52) — the app jv-compat let through and then could not
+// finish installing, which is the one thing on this bus that takes
+// minutes and the one the user walks away from; `MicPlate`
 // (A4) — whether the microphone is open, from
 // jv-ears' own capture counters; and `HealthPlate` (A6) — the services
 // that are not well, and the llm rung when the brain is on the CPU floor.
@@ -127,8 +130,15 @@ ShellRoot {
       // tools/tests/test_hudscreens.py pins the measuring one to this
       // binding, so a box that grows here and nowhere else fails a test
       // rather than quietly cropping a photograph.
+      // And again for InstallPlate (A52) — the same two lines GuardPlate
+      // draws, and the same argument for the growth: an install that
+      // failed says nothing about whether a service is unwell, so the two
+      // can genuinely be up together. This is the pair jv-compat can put
+      // on screen at once (a refused binary, then a different install
+      // that failed), which is exactly the case a box sized by "they
+      // never co-occur" would crop.
       implicitWidth: 300
-      implicitHeight: 624
+      implicitHeight: 688
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
@@ -220,6 +230,17 @@ ShellRoot {
         // machine and failing, this one is Jarvis declining to change it at
         // all. On a machine nobody hands .exe files to it is never here.
         GuardPlate {
+          anchors.right: parent.right
+        }
+
+        // The Windows app jv-compat could not finish installing, from its
+        // own compat.install lifecycle — and only when it failed. Directly
+        // under the refused binary because the two are the two halves of
+        // invariant 8 said by the two processes that enforce it: that one
+        // is a binary that never got to run, this one is a binary that ran
+        // inside its prefix and did not work. An install nobody started,
+        // or one that worked, draws nothing at all.
+        InstallPlate {
           anchors.right: parent.right
         }
 

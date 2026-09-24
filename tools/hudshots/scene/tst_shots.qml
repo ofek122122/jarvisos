@@ -45,7 +45,7 @@ Item {
   // empty two-thirds is the point — §06's earned emptiness is a thing you
   // have to SEE to have an opinion about.
   width: 300
-  height: 624
+  height: 688
 
   // NOT the HUD. The real surface is `color: "transparent"` and floats
   // over whatever Niri has on screen; a PNG has to put something behind
@@ -308,6 +308,33 @@ Item {
       });
     }
 
+    // COMPOSED. jv-compat failing to install a Windows app (A52). The
+    // other half of the pair above it: that shot is a binary that never
+    // got to run, this one is a binary that ran inside its prefix and did
+    // not work. Two frames, because the interesting thing about this
+    // element is which of the six lifecycle events it draws — the
+    // `prefix_created` says the install was under way and is deliberately
+    // invisible, and only the `failed` puts anything on screen. The
+    // installer's own stdout is in the frame and on no pixel: the schema
+    // calls it "failed/blocked detail", and it is 500 bytes written by the
+    // one thing invariant 8 calls untrusted outright.
+    function shot_install() {
+      Bus.ingest('{"t":"link","up":true}');
+      suite.micOpen();
+      suite.send("compat.install", "jv-compat", {
+        "event": "prefix_created",
+        "app": "notepad-plus-plus",
+        "sha256": "4d0d5d4bb6f8d63a0f0a08dd9e8d2f15b1d9c3a7e6b40f2c8a17d35e9b0c6a21",
+        "recipe": "notepad-plus-plus"
+      });
+      suite.send("compat.install", "jv-compat", {
+        "event": "failed",
+        "app": "notepad-plus-plus",
+        "sha256": "4d0d5d4bb6f8d63a0f0a08dd9e8d2f15b1d9c3a7e6b40f2c8a17d35e9b0c6a21",
+        "error": "wine: could not load kernel32.dll, status c0000135"
+      });
+    }
+
     // The HUD admitting it cannot see the machine at all (A23). Every
     // plate below refuses to guess, and a refusal draws the same nothing a
     // calm machine draws — so without this line a dark recording light
@@ -351,7 +378,13 @@ Item {
       { "file": "07-no-bus.png", "build": suite.shot_nobus, "plates": ["link"], "settleMs": 6500 },
       { "file": "08-action.png", "build": suite.shot_action, "plates": ["action", "mic"] },
       { "file": "09-muted.png", "build": suite.shot_muted, "plates": ["state", "output", "mic"] },
-      { "file": "10-guard.png", "build": suite.shot_guard, "plates": ["guard", "mic"] }
+      { "file": "10-guard.png", "build": suite.shot_guard, "plates": ["guard", "mic"] },
+      // TWO frames, one plate: the `prefix_created` that precedes the
+      // failure is an install RUNNING, which this stack deliberately does
+      // not draw (A52 leaves the progress question to a human), so a
+      // caption reading `install mic` and not `install install mic` is the
+      // assertion that the happy path stayed invisible.
+      { "file": "11-install.png", "build": suite.shot_install, "plates": ["install", "mic"] }
     ]
 
     function test_the_sheet() {

@@ -56,6 +56,10 @@ PlateStack {
     anchors.right: parent.right
   }
 
+  InstallPlate {
+    anchors.right: parent.right
+  }
+
   MicPlate {
     anchors.right: parent.right
   }
