@@ -3439,6 +3439,81 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       today, which is the real cost and why this is a proposal. Discovered
       in B78.
 
+- [ ] B84. **jv-ears throws captured audio away without counting it, and a
+      comment says otherwise.** `MicSource.chunks` in
+      `services/jv-ears/jv_ears/audio.py` hands PortAudio a callback with
+      two silent discards in it: `except queue.Full: pass` (the mic queue
+      is `maxsize=64`, drop-newest, so a pipeline that falls behind loses
+      whole chunks of the room) and `if status: pass` under the comment
+      "Overruns are logged by the caller via health" — nothing anywhere
+      logs them, so the comment asserts a mechanism that does not exist.
+      Neither loss reaches `sys.health`: `CaptureMeter` counts what the
+      device DELIVERED, which is the wrong side of the queue, so the
+      heartbeat says `ok`, `capture_age_s` stays fresh, `captured_s` keeps
+      rising and `MicPlate` draws a calm MIC while the ASR is being fed a
+      recording with holes in it. It is the 2026-09-15 field bug's twin —
+      ears up and cheerful, audio gone — and it is the missing MEASUREMENT
+      behind two human-review items (optimization-backlog §2, the O(n^2)
+      partial re-transcribe on the perception thread, and §6, the ~2.2 s
+      final transcribe): both are arguments about whether the mic starves,
+      and nothing on this machine can currently answer it. No schema
+      change — `state` is the frozen enum and `degraded` is in it, and
+      jv-ears already degrades for a stall, so this is the same publisher
+      making the same shape of claim about the same fault. The flap worry
+      that blocks A76 does not apply: `HEALTH_MIN_GAP_S` already floors
+      the transition beat at 1 s. Raised in iteration 105.
+
+- [ ] A84. **The mic indicator draws MIC while audio is being lost — the
+      HUD half of B84.** Once jv-ears counts its discards, `MicState`'s
+      three words (`live` / `stalled` / `off`) are one short: a device that
+      is open, delivering, and losing chunks reads as `live`, which is the
+      "not fakeable" half of invariant 10 quietly over-claiming. The shape
+      is already there — `stalled` is a freshness rule over a gauge and a
+      published budget (A14, `core/EarsBudgets.qml`), and a loss window is
+      the same rule over a different gauge — so it is one derived reading,
+      one second word on `MicPlate` ("MIC LOSING AUDIO" beside the
+      existing "MIC NO AUDIO"), and one `BUDGET_MIRRORS` entry. What it
+      needs first is the gauge: B84 deliberately ships the fault on
+      `state` + `notes` only, because B7 forbids putting a number on the
+      bus before something reads it, so the gauges this element wants
+      (`mic_lost_s`, `mic_loss_age_s`, `mic_loss_window_s`) arrive WITH
+      this item or not at all. The one real argument against: HealthPlate
+      already draws `jv-ears DEGRADED` off B84, and ReplyState (A71)
+      refused `finish_reason: error` for exactly that reason — two plates,
+      one corner, one event, which is A62. The counter-precedent is in
+      this same plate: `stalled` is already both a `degraded` heartbeat
+      AND a MicPlate word, because the privacy indicator answers "what is
+      being recorded" and the health list answers "what is unwell", and
+      those are different questions. Worth building on that precedent,
+      but it is the corner's crowding question again (A62/A70). Raised in
+      iteration 105.
+
+- [ ] B85. **`speech.state.reason` is read by nothing in this repo, and it
+      is the only field of that frozen schema in that position.** The enum
+      has four words — `completed`, `wake`, `preempted`, `error` — and they
+      say how an utterance ENDED: jv-voice publishes them at
+      `services/jv-voice/jv_voice/service.py` (`idle`+`completed` for a
+      finished turn, `interrupted`+`wake` for a barge-in,
+      `interrupted`+`preempted` for an urgent utterance cutting one off,
+      `idle`+`error` when synthesis or playback threw). Nothing reads
+      `reason`: not `core/SpeechState.qml`, which draws INTERRUPTED for
+      both of the middle two, and not `cli.rs`/`jv.rs`, where
+      `SpeechStateReason` is a typed enum in `schema.rs` with no caller.
+      Two halves, and they are not equal. The HUD half is WEAK and should
+      probably stay unbuilt: `error` rides an `idle` frame (so the plate
+      draws nothing), but the same `except` block beats `degraded` with
+      the failure in its notes one `await` later, and HealthPlate draws
+      that — reporting it again is the duplication A71 refused. What is
+      left there is `wake` vs `preempted`, and "you stopped me" versus "I
+      stopped myself to say something more urgent" is a real distinction
+      worth maybe one word. The TAP half is the stronger one: `jv tap
+      --latency` measures a turn to `speech.say` and never says how the
+      turn ENDED, so a reply that died mid-synthesis and one spoken in
+      full are timed identically and reported identically — the
+      measurement says `respond 2.1s` about words nobody heard. That is
+      B13's "a number stops meaning its label" failure with the label
+      still attached. Raised in iteration 105.
+
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD
       shows is not in the build gate. The obstacle is real: the plates need
