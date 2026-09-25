@@ -8,7 +8,7 @@ and commit the diff.
 
 This is the companion to [`../README.md`](../README.md), and the two
 answer opposite questions. That sheet renders the plates with a plain QML
-engine into the 300x560 rectangle the surface declares: the HUD's
+engine into the 300x807 rectangle the surface declares: the HUD's
 **content**, at a size you can read, and it has to disclaim everything a
 compositor owns. These are **screens** — the whole desktop, all three of
 them, with the HUD where it actually lands on it.
@@ -28,6 +28,22 @@ and `DP-1`/`DP-2`. Nothing here can tell you whether an 11 px label is
 comfortable from where you actually sit — only how much of the screen it
 takes and where.
 
+Also not real, and this one is about time rather than hardware: the
+pictures are **older than the box**. Every PNG here was photographed
+against a `300x688` surface, and `shell.qml` now declares `300x807` — the
+box grew twice after these were taken, once to stop cropping the bottom
+plate of a full corner (A63) and once for a plate that did not exist yet
+(A71). Nothing in a shot is wrong; each was true of the HUD on the day it
+was taken, and the measurements below were made against the box of that
+day. But the HUD you would photograph today is taller than the one in
+these pictures, and the newest plate is in none of them. Re-shooting needs
+a compositor and therefore a human at ares (PLAN A73 — the same seat A47
+and A55 are waiting for). Both numbers in this paragraph are derived by
+`tools/tests/test_hudscreens.py`: today's from `tools/hudscreens/sheet.py`,
+the pictures' from the commit that last wrote a PNG here. So this
+paragraph cannot itself go stale, and a re-shoot deletes it rather than
+updating it.
+
 The desktop behind the HUD is flat `#31353B`, deliberately **not** a
 `personality/theme.toml` colour, so the paper can never be mistaken for
 Jarvis's own palette. Without something behind it the plates' `0.86`
@@ -45,7 +61,7 @@ the run — no PNGs — unless all of the following hold, none of which any
 QML engine can answer:
 
 - **The HUD is on every monitor, in the corner it claims.** Everything
-  drawn on each output falls inside the 300x560 box `shell.qml` anchors to
+  drawn on each output falls inside the 300x807 box `shell.qml` anchors to
   the top-right, and the gap to the right edge is `inset_px`. *Verified it
   bites: anchoring the surface `left` instead of `right` fails; making one
   surface instead of one per screen fails.*
@@ -65,7 +81,7 @@ QML engine can answer:
   monitor to hold the keyboard, and three points are clicked: one clear of
   the HUD (the control — without it a harness whose clicks went nowhere
   would report a perfect pass-through), one on a pixel the HUD actually
-  painted, and one inside the 300x560 surface box that it painted nothing
+  painted, and one inside the 300x807 surface box that it painted nothing
   on. All three must end with the keyboard on the window under the HUD.
   *Verified: deleting `mask: Region {}` fails on the painted pixel; a mask
   covering only the lower, unpainted half of the box passes that one and

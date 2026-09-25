@@ -21,8 +21,11 @@ run against the wrong machine, or not run at all.
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from test_gen_theme_qml import ROOT
 
@@ -1485,3 +1488,212 @@ def test_the_readme_says_the_screens_are_not_byte_reproducible():
         "reproducible byte for byte — without it a clean diff after a "
         "re-run reads as evidence, and a dirty one reads as a regression"
     )
+
+
+# ------------------------------------------------ the numbers in the prose (A73)
+#
+# Every measurement above is derived: shoot.py checks the corner against
+# `sheet.SURFACE_*`, which this file checks against `shell.qml`. The PROSE
+# was not. `docs/hud/screens/README.md` quoted the surface box three times
+# and said `300x560`, which was true when A30 wrote it and stopped being
+# true four plates later — the box went 560 -> 624 -> 688 -> 745 -> 807 and
+# the sentence never moved, because no gate had ever read it.
+#
+# That is the same class of failure as a stale `SURFACE_H`, one document
+# down: a number a reader trusts, that nothing checks. So the boxes the
+# prose quotes are pinned to the boxes the harness declares, the way
+# `test_the_surface_box_is_the_one_shell_qml_declares` pins the harness to
+# the HUD.
+
+def readme_text() -> str:
+    return (SCREENS / "README.md").read_text("utf-8")
+
+
+def declared_boxes() -> dict[tuple[int, int], str]:
+    """Every WxH this harness can honestly be describing, and what each one
+    is — the surface, each monitor, the whole desk, and the older surface
+    the committed pictures were taken against."""
+    boxes = {
+        (sheet.SURFACE_W, sheet.SURFACE_H): "the surface shell.qml declares",
+        (sheet.DESK_WIDTH, sheet.DESK_HEIGHT): "the whole desk",
+        shot_box(): "the surface the committed PNGs were photographed against",
+    }
+    for out in sheet.OUTPUTS:
+        boxes.setdefault((out["width"], out["height"]), f"the {out['role']} monitor")
+    return boxes
+
+
+def shot_box() -> tuple[int, int]:
+    return sheet.shot_surface_box(ROOT, str(SCREENS.relative_to(ROOT)))
+
+
+def test_every_box_the_readme_quotes_is_one_the_harness_declares():
+    """The sentence that went stale said `300x560` while shoot.py measured
+    against 807, and a reader has no way to tell which of the two is the
+    HUD. There is no third source here: a box in this document is the
+    surface, a monitor, the desk, or the older surface these pictures were
+    taken against — and anything else is a number somebody typed.
+    """
+    allowed = declared_boxes()
+    quoted = sheet.boxes_in_prose(readme_text())
+    assert quoted, (
+        "docs/hud/screens/README.md quotes no box at all — this gate has "
+        "stopped reading the thing it was built for"
+    )
+    for box in sorted(quoted - set(allowed)):
+        raise AssertionError(
+            f"docs/hud/screens/README.md quotes {box[0]}x{box[1]}, which is "
+            f"nothing this harness declares. It knows "
+            + ", ".join(f"{w}x{h} ({what})" for (w, h), what in sorted(allowed.items()))
+        )
+
+
+def test_the_readme_says_its_pictures_predate_the_box_it_quotes():
+    """Pinning the prose to `sheet.py` makes the document MORE wrong on its
+    own if nothing else changes: the box in the text becomes today's and
+    the pictures are still yesterday's, so a reader measures a 688 px HUD
+    against an 807 px sentence and finds the sheet lying to them.
+
+    Re-shooting needs a compositor and therefore a human (A73, like A47 and
+    A55). Until then the difference is stated, and both numbers are derived
+    — today's from `tools/hudscreens/sheet.py`, the pictures' from the
+    commit that last wrote a PNG here — so the notice cannot itself go
+    stale, and a re-shoot retires it rather than updating it.
+    """
+    then, now = shot_box(), (sheet.SURFACE_W, sheet.SURFACE_H)
+    readme = readme_text()
+    if then == now:
+        assert "older than the box" not in readme, (
+            "the committed screens were taken against today's surface box, so "
+            "docs/hud/screens/README.md still carries a staleness notice that "
+            "is no longer true — delete it"
+        )
+        return
+    assert "older than the box" in readme, (
+        f"the committed screens were photographed against a {then[0]}x{then[1]} "
+        f"surface and shoot.py now measures {now[0]}x{now[1]}, and "
+        "docs/hud/screens/README.md does not say so — every caption below is "
+        "then a description of a HUD that is not in the picture"
+    )
+    for w, h in (then, now):
+        assert f"{w}x{h}" in readme, (
+            f"docs/hud/screens/README.md says its pictures are older than the "
+            f"box without naming {w}x{h} — a reader cannot tell by how much"
+        )
+
+
+# The picture's own box is read out of git rather than written down, which
+# is the only version of this that survives: the last three times the
+# surface grew, somebody would have had to remember to bump a literal here,
+# and the PLAN item that raised this had the number wrong (it says 745; the
+# commit that last wrote a PNG here declared 688).
+
+
+def mkscreens(tmp_path: Path, then: int, now: int) -> Path:
+    """A repo shaped like this one's two halves: a sheet module declaring a
+    box, and a directory of pictures taken against it. The box then moves
+    with the pictures left alone, which is exactly what this repo did."""
+    root = tmp_path / "repo"
+    (root / "tools" / "hudscreens").mkdir(parents=True)
+    (root / "docs" / "hud" / "screens").mkdir(parents=True)
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+    def sheet_py(height):
+        (root / "tools" / "hudscreens" / "sheet.py").write_text(
+            f"SURFACE_W = 300\nSURFACE_H = {height}\n", "utf-8"
+        )
+
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    sheet_py(then)
+    (root / "docs" / "hud" / "screens" / "01-quiet-desk.png").write_bytes(b"\x89PNG")
+    git("add", "-A")
+    git("commit", "-qm", "shot")
+    sheet_py(now)
+    (root / "docs" / "hud" / "screens" / "README.md").write_text("prose", "utf-8")
+    git("add", "-A")
+    git("commit", "-qm", "the box grew, the pictures did not")
+    return root
+
+
+def test_the_shot_box_is_the_one_in_force_when_the_pictures_were_written():
+    """Against this repo, where the answer is a fact about its history: the
+    PNGs were last written by the commit that took the box to 688, and
+    everything after it moved the box without moving a picture."""
+    assert shot_box() == (300, 688)
+
+
+def test_the_shot_box_is_read_out_of_git_and_not_the_working_copy(tmp_path):
+    """The whole point. The working copy's `sheet.py` says what the harness
+    would photograph TODAY; the pictures were photographed by whatever it
+    said on the day they were written, and that copy exists only in git.
+    """
+    root = mkscreens(tmp_path, then=688, now=807)
+    assert sheet.shot_surface_box(root, "docs/hud/screens") == (300, 688)
+
+
+def test_a_directory_with_no_pictures_in_it_is_refused():
+    """`git log -- <dir>/*.png` on a directory with no pictures prints
+    nothing, and `git show :sheet.py` on an empty revision would answer
+    with the WORKING COPY. That reads as "the pictures are current", which
+    is the one wrong answer nobody would think to question."""
+    with pytest.raises(ValueError):
+        sheet.shot_surface_box(ROOT, "personality")
+
+
+def test_pictures_older_than_the_sheet_are_an_error_rather_than_todays_box(tmp_path):
+    """The other way the question can have no answer: a picture committed
+    before this file existed. `git show` fails, and it must be allowed to.
+    """
+    root = tmp_path / "repo"
+    (root / "docs" / "hud" / "screens").mkdir(parents=True)
+    (root / "docs" / "hud" / "screens" / "01-quiet-desk.png").write_bytes(b"\x89PNG")
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    for args in (
+        ("config", "user.email", "t@t"),
+        ("config", "user.name", "t"),
+        ("add", "-A"),
+        ("commit", "-qm", "a picture, and no sheet to have taken it"),
+    ):
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    with pytest.raises(subprocess.CalledProcessError):
+        sheet.shot_surface_box(root, "docs/hud/screens")
+
+
+def test_a_sheet_that_declares_no_box_is_refused():
+    """The parser is the instrument. If `sheet.py` is reshaped so the box is
+    no longer two module-level ints, this must stop rather than quietly
+    return half an answer."""
+    assert sheet.parse_surface_box("SURFACE_W = 300\nSURFACE_H = 807\n") == (300, 807)
+    with pytest.raises(ValueError):
+        sheet.parse_surface_box("SURFACE_W = 300\n")
+    with pytest.raises(ValueError):
+        sheet.parse_surface_box("# SURFACE_W = 300\n# SURFACE_H = 807\n")
+
+
+def test_the_prose_scanner_reads_a_box_however_a_person_typed_it():
+    """The instrument, over the shapes this document actually uses: an
+    `x`, a `×`, and either with spaces around it. A scanner that stopped
+    matching would report a clean README forever, which is precisely the
+    silence the stale `300x560` lived in for five plates.
+    """
+    assert sheet.boxes_in_prose("the 300x807 box") == {(300, 807)}
+    assert sheet.boxes_in_prose("300 × 807 px, the box") == {(300, 807)}
+    assert sheet.boxes_in_prose("a 2560 x 1440 panel and a 300x807 surface") == {
+        (2560, 1440),
+        (300, 807),
+    }
+
+
+def test_the_prose_scanner_is_not_reading_ordinary_prose():
+    """...and it has to stay narrow, because this README is full of
+    numbers: opacities, pixel counts, drawn regions, seconds. Anything it
+    picked up out of those would be a box no harness declares, and the gate
+    would fail on a document that is perfectly correct.
+    """
+    assert sheet.boxes_in_prose("an 11 px label at 0.86 opacity") == set()
+    assert sheet.boxes_in_prose("the region (2284, 16, 2543, 178)") == set()
+    assert sheet.boxes_in_prose("six windows, 807 px tall, 745 before") == set()

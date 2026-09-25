@@ -18,6 +18,8 @@ say.
 """
 
 import re
+import subprocess
+from pathlib import Path
 
 # ares' monitors, as CLAUDE.md declares them: one 2560x1440 primary and
 # two 1920x1080 at its side. The refresh rates are real on ares and
@@ -58,6 +60,80 @@ BACKDROP = "#31353B"
 SURFACE_W = 300
 SURFACE_H = 807
 INSET = 16
+
+
+# ------------------------------------- the box the committed pictures were taken at
+#
+# Everything else here describes the HUD the harness would photograph
+# TODAY. The PNGs in docs/hud/screens are the one thing in this repo that a
+# machine without a compositor cannot re-make, so they are older than that
+# by however long it has been since a human ran the harness — and the box
+# has grown several times while they sat there.
+#
+# The older box is read back out of git rather than written down beside
+# this one. A literal would be a fifth number to remember on a day nobody
+# is thinking about it, and the PLAN item that asked for this had already
+# got it wrong by two growths. What git knows and no author has to: the
+# commit that last WROTE one of these pictures, and what this file said at
+# that commit.
+SURFACE_BOX_RE = re.compile(r"^SURFACE_([WH])\s*=\s*(\d+)\s*$", re.M)
+
+
+def parse_surface_box(text):
+    """The surface box declared by a copy of this file — including an old
+    copy, out of git, which is why it is parsed rather than imported."""
+    found = dict(SURFACE_BOX_RE.findall(text))
+    if set(found) != {"W", "H"}:
+        raise ValueError(
+            "no SURFACE_W/SURFACE_H pair in that copy of sheet.py: found "
+            f"{sorted(found)}"
+        )
+    return int(found["W"]), int(found["H"])
+
+
+# This file's own path inside a repo: the three components that follow any
+# root. Written this way rather than against a known root because the tests
+# ask the same question of a synthetic repo — and if the file is ever moved,
+# `git show` fails on a path that is not there rather than answering about
+# some other file.
+SELF_REL = Path(*Path(__file__).resolve().parts[-3:]).as_posix()
+
+
+# The instrument the prose gate reads with (A73). It lives here, beside the
+# numbers it is looking for, because a regex nothing can run is a gate that
+# grades itself: one that quietly stopped matching would report a clean
+# document forever. Both separators, because prose written by hand uses
+# either; three or four digits, because the smallest box here is a 300 px
+# surface and the largest a 6400 px desk, and a looser pattern starts
+# reading pixel counts and durations as geometry.
+BOX_IN_PROSE = re.compile(r"\b(\d{3,4})\s*[x×]\s*(\d{3,4})\b")
+
+
+def boxes_in_prose(text):
+    """Every WxH a document quotes, as a set of (width, height)."""
+    return {(int(w), int(h)) for w, h in BOX_IN_PROSE.findall(text)}
+
+
+def _git(root, *args):
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def shot_surface_box(root, screens_rel):
+    """The surface box in force when the committed screens were last
+    written. Raises if there are no pictures there or if this file did not
+    exist yet at that commit — an answer of "today's box" would read as
+    "the pictures are current", which is the one wrong answer nobody would
+    think to question.
+    """
+    sha = _git(root, "log", "-1", "--format=%H", "--", f"{screens_rel}/*.png").strip()
+    if not sha:
+        raise ValueError(f"no committed PNG under {screens_rel}")
+    return parse_surface_box(_git(root, "show", f"{sha}:{SELF_REL}"))
 
 
 # --------------------------------------------------- counting frames (A34)
