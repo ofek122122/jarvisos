@@ -502,4 +502,259 @@ TestCase {
     ask(confirm);
     verify(!confirm.pending);
   }
+
+  // --- how the question ENDED (A79) ------------------------------------
+  //
+  // `pending` going false is three different endings wearing one face: yes,
+  // no, and "we stopped being able to tell". The HUD kept none of them, so
+  // the outcome of a DESTRUCTIVE tool — the most consequential thing this
+  // topic carries — left the screen with the question. `granted` was the
+  // one body field of the frozen schema nothing here read.
+  //
+  // These are the reading half only. What a HUD should DRAW when a question
+  // ends, and for how long, is a §06 decision and a human's (A22); nothing
+  // renders any of this yet. So the tests below are about what may and may
+  // not be SAID, which is the part that can be settled without the design.
+
+  function test_a_machine_that_has_answered_nothing_says_nothing() {
+    const confirm = makeConfirm();
+    compare(confirm.outcome, "");
+    compare(confirm.answeredBy, "");
+    compare(confirm.answeredRequestId, "");
+    compare(confirm.answeredTool, "");
+    compare(confirm.answeredSummary, "");
+  }
+
+  function test_a_question_still_open_has_no_ending() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    verify(confirm.pending);
+    compare(confirm.outcome, "", "it is still being asked");
+    compare(confirm.answeredBy, "");
+  }
+
+  function test_a_yes_is_remembered_as_granted() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "granted": true,
+      "answered_by": "voice"
+    });
+    compare(confirm.outcome, "granted");
+    compare(confirm.answeredBy, "voice");
+    compare(confirm.answeredRequestId, "req-1");
+    // The words of the question that ended, which `summary` can no longer
+    // give: everything readable there is gated on `pending`, and the whole
+    // point of this ending is that nothing is pending any more.
+    compare(confirm.summary, "");
+    compare(confirm.answeredTool, "trash.empty");
+    compare(confirm.answeredSummary, "empty the trash — yes or no?");
+  }
+
+  function test_a_no_is_remembered_as_denied() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "granted": false,
+      "answered_by": "voice"
+    });
+    compare(confirm.outcome, "denied");
+    compare(confirm.answeredBy, "voice");
+  }
+
+  function test_a_timeout_is_a_denial_and_says_which_it_was() {
+    // Two different questions with two different answers: the verdict is
+    // `granted`, the route is `answered_by`. Nobody spoke and the tool did
+    // not run — and a reader wants to know the difference between "you
+    // said no" and "you were not there".
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "granted": false,
+      "answered_by": "timeout"
+    });
+    compare(confirm.outcome, "denied");
+    compare(confirm.answeredBy, "timeout");
+  }
+
+  function test_an_answer_from_the_cli_is_remembered_by_its_route() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "answered_by": "cli"
+    }, {}, "jv");
+    compare(confirm.outcome, "granted");
+    compare(confirm.answeredBy, "cli");
+  }
+
+  function test_an_answer_that_does_not_say_whether_it_granted_is_unknown() {
+    // `granted` is optional in the frozen schema. An answer without it
+    // ends the question and settles nothing, and saying so is the honest
+    // reading — "denied" would be a guess about a destructive tool.
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "granted": null
+    });
+    verify(!confirm.pending, "it was still an answer");
+    compare(confirm.outcome, "unknown");
+    compare(confirm.answeredBy, "voice");
+  }
+
+  function test_a_timeout_that_does_not_say_is_not_read_as_a_denial() {
+    // The tempting inference, refused. The schema's prose says a timeout
+    // is a denial and jv-act publishes `granted: false` when it times out
+    // — so reading the denial off the ROUTE here would be a second copy of
+    // a rule jv-act already states in the frame (A14), and the copy is the
+    // half that can drift.
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "granted": null,
+      "answered_by": "timeout"
+    });
+    compare(confirm.outcome, "unknown");
+    compare(confirm.answeredBy, "timeout");
+  }
+
+  function test_a_granted_that_is_not_a_boolean_is_unknown() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "granted": "yes"
+    });
+    compare(confirm.outcome, "unknown", "'yes' is a string, and a string is not a decision");
+  }
+
+  function test_an_answer_by_a_route_we_do_not_know_still_has_a_verdict() {
+    // The route is detail; the verdict is the signal. Losing a word we do
+    // not recognise must not lose the fact that something destructive was
+    // authorized.
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "answered_by": "telepathy"
+    });
+    compare(confirm.outcome, "granted");
+    compare(confirm.answeredBy, "");
+  }
+
+  function test_an_answer_with_no_route_still_has_a_verdict() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "answered_by": null
+    });
+    compare(confirm.outcome, "granted");
+    compare(confirm.answeredBy, "");
+  }
+
+  function test_an_answer_to_a_question_we_never_saw_is_not_an_ending() {
+    // A verdict out of nowhere. The HUD reports the end of a question it
+    // was holding; it has no business announcing the outcome of one it
+    // never showed — the same rule that stops a stranger's answer from
+    // blanking a live question.
+    const confirm = makeConfirm();
+    reply(confirm);
+    compare(confirm.outcome, "");
+    compare(confirm.answeredRequestId, "");
+  }
+
+  function test_a_strangers_answer_writes_no_ending() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {
+      "request_id": "req-other"
+    });
+    verify(confirm.pending, "our question is still open");
+    compare(confirm.outcome, "");
+  }
+
+  function test_a_frame_we_cannot_read_ends_nothing() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm, {}, {
+      "v": 2
+    });
+    verify(confirm.pending);
+    compare(confirm.outcome, "");
+  }
+
+  function test_a_new_question_forgets_the_last_ending() {
+    // The live question is the news. An ending still readable beside a
+    // question that has not been answered is two states at once, and a
+    // reader would attach the verdict to the wrong one.
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm);
+    compare(confirm.outcome, "granted");
+    ask(confirm, {
+      "request_id": "req-2"
+    });
+    verify(confirm.pending);
+    compare(confirm.outcome, "");
+    compare(confirm.answeredRequestId, "");
+    compare(confirm.answeredTool, "");
+  }
+
+  function test_losing_the_link_forgets_the_ending() {
+    // Same rule as the question itself: a verdict latched off a bus we can
+    // no longer see describes a machine we can no longer see.
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm);
+    confirm.bus.ingest('{"t":"link","up":false,"err":"bridge died"}');
+    compare(confirm.outcome, "");
+    compare(confirm.answeredBy, "");
+    compare(confirm.answeredTool, "");
+  }
+
+  function test_a_link_that_comes_back_does_not_resurrect_the_ending() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm);
+    confirm.bus.ingest('{"t":"link","up":false,"err":"bridge died"}');
+    confirm.bus.ingest('{"t":"link","up":true}');
+    compare(confirm.outcome, "", "nothing on the bus says how that ended");
+  }
+
+  function test_a_window_that_runs_out_settles_nothing() {
+    // `expired` is the HUD's own backstop for a jv-act that died
+    // mid-question — it ends the ASKING and answers nothing. Reading it as
+    // a denial would be the HUD deciding the outcome of a destructive tool
+    // on its own timer.
+    const confirm = makeConfirm();
+    ask(confirm, {
+      "window_s": 0.05
+    });
+    tryCompare(confirm, "pending", false, 3000);
+    compare(confirm.outcome, "", "we stopped asking; nobody answered");
+  }
+
+  function test_an_answer_that_lands_after_we_let_go_is_still_an_ending() {
+    // The other side of the same case: our ceiling closed the question
+    // early and then jv-act said what really happened. That frame is news
+    // about a question the user was shown, and it is taken.
+    const confirm = makeConfirm();
+    ask(confirm, {
+      "window_s": 0.05
+    });
+    tryCompare(confirm, "pending", false, 3000);
+    reply(confirm, {
+      "granted": true
+    });
+    compare(confirm.outcome, "granted");
+    compare(confirm.answeredTool, "trash.empty");
+  }
+
+  function test_another_topic_does_not_disturb_the_ending() {
+    const confirm = makeConfirm();
+    ask(confirm);
+    reply(confirm);
+    send(confirm, "speech.state", "jv-voice", {
+      "state": "speaking"
+    });
+    compare(confirm.outcome, "granted");
+    compare(confirm.answeredRequestId, "req-1");
+  }
 }

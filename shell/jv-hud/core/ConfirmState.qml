@@ -57,6 +57,14 @@
 // Everything else is refused rather than guessed at, and refusing is never
 // the same as being answered: a frame this cannot read leaves a pending
 // question exactly where it was.
+//
+// Of those three, exactly one is NEWS — an answer frame says what the
+// machine decided about a destructive tool, and until A79 that was thrown
+// away with the question (`granted` was the one body field of the frozen
+// schema nothing here read). So the ending is latched too, beside the
+// question: what was decided, by which route, and about which tool. The
+// reading half only — what a HUD should DRAW when a question ends, and for
+// how long, is a §06 decision and a human's (A22).
 import QtQuick
 
 QtObject {
@@ -100,11 +108,84 @@ QtObject {
   // HUD's own ceiling when it declared nothing usable.
   readonly property real windowS: root.windowOf(root.request)
 
+  // --- how the last question ENDED (A79) ------------------------------
+  //
+  // `pending` going false is three different endings wearing one face: the
+  // user said yes, the user said no (or said nothing and jv-act denied it
+  // for them), or we stopped being able to tell. The most consequential
+  // thing this topic carries is which of those it was, and it used to
+  // leave the screen with the question.
+  //
+  // What this will and will not say:
+  //
+  //   · only about a question this element was HOLDING. An answer whose
+  //     request_id we never saw asked is a verdict out of nowhere; the
+  //     rule that keeps a stranger's answer from blanking a live question
+  //     keeps it from writing an ending for one.
+  //   · only from an answer FRAME. A window that ran out on our side ends
+  //     the asking and settles nothing — `expired` is the HUD's own
+  //     backstop for a jv-act that died mid-question, not news from the
+  //     machine. An answer that lands after we let go is still an ending,
+  //     and is taken: it is what really happened to a question the user
+  //     was shown.
+  //   · `granted` decides, and nothing else does. See `outcome`.
+  //
+  // It is forgotten when a new question arrives (the live one is the news,
+  // and a verdict readable beside an unanswered question would be attached
+  // to the wrong one) and when the link drops (a decision latched off a
+  // bus we can no longer see). Nothing else forgets it, because "how long
+  // does an ending stay up" is precisely what A22 is for.
+
+  // "" until something is answered; then "granted", "denied", or
+  // "unknown" for an answer whose verdict we could not read.
+  //
+  // `granted` is optional in the frozen schema, and an answer without a
+  // usable one is `unknown` even when `answered_by` is "timeout" — the
+  // schema's prose does say a timeout is a denial, and jv-act publishes
+  // `granted: false` when it times out, which is exactly why reading the
+  // denial off the ROUTE here would be a second copy of a rule the frame
+  // already states (A14). Two copies are what drift is made of, and this
+  // one would be guessing at the outcome of a destructive tool.
+  readonly property string outcome: {
+    if (root.answer === null)
+      return "";
+    const g = root.answer.env.body.granted;
+    if (typeof g !== "boolean")
+      return "unknown";
+    return g ? "granted" : "denied";
+  }
+
+  // Which route the answer came in by: "voice", "cli", "timeout", or ""
+  // for an answer naming a route the frozen schema does not have. A
+  // different question from `outcome` — "you said no" and "you were not
+  // there" are both denials and a reader wants them apart — and losing a
+  // word we do not recognise must not lose the verdict with it.
+  readonly property string answeredBy: {
+    if (root.answer === null)
+      return "";
+    const by = root.answer.env.body.answered_by;
+    return by === "voice" || by === "cli" || by === "timeout" ? by : "";
+  }
+
+  // The question that ended. Kept rather than read back off `request`,
+  // because by now there is no pending question and everything readable
+  // through `textOf` is gated on there being one — and an ending nobody
+  // can attach to a tool is not worth drawing.
+  readonly property string answeredRequestId: root.answer === null ? "" : root.answer.env.body.request_id
+  readonly property string answeredTool: root.askedTextOf("tool")
+  readonly property string answeredSummary: root.askedTextOf("summary")
+
   // --- the question we are holding ------------------------------------
 
   // The latched request envelope, or null. A plain property: it is a
   // memory, not a reading, and every path that sets it is below.
   property var request: null
+
+  // The latched ending: `{ env, request }` — the answer frame and the
+  // question it closed — or null. A plain property for the same reason
+  // `request` is one, and holding both halves because the answer frame
+  // carries neither `tool` nor `summary` (request-only in the schema).
+  property var answer: null
 
   // True only while the bridge holds a live subscription. Separate from
   // `frame` on purpose — a link that drops must forget the question, while
@@ -112,8 +193,10 @@ QtObject {
   readonly property bool linked: !!root.bus && root.bus.linkUp === true
 
   onLinkedChanged: {
-    if (!root.linked)
+    if (!root.linked) {
       root.request = null;
+      root.answer = null;
+    }
   }
 
   // The newest action.confirm we are willing to read, or null. Null covers
@@ -140,12 +223,19 @@ QtObject {
     if (env === null)
       return; // a frame we cannot read is not an answer
     if (env.body.kind === "request") {
-      // Newest wins: a second question is the live one.
+      // Newest wins: a second question is the live one, and how the last
+      // one ended stops being the news the moment there is another.
       root.request = env;
+      root.answer = null;
       return;
     }
-    if (root.request !== null && root.request.body.request_id === env.body.request_id)
+    if (root.request !== null && root.request.body.request_id === env.body.request_id) {
+      root.answer = {
+        "env": env,
+        "request": root.request
+      };
       root.request = null;
+    }
   }
 
   // --- the window ------------------------------------------------------
@@ -209,6 +299,16 @@ QtObject {
     if (!root.pending)
       return "";
     const v = root.request.body[field];
+    return typeof v === "string" ? v : "";
+  }
+
+  // A string field of the QUESTION that ended, or "". `tool` and `summary`
+  // are request-only in the frozen schema, so this reads the request half
+  // of the latch; the answer frame carries neither.
+  function askedTextOf(field: string): string {
+    if (root.answer === null)
+      return "";
+    const v = root.answer.request.body[field];
     return typeof v === "string" ? v : "";
   }
 
