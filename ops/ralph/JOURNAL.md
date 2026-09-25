@@ -10383,3 +10383,121 @@ new non-zero exit are a flapping gate, which is A76's question again.
   unchanged: Track A is human-blocked (A47 -> A55 and the growth checks;
   A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
   A76/A77/A81/A82 and B62/B67/B76/B77 are raised-but-undecided.
+
+## 2026-09-25 — iteration 105 · the audio this machine captured and threw away
+
+Track A is human-blocked (A11/A13/A21/A22/A25/A27/A28/A38/A47-A55 and
+A76/A77/A80-A83 are all a human's call or waiting on a schema), and
+`docs/optimization-backlog.md` says human-review-required in its own
+header, so this was PROMPT.md's brainstorm step: three ideas raised
+(becd98a — **B84**, **A84**, **B85**), then the first one built.
+
+The sweep behind them: every body field of the 18 frozen schemas against
+every name the shipped QML and jarvisd's CLI actually read, then the
+places a service loses data and publishes nothing. Two dead ends worth
+recording so nobody re-walks them. **`guard.verdict.scanned_by`** looks
+unread and is not a gap: `decide()` returns None when no authoritative
+engine ran, so a `clean` verdict always names one, and the outage goes to
+`sys.health` as `degraded` — already the honest answer. And
+**`audio.transcript.t0/t1`** cannot say the ASR covered only part of an
+utterance, because jv-ears publishes `t0: 0.0` and `t1` as the buffer
+length: they describe the audio, not the transcribed span.
+
+**What shipped (97bac94).** `MicSource.chunks` handed PortAudio a callback
+with two silent discards in it. `except queue.Full: pass` — the hand-off
+queue is 64 chunks deep and drop-newest, so a pipeline that fell behind
+lost whole chunks of the room. And `if status: pass`, under a comment
+reading "Overruns are logged by the caller via health" while nothing
+anywhere logged one. Neither reached the bus, because `CaptureMeter`
+counts what the device DELIVERED — the wrong side of the queue. So the
+heartbeat said `ok`, `capture_age_s` stayed fresh, `captured_s` kept
+rising, and `MicPlate` drew a calm MIC while the ASR was fed a recording
+with holes in it. It is the 2026-09-15 field bug's twin — jv-ears up and
+cheerful with the audio gone — and it is the missing MEASUREMENT behind
+optimization-backlog §2 and §6, both of which are arguments about whether
+the mic starves that nothing on this machine could settle.
+
+**Two losses, not one total.** `Loss.samples` is what jv-ears itself
+dropped, and its size is known exactly: PortAudio tells the callback how
+many frames it is holding. `Loss.overruns` is what the DEVICE dropped, and
+its length is not knowable — PortAudio reports the event, never its
+duration — so it stays a count and is never converted into seconds. They
+are separate because they send a reader to different places: one is this
+process falling behind, the other is the machine or the driver, and a
+single number would average two bug reports into one. Same reasoning
+`OutputState` uses for "muted" versus "zero". `_overflowed` reads the one
+flag that means discarded input rather than the truthy `CallbackFlags`, so
+an output underflow cannot put a fault on the heartbeat that never
+happened. The queue policy is unchanged: this is the measurement, not the
+fix.
+
+**It adds no gauge, and that is B7.** `metrics` is free-form, so
+`mic_lost_s` could have ridden out today — but nothing reads a loss
+window, the HUD's `MicState` has no word for a device that is open and
+losing audio, and a gauge nobody consumes is noise on the bus and a second
+thing to keep true. So the fault ships on `state` + `notes`, which every
+consumer already reads: `HealthPlate` draws `jv-ears DEGRADED` with the
+note, `jv health` prints it, and `jv health --check` now exits 1 on it.
+The numbers arrive with A84 or not at all, and a test pins their absence
+so that day is a decision rather than a diff.
+
+**Why `degraded` at all, when the same question stalls A76.** `degraded`
+is in the frozen enum and jv-ears already calls a silent device degraded —
+same publisher, same class of fault, same shape of rule (a freshness
+window over a condition that self-clears). The flap argument that blocks
+the broker does not carry here: `main.HEALTH_MIN_GAP_S` already floors the
+transition beat at one second, so a device dropping in bursts cannot turn
+`sys.health` into a 4 Hz topic. (The commit message for 97bac94 writes
+this as "A26's flap worry"; it is **A76**. Left uncorrected rather than
+amended — GUARDRAILS forbids rewriting history, including a commit that
+has not been pushed yet.)
+
+**Two orderings are decisions, each with its own test.** A stall outranks
+a loss: both are `degraded`, so the only thing at stake is which note goes
+out, and "no audio at all" is the one a reader needs first. And a loss
+outranks `starting`, which reads backwards until you see the case — the
+queue can fill before the pipeline thread has pulled its first chunk, so
+`capture_age_s` is still absent while audio is already being discarded,
+and a discard is then the only evidence the meter has.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 1 gate over 3 paths, 35.0 s
+  (`runtests.sh tools`, 436 tests). **And `bash ops/ralph/runtests.sh
+  jv-ears` run separately, 136 passed (was 114), 143.9 s, exit 0 — because
+  verify did not name it and could not, which is B86 below.** All 22 new
+  tests were RED before `Loss` existed; the integration test drives
+  `main.amain` with a losing source and asserts the published heartbeat,
+  so the unit work is load-bearing on the frame and not only on the
+  method. Mutations: 12 graded, 12 caught — the overflow flag ignored, any
+  truthy status counted, the discarded chunk uncounted, the chunk size
+  assumed instead of taken from PortAudio, only the first loss stamped,
+  `.copy()` dropped so PortAudio overwrites a queued view, the window made
+  exclusive, both orderings inverted, the `--wav` guard deleted, the note
+  forgetting the device's share, and the meter refusing to ask its source.
+  The stamp one SURVIVED the first run and was a real test weakness, not a
+  harmless mutant: `FakeClock()` starts at 0.0, 0.0 is falsy, so
+  `last_loss_at or clock()` restamped anyway. The clock now starts at 4.0
+  and the mutation is caught.
+- build: `nixos-rebuild build --flake .#ares` green, twice (before and
+  after the mutation run restored the tree). No schema change — `state` is
+  frozen and `degraded` is in it, `metrics` grew nothing. No jv-act, no
+  boot path, no pins.
+- files: services/jv-ears/jv_ears/audio.py,
+  services/jv-ears/tests/test_mic_loss.py (new), ops/ralph/PLAN.md
+- commits: becd98a (the three ideas), 97bac94 (the counting and the fault)
+- next: **B86 first, and ahead of the feature work.** Verifying this
+  iteration found that `verify.sh` cannot see jv-ears at all:
+  `tools/dependents.py` resolves an import by looking for
+  `<pkg>/__init__.py`, and `services/jv-ears/jv_ears/` is the one service
+  package in this repo without one, so a change to `jv_ears/audio.py`
+  plans `runtests.sh tools` and never the 136-test suite that executes it.
+  The gate went green in 35.8 s over code it had not run. That is B68's
+  failure with the roles reversed and it is silent in the worst direction,
+  since a suite that is never named cannot report being skipped — fix both
+  halves (the missing `__init__.py`, and `_module_path` learning that a
+  PEP 420 namespace package is importable, with a `tools` test on it).
+  Then **A84**, which is B84's reader and the only thing that makes the
+  gauges publishable. **B85**'s tap half (a turn's ENDING, which
+  `--latency` never reports) is the next cheap one; its HUD half should
+  probably stay unbuilt for A71's reason. Otherwise unchanged: B82 is
+  still half of A76's decision, B80/B81/B83 are the tap's own limits, and
+  A22/A83 want answering together.

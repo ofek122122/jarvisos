@@ -3439,7 +3439,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       today, which is the real cost and why this is a proposal. Discovered
       in B78.
 
-- [ ] B84. **jv-ears throws captured audio away without counting it, and a
+- [x] B84. **jv-ears throws captured audio away without counting it, and a
       comment says otherwise.** `MicSource.chunks` in
       `services/jv-ears/jv_ears/audio.py` hands PortAudio a callback with
       two silent discards in it: `except queue.Full: pass` (the mic queue
@@ -3461,7 +3461,32 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       jv-ears already degrades for a stall, so this is the same publisher
       making the same shape of claim about the same fault. The flap worry
       that blocks A76 does not apply: `HEALTH_MIN_GAP_S` already floors
-      the transition beat at 1 s. Raised in iteration 105.
+      the transition beat at 1 s. Raised in iteration 105. — 97bac94
+      (`Loss` is two facts and not one total, because they send a reader to
+      different places: `samples` is what jv-ears dropped and PortAudio
+      tells the callback exactly how many frames went with it, `overruns`
+      is what the DEVICE dropped and its length is not knowable — so it
+      stays a count and is never made into seconds. `_overflowed` reads
+      the one flag that means discarded input rather than the truthy
+      `CallbackFlags`, so an output underflow cannot put a fault on the
+      heartbeat that never happened, and `getattr` keeps a differently
+      shaped status object from becoming an exception on the audio thread.
+      The queue policy is untouched — this is the measurement, not the
+      fix. The fault ships on `state` + `notes` and adds NO gauge (B7;
+      A84 is where the numbers go), so every existing consumer reads it:
+      HealthPlate, `jv health`, and `jv health --check`, which now exits 1
+      on it. Two orderings are decisions with a test each: a stall
+      outranks a loss (both degraded, and "no audio at all" is the note
+      wanted first), and a loss outranks `starting`, because the queue can
+      fill before the pipeline thread has pulled its first chunk and the
+      discard is then the only evidence there is. `callback()` is a method
+      rather than a closure so the code that decides what counts as lost
+      audio can be called without a sound card. 22 tests (136, was 114),
+      12 mutations, 12 caught — the twelfth only after a run showed
+      `test_every_discard_moves_the_stamp_forward` passing for the wrong
+      reason: its fake clock started at 0.0, and 0.0 is falsy, so
+      `last_loss_at or clock()` restamped anyway. Raised: B86, and it is
+      about the gate rather than about ears.)
 
 - [ ] A84. **The mic indicator draws MIC while audio is being lost — the
       HUD half of B84.** Once jv-ears counts its discards, `MicState`'s
@@ -3513,6 +3538,32 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       measurement says `respond 2.1s` about words nobody heard. That is
       B13's "a number stops meaning its label" failure with the label
       still attached. Raised in iteration 105.
+
+- [ ] B86. **`verify.sh` cannot see a whole service, and jv-ears is that
+      service.** `tools/dependents.py` resolves an import to a path with
+      `_module_path`, which asks for `<base>/<top>/__init__.py` or
+      `<base>/<top>.py` — and `services/jv-ears/jv_ears/` is the ONE service
+      package in this repo with no `__init__.py` (the other seven have one;
+      `[tool.setuptools.packages.find]` finds it anyway because setuptools'
+      pyproject discovery defaults to `namespaces = true`). So `import
+      jv_ears` resolves to nothing, the closure walk stops at the first
+      edge, and `bash ops/ralph/verify.sh` over a change to
+      `jv_ears/audio.py` plans ONE gate — `runtests.sh tools`, which reaches
+      it as TEXT — and never `runtests.sh jv-ears`, the suite that actually
+      executes it. Field-verified in iteration 105: the gate went green in
+      35.8 s over a change whose own 136-test suite it had not run. It is
+      B68's exact failure with the roles reversed — there the guess missed
+      the third suite, here the derivation misses the first one — and it is
+      silent in the direction that matters, because a suite that is never
+      named cannot report that it was skipped. Two fixes and they are not
+      equal: `touch services/jv-ears/jv_ears/__init__.py` closes THIS hole
+      in one line and consistently with the other seven, and leaves the next
+      namespace package to reintroduce it silently; teaching `_module_path`
+      that a directory of `*.py` with no `__init__.py` is importable (PEP
+      420, and it is how this one is really imported) closes the class. Do
+      both — the second is the gate's own rule and wants a `tools` test
+      pinning it, the first is what makes jv-ears look like its siblings.
+      Discovered while verifying B84.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD
