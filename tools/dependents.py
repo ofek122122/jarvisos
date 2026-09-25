@@ -884,6 +884,11 @@ DECLARED_GATES = (
             # that can go wrong quietly: a floor set too high turns a changed
             # HUD into a green run.
             "tools/hudsheet.py",
+            # And the scanner it reads the real shell's own logs with (D39).
+            # Same argument one step further: a scanner that stopped matching
+            # what quickshell prints would report a silent HUD, and this is
+            # the only gate that ever runs one.
+            "tools/qmlerrors.py",
         ),
         runs_here=False,
         note=(

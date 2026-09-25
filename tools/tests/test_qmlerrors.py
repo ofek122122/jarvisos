@@ -37,11 +37,18 @@ own message handler before any of this can see them. What reaches the output
 is what the engine reports while a test body is running — which is where the
 drivers do all of their work, and is exactly where D34's TypeError was.
 
-THE REST IS A SECOND ENGINE (PLAN D38), and the tests for it are at the foot
-of this file. `tools/qmlprobe/Probe.qml` loads the same staged scene under
-plain `qml`, which installs no handler and prints the engine's own line with
-nothing in front of it — so the same rule reads both, and the prefix that
-looked like the shape of a fault turns out to be optional.
+THE SECOND ENGINE (PLAN D38) is plain `qml`: `tools/qmlprobe/Probe.qml` loads
+the same staged scene under it, and it installs no handler and prints the
+engine's own line with nothing in front of it — so the same rule reads both,
+and the prefix that looked like the shape of a fault turns out to be optional.
+
+AND A THIRD (PLAN D39), whose tests are at the foot of this file too: the real
+`.#jv-hud`, quickshell, photographed through a real compositor by
+`ops/ralph/hudscreens.sh`. It writes a level, a CATEGORY and `@path[line:col]`
+rather than `QWARN :` and `file://…:line:`, it separates `console.*` from the
+engine's own errors at the source, and it colours its output with ANSI escapes
+whether or not anything is watching — which is the one thing that could have
+made this gate green forever over a HUD that threw on every frame.
 """
 
 import subprocess
@@ -269,11 +276,16 @@ def test_every_shot_harness_hands_the_runners_output_to_this():
         assert "--stage" in text, f"{script} does not tell the scanner where it staged"
 
 
-def test_the_three_gates_read_this_scanner_and_nothing_else_does():
+def test_the_three_shot_gates_read_this_scanner_and_no_other_qml_gate_does():
     """`tools/verify.py` derives which gates to run from what changed, and the
     only way it can learn that a shot harness now reads a Python file is the
     `also` table in `dependents`. A scanner whose change ran no shot harness
-    would be a scanner nobody could safely edit."""
+    would be a scanner nobody could safely edit.
+
+    There is a FOURTH reader since D39 — `hudscreens.sh`, the only gate that
+    loads `shell.qml` at all — and it is not here because it is not derived
+    from any import graph: it is a declared gate, and the test for it is at
+    the foot of this file."""
     got = dependents.qml_readers(ROOT, ["tools/qmlerrors.py"])
     assert set(got) == set(SCRIPTS), got
 
@@ -388,3 +400,195 @@ def test_the_three_gates_read_the_shared_probe_body():
     nobody could verify."""
     got = dependents.qml_readers(ROOT, ["tools/qmlprobe/Probe.qml"])
     assert set(got) == set(SCRIPTS), got
+
+
+# ---------------------------------------------------- the third engine (D39)
+#
+# The only one that ever draws the REAL HUD. `ops/ralph/hudscreens.sh` runs
+# `.#jv-hud` — quickshell, its layer-shell surface, its own bus bridge —
+# through a real compositor twelve times in a run, and until D39 nothing had
+# ever read a line of what it said.
+#
+# D38 predicted the obstacle would be `QT_FORCE_STDERR_LOGGING`: this Qt is
+# built with the journald backend, so a Qt program whose stderr is not a
+# terminal prints nothing. MEASURED, and that is not what happens — quickshell
+# installs a message handler of its OWN, and its output reaches a redirected
+# file regardless. What it writes there is a third shape, and the fixtures
+# below are it, recorded from quickshell 0.3.0 under
+# `QT_QPA_PLATFORM=offscreen` with a probe shell whose bindings read a
+# property of `undefined` and an undeclared name.
+
+QS_THREW = """\
+  INFO: Launching config: "/tmp/qsy/shell.qml"
+  INFO: Shell ID: "0865055f43ce53d7ea30bc3ec59129c7" Path ID "0865055f43ce53d7ea30bc3ec59129c7"
+  INFO: Saving logs to "/tmp/qsy/run/quickshell/by-id/tlda15qzxlt/log.qslog"
+  WARN scene: @sub/Thing.qml[4:-1]: TypeError: Cannot read property 'nothingHere' of undefined
+  INFO: Configuration Loaded
+  WARN scene: @sub/Thing.qml[5:-1]: ReferenceError: undefinedThing is not defined
+Shell cwd was reset to /home/ofek/jarvisos-ralph
+"""
+
+# Every `console.*` a QML file can call, through quickshell's handler. Note
+# that `console.log` arrives as DEBUG and `console.error` as ERROR: the level
+# is not the discriminator, the CATEGORY is.
+QS_VOICES = """\
+ DEBUG qml: a log
+  INFO qml: an info
+ DEBUG qml: a debug
+  WARN qml: a warn
+ ERROR qml: an error
+  INFO: Configuration Loaded
+"""
+
+# The same fault as the first line of QS_THREW, as quickshell writes it when
+# nothing has told it not to colour its output. This is why the harness sets
+# NO_COLOR=1, and it is a fixture rather than a sentence because the failure
+# it prevents is silent: every line reads as unprefixed noise and the scan
+# comes back clean.
+QS_COLOURED = (
+    "\x1b[33m  WARN\x1b[97m scene\x1b[0m: @shell.qml[8:-1]: "
+    "TypeError: Cannot read property 'count' of undefined\n"
+)
+
+
+def test_the_third_engines_errors_are_the_same_rule():
+    threw = qmlerrors.scan(QS_THREW)
+    assert [t.error for t in threw] == ["TypeError", "ReferenceError"]
+    assert [t.where for t in threw] == ["sub/Thing.qml:4", "sub/Thing.qml:5"]
+    assert threw[0].message == "Cannot read property 'nothingHere' of undefined"
+
+
+def test_quickshells_own_narration_is_not_a_fault():
+    """`INFO: Launching config`, `INFO: Configuration Loaded` — the lines the
+    harness already waits for. A gate that refused its own readiness signal
+    would never have run at all."""
+    assert qmlerrors.scan(QS_THREW)[0].where == "sub/Thing.qml:4"
+    quiet = "\n".join(l for l in QS_THREW.splitlines() if "scene:" not in l)
+    assert qmlerrors.scan(quiet) == []
+
+
+def test_every_console_voice_survives_the_third_engine_too():
+    """The category is what separates them, and it is quickshell's own: every
+    `console.*` goes out under `qml` and the engine's errors under `scene`.
+    The LEVEL is not the discriminator — `console.error` is ERROR and
+    `console.log` is DEBUG, and neither is a throw."""
+    assert qmlerrors.scan(QS_VOICES) == []
+
+
+def test_a_voice_that_quotes_a_throw_is_still_a_voice():
+    """The `qml` category holds whatever this repo's QML chose to say, which
+    can include the text of an error it handled itself."""
+    voice = "  WARN qml: @Corner.qml[4:-1]: TypeError: handled, and reported\n"
+    assert qmlerrors.scan(voice) == []
+
+
+def test_the_colour_escapes_are_why_the_harness_sets_no_color():
+    """Recorded, because the failure is silent. Quickshell colours its output
+    whether or not anything is watching, and a coloured log scans clean — so
+    the gate would pass forever with a HUD that threw on every frame."""
+    assert qmlerrors.scan(QS_COLOURED) == []
+    assert qmlerrors.scan(QS_COLOURED.replace("\x1b[33m", "").replace(
+        "\x1b[97m", ""
+    ).replace("\x1b[0m", ""))
+
+
+def test_a_column_the_engine_did_not_have_is_not_printed():
+    """`[8:-1]` is quickshell saying it has a line and no column. A report
+    that printed `shell.qml:8:-1` would be naming a position no file has."""
+    (throw,) = qmlerrors.scan("  WARN scene: @shell.qml[8:-1]: TypeError: x\n")
+    assert throw.where == "shell.qml:8"
+    (known,) = qmlerrors.scan("  WARN scene: @shell.qml[8:22]: TypeError: x\n")
+    assert known.where == "shell.qml:8:22"
+
+
+def test_the_third_engines_paths_are_reported_under_the_root_they_are_under():
+    """Quickshell's paths are relative to the directory holding `shell.qml`,
+    which at runtime is a store path. Told where that lives in this
+    repository, the report names a file a reader can open."""
+    (throw,) = qmlerrors.scan(
+        "  WARN scene: @core/BusModel.qml[113:-1]: TypeError: x\n",
+        prefix="shell/jv-hud",
+    )
+    assert throw.where == "shell/jv-hud/core/BusModel.qml:113"
+
+
+def test_an_absolute_path_is_left_where_the_engine_put_it():
+    """A path that is already absolute is not relative to the shell's root,
+    so putting the root in front of it would invent a place."""
+    (throw,) = qmlerrors.scan(
+        "  WARN scene: @/nix/store/abc-jv-hud/Corner.qml[7:-1]: TypeError: x\n",
+        prefix="shell/jv-hud",
+    )
+    assert throw.where == "/nix/store/abc-jv-hud/Corner.qml:7"
+
+
+def test_every_log_of_a_run_is_scanned_and_the_report_names_which(tmp_path):
+    """`hudscreens.sh` starts a fresh jv-hud per shot and per idle window, so
+    a scan of one of them would have been the harness choosing which surface
+    to believe."""
+    clean = tmp_path / "01-quiet-hud.log"
+    clean.write_text(QS_VOICES, "utf-8")
+    dirty = tmp_path / "idle-lit-hud.log"
+    dirty.write_text(QS_THREW, "utf-8")
+    got = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "qmlerrors.py"),
+            str(clean),
+            str(dirty),
+            "--prefix",
+            "shell/jv-hud",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert got.returncode == 1, got.stdout + got.stderr
+    assert "idle-lit-hud.log" in got.stdout
+    assert "01-quiet-hud.log" not in got.stdout, "a clean log is not a finding"
+    assert "shell/jv-hud/sub/Thing.qml:4" in got.stdout
+
+
+def test_two_clean_logs_are_one_verdict(tmp_path):
+    for name in ("a-hud.log", "b-hud.log"):
+        (tmp_path / name).write_text(QS_VOICES, "utf-8")
+    got = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "qmlerrors.py"),
+            str(tmp_path / "a-hud.log"),
+            str(tmp_path / "b-hud.log"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert got.returncode == 0, got.stdout + got.stderr
+    assert "across 2 logs" in got.stdout
+
+
+# ------------------------------------------------------- the seam, once more
+
+HUDSCREENS = "ops/ralph/hudscreens.sh"
+
+
+def test_the_real_hud_gate_hands_every_shells_log_to_this():
+    """The D36 seam for the third engine. `hudscreens.sh` is the only gate in
+    this repo that loads `shell.qml` at all, and the three things it must do
+    are all silent when they are missing: capture the logs (it already does —
+    `Proc` writes each to a file), turn quickshell's colour off, and hand the
+    lot here."""
+    text = (ROOT / HUDSCREENS).read_text("utf-8")
+    assert "tools/qmlerrors.py" in text, "the real HUD's gate does not run the scanner"
+    assert "NO_COLOR" in text, (
+        "without NO_COLOR quickshell's ANSI escapes make every line unprefixed "
+        "noise, and the scan comes back clean whatever the HUD did"
+    )
+    assert "-hud.log" in text, "the gate does not hand the scanner the shells' logs"
+    assert "--prefix" in text, "the report would name paths relative to a store path"
+
+
+def test_the_real_hud_gate_declares_that_it_reads_this_scanner():
+    """It is a DECLARED gate — what it reads is a derivation, not an import
+    graph — so nothing can derive that it now opens a Python file. The
+    declaration is what makes a change to this scanner say so."""
+    got = dict(dependents.declared_readers(ROOT, ["tools/qmlerrors.py"]))
+    assert [g.script for g in got] == [HUDSCREENS], got

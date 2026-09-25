@@ -685,21 +685,54 @@ human-reviewed step.
         `bash ops/ralph/barshots.sh` ends 1 at the probe, naming
         `shots/Strip.qml:31`, before a single PNG is written.
 
-- [ ] D39. **`hudscreens.sh` runs a real compositor and is outside D36's
-      rule.** The three shot harnesses now refuse a run whose QML threw;
-      `ops/ralph/hudscreens.sh` drives the real quickshell through niri, is
-      the only gate that loads `shell.qml` at all, and still pipes its output
-      straight through. It is a different runner — not QtTest, so nothing is
-      dropped, and `console.warn` from a real session is a different
-      population of lines — so `qmlerrors.py` may apply verbatim or may need
-      a second shape. **D38 found the thing that decides it: this Qt is built
-      with the journald backend, so a Qt program whose stderr is a PIPE prints
-      nothing at all.** `hudscreens.sh` pipes quickshell's output, so the
-      first question is not what shape its lines have — it is whether it has
-      ever emitted one, and `QT_FORCE_STDERR_LOGGING=1` is probably the whole
-      fix. Not done with D36 because the gate costs 3m00s and rewrites a sheet
-      a human has to look at, so its first run belongs to an iteration that is
-      already paying that price. Raised by D36; sharpened by D38.
+- [x] D39. **`hudscreens.sh` ran a real compositor for thirty iterations and
+      nobody had read a line of what it said.** (Done this iteration.) The
+      only gate that loads `shell.qml` at all starts TWELVE real quickshells
+      in a pass — one per shot, one per idle window — and every one of them
+      has written its output to a file since the first version of the
+      harness, where nothing ever opened it. It scans them now, through the
+      same `tools/qmlerrors.py` D36 wrote.
+      · **D38's prediction was wrong, and the measurement says why.**
+        `QT_FORCE_STDERR_LOGGING` is not needed here: quickshell installs a
+        message handler of its OWN, so the journald backend never gets its
+        output and a redirected file receives it whatever Qt would have done.
+      · **THE REAL OBSTACLE WAS COLOUR.** Quickshell writes ANSI escapes
+        whether or not anything is watching, so every level arrives as
+        `\x1b[33m  WARN\x1b[97m scene\x1b[0m: `, which is not a prefix the
+        scanner knows — a coloured log scans CLEAN. `NO_COLOR=1` is exported
+        by the harness and is load-bearing; the coloured line is a recorded
+        fixture, because the failure it prevents is silent.
+      · **A THIRD SHAPE, and the same rule.** `WARN scene:
+        @core/BusModel.qml[113:-1]: TypeError: …` — a level and a CATEGORY
+        instead of `QWARN :`, a location written `@path[line:column]`
+        relative to the shell's own root instead of `file:///…:line:`, and a
+        column of -1 when the engine had none. Quickshell separates the voice
+        from the fault at the source (`console.*` goes out under `qml`, the
+        engine's errors under `scene`), which is a cleaner discriminator than
+        the one D36 had to infer — but the location and the error name are
+        still required, because a category is a claim someone else makes.
+        `--prefix`, out of `sheet.SHELL_ROOT`, turns `@shell.qml` into
+        `shell/jv-hud/shell.qml`; the constant lives in `sheet.py` because
+        the script may not contain that path in any line it executes (the
+        rule that keeps this harness from ever staging a HUD).
+      · **THE ANSWER: the real HUD says nothing that throws.** 7,170 lines
+        across the twelve logs of a full pass, clean, in 0.1 s.
+      · **AND THE INSTRUMENT IS LIVE, proved by injection.** A `property var
+        injectedFault: modelData.noSuchThing.count` on the PanelWindow — the
+        D34 shape, invisible to qmllint — and the gate ends 1, naming
+        `shell/jv-hud/shell.qml:90` in all twelve logs, three times in each
+        (once per monitor). **Everything else about that run was green**:
+        every probe passed — the corner, the zone, the focus, the growth, the
+        click, 0 commits in every idle window — and all nine photographs
+        still matched the sheet committed at HEAD. Without this scan that run
+        was a perfect pass with a shell throwing on every screen.
+      · No census is needed here, unlike the staged harnesses: the harness
+        already waits on `Configuration Loaded` for every shell it starts,
+        which is quickshell's own handler proving that log is being written.
+        A test counts the two and holds them equal.
+      · The run's cost was re-measured while it was open, which is the
+        standing lesson of that paragraph: probe 154.8 s / 79.4%, sheet
+        39.9 s / 20.5%, of 194.9 s. The scan itself is 0.1 s of it.
 
 - [x] D37. **The notifier had the bar's exact shape, and it was worse there.**
       (Done 653b2cd.) `shell/jv-notify/shell.qml` repeated over
@@ -751,6 +784,26 @@ human-reviewed step.
       all), or renaming one driver per harness so the silent slot is held by
       a file that declares nothing — a trick, and a trick that the next
       alphabetical file would quietly inherit. Raised by D38.
+
+- [ ] D41. **Two of the three shells' `shell.qml` are never LOADED by
+      anything.** D39 closed the gap for the HUD, and in doing so measured
+      what it is: `ops/ralph/hudscreens.sh` is the only gate in this repo
+      that runs a real quickshell, and `shell/jv-hud/shell.qml` is the only
+      `shell.qml` any engine ever opens. The bar's and the notifier's are
+      qmllint-clean and nothing more — every shot harness deletes `shell.qml`
+      from its stage on purpose, because ShellRoot, PanelWindow and the
+      layer-shell attached properties cannot resolve outside quickshell's own
+      binary. So the two surfaces that reserve screen space and take D2's
+      D-Bus name have their outermost file held only by a linter, and the
+      D34/D39 shape — a `var` binding that throws and leaves the surface
+      plausible — is exactly what a linter cannot see.
+      The honest options, in rising price: (a) a probe-only run per shell —
+      the same headless sway, one quickshell, `Configuration Loaded`, and the
+      D39 scan, with no pictures and none of the 97.7 s idle probe, which is
+      most of what `hudscreens.sh` costs; (b) a full `barscreens.sh` /
+      `notifyscreens.sh` with their own sheets, which doubles the number of
+      3m00s gates nobody runs unattended. (a) is a verdict a gate could
+      collect and is probably the whole item. Raised by D39.
 
 - [ ] D35. **A monitor narrower than the corner the HUD reserves gets an
       unbounded row.** `roomPx` negative means "nobody has said" — the right

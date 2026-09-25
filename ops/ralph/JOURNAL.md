@@ -12825,3 +12825,99 @@ is not worth chasing.)
   at what a real compositor session has been printing into nothing. Then
   **D33** (the last copies of the HUD's box) and **D17** (the strip's empty
   right half, the first Track D item that wants a real SOURCE).
+
+## 2026-09-26 — iteration 130 — the real HUD had been talking to nobody for
+## thirty iterations
+
+- built: the D39 half of `tools/qmlerrors.py`, and the wiring that makes
+  `ops/ralph/hudscreens.sh` read what the REAL shell said. That gate starts
+  twelve real quickshells in a pass — one per shot, one per idle window —
+  and every one of them has written its output to a file since the first
+  version of the harness, where nothing had ever opened it. D36 made the
+  three STAGED harnesses refuse a run whose QML threw; this is the same rule
+  over the only gate in this repo that loads `shell.qml` at all.
+- **D38's PREDICTION WAS WRONG, and that is the first finding.** D38 expected
+  `QT_FORCE_STDERR_LOGGING` to be the whole fix, because this Qt is built
+  with the journald backend and a Qt program whose stderr is not a terminal
+  prints nothing. It is not needed here: quickshell installs a message
+  handler of its OWN, so its output never goes near Qt's default sink and a
+  redirected file gets every line.
+- **THE REAL OBSTACLE WAS COLOUR, and it would have been silent.** Quickshell
+  writes ANSI escapes whether or not anything is watching, so a log written
+  to a file has `\x1b[33m  WARN\x1b[97m scene\x1b[0m: ` in front of every
+  message — which is not a prefix the scanner knows, so a coloured log scans
+  CLEAN. `NO_COLOR=1` is exported by the harness and is load-bearing. The
+  coloured line is a recorded fixture rather than a sentence, because a gate
+  that is green for the wrong reason is the thing all of D36–D39 is about.
+- **A THIRD SHAPE, and the same rule.** Recorded from quickshell 0.3.0:
+
+      WARN scene: @core/BusModel.qml[113:-1]: TypeError: Value is undefined
+     DEBUG qml: the arrival, sampled
+
+  A level and a CATEGORY instead of `QWARN :`, a location written
+  `@path[line:column]` relative to the shell's own root instead of
+  `file:///…:line:`, and a column of -1 when the engine had none (so it is
+  not printed — `shell.qml:8:-1` is a position no file has). Quickshell
+  separates the voice from the fault at the SOURCE — every `console.*` goes
+  out under `qml`, the engine's own errors under `scene` — which is a cleaner
+  discriminator than the one D36 had to infer. The location and the error
+  name are still required anyway: a category is a claim someone else makes
+  about a line, and the rule is about the shape the engine prints.
+  `console.log` arrives as DEBUG and `console.error` as ERROR, so the level
+  is not the discriminator and a test says so.
+- **THE ANSWER D39 ASKED FOR: the real HUD says nothing that throws.** 7,170
+  lines across the twelve logs of a full pass, clean, in 0.1 s.
+- **AND THE INSTRUMENT IS LIVE, proved by injection.** A `property var
+  injectedFault: modelData.noSuchThing.count` on the PanelWindow — the D34
+  shape, invisible to qmllint — and the gate ends 1, naming
+  `shell/jv-hud/shell.qml:90` in all twelve logs, three times in each (once
+  per monitor). **Everything else about that run was green.** Every probe
+  passed: the corner, the exclusive zone, the keyboard focus, the growth, the
+  click through the empty mask, 0 commits in every one of the five idle
+  windows. And all nine photographs still matched the sheet committed at HEAD
+  to inside the noise floor — because a QML binding that throws keeps the
+  value it already had. Without this scan, that was a perfect pass with a
+  shell throwing on every screen.
+- **NO CENSUS IS NEEDED HERE, unlike the staged harnesses**, and the reason is
+  already in the harness: D38 had to build `Probe.qml` because a staged scene
+  that silently built nothing would scan clean, but this one waits on
+  `Configuration Loaded` for every shell it starts — quickshell's own handler
+  putting that line in that file — so an empty log never gets past the start.
+  A test counts the `Proc("jv-hud", …)` sites and the waits and holds them
+  equal.
+- **`--prefix`, and where the path is allowed to live.** Quickshell's paths
+  are relative to the directory holding `shell.qml`, which at runtime is a
+  store path, so the report would otherwise name `core/BusModel.qml` — three
+  directories in this repo. The root comes out of the new `sheet.SHELL_ROOT`
+  rather than the script, because `hudscreens.sh` may not contain the string
+  `shell/jv-hud` in any line it EXECUTES: that is the rule
+  (`test_the_harness_photographs_the_shipped_binary_and_stages_nothing`) that
+  keeps this gate from ever staging a HUD, and it caught the first version of
+  this change. Two new tests hold both ends — the root is the directory that
+  really has `shell.qml`, and the script really reads it.
+- also: `qmlerrors.py` takes MORE THAN ONE log now (twelve here; a scan of one
+  would have been the harness choosing which surface to believe), the report
+  names which log when there is more than one, and an unmatched glob arrives
+  as its own pattern and is refused — a run that started no shell is not a
+  clean one. The run's cost was re-measured while it was open, which is that
+  paragraph's standing lesson: probe 154.8 s / 79.4%, sheet 39.9 s / 20.5%,
+  of 194.9 s; the new scan is 0.1 s of it.
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 6 paths (tools **619
+  pass**, 15 of them new; all three shot harnesses green, all 37 shots
+  byte-identical), 162.2 s. `ops/ralph/hudscreens.sh` was named by the plan
+  and RUN, twice: once clean (exit 0, sheet unchanged, `docs/hud/screens`
+  restored to its committed bytes) and once with the injection above into a
+  scratch directory (exit 1). build: `nixos-rebuild build --flake .#ares`
+  green. No schema change, no jv-act, no boot path, no pins. Never tested,
+  never switched.
+- files: tools/qmlerrors.py, tools/tests/test_qmlerrors.py,
+  tools/hudscreens/sheet.py, tools/tests/test_hudscreens.py,
+  tools/dependents.py, ops/ralph/hudscreens.sh, ops/ralph/PLAN.md
+- next: **D41**, raised by this one and the sharpest thing it measured — the
+  bar's and the notifier's `shell.qml` are never LOADED by anything, only
+  linted, because every shot harness deletes `shell.qml` from its stage on
+  purpose. The cheap answer is a probe-only run per shell (headless sway, one
+  quickshell, `Configuration Loaded`, this scan) with no pictures and none of
+  the 97.7 s idle probe that is most of what `hudscreens.sh` costs. Then
+  **D33** (the last copies of the HUD's box) and **D17** (the strip's empty
+  right half, the first Track D item that wants a real SOURCE).
