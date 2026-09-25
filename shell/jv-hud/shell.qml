@@ -165,13 +165,21 @@ ShellRoot {
       //
       // Which is what ReplyPlate (A71) did: the crowd measured 775 px, 62
       // px more than before — two 11 px rows and the gap above them — so
-      // this is 807. The growth is not free and is worth writing down
+      // this was 807. The growth is not free and is worth writing down
       // where A70 can read it: the crowded corner is now more than half a
       // 1440p screen, and whether a corner that tall should exist at all
       // is the open question A70 asks, unchanged by this except that the
       // number in it is bigger.
+      //
+      // And again for the drop row (A75), which is not a new plate: it is
+      // one 11 px row and its gap inside `HealthPlate`, so the crowd went
+      // 775 -> 794 and this is 826. Worth noting how the growth arrived,
+      // because it is the first one that did not come with a plate — a row
+      // added to a plate that already exists costs the box exactly as much
+      // per line as a plate would, and the suite is what said so rather
+      // than a paragraph here guessing.
       implicitWidth: 300
-      implicitHeight: 807
+      implicitHeight: 826
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 

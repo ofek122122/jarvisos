@@ -2,7 +2,7 @@
 // widest thing it will ever draw, measured against the surface it has to fit
 // inside (PLAN A63).
 //
-// shell.qml's box is 300x807, and until this file every digit of that number
+// shell.qml's box is 300x826, and until this file every digit of that number
 // came out of an ARGUMENT about co-occurrence: LinkPlate "can never share the
 // surface, but a box sized by an argument about how other elements behave is
 // a box that clips"; ConfirmPlate and HeardPlate each wrap to three lines;
@@ -63,7 +63,7 @@ Item {
   // grew there and not here would leave this check asserting yesterday's
   // edge, which is the failure mode that makes a check worse than none.
   width: 300
-  height: 807
+  height: 826
 
   // The same corner shell.qml composes, in the same order, from the one file
   // both other drivers use.
@@ -279,10 +279,29 @@ Item {
       }, "VRAM pressure: fell back to CPU");
       for (let i = 0; i < suite.roster.length; i++) {
         const service = suite.roster[i];
-        if (service === "jv-ears" || service === "jv-brain" || service === "jv-voice")
+        if (service === "jv-ears" || service === "jv-brain" || service === "jv-voice"
+            || service === "jarvisd")
           continue;
         suite.beat(service, "degraded", undefined, "impaired");
       }
+      // And the broker, throwing frames away (A75), which adds the row ABOVE
+      // the list. Past four digits on purpose: `9999+ DROPPED` is the widest
+      // string DropState can render, and this file measures caps rather than
+      // plausible numbers. It is also genuinely co-occurrent rather than
+      // contrived — a machine whose bus is shedding frames is a machine whose
+      // services look unwell, and the drop row is there to say which way
+      // round that is.
+      suite.send("sys.health", "jarvisd", {
+        "service": "jarvisd",
+        "state": "degraded",
+        "uptime_s": 1847,
+        "period_s": 5,
+        "notes": "impaired",
+        "drops": {
+          "audio.vad": 12000,
+          "_lagged": 40
+        }
+      });
 
       // And let the scene lay out. Every check below reads a SIZE, and a
       // size is the one thing in this harness that is not ready in the

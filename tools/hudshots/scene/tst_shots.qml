@@ -45,7 +45,7 @@ Item {
   // empty two-thirds is the point — §06's earned emptiness is a thing you
   // have to SEE to have an opinion about.
   width: 300
-  height: 807
+  height: 826
 
   // NOT the HUD. The real surface is `color: "transparent"` and floats
   // over whatever Niri has on screen; a PNG has to put something behind
@@ -268,6 +268,55 @@ Item {
         "audio_volume": 0.62,
         "audio_muted": false,
         "gpu_vram_free_mb": 943
+      });
+    }
+
+    // COMPOSED, and it is the one shot on this sheet whose plate is up for a
+    // reason `HealthState` cannot see (A75). Every service here says `ok`,
+    // the brain is on the card, and there are no findings at all — the only
+    // thing wrong with this machine is that the bus threw frames away, which
+    // lives in a field nothing in the HUD read until this row existed.
+    //
+    // `state: "ok"` next to a non-empty `drops` map is not a contrived pair:
+    // `publish_health` in services/jarvisd/src/broker.rs hardcodes `Ok` in
+    // the same body it fills the map into (A76 asks whether it should), so
+    // this is the frame the broker really writes while it is losing frames.
+    // That is the whole reason the row is on the plate rather than in the
+    // findings list: `HealthState.rank("ok")` is 0.
+    //
+    // The TOTAL is composed — nothing on this machine has measured a drop
+    // yet — but the keys are the broker's own: a topic name for an
+    // out-queue overflow (`drops.add(&d.topic, 1)`) and `_lagged` for a
+    // subscriber that fell so far behind the broadcast channel that the
+    // ring wrapped. The picture shows neither of them, which is the point
+    // of it: the map is summed across every subscriber connection before it
+    // is published, so naming a key here would tell a reader that audio.vad
+    // is broken when the fault is a slow consumer somewhere else entirely.
+    function shot_drops() {
+      Bus.ingest('{"t":"link","up":true}');
+      suite.micOpen();
+      suite.beat("jv-voice", "ok");
+      suite.beat("jv-brain", "ok", {
+        "llm_rung": 0,
+        "llm_gpu": 1
+      });
+      Bus.deliver({
+        "topic": "sys.health",
+        "ts": Bus.now,
+        "seq": suite.seq++,
+        "src": "jarvisd",
+        "conf": 1.0,
+        "v": 1,
+        "body": {
+          "service": "jarvisd",
+          "state": "ok",
+          "uptime_s": 1847,
+          "period_s": 5,
+          "drops": {
+            "audio.vad": 38,
+            "_lagged": 3
+          }
+        }
       });
     }
 
@@ -690,7 +739,14 @@ Item {
       // Jarvis starts answering, so a caption reading `state reply mic`
       // says the reply plate is up on its own account rather than riding
       // a transcript that never left.
-      { "file": "14-cut-off.png", "build": suite.shot_cutoff, "plates": ["state", "reply", "mic"] }
+      { "file": "14-cut-off.png", "build": suite.shot_cutoff, "plates": ["state", "reply", "mic"] },
+      // The plate up for a reason HealthState cannot see (A75). `health` in
+      // this caption with every service reporting `ok` is the assertion:
+      // `shown` counts the drop row, so a bus shedding frames puts the
+      // corner on screen on its own account. `mic health` and not
+      // `mic health` plus anything else says the row arrived without a
+      // finding, a rung or a VRAM reading under it.
+      { "file": "15-bus-drops.png", "build": suite.shot_drops, "plates": ["mic", "health"] }
     ]
 
     function test_the_sheet() {

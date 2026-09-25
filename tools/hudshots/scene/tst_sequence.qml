@@ -50,7 +50,7 @@ Item {
   // file never grabs an image — the layout matters only so that a plate
   // that is too wide for the surface would still be too wide here.
   width: 300
-  height: 807
+  height: 826
 
   // The same corner shell.qml composes, in the same order: one file, two
   // harnesses (tools/tests/test_hudshots.py pins it to shell.qml).

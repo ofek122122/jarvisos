@@ -15,7 +15,16 @@
 // own state is developer information and lives in the self-test marker in
 // shell.qml, where it cannot be mistaken for a fact about the machine.)
 //
-// What it draws, worst first:
+// What it draws, top to bottom — the list worst first, with one line above
+// it that is about the list:
+//   · `bus 41 DROPPED` first, when jarvisd says the bus threw frames away
+//     in the interval its last heartbeat covers (A75). Above the findings
+//     rather than in them, because it is a claim ABOUT the list and not an
+//     item in it: every line below is drawn from the frames that arrived,
+//     and dropped heartbeats are one of the ways a service comes to look
+//     `lost`. Named `bus` and not `jarvisd` — the count is summed across
+//     every subscriber connection, so the broker is the witness and not the
+//     culprit, and `bus` is the word LinkPlate already uses.
 //   · one line per unwell service — `jv-brain DEGRADED` — in the service's
 //     own name, and the schema's own word for its state. Never a
 //     friendlier paraphrase, and never a state word the schema does not
@@ -79,6 +88,15 @@ Item {
     gpuFloorMb: root.health.llmGpuFloorMb
   }
 
+  // Did the bus throw frames away? Off jarvisd's own heartbeat, which
+  // `HealthState` also reads — but through a second element rather than a
+  // property on the first, because this is a different field with a
+  // different lifetime (one period, not two) and the two would have to
+  // disagree about expiry to share a reader.
+  readonly property DropState drops: DropState {
+    bus: Bus
+  }
+
   // How many findings fit before the list becomes a wall. Past this the
   // count is more useful than the names — and the machine has bigger
   // problems than the HUD's typography.
@@ -89,8 +107,11 @@ Item {
   // arrived" — see `litNames` in core/PlateStack.qml.
   readonly property string plateName: "health"
 
-  // On screen exactly while there is something to report.
-  readonly property bool shown: root.health.reporting
+  // On screen exactly while there is something to report. The drop count
+  // is its own reason to appear: on a machine where every service says
+  // `ok` and the brain is on the card, a bus shedding frames is the only
+  // finding there is, and `HealthState` cannot see it.
+  readonly property bool shown: root.health.reporting || root.drops.reporting
 
   // True while anything is still drawn, including the fade out, so
   // shell.qml can keep the surface mapped until the plate is really gone.
@@ -102,6 +123,16 @@ Item {
   readonly property var lines: {
     const health = root.health;
     let out = [];
+    // First, because it qualifies everything under it. `warn` and not
+    // `risk`: frames were lost, which is an impairment and not a machine
+    // that has stopped — and ember is never spent here (ember means Jarvis
+    // is doing something).
+    if (root.drops.reporting)
+      out.push({
+        "name": "bus",
+        "detail": root.drops.line,
+        "tone": Theme.warn
+      });
     for (const finding of health.findings.slice(0, root.maxLines))
       out.push({
         "name": finding.service,

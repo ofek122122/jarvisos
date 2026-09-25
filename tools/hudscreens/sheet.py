@@ -7,7 +7,7 @@ are stated once — and anything the harness MEASURES with lives here too,
 where a test with no compositor can still run it.
 
 The difference between this sheet and the contact sheet in `docs/hud`
-(A29) is the whole point of it: A29 renders the plates into a 300x807
+(A29) is the whole point of it: A29 renders the plates into a 300x826
 rectangle with a plain QML engine, which is the HUD's CONTENT and nothing
 else. This one runs the REAL `jv-hud` — quickshell, layer-shell, the real
 bridge, the real jarvisd — on a real wlroots compositor with ares' three
@@ -60,7 +60,7 @@ BACKDROP = "#31353B"
 # silently stopped working, and it would look perfectly fine in a picture
 # nobody measured.
 SURFACE_W = 300
-SURFACE_H = 807
+SURFACE_H = 826
 INSET = 16
 
 

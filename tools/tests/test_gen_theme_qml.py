@@ -659,6 +659,67 @@ def test_the_requirement_row_is_bound_to_the_brain_that_publishes_it():
     )
 
 
+# --- A75: the drop row is the plate's own reason to appear -----------------
+
+
+def test_the_drop_row_is_wired_to_the_plate_that_draws_it():
+    """A75: HealthState cannot see `drops`, so HealthPlate must ask twice.
+
+    `HealthState.reporting` is findings-or-rung and knows nothing about the
+    broker's drop count — the field lives on jarvisd's heartbeat with a
+    different lifetime (one period, not two) and is read by DropState. So the
+    plate has two reasons to be on screen, and the one that rots silently is
+    the second: a HealthPlate that built a DropState and left `shown` bound to
+    HealthState alone would compose the row, never map the surface, and look
+    exactly like a machine whose bus is fine. On a machine where every service
+    says `ok` that is the ONLY finding there is.
+
+    Three claims, because each can rot alone: the element is built, the row is
+    drawn only while it reports, and `shown` counts it.
+    """
+    plate = ROOT / "shell" / "jv-hud" / "HealthPlate.qml"
+    text = strip_qml_comments(plate.read_text("utf-8"))
+    assert "DropState {" in text, "HealthPlate no longer builds a DropState"
+    assert re.search(r"if\s*\(\s*\w+\.drops\.reporting\s*\)", text), (
+        "HealthPlate draws its bus row without asking DropState whether there "
+        "is anything worth reporting"
+    )
+    assert re.search(
+        r"^\s*readonly\s+property\s+bool\s+shown\s*:.*\.drops\.reporting", text, re.M
+    ), (
+        "HealthPlate's `shown` does not count the drop count, so a bus "
+        "shedding frames on an otherwise healthy machine would draw nothing"
+    )
+
+
+def test_the_drop_row_names_no_topic_and_no_subscriber():
+    """A75/A77: the count is an aggregate, so the row may not attribute it.
+
+    jarvisd sums every subscriber connection's tally into one map before
+    publishing it, which means the HUD may not be the reader that lost
+    anything — and the map's keys are not all topics (`_lagged`, `_ctl`). A
+    row that named a key would read as "audio.vad is broken" when the fault is
+    a slow consumer three processes away, and it would not fit the 300 px box
+    either. So DropState renders a total and the plate quotes it verbatim: no
+    key from the map may reach a screen through either file.
+
+    Checked against the SOURCE rather than a render, because the two places
+    this could go wrong are a renderer that interpolates a key and a plate
+    that reaches past `line` into the frame.
+    """
+    for name in ("core/DropState.qml", "HealthPlate.qml"):
+        text = strip_qml_comments((ROOT / "shell" / "jv-hud" / name).read_text("utf-8"))
+        for key in ("_lagged", "_ctl"):
+            assert key not in text, (
+                f"{name} names `{key}`, one of the broker's own map keys — the "
+                "count is an aggregate and the row attributes it to nobody (A77)"
+            )
+        assert "body.drops[" not in text, (
+            f"{name} indexes into the drops map by key, which is how a topic "
+            "name reaches a screen"
+        )
+
+
 # --- A20: an element cannot read a topic nothing subscribes to -------------
 
 # Every way a core/ element can ask the bus about a topic. Each one takes the

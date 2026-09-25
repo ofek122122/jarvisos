@@ -12,7 +12,7 @@ something to look at without sitting at the machine.
 
 ## What you are looking at
 
-Each PNG is **one HUD surface, at its real size** — 300 × 807 px, the box
+Each PNG is **one HUD surface, at its real size** — 300 × 826 px, the box
 `shell.qml` asks the compositor for, anchored top-right. The empty two thirds
 is not a crop artifact; it is §06's earned emptiness, and it is most of what
 this HUD looks like most of the time.
@@ -440,10 +440,14 @@ unrelated plates 8 px apart is a picture of the question A62 is asking a
 human, not an answer to it.
 
 Adding `ReplyPlate` (shot 14, PLAN A71) moved the measurement again: the
-crowd is **775 px** and the surface is **807**. That is worth reading
-alongside A70, which asks whether a corner that tall should exist at all —
-it is now more than half a 1440p screen, and this change made the number
-bigger rather than answering the question.
+crowd was **775 px** and the surface **807**. Adding the drop row (PLAN A75)
+moved it once more, and this time without a plate: one 11 px row inside
+`HealthPlate`, saying that the bus threw frames away, makes the crowd **794
+px** and the surface **826**. That is worth reading alongside A70, which asks
+whether a corner that tall should exist at all — it is now well past half a
+1440p screen, and neither change answered the question. What the second one
+adds to it is that a row is not cheaper than a plate: per line, the box pays
+the same.
 
 **It is not the sequence A61 assumed, and finding that out is most of what
 this shot bought.** The obvious story is a refusal and a retry: jv-guard
@@ -591,6 +595,55 @@ the bridge forwards whole envelopes, and it reaches no pixel: the HUD has a
 place for what you were heard *saying* and none for what Jarvis said back.
 What a glance gets you is that the answer stopped early, and the schema's own
 word for why.
+
+### 15 — the bus threw frames away
+
+![15-bus-drops.png](15-bus-drops.png)
+
+**On screen:** `mic` · `health`
+
+`composed`. Every service on this machine says `ok`, the brain is on the card,
+and there is not one finding in the list — the plate is on screen anyway,
+because the bus dropped frames and `HealthState` cannot see that (PLAN A75).
+This is the only shot on the sheet whose plate is up for a reason the element
+that owns the plate does not know about.
+
+`schemas/sys.health.json` has carried `drops` since v1 — "frames dropped since
+the last heartbeat, keyed by topic. Published by jarvisd per slow subscriber;
+empty/absent = none" — and `broker.rs` really fills it. Nothing in
+`shell/jv-hud` read the field until this row: `seq` appears in eleven files
+under `core/` and in every one of them it is an identity component, never a
+gap check. So invariant 5's one failure — something blocked the bus long
+enough that frames were thrown away — was visible to a human running
+`jv health` and invisible on screen, under a corner every line of which is
+drawn from the frames that arrived.
+
+**`ok` beside a non-empty map is not a contrived frame.** `publish_health` in
+`services/jarvisd/src/broker.rs` hardcodes `SysHealthState::Ok` in the same
+body it drains the drops into, so this is what the broker writes while it is
+losing frames — and `HealthState.rank("ok")` is 0, which is why the count
+needed a row of its own rather than a place in the findings list. Whether the
+broker should ever call itself impaired is PLAN A76, and it is a real
+question: `degraded` on a per-interval counter flaps by construction, and
+`jv health --check` would exit 1 on it.
+
+**The total is composed; the keys are not.** Nothing on this machine has
+measured a drop yet. The two keys behind the 41 are the broker's own — a
+topic name for an out-queue overflow (`drops.add(&d.topic, 1)`) and `_lagged`
+for a subscriber that fell so far behind the broadcast channel that the ring
+wrapped — and **the picture shows neither**, which is the decision worth
+reading. jarvisd sums every subscriber connection's tally into one map before
+publishing, so the HUD may not be the reader that lost anything; a row
+reading `audio.vad 38` would send someone after a perception service when the
+fault is a slow consumer three processes away. The row says the bus dropped
+something, says how many, and stops. The map itself is one `jv health` away,
+which is the same answer B23 gives for `jv sub`. Whether the corner should
+ever tell a lag from an overflow is PLAN A77.
+
+The count is capped at four digits (`9999+ DROPPED`) for the reason every
+figure in this corner is bounded: the surface is 300 px wide, sized to the
+longest line any plate may draw, and a truncation that does not admit it
+reads as a complete number.
 
 ## Regenerating
 
