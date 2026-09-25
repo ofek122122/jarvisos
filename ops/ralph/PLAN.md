@@ -239,7 +239,7 @@ human-reviewed step.
       fire — a pip drawn from an event that might not arrive goes stale
       silently, which is the one failure mode a bar must not have.
       (`NiriModel.qml` names this item for that half.)
-- [ ] D13. **A render harness for the bar**, the way `hudshots.sh` is one for
+- [x] D13. **A render harness for the bar**, the way `hudshots.sh` is one for
       the HUD: stage `shell/jv-bar` with `Niri.qml` stubbed, drive
       `Workspaces`/`Clock` with the recorded desk, photograph the strip and
       read the sheet back. Today `Workspaces.qml`, `Clock.qml` and the strip
@@ -247,6 +247,39 @@ human-reviewed step.
       .#jv-bar` and the Python sweeps over `shell/**`, which is why
       `test_dependents.py` writes that gap down instead of letting it be
       invisible. `Workspaces.qml` names this item.
+      DONE (iteration 123): `ops/ralph/barshots.sh` + `tools/barshots/` +
+      `docs/bar/` — nine shots, one gate, and the bar's ungated set is now
+      exactly the other two shells' (`shell.qml` and the two Quickshell
+      singletons). The decisions worth knowing:
+      · **The shot is a WHOLE MONITOR**, 2560 or 1920 px wide by the 31 px the
+        shell derives from the type scale — not a box the harness chose. This
+        surface spans its output, so width is the one thing a harness cannot
+        pick for itself: both questions only this sheet can answer (is the
+        clock on screen, does the row reach the HUD's corner) are questions
+        about a particular monitor. A 640 px shot is there for the third case,
+        which ares does not have and `shell.qml` says "should fail visibly".
+      · **Two numbers are asserted, not just photographed.** `hudOverflowPx`
+        is 0 on every shot — the bar's side of a promise made in prose to a
+        process on another layer that draws in that corner and cannot be asked
+        — and `clockOverlapPx` is 0 against a clock centred on the SCREEN,
+        which therefore cannot move out of the way.
+      · **The paper is the bar's own ground**, unlike the other two sheets: a
+        bar is opaque and reserves its own strip, so there is nothing behind it
+        and a neutral grey would be the harness inventing one.
+      · **Six shots are ares' real desk** (the recorded `WorkspacesChanged`,
+        byte for byte, through the real `core/NiriModel.qml`); two are composed
+        because this machine has no named workspaces, and the composer's every
+        field is checked against the recording, so a composed shot cannot
+        quietly be a picture of a message shape niri does not send.
+      · **The caption and the colour are one decision.** `Workspaces.reading()`
+        names what a workspace is doing in a word and `tint()` turns that word
+        into a token, so the sheet cannot report `focused` over a label painted
+        `text_3` — `Toast.urgencyName`'s argument, one shell over.
+      · **The margin is printed, not pinned.** Every run says how much room is
+        left between the last workspace and the clock, because that is
+        arithmetic over glyph widths: asserting it would fail on a font update
+        with nothing wrong, and never measuring it is how it runs out. See
+        **D32**.
 - [x] D14. **The bar moves, once, and only where a signal moved.** Closed by
       **D18**: the bar has the generated `Ease`/`Motion`/`MotionPolicy`, and
       `Workspaces.qml` eases exactly one property — the label colour, which IS
@@ -426,8 +459,15 @@ human-reviewed step.
       hole first (`STUB_SHELL` pointed at another shell survived, because a
       repo-root `--check` names all three and rendered the stand-in anyway),
       and closing it is what pins WHICH shell the stand-in rides out with.
-- [ ] D30. **The bar now has an `Ease` and no gate loads it.** (Half closed by
-      **D20**: `notifyshots.sh` loads `shell/jv-notify`'s `Ease`, `Toast` and
+- [x] D30. **The bar now has an `Ease` and no gate loads it.** (Half closed by
+      **D20**, and CLOSED by **D13** (iteration 123): `barshots.sh` stages
+      `shell/jv-bar` whole and drives the real `Workspaces`, so the bar's
+      `Ease`, `Motion`, `Theme` and `core/MotionPolicy` are all loaded by a
+      gate now, and `03-focus-moved.png` is the picture of the one property
+      this shell eases. Every shell has a render harness; A11 —
+      `Motion.onBattery`/`fullscreen` have no source — is now the only part of
+      this that stands, in all three. The original text follows.) The earlier
+      half, from **D20**: `notifyshots.sh` loads `shell/jv-notify`'s `Ease`, `Toast` and
       the strip, so the notifier's half of this is done and the remaining one
       is the bar's — **D13**.) The original, for the half that stands:
       **The bar and the notifier now have an `Ease`, and no gate loads
@@ -457,6 +497,24 @@ human-reviewed step.
       the current single-suite shape. Worth doing before **D27**: the sweep
       D27 asks for is over `core/`, and the toast is the file whose content a
       stranger chooses. `tools/mutate.py`'s notify hint names this item.
+
+- [ ] D32. **The bar's workspaces row has no width of its own, and D13
+      measured how much room is left: 274 px.** The row is a `Row`, which takes
+      its width from its children; the clock is centred on the SCREEN, so it
+      cannot move; and the HUD's corner is reserved by a number. Six
+      long-named workspaces on a 1920 px monitor (`docs/bar/08-crowded.png`)
+      leave 274 px before the two collide — about three more names. Nothing in
+      the shell stops the seventh, and what happens then is a real §06
+      decision rather than a clamp: dropping labels silently is the failure the
+      notifier's `+N EARLIER` line exists to prevent, and eliding every label
+      makes the one you are ON unreadable. The shape that fits this design
+      language is probably "as many whole labels as fit, then `+N`", with the
+      focused one never among the dropped — but that is a decision, and
+      `barshots.sh` is now the thing that can photograph the answer.
+      Discovered by D13, which prints the margin on every run so it stays a
+      number somebody has seen. The fix wants a shot at the point of collision,
+      which today would fail the sheet's own assertion — which is the right way
+      round.
 
 - [ ] D28. **The refusal D11 added is about PATHS, and the question it stands
       in for is about READS.** `tools/dependents.py` already walks the real

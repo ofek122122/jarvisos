@@ -59,8 +59,8 @@ def sheet() -> list[tuple[str, list[str]]]:
     return out
 
 
-def stack_of(text: str) -> list[tuple[int, str]]:
-    """What a column stacks, in order, as (depth, element).
+def stack_of(text: str, opener: str = "Column {") -> list[tuple[int, str]]:
+    """What a container holds, in order, as (depth, element).
 
     Brace-walked rather than matched by indentation, because the two files this
     compares are indented four levels apart: shell.qml's stack is inside a
@@ -69,9 +69,14 @@ def stack_of(text: str) -> list[tuple[int, str]]:
     composition — a strip that repeated something else would stack the same two
     elements — and the ORDER is the point: the `+N EARLIER` line is above the
     plates because the ones it counts are older than everything on screen.
+
+    `opener` is which container to walk. It exists because the bar's harness
+    asks exactly this question of a PanelWindow and a Rectangle
+    (tools/tests/test_barshots.py), and two brace-walks would eventually be two
+    answers.
     """
     body = strip_qml_comments(text)
-    start = body.index("Column {") + len("Column {")
+    start = body.index(opener) + len(opener)
     out: list[tuple[int, str]] = []
     depth = 1
     i = start
@@ -80,16 +85,18 @@ def stack_of(text: str) -> list[tuple[int, str]]:
         if c == "}":
             depth -= 1
         elif c == "{":
-            # The identifier this block belongs to, if it is a declaration
-            # (`Toast {`) rather than a binding (`onX: { … }`) or an object
-            # literal.
+            # The identifier this block belongs to, if it is a CHILD
+            # (`Toast {`) rather than a binding (`onX: { … }`, an object
+            # literal) or a value assigned to one (`mask: Region {}`, which is
+            # a property of the surface and not something drawn in it).
             head = re.search(r"([A-Z]\w*)\s*$", body[:i])
             before = body[:i].rstrip()
-            if head and not before.endswith(":"):
+            valued = re.search(r":\s*[A-Z]\w*\s*$", body[:i])
+            if head and not before.endswith(":") and not valued:
                 out.append((depth, head.group(1)))
             depth += 1
         i += 1
-    assert depth == 0, "the Column's braces do not balance"
+    assert depth == 0, f"the {opener.split()[0]}'s braces do not balance"
     return out
 
 

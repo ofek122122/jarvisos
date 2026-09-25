@@ -853,16 +853,19 @@ def test_the_qml_gates_reach_every_file_of_the_hud_that_runs():
 
 
 def test_the_qml_gate_reaches_every_file_of_the_bar_that_a_test_can_load():
-    """The same sweep for `shell/jv-bar` (PLAN D1), and it is a SHORTER reach
-    on purpose — which is the fact worth pinning.
+    """The same sweep for `shell/jv-bar` (PLAN D1), and since D13 it is the
+    HUD's reach rather than a shorter one.
 
-    The HUD has two gates: the headless tests and the contact sheet, which
-    stages the whole shell and drives the real plates. The bar has one. So
-    everything above `core/` — the strip itself, the workspaces row, the clock
-    — is reached by no QML gate at all and is covered only by qmllint inside
-    `nix build .#jv-bar`, plus the Python sweeps over `shell/**`. That is a
-    real gap (PLAN D13 is the bar's render harness), and the way a gap like
-    this usually disappears is by nobody writing it down."""
+    This shell had one gate and a five-file gap — the strip, the workspaces
+    row, the clock, the ease and the motion policy, covered only by qmllint
+    inside `nix build .#jv-bar` and the Python sweeps over `shell/**`. Which
+    mattered, because the bar is the one surface that is always on screen:
+    every decision in it is a decision about a glance, and a glance is what no
+    headless test can take. `ops/ralph/barshots.sh` closed it by staging the
+    shell and photographing the real strip at real monitor widths, and what is
+    left out is now exactly what the other two shells leave out: `shell.qml`
+    and the two singletons that import Quickshell, which the stage replaces
+    because no other engine can resolve them."""
     ours = {
         p.relative_to(ROOT).as_posix()
         for p in (ROOT / "shell" / "jv-bar").rglob("*.qml")
@@ -873,27 +876,25 @@ def test_the_qml_gate_reaches_every_file_of_the_bar_that_a_test_can_load():
     assert ours - seen == {
         "shell/jv-bar/shell.qml",  # Quickshell: gated by `nix build .#jv-bar`
         "shell/jv-bar/Niri.qml",  # Quickshell: the niri child process
-        "shell/jv-bar/Theme.qml",  # generated; `--check` in the same build
         "shell/jv-bar/Motion.qml",  # Quickshell: the session override (D18)
-        "shell/jv-bar/Ease.qml",  # generated; the HUD's copy IS gated (D13)
-        # Generated, and reached in the HUD only because the shots harness
-        # stages a stub Motion that NAMES the type. Nothing the bar's one gate
-        # loads names it, so the walk stops — which is honest: the file is
-        # byte-identical to the HUD's (test_gen_theme_qml.py) and the HUD's
-        # tst_motionpolicy.qml is the suite that reads it (PLAN D18).
-        "shell/jv-bar/core/MotionPolicy.qml",
-        "shell/jv-bar/Workspaces.qml",  # no render gate for the bar yet (D13)
-        "shell/jv-bar/Clock.qml",  # likewise
     }, sorted(ours - seen)
 
 
-def test_a_bar_element_names_only_the_bars_gate():
-    """Two scripts, not one with an argument: touching a bar element must not
-    run the HUD's tests, and touching a HUD element must not run the bar's."""
+def test_a_bar_element_names_only_the_bars_gates():
+    """Two gates now, and the claim is the one it was at one: touching a bar
+    element must not run the HUD's tests, and touching a HUD element must not
+    run the bar's.
+
+    `NiriModel` names BOTH of this shell's gates, and that is the derivation
+    being right rather than loose — `barshots.sh` drives the real model to
+    build the desk it photographs, so a change to the per-output filter or the
+    activation rule moves the sheet as surely as it moves the headless
+    tests."""
     got = dependents.qml_readers(ROOT, ["shell/jv-bar/core/NiriModel.qml"])
-    assert set(got) == {"ops/ralph/bartest.sh"}, got
-    got = dependents.qml_readers(ROOT, ["shell/jv-hud/core/BusModel.qml"])
-    assert "ops/ralph/bartest.sh" not in got, got
+    assert set(got) == {"ops/ralph/bartest.sh", "ops/ralph/barshots.sh"}, got
+    for other in ("shell/jv-hud/core/BusModel.qml", "shell/jv-notify/core/NotifyModel.qml"):
+        for mine in ("ops/ralph/bartest.sh", "ops/ralph/barshots.sh"):
+            assert mine not in dependents.qml_readers(ROOT, [other]), (mine, other)
 
 
 def test_the_qml_gate_reaches_every_file_of_the_notifier_that_a_test_can_load():

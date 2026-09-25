@@ -45,9 +45,9 @@ It also writes the files that are not any shell's: one
 harness stages over its shell's Motion because the shots run under an engine
 that cannot resolve Quickshell. Each is rendered from the same body as the real
 one with three lines swapped (PLAN D29), so what a sheet photographs animates
-for the reason the running shell would. There are two: the HUD's contact sheet
-(`ops/ralph/hudshots.sh`) and the notification corner's (`notifyshots.sh`,
-PLAN D20).
+for the reason the running shell would. There are three, one per shell: the
+HUD's contact sheet (`ops/ralph/hudshots.sh`), the notification corner's
+(`notifyshots.sh`, PLAN D20) and the top bar's (`barshots.sh`, PLAN D13).
 """
 
 from __future__ import annotations
@@ -602,14 +602,16 @@ class Standin:
     script: str
 
 
-# The two harnesses that photograph a shell. Each stages its own stand-in
+# The three harnesses that photograph a shell — one per shell, now that the
+# bar has one too (PLAN D13). Each stages its own stand-in
 # because `import "."` resolves inside ONE directory and each harness assembles
 # its own stage; the FILES are generated from one body, which is the whole
-# point of D29 — and what makes a second harness (D20) a three-line table entry
-# rather than a second hand copy.
+# point of D29 — and what made the second harness (D20) and the third (D13) a
+# one-line table entry each rather than another hand copy.
 STANDINS = (
     Standin("jv-hud", ROOT / "tools" / "hudshots" / "stub", "ops/ralph/hudshots.sh"),
     Standin("jv-notify", ROOT / "tools" / "notifyshots" / "stub", "ops/ralph/notifyshots.sh"),
+    Standin("jv-bar", ROOT / "tools" / "barshots" / "stub", "ops/ralph/barshots.sh"),
 )
 
 

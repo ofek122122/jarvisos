@@ -705,10 +705,12 @@ SHELLS: tuple[Shell, ...] = (
         canary_hint=(
             "bartest.sh is handed shell/jv-bar/tests, whose drivers import "
             "\"../core\" and nothing else, so only shell/jv-bar/core is gradeable "
-            "here and a canary anywhere else in the shell lives. There is no "
-            "staged-render runner for the bar to regrade it with — that is PLAN "
-            "D13, and until it exists Workspaces.qml, Clock.qml and shell.qml "
-            "are held by qmllint inside `nix build .#jv-bar` and by nothing else."
+            "here and a canary anywhere else in the shell lives. "
+            "`ops/ralph/barshots.sh` now stages the whole shell and photographs "
+            "the real strip at real monitor widths (D13), so Workspaces.qml and "
+            "Clock.qml ARE held by something — but this harness has not been "
+            "pointed at it yet (PLAN D31), so grading them means running that "
+            "script by hand."
         ),
     ),
     Shell(

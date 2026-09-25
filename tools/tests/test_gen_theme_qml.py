@@ -367,11 +367,22 @@ def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeyp
     `--shell jv-hud` — which would have rewritten the HUD's Motion and left the
     sheet's behind, the exact drift D29 closed, reopened one level up.
 
-    Both halves are the claim. The HUD's run emits it, because that is the file
-    it stands in for; another shell's run does not, because a stand-in rewritten
-    by a run that has nothing to do with it is a surprise in someone else's diff.
-    Patching the two output roots keeps this out of the checkout entirely.
+    Both halves are the claim. A shell's run emits its own, because that is the
+    file it stands in for; it does not emit another shell's, because a stand-in
+    rewritten by a run that has nothing to do with it is a surprise in someone
+    else's diff. Patching the two output roots keeps this out of the checkout
+    entirely.
+
+    There used to be a third half — jv-bar, which carried no stand-in at all and
+    so had to write none of them. D13 gave it one, so every shell carries one
+    now and the "none" case has no example left. What is checked instead is the
+    count: three harnesses for three shells, so a fourth stand-in is a
+    deliberate edit here rather than a table that grew unnoticed.
     """
+    assert {s.shell for s in gen.STANDINS} == set(gen.SHELLS), (
+        "every shell this generator writes is photographed by a harness that "
+        "stages a stand-in Motion over it, and the table no longer says so"
+    )
     monkeypatch.setattr(gen, "SHELL_DIR", tmp_path / "shell")
     moved = tuple(
         dataclasses.replace(s, dir=tmp_path / "standin" / s.shell) for s in gen.STANDINS
@@ -380,14 +391,7 @@ def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeyp
     theme = tmp_path / "theme.toml"
     theme.write_text(MINIMAL, "utf-8")
 
-    # jv-bar carries no stand-in at all, so its run must write none of them.
-    assert gen.main(["--shell", "jv-bar", "--theme", str(theme)]) == 0
-    for standin in moved:
-        assert not (standin.dir / "Motion.qml").exists(), (
-            f"the bar's run wrote {standin.shell}'s stand-in"
-        )
-
-    # And each shell that DOES carry one writes its own and nobody else's.
+    # Each shell writes its own stand-in and nobody else's.
     for mine in moved:
         assert gen.main(["--shell", mine.shell, "--theme", str(theme)]) == 0
         assert (mine.dir / "Motion.qml").read_text("utf-8") == gen.render_motion_qml(
