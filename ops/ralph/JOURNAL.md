@@ -8905,3 +8905,71 @@ the one granted `.ini` and cannot see its sibling.
   asked three times; **B62** is B61's two decisions; and **B10/A28** — one
   live recording of one spoken turn on ares — remains the biggest thing a
   human can hand this loop.
+
+## 2026-09-25 — iteration 88 — B66: the grant whose symlink hands back the home
+
+Track A is still one human look at `docs/hud/` away from unblocking, so this
+is the B track again, and it is the item iteration 87 raised while doing B65.
+
+`grant_dest` reads the recipe's WORDS: it refuses `.`, `..`, the empty grant
+and an absolute path, which reads like a promise that a grant stays inside the
+app's private home. It is not one. `--bind` resolves its source for real, so
+on a home where `~/Documents` is a symlink, `home_paths = ["Documents"]` IS
+`home_paths = ["."]` — the user's entire home, read-write, mounted back over
+the private one the confinement had just put there — and every word of the
+recipe is legal. B65 did not create this; it made it visible, by deliberately
+following links so the existence check agrees with bwrap.
+
+**The reason this shipped as a patch and not as a proposal** is that B66's own
+three options were not equally undecidable, and splitting them is the whole
+work. "Refuse everything that resolves outside the home" refuses a user whose
+`~/Documents` genuinely lives on another disk, which is an ordinary setup. But
+a grant resolving to the real home ITSELF, or to an ancestor of it, is the
+`["."]` / `["../.."]` bug arriving through the user's filesystem instead of
+through the TOML — it needs no judgement and nothing legitimate wants it. That
+line is now refused in `grant_problems` (where a recipe meets a machine, not in
+the pure `grant_dest`, which stays willing — B65's rule). Everything else is
+honoured AND pinned by a test, so the strong reading cannot arrive by accident,
+and it is raised as B67 with the candidate properties and what each refuses.
+
+The premise is EXECUTED before the refusal is asserted, which is the habit B63
+left behind and the only way a guard proves it stands in front of something:
+`test_sandbox.py` enters the sandbox and reads `tax-return.pdf` through a
+`Documents -> $HOME` link, and lists the whole machine through a `Root -> /`,
+and only then asks `grant_problems` to refuse both. Delete the check and the
+leak is what the suite reports.
+
+- tests: `bash ops/ralph/runtests.sh jv-compat` **49 (was 42)**, all green.
+- graded with **8 mutations, 7 caught** — and the first pass had a real
+  survivor that changed the code: resolving only the GRANT and comparing it
+  against an unresolved `$HOME` passed everything, because my test for it used
+  a linked `$HOME` with an ordinary grant, where the two readings agree. A
+  machine whose `$HOME` is a link has two names for one home, and the escape
+  is a grant landing on the OTHER name; that is the test now. Also caught: the
+  check deleted, the ancestor half dropped, the comparison reversed (refusing
+  every grant under the home), the grant compared unresolved, the message
+  naming the recipe's words instead of where they land, and the strong reading
+  smuggled in. The eighth — hoisting the gate past the `continue` that skips an
+  absent grant — is provably EQUIVALENT, not a gap: `exists()` follows links,
+  so anything resolving to the home or an ancestor resolves to something that
+  exists and can never be absent.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/jv-compat/jv_compat/prefix.py,
+  services/jv-compat/tests/test_compat.py,
+  services/jv-compat/tests/test_sandbox.py, recipes/README.md
+- commits: a0d02ef
+- next: **B67**, the sibling-of-the-home half of this one, and it is genuinely
+  a human's: `-> /mnt/games/Documents` and `-> /etc` (already ro-bound, so the
+  grant turns it read-write) and `-> ~/.local/share/jarvis/prefixes` (every
+  other app's prefix) are the same shape, and every property that separates
+  them refuses some real setup — a uid check fails an ntfs mount with `uid=0`,
+  which on a dual-boot machine is exactly where a Wine app's saves live. Free
+  until the first recipe with a grant is committed. Otherwise unchanged:
+  **Track A is one human look at `docs/hud/` away from unblocking** A47, A55,
+  A62, A63's picture half, A70 and the A21/A22/A25 cluster; **A56** asks
+  whether the shot suites belong in the build gate; **B27/B28** are one
+  decision about whether jv-ears gets a state topic for the no-wake window;
+  **B43/B47/B54** are one question asked three times; **B62** is B61's two
+  decisions; and **B10/A28** — one live recording of one spoken turn on ares —
+  remains the biggest thing a human can hand this loop.

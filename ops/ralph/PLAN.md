@@ -1588,23 +1588,39 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       to exec. Tests: `bash ops/ralph/runtests.sh jv-compat` 42, was 33;
       9 mutations, 9 caught.)
 
-- [ ] B66. `grant_dest` promises that a grant "stays under the app's private
-      home" and checks the STRING: it refuses absolute paths, `..` and the
-      empty grant by inspecting the words, while bwrap resolves the source
-      path for real. So a grant of `Documents` binds whatever `~/Documents`
-      is a symlink to — another disk, `/home`, or `/`. B65 did not create
-      this gap; it made it explicit, by deliberately following links so the
-      existence check agrees with bwrap. The trap is that the obvious fix is
-      WRONG: a user whose `~/Documents` genuinely lives on another disk is an
-      ordinary setup, and refusing every grant that resolves outside the home
-      refuses it. So this is a decision between three properties, not a patch:
-      "stays under the real home" (refuses legitimate relocation), "resolves
-      to something the user owns" (a uid check, which a relocated folder
-      passes and `/` fails), or "leave it and say in recipes/README.md that a
-      grant is exactly as wide as what the link points at". Nothing relies on
-      the stronger reading today and no recipe with a grant is committed, so
-      it is free now for the same reason B65 was — and it stops being free the
-      same day. Discovered in B65.
+- [x] B66. `grant_dest` promised a grant "stays under the app's private home"
+      and checked the STRING. — a0d02ef
+      (The three properties it listed were not equally undecidable, and the
+      split is what made this buildable: a grant resolving to the real home
+      ITSELF or to an ancestor of it is the `["."]`/`["../.."]` bug reaching
+      the same place through a symlink, needs no judgement, and nothing
+      legitimate wants it — so that is refused, in `grant_problems`, where a
+      recipe meets a machine. A grant resolving to a SIBLING of the home —
+      the relocated-to-another-disk case — is honoured AND pinned by a test,
+      so the strong reading cannot arrive by accident; it is B67. The
+      premise is executed: `test_sandbox.py` reads `tax-return.pdf` through
+      the link and lists the whole machine through `Root -> /` BEFORE
+      asserting the refusal, so deleting the check shows as a leak. Both
+      sides of the comparison are resolved — a `$HOME` that is itself a link
+      has two names for one home, and the first draft compared one against
+      the other and let it through; the mutation that found that is now a
+      test. 49 tests (was 42), 8 mutations, 7 caught, the eighth provably
+      equivalent. Width documented in `recipes/README.md`.)
+
+- [ ] B67. **The half of B66 deliberately left open, and it is a decision
+      with a human in it.** A grant resolving to a SIBLING of the home is
+      accepted: `~/Documents -> /mnt/games/Documents` (ordinary, and the
+      reason B66 did not take the strong reading), but also `-> /etc`
+      (already `--ro-bind` in the confinement, so the grant silently turns
+      it read-WRITE) and `-> ~/.local/share/jarvis/prefixes` (every other
+      app's prefix, inside an untrusted one). Every candidate property
+      refuses some real setup: a uid check fails an ntfs mount with
+      `uid=0`, which on a dual-boot machine is exactly where a Wine app's
+      saves would live; "not under any path the confinement already binds"
+      is narrower and answers nothing about another disk. The third option
+      is to leave it and rely on the recipe review, which is what
+      `recipes/README.md` now says. Cheap either way and still free —
+      no recipe with a grant is committed. Discovered in B66.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
