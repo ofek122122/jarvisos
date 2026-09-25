@@ -10,7 +10,7 @@
 
 use clap::{Parser, Subcommand};
 use jarvisd::broker::BusAddr;
-use jarvisd::cli::{self, HopStats, Outcome, TurnStats, Utterances};
+use jarvisd::cli::{self, Confirmations, HopStats, Outcome, TurnStats, Utterances};
 use jarvisd::client::BusClient;
 use jarvisd::proto::ServerMsg;
 use jarvisd::time::mono_now;
@@ -75,6 +75,11 @@ enum Cmd {
     /// A turn that ran a TOOL gets a second line saying how much of its
     /// think jv-act held — the tool's execution and, for a confirming tool,
     /// the window it waited for your answer in.
+    ///
+    /// A confirmation gets a line of its own when it ends: the tool that was
+    /// asked about, what was decided, by which route, and how long you took.
+    /// The two frames that say all that are minutes apart on the wire and
+    /// share only a request_id.
     Tap {
         #[arg(long)]
         latency: bool,
@@ -215,6 +220,12 @@ async fn main() -> anyhow::Result<()> {
             let mut stats = HopStats::default();
             let mut turns = TurnStats::default();
             let mut utts = Utterances::with_capacity(UTTERANCE_MEMORY);
+            // The confirmation exchanges, held question-half-first so each
+            // one can be reported as the single sentence it is. Independent
+            // of the turn bookkeeping above on purpose: `action.confirm`
+            // names no utterance, so a destructive tool nobody spoke for is
+            // still an exchange worth a line (cli::Confirmations).
+            let mut confirms = Confirmations::default();
             // jv-ears' endpoint hold, once it has said what it is. No
             // fallback: a turn measured before the first heartbeat lands
             // reports `?` for the spans that need it (cli::Turn).
@@ -309,6 +320,14 @@ async fn main() -> anyhow::Result<()> {
                     // request_id, because `action.confirm` names no utterance
                     // either. Still no new publisher and no schema change.
                     "action.confirm" => {
+                        // The exchange as one line, when the answer closes a
+                        // question this tap saw opened. Every refusal about
+                        // what an ending IS lives in `Confirmations`, which
+                        // keeps the three `core/ConfirmState.qml` argues, so
+                        // there is nothing to decide here (PLAN B79).
+                        if let Some(line) = confirms.observe(body, ts) {
+                            println!(">>> {line}");
+                        }
                         let Some(rid) = cli::get_str(body, "request_id") else { return };
                         match cli::get_str(body, "kind").as_deref() {
                             Some("request") => utts.confirm_asked(&rid, ts),

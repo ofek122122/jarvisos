@@ -1093,6 +1093,61 @@ async fn a_confirming_tool_says_which_half_of_its_span_was_you() {
     assert!(s.contains("action.confirm"), "and say where the number came from:\n{s}");
 }
 
+/// Every `>>> confirm` line the child printed.
+fn confirm_lines(out: &Out) -> Vec<&str> {
+    out.stdout.lines().filter(|l| l.starts_with(">>> confirm ")).collect()
+}
+
+#[tokio::test]
+async fn a_confirmation_on_the_wire_is_one_line_and_not_two_frames_to_correlate() {
+    let bus = start(Config::default()).await;
+    let p = pump_confirm_turns(&bus);
+
+    // No `--latency`: the plain tap is the one that prints every frame as
+    // JSON, so this also proves the line is not merely the frames restated.
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--for", "1.5"]), 8.0).await;
+    p.abort();
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    let lines = confirm_lines(&out);
+    assert!(!lines.is_empty(), "no confirmation was reported:\n{}", out.stdout);
+    let line = lines[0];
+    // The question's tool and the answer's verdict and route, which live on
+    // two different frames and never on one.
+    assert!(line.contains("fs.delete -> granted (cli,"), "{line}");
+    // And the wait between them, which lives on neither: the window this
+    // fixture holds open is 200 ms, and it is printed in the unit a person
+    // answers in.
+    assert!(line.contains("0.2s)"), "{line}");
+
+    // jv-act ECHOES the answer it acted on, so every one of these exchanges
+    // put TWO answer frames on the wire — and each exchange is still one
+    // line. Counted against the questions actually asked in the window.
+    let asked = out
+        .stdout
+        .lines()
+        .filter(|l| l.contains("\"kind\":\"request\"") && l.contains("action.confirm"))
+        .count();
+    let answered = out
+        .stdout
+        .lines()
+        .filter(|l| l.contains("\"kind\":\"answer\"") && l.contains("action.confirm"))
+        .count();
+    assert!(asked >= 2, "the window was too short to prove anything: {asked} questions");
+    assert!(answered > asked, "the echo did not happen, so nothing was deduplicated: {answered}");
+    assert!(
+        lines.len() == asked || lines.len() == asked - 1,
+        "{} lines for {asked} questions (the last may be unanswered when the tap stopped):\n{}",
+        lines.len(),
+        out.stdout
+    );
+
+    // The request id is abbreviated like every other id these lines carry,
+    // and this one fits whole — `pump_confirm_turns` names them `req-N`.
+    assert!(line.starts_with(">>> confirm req-"), "{line}");
+    every_reported_line_fits(&out);
+}
+
 #[tokio::test]
 async fn an_action_no_result_answered_leaves_the_turn_unsplit() {
     let bus = start(Config::default()).await;

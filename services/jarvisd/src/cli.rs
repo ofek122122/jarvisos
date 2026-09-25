@@ -34,6 +34,18 @@ pub fn get_f64(v: &rmpv::Value, key: &str) -> Option<f64> {
     }
 }
 
+/// A boolean field, or None. Strictly a msgpack bool: a 1, or the string
+/// "true", is a producer writing a different schema, and reading it as a
+/// yes would be this CLI granting a destructive action nobody granted.
+/// `action.confirm.granted` is why this exists, and there the difference
+/// between absent and `false` is the whole of the field's meaning.
+pub fn get_bool(v: &rmpv::Value, key: &str) -> Option<bool> {
+    match get(v, key)? {
+        rmpv::Value::Boolean(b) => Some(*b),
+        _ => None,
+    }
+}
+
 /// One frame as a JSON line. Never panics: a frame we cannot print is still
 /// worth reporting as one, in place, rather than killing a tap that may be
 /// the only thing watching a live bus.
@@ -1186,6 +1198,177 @@ impl TurnStats {
         }
         out
     }
+}
+
+// ---------------------------------------------------------------- confirmations
+
+/// How many open confirmation questions one tap remembers at a time.
+///
+/// jv-act keeps a single outstanding slot today and this is not the thing
+/// that enforces that — the same reason `core/ConfirmState.qml` closes only
+/// on an answer naming the question it holds. Bounded because `jv tap` is
+/// meant to be left running for hours and an open question is forgotten by
+/// nothing but its own answer: a jv-act that died mid-window leaves one
+/// here forever. Past the cap the OLDEST is dropped, because the newest is
+/// the one somebody is still waiting on.
+pub const CONFIRMS_OPEN: usize = 16;
+
+/// The widest a tool name prints inside a confirmation line.
+///
+/// 22, which is the column `act_log_line` already gives a tool name, so the
+/// same tool is the same width in both places a human reads it.
+pub const CONFIRM_TOOL_COLUMNS: usize = 22;
+
+/// The question half of one `action.confirm` exchange, held until its answer.
+struct Asked {
+    request_id: String,
+    /// The tool the question named, or None: `tool` is request-only AND
+    /// optional in the frozen schema, so a question that named none is a
+    /// real case and not a parse failure.
+    tool: Option<String>,
+    /// The frame's own `ts`, so the wait is measured between two moments on
+    /// the bus rather than between two moments this process got round to.
+    ts: f64,
+}
+
+/// The `action.confirm` exchanges `jv tap` has seen the question half of,
+/// and the one line each of them is worth when it ends.
+///
+/// A confirmation is TWO frames on one topic threaded by `request_id` — the
+/// question (which alone carries `tool` and `summary`) and the answer (which
+/// alone carries `granted` and `answered_by`) — with a human's silence in
+/// between. Read as raw frames that is two records a reader has to correlate
+/// by hand, and under `--latency` it is two hop lines carrying neither. This
+/// holds the question until the answer lands and writes the sentence they
+/// make together (PLAN B79).
+///
+/// **It decides nothing.** What a denial IS is argued in
+/// `shell/jv-hud/core/ConfirmState.qml` and this reader may not disagree
+/// with it, so it keeps the same three refusals:
+///
+///   * only about a question this tap SAW asked. An answer whose
+///     `request_id` we never heard opened is a verdict out of nowhere — and
+///     it could not name a tool anyway, since the answer frame carries none.
+///   * only from an answer FRAME. Nothing here times a window out: a
+///     question whose answer never comes is dropped by the cap, silently,
+///     and never reported as an ending the machine did not state.
+///   * `granted` decides and nothing else does. An answer without a usable
+///     `granted` is `unknown` even when the route is `timeout` — the
+///     schema's prose does say a timeout is a denial and jv-act publishes
+///     `granted: false` when it times out, which is exactly why inferring it
+///     off the route here would be a second copy of a rule the frame already
+///     states (A14).
+///
+/// What it does NOT print, deliberately: the `summary`, jv-act's spoken
+/// words. Eighty columns holds the tool or the sentence and not both, and
+/// the tool is the name the same event goes by in `intent.action`, in the
+/// audit, and in `jv act-log`, so it is the one a reader can follow between
+/// them. The words are verbatim on the request frame this tap printed.
+pub struct Confirmations {
+    open: VecDeque<Asked>,
+    cap: usize,
+}
+
+impl Default for Confirmations {
+    fn default() -> Self {
+        Self::with_capacity(CONFIRMS_OPEN)
+    }
+}
+
+impl Confirmations {
+    /// A reader holding at most `cap` open questions. A cap of zero would be
+    /// a reader that cannot report anything, so one is the floor.
+    pub fn with_capacity(cap: usize) -> Self {
+        Confirmations { open: VecDeque::new(), cap: cap.max(1) }
+    }
+
+    /// How many questions are open — the memory this holds, for a test that
+    /// wants to prove it is bounded.
+    pub fn open(&self) -> usize {
+        self.open.len()
+    }
+
+    /// One `action.confirm` body, and the line it completes if it ends an
+    /// exchange this tap was following.
+    ///
+    /// Every field is read here rather than at the call site so that all
+    /// three refusals are in the tested unit: `bin/jv.rs` passes the body
+    /// through and prints whatever comes back, and cannot hold an opinion
+    /// about what a denial is.
+    pub fn observe(&mut self, body: &rmpv::Value, ts: f64) -> Option<String> {
+        let rid = get_str(body, "request_id").filter(|s| !s.is_empty())?;
+        match get_str(body, "kind").as_deref() {
+            Some("request") => {
+                self.asked(rid, get_str(body, "tool"), ts);
+                None
+            }
+            // `granted` and `answered_by` are read as Options and stay that
+            // way: absent and false are different facts about a destructive
+            // tool, and this is the last place that could confuse them.
+            Some("answer") => self.answered(&rid, get_bool(body, "granted"), get_str(body, "answered_by").as_deref(), ts),
+            _ => None,
+        }
+    }
+
+    /// Remember a question. Newest wins for a reused id, the same way
+    /// `ConfirmState` replaces its latch: an id asked again is a new
+    /// question, and answering the old one would name the wrong tool.
+    fn asked(&mut self, request_id: String, tool: Option<String>, ts: f64) {
+        self.open.retain(|a| a.request_id != request_id);
+        while self.open.len() >= self.cap {
+            self.open.pop_front();
+        }
+        self.open.push_back(Asked { request_id, tool, ts });
+    }
+
+    /// Close a question and say how it went, or nothing at all for an answer
+    /// to a question this tap never saw — including the second copy of one
+    /// it has already reported, which is what jv-act's echo of the answer it
+    /// acted on looks like from here.
+    fn answered(&mut self, request_id: &str, granted: Option<bool>, answered_by: Option<&str>, ts: f64) -> Option<String> {
+        let i = self.open.iter().position(|a| a.request_id == request_id)?;
+        let asked = self.open.remove(i)?;
+        Some(confirm_exchange_line(&asked, granted, answered_by, ts))
+    }
+}
+
+/// One finished confirmation as `jv tap` prints it:
+///
+/// ```text
+/// >>> confirm req-4c81: fs.delete -> granted (voice, 4.1s)
+/// ```
+///
+/// Seconds, not the milliseconds every turn line uses, and the difference is
+/// the point: the turn ladder decomposes one latency and its terms have to
+/// be comparable with each other, while this number is a person deciding.
+/// It is the same span `Turn::confirm_line` calls `you=`, and the reason
+/// that one is in milliseconds is that it is a share of a millisecond whole.
+///
+/// Unknowns print `?` — the tool nobody named, the wait two timestamps could
+/// not agree on — and never a plausible zero, the rule `ms` and `health_line`
+/// already follow. A route this binary does not recognise prints as no route
+/// rather than being read aloud: the enum is frozen
+/// (`schemas/action.confirm.json`), a word outside it is not a diagnosis, and
+/// losing it must not take the verdict with it.
+fn confirm_exchange_line(asked: &Asked, granted: Option<bool>, answered_by: Option<&str>, ts: f64) -> String {
+    let tool = match asked.tool.as_deref().filter(|t| !t.is_empty()) {
+        Some(t) => clip(t, CONFIRM_TOOL_COLUMNS),
+        None => "?".to_string(),
+    };
+    let verdict = match granted {
+        Some(true) => "granted",
+        Some(false) => "denied",
+        None => "unknown",
+    };
+    let waited = match ts - asked.ts {
+        d if d.is_finite() && d >= 0.0 => format!("{d:.1}s"),
+        _ => "?".to_string(),
+    };
+    let route = match answered_by {
+        Some(by @ ("voice" | "cli" | "timeout")) => format!("{by}, "),
+        _ => String::new(),
+    };
+    format!("confirm {}: {tool} -> {verdict} ({route}{waited})", short_id(&asked.request_id))
 }
 
 // ---------------------------------------------------------------- line formats
@@ -4228,4 +4411,250 @@ mod tests {
         assert!(line.contains("fs.read"), "{line}");
         assert!(line.contains('?'), "{line}");
     }
+
+    // ---------------------------------------------------------- confirmations
+
+    /// One `action.confirm` body, as jv-act and the CLI put it on the bus.
+    fn ask(rid: &str, tool: Option<&str>) -> rmpv::Value {
+        let mut pairs = vec![("kind", rmpv::Value::from("request")), ("request_id", rid.into())];
+        if let Some(t) = tool {
+            pairs.push(("tool", t.into()));
+        }
+        // `summary` and `window_s` ride along on the real frame and this
+        // reader is required not to care about either.
+        pairs.push(("summary", "Delete 3 files from Downloads - yes or no?".into()));
+        pairs.push(("window_s", rmpv::Value::from(15.0)));
+        map(&pairs)
+    }
+
+    fn answer(rid: &str, granted: Option<bool>, by: Option<&str>) -> rmpv::Value {
+        let mut pairs = vec![("kind", rmpv::Value::from("answer")), ("request_id", rid.into())];
+        if let Some(g) = granted {
+            pairs.push(("granted", g.into()));
+        }
+        if let Some(b) = by {
+            pairs.push(("answered_by", b.into()));
+        }
+        map(&pairs)
+    }
+
+    #[test]
+    fn a_question_and_its_answer_come_out_as_one_line() {
+        let mut c = Confirmations::default();
+        // The question alone says nothing: the tap prints the frame, and an
+        // exchange with no ending is not an exchange.
+        assert_eq!(c.observe(&ask("req-1", Some("fs.delete")), 100.0), None);
+        assert_eq!(c.open(), 1);
+        let line = c.observe(&answer("req-1", Some(true), Some("voice")), 104.1).expect("one line");
+        assert!(line.starts_with("confirm req-1: "), "{line}");
+        assert!(line.contains("fs.delete"), "{line}");
+        assert!(line.contains("granted"), "{line}");
+        assert!(line.contains("voice"), "{line}");
+        // Your own time, in the unit a person answers in.
+        assert!(line.contains("4.1s"), "{line}");
+        // And the question is gone: an exchange is reported once.
+        assert_eq!(c.open(), 0);
+    }
+
+    #[test]
+    fn an_answer_to_a_question_this_tap_never_saw_is_not_a_verdict() {
+        // The rule `core/ConfirmState.qml` keeps for the HUD, for the same
+        // reason: a verdict out of nowhere names a tool nobody can read off
+        // the answer frame (`tool` is request-only in the frozen schema),
+        // and a tap that joined mid-window never heard the question.
+        let mut c = Confirmations::default();
+        assert_eq!(c.observe(&answer("req-9", Some(true), Some("voice")), 5.0), None);
+        assert_eq!(c.open(), 0);
+    }
+
+    #[test]
+    fn an_exchange_is_reported_once_however_many_times_it_is_answered() {
+        // Not hypothetical: jv-act ECHOES the answer it acted on, on the
+        // same topic (`services/jv-act/src/service.rs`), so every confirmed
+        // tool puts two answer frames on the wire.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        assert!(c.observe(&answer("req-1", Some(true), Some("cli")), 1.0).is_some());
+        assert_eq!(c.observe(&answer("req-1", Some(true), Some("cli")), 1.0), None, "the echo");
+    }
+
+    #[test]
+    fn granted_decides_the_verdict_and_the_route_never_does() {
+        // The argument is `core/ConfirmState.qml`'s and this reader may not
+        // disagree with it: the schema's prose says a timeout is a denial
+        // and jv-act publishes `granted: false` when it times out, which is
+        // exactly why inferring the denial off the ROUTE here would be a
+        // second copy of a rule the frame already states (A14).
+        let rows = [
+            (Some(true), "granted"),
+            (Some(false), "denied"),
+            (None, "unknown"),
+        ];
+        for (granted, word) in rows {
+            let mut c = Confirmations::default();
+            c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+            let line = c.observe(&answer("req-1", granted, Some("timeout")), 15.0).expect("a line");
+            assert!(line.contains(word), "{granted:?} did not read as {word}: {line}");
+            // The route is printed and is never the verdict.
+            assert!(line.contains("timeout"), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_granted_that_is_not_a_boolean_grants_nothing() {
+        // The floor `granted` decides on. A producer writing 1, or "true",
+        // is writing a different schema, and reading either as a yes would
+        // be this CLI reporting an authorization nobody gave.
+        for g in [rmpv::Value::from(1), rmpv::Value::from("true"), rmpv::Value::Nil] {
+            let mut c = Confirmations::default();
+            c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+            let body = map(&[
+                ("kind", "answer".into()),
+                ("request_id", "req-1".into()),
+                ("granted", g.clone()),
+                ("answered_by", "voice".into()),
+            ]);
+            let line = c.observe(&body, 1.0).expect("a line");
+            assert!(line.contains("unknown"), "{g:?} read as a verdict: {line}");
+            assert!(!line.contains("granted"), "{g:?} granted something: {line}");
+        }
+        assert_eq!(get_bool(&map(&[("g", rmpv::Value::from(1))]), "g"), None);
+        assert_eq!(get_bool(&map(&[("g", false.into())]), "g"), Some(false));
+        assert_eq!(get_bool(&rmpv::Value::Nil, "g"), None);
+    }
+
+    #[test]
+    fn a_route_the_frozen_schema_does_not_have_loses_the_route_and_not_the_verdict() {
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        let line = c.observe(&answer("req-1", Some(false), Some("hud")), 2.0).expect("a line");
+        assert!(line.contains("denied"), "{line}");
+        assert!(!line.contains("hud"), "a word off the enum was read aloud: {line}");
+        assert!(line.contains("(2.0s)"), "{line}");
+        // The same for an answer that names no route at all.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-2", Some("fs.delete")), 0.0);
+        let line = c.observe(&answer("req-2", Some(true), None), 2.0).expect("a line");
+        assert!(line.contains("granted") && line.contains("(2.0s)"), "{line}");
+    }
+
+    #[test]
+    fn a_frame_that_is_neither_a_question_nor_an_answer_is_no_news() {
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        for junk in [
+            map(&[("kind", "request".into())]),                       // no request_id
+            map(&[("kind", "request".into()), ("request_id", "".into())]),
+            map(&[("request_id", "req-1".into())]),                   // no kind
+            map(&[("kind", "cancel".into()), ("request_id", "req-1".into())]),
+            map(&[("kind", rmpv::Value::from(7)), ("request_id", "req-1".into())]),
+            rmpv::Value::Nil,
+        ] {
+            assert_eq!(c.observe(&junk, 1.0), None, "{junk:?}");
+        }
+        // And none of it disturbed the question that was open.
+        assert_eq!(c.open(), 1);
+        assert!(c.observe(&answer("req-1", Some(true), Some("cli")), 3.0).is_some());
+    }
+
+    #[test]
+    fn a_second_question_under_the_same_id_is_the_one_that_gets_answered() {
+        // Newest wins, the same way `ConfirmState` replaces its latch: an id
+        // reused is a new question, and answering the old one would name the
+        // wrong tool.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        c.observe(&ask("req-1", Some("net.disable")), 10.0);
+        assert_eq!(c.open(), 1, "the same id is one question, not two");
+        let line = c.observe(&answer("req-1", Some(true), Some("voice")), 12.0).expect("a line");
+        assert!(line.contains("net.disable") && !line.contains("fs.delete"), "{line}");
+        assert!(line.contains("voice, 2.0s)"), "the wait is the live question's: {line}");
+    }
+
+    #[test]
+    fn a_request_that_named_no_tool_says_so_rather_than_inventing_one() {
+        // `tool` is optional in the frozen schema, and a name nobody stated
+        // is not one this may supply. `?` is what every unknown prints here.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", None), 0.0);
+        let line = c.observe(&answer("req-1", Some(true), Some("cli")), 1.0).expect("a line");
+        assert!(line.contains("? -> granted"), "{line}");
+    }
+
+    #[test]
+    fn two_timestamps_that_disagree_produce_no_third_number() {
+        // The same rule `Turn::spoke_ms` follows. Frames arrive in order on
+        // this bus, and the tap reads `ts` defensively anyway — a negative
+        // wait is a clock, not a fast user.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 100.0);
+        let line = c.observe(&answer("req-1", Some(true), Some("cli")), 99.0).expect("a line");
+        assert!(line.contains("granted (cli, ?)"), "{line}");
+        assert!(!line.contains("-1.0s"), "a negative wait was printed as a number: {line}");
+        // A ts that is not a number at all reads as 0.0 at the call site in
+        // `bin/jv.rs`, and an unreadable clock is the same non-answer.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-2", Some("fs.delete")), f64::NAN);
+        let line = c.observe(&answer("req-2", Some(true), Some("cli")), 1.0).expect("a line");
+        assert!(line.contains('?'), "{line}");
+    }
+
+    #[test]
+    fn the_open_questions_are_bounded_so_a_tap_left_running_cannot_grow() {
+        // jv-act keeps ONE outstanding slot today and this is not the thing
+        // that enforces that; a question whose answer never comes (a jv-act
+        // that died mid-window) is never forgotten by an answer, and `jv
+        // tap` is meant to be left running for hours.
+        let mut c = Confirmations::with_capacity(4);
+        for n in 0..64 {
+            c.observe(&ask(&format!("req-{n}"), Some("fs.delete")), n as f64);
+        }
+        assert_eq!(c.open(), 4);
+        // The oldest were dropped, so their answers are strangers' answers.
+        assert_eq!(c.observe(&answer("req-0", Some(true), Some("cli")), 70.0), None);
+        assert_eq!(c.observe(&answer("req-59", Some(true), Some("cli")), 70.0), None);
+        // The newest four are still answerable.
+        for n in 60..64 {
+            assert!(c.observe(&answer(&format!("req-{n}"), Some(true), Some("cli")), 70.0).is_some(), "req-{n}");
+        }
+        assert_eq!(c.open(), 0);
+        // A cap of nothing is still a working reader, not a spin.
+        let mut c = Confirmations::with_capacity(0);
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        assert!(c.observe(&answer("req-1", Some(true), Some("cli")), 1.0).is_some());
+    }
+
+    /// The confirmation line at the widest every part of it can be.
+    ///
+    /// What is enforced elsewhere: the id is capped by `short_id`, the tool
+    /// by `CONFIRM_TOOL_COLUMNS`, the verdict and the route are both closed
+    /// word lists. What is ASSUMED, said out loud: the wait is five digits
+    /// and a decimal, which puts the worst case at 79 of the 80 columns.
+    /// 99999.9 s is 27 hours of one question staying open — jv-act's real
+    /// window is 15 s and its own timeout answer closes it long before — so
+    /// a sixth digit (80 columns, still fitting) is already absurd and a
+    /// seventh would be the first thing to wrap. This test is what notices.
+    #[test]
+    fn the_confirmation_line_fits_eighty_columns() {
+        let mut c = Confirmations::default();
+        c.observe(&ask(WIDEST_ID, Some(&"t".repeat(120))), 0.0);
+        let line = c
+            .observe(&answer(WIDEST_ID, None, Some("timeout")), 99_999.9)
+            .expect("a line");
+        let w = line.chars().count() + ">>> ".len();
+        assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+        // The control: a line far under the budget would mean this stopped
+        // building the worst case.
+        assert!(w >= 60, "{w} columns is not a worst case: {line}");
+        // Both long strings were cut down, and both say they were.
+        assert!(line.contains("3f2a91c4..."), "the id is not abbreviated: {line}");
+        assert!(!line.contains(WIDEST_ID), "the whole id reached the line: {line}");
+        assert!(line.contains(&("t".repeat(CONFIRM_TOOL_COLUMNS - 3) + "...")), "the tool is not clipped: {line}");
+        // A tool that already fits is never made longer by being clipped.
+        let mut c = Confirmations::default();
+        c.observe(&ask("r", Some("fs.delete")), 0.0);
+        let short = c.observe(&answer("r", Some(true), Some("cli")), 0.0).expect("a line");
+        assert!(short.contains(" fs.delete ->"), "{short}");
+    }
+
 }
