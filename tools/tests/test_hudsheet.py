@@ -431,7 +431,11 @@ def test_the_cli_is_green_on_a_faithful_copy_of_the_sheet(tmp_path):
 
     done = run_cli(out)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "13" in done.stdout
+    # The COUNT, read off the sheet rather than written down. It was the
+    # literal `13` until A71 added a fourteenth shot, at which point this
+    # was a check that the sheet had not grown — which is a thing that is
+    # supposed to happen and is already asserted next door.
+    assert f"all {len(list(SHEET.glob('*.png')))} shots match" in done.stdout
 
 
 def test_the_cli_names_the_shot_that_moved_and_exits_nonzero(tmp_path):
