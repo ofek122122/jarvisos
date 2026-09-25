@@ -11316,3 +11316,102 @@ still matches HEAD.
   two words nobody can read. **B92** stays the larger loop task —
   `respond` p50 mixes finished turns with talked-over ones. A62/A70 — one
   corner, two plates, one event — remain a human's call.
+
+## 2026-09-25 18:05 — the desktop was painting itself in four colours §06 never chose
+- built: **D7's desktop half** — `modules/theme.nix` stops carrying a palette.
+  The file was written by hand yesterday (cf8c0a2) with the §06 tokens copied
+  into a `let` block under the comment "kept in sync with
+  personality/theme.toml", and ONE DAY LATER three of them had drifted:
+  the terminal and the launcher were painting text in #E6ECF0 / #9BAAB4 /
+  #64747F where the blueprint's dark `:root` (and therefore theme.toml, which
+  a test holds against it) says #E4EAEE / #9FADB7 / #6E7E89 — plus #F79070 on
+  five ANSI slots, which is not a token in any form and appears nowhere in
+  `docs/blueprint.html`. Nothing failed, because nothing was asking: the QML
+  side has had `test_no_qml_file_carries_a_literal_colour` since A2 and the
+  desktop side had no gate at all. This is the exact failure `modules/fonts.nix`
+  was written for one level over — the identity does not break, it quietly
+  becomes a lookalike of itself.
+  The palette is now read with `builtins.fromTOML`, the fonts.nix way, through
+  a `token` helper that THROWS on an unknown name (proven: `token "crimson"`
+  is an eval error, not `""` — a colour that silently became empty would paint
+  a surface black and pass every check). Font families the same way, via
+  `face "sans"` / `face "mono"`: a hand-spelled `Archivo` is a name only
+  theme.toml guarantees `modules/fonts.nix` installed.
+  What deliberately STAYS in the file is the binding from a surface to the
+  token it spends, because that is a design decision and belongs in the open:
+  a window's ground is `ground_deep` and `ground` is the panel edge inside it
+  (which is what makes a terminal read as a window lying on the desktop rather
+  than a hole cut in it), and the ANSI mapping, where §06's three hues and
+  three status colours have to cover sixteen slots — green/blue/cyan collapse
+  onto `teal` as they already did, yellow becomes `warn` (caution is what
+  yellow has always meant) and magenta and the bright reds become `risk`.
+  That last part is a real change of hue on three slots, and it is the one
+  that needed a decision rather than a correction: the alternative was adding
+  #F79070 to theme.toml as a 17th token, which would have been an afternoon's
+  work with no risk — and would have enshrined the drift as identity.
+  `test_palette_still_agrees_with_the_blueprint_dark_tokens` exists precisely
+  so the palette cannot become "a lookalike of the blueprint", and four greys
+  §06 never chose, added so a hand-copy need not be corrected, is that. The
+  colours were wrong, not under-documented. Written up as the rejected shape
+  in R9.
+- the gate, three tests, the desktop mirrors of the QML ones: no file under
+  `modules/` or `pkgs/` may carry a colour literal; every `token "x"` in
+  theme.nix must be a name `[palette]` defines; every font family must come
+  from `[type]`. The colour scan **discovers** its subjects (walk `modules/`
+  and `pkgs/`, read anything decodable, skip comment lines) rather than
+  listing them, because the failure it exists for is a NEW file painting a new
+  surface — theme.nix itself was that file a day ago. Its exception table is
+  exhaustive in BOTH directions, and the second direction bit on the first
+  run: `modules/plymouth-theme/jarvis.script` was in it and turned out to
+  carry no colour at all, only a comment naming one, so the entry came out.
+  An excuse that outlives the drift it excuses reads as "known, being handled"
+  and hides the next literal somebody adds to that file.
+- the boot path is untouched and is NOT this loop's: GUARDRAILS makes
+  `modules/boot-*.nix` human-review, and `modules/grub-theme/**` +
+  `modules/plymouth-theme/default.nix` are the content those two modules
+  install — the restriction is about the boot path, not about a filename. A
+  wrong value there is the most expensive kind to find (a broken `theme.txt`
+  degrades GRUB to its built-in menu on the NEXT boot, and the only honest
+  check is a reboot and a photograph, which is what a human did on
+  2026-09-15). Proposal **R9** measures it colour-by-colour: the same three
+  greys, plus #F79070, plus #4A5762 and #0E6A72 — which are the blueprint's
+  **light-mode** `--text-2` and `--teal`, spent on a dark ground. Worth saying
+  plainly: this commit makes the drift WORSE-LOOKING and that is the point.
+  The three greys now live in the boot path and nowhere else on the machine,
+  so Plymouth's last frame and the desktop's first no longer agree — an
+  invisible inconsistency became a visible seam, which is the only form in
+  which a human can act on it.
+- tests: `bash ops/ralph/verify.sh` GREEN (4 gates, 67.1 s: tools 466 pass,
+  jv-compat, jv-hud-bridge, nixtest), and again as `--since HEAD~1` over what
+  the commit actually took. 4 new tests in
+  `tools/tests/test_gen_theme_qml.py` (467 in the tools suite). 3 mutations,
+  3 caught: a raw `"#090D12"` back in the alacritty block, `gtk-font-name=Archivo 11`
+  hand-spelled, and `token "crimson"`.
+- verified where it counts: the built store output, not the source.
+  `result/etc/xdg/alacritty/alacritty.toml` and `.../fuzzel/fuzzel.ini` hold
+  9 palette tokens and **0 off-palette colours** — the source could have been
+  token-only and still emitted something wrong through `rgba`, and reading the
+  derivation is the only thing that answers that.
+- build: `nixos-rebuild build --flake .#ares` green, closure
+  jwwh0cdlzf5479bpjs1mm4r1cxy4ja4f (w9smk2s4… at HEAD~1 — the diff is etc/
+  and nothing else; `etc-xdg-alacritty-alacritty.toml`,
+  `etc-xdg-fuzzel-fuzzel.ini` and `etc.drv` rebuilt). No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: modules/theme.nix, tools/tests/test_gen_theme_qml.py,
+  docs/optimization-backlog.md (R9), ops/ralph/PLAN.md
+- commits: 824444f
+- next: **D8** is the clean one and it is CHECKABLE, which is rare here:
+  `pkgs/jarvis-wallpaper` still carries #E6ECF0 and #64747F — the two greys
+  that as of this commit exist nowhere else on the desktop — plus #F79070,
+  #26323B and #05080B, the last two having no token at all (#26323B sits
+  between `line` and `line_soft`, #05080B below `ground_deep`, so each needs a
+  choice rather than a substitution). It is the one loop-owned entry in
+  `COLOUR_EXCEPTIONS`, and `resvg` runs in this sandbox: render the PNG before
+  and after and LOOK, which is how a two-stop vignette gets to be judged
+  rather than reasoned about. **D9/R9** is the boot path and a human's.
+  **D1** (the top bar) is still the biggest unclaimed piece of Track D and the
+  first new on-screen surface since the HUD — note that the new colour gate
+  covers it from the day its `pkgs/jv-bar` exists. From the old corner:
+  **A89** (a band's width nearly IS the word — measure more of the sheet
+  before writing any rule), **A88** (six callers still measure the union),
+  **B94** and **A62/A70** remain a human's call.

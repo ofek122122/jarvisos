@@ -32,8 +32,42 @@ human-reviewed step.
 - [ ] D6. **Login greeter** (CAREFUL): recolor tuigreet first (safe); then a
       graphical greeter (regreet themed) as its own reviewed step — never
       switch the greetd session command untested.
-- [ ] D7. **Boot continuity check**: confirm GRUB + Plymouth share the exact §06
-      tokens the desktop now uses; unify any drift.
+- [~] D7. **Boot continuity check**: confirm GRUB + Plymouth share the exact §06
+      tokens the desktop now uses; unify any drift. — 824444f (the DESKTOP half)
+      (Measured, and the answer was no: the boot path and the desktop were
+      BOTH off §06, consistently, from the same hand-copy. `modules/theme.nix`
+      now reads `personality/theme.toml` with `builtins.fromTOML` — the
+      fonts.nix idiom, `token`/`face` helpers that throw on an unknown name —
+      so the terminal and the launcher moved onto the blueprint's greys
+      (#E4EAEE / #9FADB7 / #6E7E89, from #E6ECF0 / #9BAAB4 / #64747F) and
+      #F79070 left the desktop: §06's three hues + three status colours cover
+      all sixteen ANSI slots, with yellow = `warn` and magenta = `risk`.
+      VERIFIED by reading the BUILT store output, not the source — 9 tokens,
+      0 off-palette colours in `result/etc/xdg/{alacritty,fuzzel}`. Three
+      tools gates, the desktop mirrors of the QML ones (no colour literal
+      under modules/ or pkgs/, every `token "x"` a name [palette] defines,
+      every family from [type]); the colour scan DISCOVERS its subjects, and
+      its exception table is exhaustive both ways. 3 mutations, 3 caught.
+      The boot path is NOT done and is not the loop's: proposal **R9** in
+      `docs/optimization-backlog.md` measures its drift colour-by-colour.
+      Tests: `bash ops/ralph/verify.sh`.)
+- [ ] D8. **The wallpaper's colours are its own** (`pkgs/jarvis-wallpaper`):
+      it still carries literals, and two of them are the drifted greys D7 just
+      removed from every other desktop surface (#E6ECF0 wordmark, #64747F
+      subtitle and tick ring), plus #F79070 on the comet head, #26323B on the
+      rings and #05080B on the outer gradient stop — the last two being
+      colours theme.toml has no token for at all (#26323B sits between `line`
+      and `line_soft`; #05080B is below `ground_deep`). Recorded as the one
+      loop-owned entry in `COLOUR_EXCEPTIONS`. Deliberately NOT done with D7:
+      whether a vignette still reads as depth once its third stop becomes a
+      token is a thing to LOOK at, and this one is checkable — `resvg` renders
+      the PNG in the sandbox, so the shot can be compared before and after.
+- [ ] D9. **Boot path onto §06** — blocked on human review (**R9**). Four
+      files: `modules/grub-theme/{theme.txt,background.svg,default.nix}` and
+      `modules/plymouth-theme/default.nix`. The real design in it is
+      `background.svg`, a checked-in asset with no interpolation, so it needs
+      placeholders or a generator. When it lands, its paths come out of
+      `COLOUR_EXCEPTIONS` (a test fails if an exception outlives its drift).
 
 ## Track A — UI/UX (Quickshell/QML HUD + workspace) — PRIMARY
 The HUD is a bus CONSUMER: it subscribes to real topics and reflects them
