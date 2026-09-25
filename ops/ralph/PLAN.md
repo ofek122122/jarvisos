@@ -3110,6 +3110,64 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       helper now, shared with that test. The README also says the number is
       held, in prose that quotes no box of its own. Six mutations, six caught.)
 
+- [ ] A75. **The bus's own drop count is on the bus, and the HUD cannot say
+      it.** `schemas/sys.health.json` has carried `drops` since v1 — "frames
+      dropped since the last heartbeat, keyed by topic, published by jarvisd
+      per slow subscriber" — and `broker.rs` really publishes it: every
+      subscriber's out-queue overflow (`drops.add(&d.topic, 1)`) plus the
+      broadcast lag (`_lagged`) and control frames (`_ctl`), summed across
+      every connection, drained into each heartbeat. `jv health` prints the
+      map (`drops={"audio.vad":2}`). Nothing in `shell/jv-hud` reads the
+      field at all: `seq` appears in eleven core/ files and in every one of
+      them it is an identity component, never a gap check, and `HealthState`
+      reads `state`, `notes` and `metrics` and not `drops`. So invariant 5's
+      one failure — something on this machine blocked the bus long enough
+      that frames were thrown away — is visible to a human at a terminal and
+      invisible on screen, under a corner every plate of which is drawn from
+      frames that may be the ones that got through. One row in `HealthPlate`,
+      the `VramState` pattern (a core/ element that decides, a row drawn only
+      while it offers one), no schema change and no new topic. The care is in
+      the wording: the count is an AGGREGATE over every subscriber, so the
+      HUD may not be the reader that lost anything and must not say it was.
+      Discovered while orienting at iteration 100.
+
+- [ ] A76. **jarvisd reports `state: "ok"` while it is throwing frames
+      away.** `publish_health` in `services/jarvisd/src/broker.rs` hardcodes
+      `SysHealthState::Ok` — the broker is the one service on this machine
+      that can never say it is unwell — and it does so in the same body that
+      carries a non-empty `drops` map. Every consumer inherits that: `jv
+      health` prints `jarvisd ok drops={...}`, and `HealthState.rank("ok")`
+      is 0, so `HealthPlate`'s "what is not well" list omits the one service
+      that knows something is. A75 works around it with its own row; the
+      question underneath is whether the broker should call itself
+      `degraded` for the period in which it dropped something, which would
+      put it on the existing list with no new reader anywhere. Not obvious
+      and not the loop's to take blind: `degraded` on a per-period counter
+      flaps by construction (one heartbeat degraded, the next ok), it is
+      what `jv health --check` would then exit 1 on, and a broker that
+      reports itself impaired for one lost frame is the boy who cried wolf
+      on the one topic that must stay readable. A human's call, and it is
+      cheap either way — one enum and its tests. Raised with A75.
+
+- [ ] A77. **A75 sums three different failures into one number, and two of
+      them are not topics.** The broker's map is keyed by topic for an
+      out-queue overflow, by `_lagged` when a subscriber fell so far behind
+      the broadcast channel that the ring wrapped, and by `_ctl` for a
+      control frame. Those are not the same event: an overflow lost one
+      frame of one topic, a lag means the reader missed an unknown stretch
+      of EVERYTHING, and a lost `_ctl` is a subscription that may not have
+      taken effect. A75 deliberately draws one total in the broker's own
+      word (DROPPED) and leaves the map to `jv health`, for two stated
+      reasons — the 300 px box cannot hold a topic name (`context.window`
+      is 14 characters before a count) and, more importantly, the count is
+      aggregated across every subscriber, so naming a topic would invite
+      "audio.vad is broken" when the fault is a slow consumer three
+      processes away. Whether the corner should ever tell a lag from an
+      overflow is a §06 design question with a real argument on the other
+      side (a lag is the one of the three that means the HUD's own picture
+      may be missing a stretch). Do not build it before answering it.
+      Raised with A75.
+
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD
       shows is not in the build gate. The obstacle is real: the plates need
