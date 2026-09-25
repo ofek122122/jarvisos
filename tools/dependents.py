@@ -494,7 +494,9 @@ class QmlGate:
     table behind.
 
     `also` is what the gate reads that is not QML at all: the comparator it
-    runs, and the committed sheet it compares against.
+    runs, the committed sheet it compares against, and the scanner that reads
+    the runner's own output back for errors it threw while staying green
+    (PLAN D36).
     """
 
     script: str
@@ -534,7 +536,7 @@ QML_GATES = (
             # stage and is not a type, so nothing reaches it from here.
             ("..", ("shell/jv-hud", "tools/hudshots/stub")),
         ),
-        also=("tools/hudsheet.py", "docs/hud"),
+        also=("tools/hudsheet.py", "tools/qmlerrors.py", "docs/hud"),
     ),
     # And the notification corner's (PLAN D20), the same assembly one shell
     # over. Same argument for a second script as for `notifytest.sh`: a change
@@ -551,7 +553,7 @@ QML_GATES = (
             # is not a type, so nothing reaches it from here.
             ("..", ("shell/jv-notify", "tools/notifyshots/stub")),
         ),
-        also=("tools/hudsheet.py", "docs/notify"),
+        also=("tools/hudsheet.py", "tools/qmlerrors.py", "docs/notify"),
     ),
     # And the top bar's (PLAN D13), which makes it one harness per shell.
     # Third script for the third shell, same argument as `bartest.sh`: what is
@@ -569,7 +571,7 @@ QML_GATES = (
             # stage and is not a type, so nothing reaches it from here.
             ("..", ("shell/jv-bar", "tools/barshots/stub")),
         ),
-        also=("tools/hudsheet.py", "docs/bar"),
+        also=("tools/hudsheet.py", "tools/qmlerrors.py", "docs/bar"),
     ),
 )
 

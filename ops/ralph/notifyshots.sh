@@ -135,9 +135,23 @@ mkdir -p "$out"
 cd "$out"
 export QT_QPA_PLATFORM=offscreen
 export HOME="$stage"
+# The runner, with its output CAPTURED as well as shown (PLAN D36). `tee`
+# keeps every line on the terminal — a gate behind a silent pipe is
+# indistinguishable from a hang — and the copy is read by
+# `tools/qmlerrors.py`, which ends this run non-zero if anything in the scene
+# THREW. That is not the same question as "did a test fail": a QML handler
+# that throws keeps the value the property already had and recovers on the
+# next evaluation, so the surface stays plausible, the shots come out
+# byte-identical and the totals come out green. D34 shipped exactly that, and
+# one QWARN line in output nobody reads was the only evidence it ever gave.
+# `console.warn` stays a legitimate voice — the rule is about an error the
+# engine attributed to a file and a line number.
+log="$stage/runner.log"
 "$qtdecl/bin/qmltestrunner" \
   -input "$stage/shots" \
-  -import "$qtdecl/lib/qt-6/qml"
+  -import "$qtdecl/lib/qt-6/qml" 2>&1 | tee "$log"
+"$python/bin/python3" "$root/tools/qmlerrors.py" "$log" \
+  --stage "$stage" --rerun "bash ops/ralph/notifyshots.sh"
 
 echo
 echo "notifyshots: wrote $(ls "$out"/*.png | wc -l) shots to $out"
