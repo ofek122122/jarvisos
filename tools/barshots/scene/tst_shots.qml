@@ -211,6 +211,31 @@ Item {
       ]));
     }
 
+    // COMPOSED, and the shot D32 was raised to take: a desk with more names on
+    // it than the strip has room for. The rule is `core/RowFit.qml`'s — as many
+    // WHOLE labels as fit, then a `+N` where the row was cut — and here the
+    // keyboard is on the FIRST workspace, so the run simply stops and the
+    // number is the last thing on the row. Nothing is elided and nothing is
+    // clipped: every name on screen is a name, and the ones that are not there
+    // are counted rather than quietly missing.
+    function shot_collapsed() {
+      Niri.ingest(suite.snapshot(suite.crowd(1)));
+    }
+
+    // The same desk and the same monitor, with the keyboard on the LAST
+    // workspace — which is the half of the rule that is not arithmetic. The
+    // one you are on is reserved before the run is filled and drawn after the
+    // marker, so the row reads "these, then some, then you". One of the
+    // workspaces you cannot see is asking for you, and that is why the `+N` is
+    // in `warn` rather than the quietest grey: a row that hid a window's call
+    // for attention and said nothing would be doing the thing the marker
+    // exists to prevent.
+    function shot_collapsed_focus_last() {
+      const desk = suite.crowd(10);
+      desk[7].urgent = true;
+      Niri.ingest(suite.snapshot(desk));
+    }
+
     // A monitor narrow enough that the centre of the screen falls inside the
     // HUD's corner. The clock hides itself rather than be drawn under another
     // process's plates — `fits` in shell.qml — and the workspaces stay,
@@ -220,6 +245,26 @@ Item {
     // This is what visibly looks like.
     function shot_narrow() {
       Niri.ingest(suite.recorded);
+    }
+
+    // A desk of ten named workspaces on one output, with the keyboard on the
+    // `focus`th of them. More names than a 1920 px strip has room for, which
+    // is the whole point of it — and every one of them is the kind of word
+    // somebody really calls a workspace, because a desk of `aaaaaaaaaaaa`
+    // would photograph the arithmetic rather than the bar.
+    function crowd(focus: int): var {
+      const names = ["documentation", "compositor", "video-editing", "correspondence", "nixos-rebuild", "measurements", "screenshots", "references", "long-running-builds", "scratch"];
+      const out = [];
+      for (let i = 0; i < names.length; i++)
+        out.push({
+          "id": i + 1,
+          "idx": i + 1,
+          "output": "DP-1",
+          "name": names[i],
+          "active": i + 1 === focus,
+          "focused": i + 1 === focus
+        });
+      return out;
     }
 
     // --- the sheet --------------------------------------------------------
@@ -243,7 +288,11 @@ Item {
       { "file": "07-named.png", "build": suite.shot_named, "screen": 2560, "output": "HDMI-A-1", "desk": ["web:focused", "code:idle", "chat:idle"], "clock": "09:41", "overlap": 0 },
       { "file": "08-crowded.png", "build": suite.shot_crowded, "screen": 1920, "output": "DP-1", "desk": ["documentation:focused", "compositor:idle", "video-editing:idle", "correspondence:idle", "nixos-rebuild:urgent", "measurements:idle"], "clock": "09:41", "overlap": 0 },
       // The clock is gone, and that is the shot.
-      { "file": "09-narrow.png", "build": suite.shot_narrow, "screen": 640, "output": "DP-2", "desk": ["1:active"], "clock": "", "overlap": 0 }
+      { "file": "09-narrow.png", "build": suite.shot_narrow, "screen": 640, "output": "DP-2", "desk": ["1:active"], "clock": "", "overlap": 0 },
+      // More names than the strip has room for, which is what the two numbers
+      // in every caption above were counting down to (PLAN D32).
+      { "file": "10-collapsed.png", "build": suite.shot_collapsed, "screen": 1920, "output": "DP-1", "desk": ["documentation:focused", "compositor:idle", "video-editing:idle", "correspondence:idle", "nixos-rebuild:idle", "measurements:idle", "screenshots:idle", "references:idle", "+2:idle"], "clock": "09:41", "overlap": 0 },
+      { "file": "11-collapsed-focus-last.png", "build": suite.shot_collapsed_focus_last, "screen": 1920, "output": "DP-1", "desk": ["documentation:idle", "compositor:idle", "video-editing:idle", "correspondence:idle", "nixos-rebuild:idle", "measurements:idle", "screenshots:idle", "+2:urgent", "scratch:focused"], "clock": "09:41", "overlap": 0 }
     ]
 
     function test_the_sheet() {

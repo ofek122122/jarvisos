@@ -155,6 +155,57 @@ def test_the_sheet_asserts_that_nothing_is_laid_out_in_the_huds_corner():
     )
 
 
+def test_both_surfaces_tell_the_row_how_much_room_it_has():
+    """The row is a `Row`: it is as wide as its children, and its children are
+    names the USER chose the length of. `roomPx` is the whole of what stops it
+    (PLAN D32), and it is arithmetic only the SURFACE can do — how wide this
+    monitor is, where the clock is centred, how much of the right end the HUD
+    draws over. So it is written twice, once per surface, and compared here
+    with the id normalised away: a staged strip that gave its row a different
+    budget would photograph a collapse that happens at a width the real bar
+    does not collapse at."""
+    shell = strip_qml_comments((SHELL / "shell.qml").read_text("utf-8"))
+    strip = strip_qml_comments(STRIP.read_text("utf-8"))
+    wanted = "roomPx: (face.visible ? face.x : @.width - @.hudReservePx) - Theme.insetPx - Theme.gapPx"
+    assert wanted.replace("@", "surface") in shell, (
+        "shell.qml no longer tells the workspaces row how much room it has"
+    )
+    assert wanted.replace("@", "root") in strip, (
+        "the staged strip budgets the row differently from the bar"
+    )
+
+
+def test_the_sheet_photographs_a_row_that_did_not_fit():
+    """The shot D32 was raised to take, and it is three shots' worth of one
+    decision. A row with more names than room drops WHOLE labels and says how
+    many it dropped; the workspace the output is showing is never among them,
+    so the `+N` is not always the last thing on the row; and a dropped
+    workspace that is asking for you turns the marker `warn`, because a row
+    that hid a window's call for attention and said nothing would be doing
+    exactly the thing the marker exists to prevent.
+
+    All three are captions, which is the point: the rule itself is arithmetic
+    and is tested in shell/jv-bar/tests/tst_rowfit.qml, at round numbers, away
+    from any font. What a sheet adds is that the numbers were REAL ones — a
+    1920 px monitor, JetBrains Mono at the token size, the clock where the
+    clock is — and that the row still ends clear of both the clock and the
+    corner the HUD draws in, which every shot here asserts."""
+    marked = [s for s in sheet() if any(c.startswith("+") for c in s["desk"])]
+    assert marked, (
+        "no shot on this sheet has more names on it than the strip has room for, "
+        "so nothing photographs what happens when the row is cut"
+    )
+    assert any(not s["desk"][-1].startswith("+") for s in marked), (
+        "every collapsed shot puts the `+N` last, so none of them photographs the "
+        "one you are on being held back — which is the half of the rule that is "
+        "not arithmetic"
+    )
+    assert any("+" in c and c.endswith(":urgent") for s in marked for c in s["desk"]), (
+        "no shot hides a workspace that is asking for you, so nothing photographs "
+        "the marker in `warn`"
+    )
+
+
 def test_no_driver_keeps_its_own_copy_of_the_surface():
     """One copy of shell.qml's surface, in Strip.qml, so that "the harness draws
     what the shell draws" is one claim. A driver that declared a Workspaces row
@@ -345,12 +396,28 @@ def test_the_colour_of_a_reading_is_chosen_where_the_word_is():
     row = strip_qml_comments((SHELL / "Workspaces.qml").read_text("utf-8"))
     assert "function reading(w: var): string" in row
     assert "function tint(reading: string): color" in row
-    assert "color: root.tint(root.reading(modelData))" in row, (
+    # The word is attached to the label ONCE, in `entry()`, and everything
+    # downstream carries that word rather than asking again: the delegate
+    # paints `tint(modelData.reading)` and the caption prints the same string.
+    # A delegate that re-derived the reading from the workspace would be a
+    # second decision, and two decisions can differ.
+    assert "\"reading\": root.reading(w)" in row, (
+        "the things this row draws no longer carry the word `reading()` gave them"
+    )
+    assert "color: root.tint(modelData.reading)" in row, (
         "the delegate no longer takes its colour through tint(reading()), so the "
         "word in the caption and the colour on screen are two decisions"
     )
-    assert "drew: root.workspaces.map(w => w.label + \":\" + root.reading(w))" in row, (
+    assert "drew: root.shown.map(e => e.label + \":\" + e.reading)" in row, (
         "the row's account of what it drew no longer goes through reading()"
+    )
+    # …and the `+N` is in `drew` for the same reason every label is: it is a
+    # thing on screen with a colour, and a sheet that photographed a row with
+    # something in it the caption did not mention would be asserting less than
+    # the picture shows.
+    assert "function hidden(plan: var): string" in row, (
+        "nothing decides what the workspaces behind the `+N` amount to, so the "
+        "marker cannot be painted from a reading and is not in the caption"
     )
     # …and each of the four is a §06 token rather than a colour of its own.
     for token in ("Theme.warn", "Theme.teal", "Theme.text2", "Theme.text3"):

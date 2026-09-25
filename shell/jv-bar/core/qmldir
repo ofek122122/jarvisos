@@ -9,3 +9,4 @@
 MotionPolicy 1.0 MotionPolicy.qml
 NiriModel 1.0 NiriModel.qml
 WallClock 1.0 WallClock.qml
+RowFit 1.0 RowFit.qml

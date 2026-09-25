@@ -40,13 +40,14 @@ The paper is the bar's own ground (`ground_deep`), unlike the other two sheets,
 whose neutral grey is the harness's: this surface is opaque, reserves its own
 strip, and has nothing behind it. What you see is what the compositor maps.
 
-**Recorded and composed.** Six of the nine shots are ares' own desk —
+**Recorded and composed.** Six of the eleven shots are ares' own desk —
 `harness/fixtures/niri/ares-desk.jsonl` line 1, the real opening snapshot of
 `niri msg --json event-stream`, byte for byte, fed through the real
-`core/NiriModel.qml`. Two are **composed**: `07-named.png` and
-`08-crowded.png` need a desk this machine does not have (workspaces with
-names), and they are built in the recording's own shape, every field checked
-against it by `tools/tests/test_barshots.py`. The two deltas in `03` and `04`
+`core/NiriModel.qml`. Four are **composed**: `07-named.png`, `08-crowded.png`,
+`10-collapsed.png` and `11-collapsed-focus-last.png` need a desk this machine
+does not have (workspaces with names, and more of them than fit), and they are
+built in the recording's own shape, every field checked against it by
+`tools/tests/test_barshots.py`. The two deltas in `03` and `04`
 are composed too, for the reason `harness/fixtures/niri/README.md` gives: niri
 sends them only when a desk someone is sitting at is rearranged.
 
@@ -159,10 +160,10 @@ sheet found on its first run, where an app name with no space in it painted
 
 The answer, measured: this desk leaves **274 px** between the last label and
 the clock, and reaches 0 px into the HUD's corner. It is clear — and it is
-clear by about three more workspace names. Nothing in the shell stops the
-seventh. `bash ops/ralph/barshots.sh` prints the remaining margin for every
-shot, so the number is one somebody has seen rather than one nobody measured;
-what to *do* when it runs out is PLAN D32.
+clear by about three more workspace names. `bash ops/ralph/barshots.sh` prints
+the remaining margin for every shot, so the number is one somebody has seen
+rather than one nobody measured. What happens to the seventh name is the next
+two shots.
 
 ### 09-narrow.png — a monitor too narrow for a clock
 
@@ -174,6 +175,51 @@ the clock hides itself rather than be drawn under another process's plates
 is nobody else's. ares has no such output; 640 px is what a projector or a
 capture device gives you, and `shell.qml` says this "should fail visibly on the
 fourth" monitor. This is what visibly looks like.
+
+### 10-collapsed.png — more names than room, and the row says so
+
+![10-collapsed.png](10-collapsed.png)
+
+1920 px, **composed**: ten named workspaces on DP-1, which is more than this
+strip has room for. The rule is `shell/jv-bar/core/RowFit.qml`'s — **as many
+whole labels as fit, then a `+N` where the row was cut** — and here the
+keyboard is on the first workspace, so the run simply stops and the number is
+the last thing on the row.
+
+What each of the alternatives would have looked like, and why this is the one
+(PLAN D32):
+
+- **Let it run on.** Into the clock, which is centred on the *screen* and
+  cannot move out of the way, and then into the corner another process draws
+  its plates over. Nothing on this machine can see that happen.
+- **Clip the row.** A glyph cut in half is a surface that looks broken rather
+  than one that has less to say.
+- **Elide every label.** Then the workspace you are *on* is unreadable, which
+  is the one thing this strip exists to say.
+- **Drop the labels silently.** That is the failure the notifier's
+  `+N EARLIER` line exists to prevent: a surface that has hidden something
+  from you has to say that it has, and how much.
+
+The two names that did not fit are counted, not forgotten, and the row ends
+63 px clear of the clock — whole words, or nothing.
+
+### 11-collapsed-focus-last.png — the one you are on is never dropped
+
+![11-collapsed-focus-last.png](11-collapsed-focus-last.png)
+
+The same desk on the same monitor, with the keyboard on the **last**
+workspace — the half of the rule that is not arithmetic. `scratch` is reserved
+before the run is filled and drawn *after* the marker, so the row reads "these,
+then some, then you", and the label this strip exists to show is on screen
+whatever the desk does.
+
+The `+2` is in **warn**, not the quietest grey, because one of the workspaces
+you cannot see is asking for you (`references` is urgent here). A row that hid
+a window's call for attention and said nothing would be doing the exact thing
+the marker exists to prevent. The count is always exact; its *position* says
+"the row was cut here" rather than "they were all here" — with more workspaces
+beyond the one you are on, some of the counted ones are to the right of the
+label the marker is drawn to the left of.
 
 ## What this sheet is NOT
 

@@ -148,6 +148,14 @@ ShellRoot {
         anchors.verticalCenter: parent.verticalCenter
 
         workspaces: Niri.workspacesOn(surface.modelData.name)
+        // How much room the row has before it reaches something it must not
+        // touch (PLAN D32). The surface's own arithmetic, because only it
+        // knows how wide this monitor is: the clock is centred on the SCREEN
+        // and cannot move out of the way, and where there is no clock the
+        // limit is the corner the HUD draws its plates over. One gap is left
+        // between the row and whichever of the two it stops at — a label
+        // touching the clock reads as one longer word.
+        roomPx: (face.visible ? face.x : surface.width - surface.hudReservePx) - Theme.insetPx - Theme.gapPx
       }
 
       // Middle: the time. Centred on the SCREEN rather than on the space

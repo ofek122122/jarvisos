@@ -176,6 +176,7 @@ BAR_COMPONENTS = (
 BAR_CORE = (
     ("NiriModel", "NiriModel.qml"),  # what the compositor has said (D1)
     ("WallClock", "WallClock.qml"),  # a time, as the glyphs a bar shows (D1)
+    ("RowFit", "RowFit.qml"),  # which labels fit, and what the rest collapse to (D32)
 )
 
 
