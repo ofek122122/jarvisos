@@ -12340,3 +12340,82 @@ is not worth chasing.)
   mutation sweep) worth running. **D32** is the first real design question the
   loop has raised from a picture rather than from reading code, and
   `barshots.sh` can photograph whichever answer a human picks.
+
+## 2026-09-25 — iteration 124: the corner two processes share, declared once
+
+- **what**: `[geometry] hud_corner_px = 300` in `personality/theme.toml`, and
+  the two shells that need it reading it — `shell/jv-hud/shell.qml` is
+  `implicitWidth: Theme.hudCornerPx`, `shell/jv-bar/shell.qml` is
+  `hudReservePx: Theme.hudCornerPx + Theme.insetPx`. PLAN **D16**, raised
+  while finishing the bar (D1).
+- **why**: the HUD sets `ExclusionMode.Ignore`, so it is not pushed down by
+  the bar — its plates are painted OVER the top right of the bar's strip. Two
+  surfaces, two layers, two processes, and neither can detect the other. The
+  only thing keeping a plate off the clock was that jv-bar had typed the HUD's
+  width into a file that cannot ask the HUD anything, and the failure was
+  silent in both directions: grow the corner and the bar's own content is
+  covered, shrink it and the bar reserves an emptiness nothing needs. What
+  stood under that was a tools test comparing the two numbers, which is the
+  honest floor for a copy and not a fix for one.
+- **THE HEIGHT DELIBERATELY DID NOT MOVE**, and that is the thing the copy was
+  hiding. `implicitWidth` and `implicitHeight` sat on adjacent lines looking
+  like one decision and they are not the same KIND of number. The width is
+  DECLARED — how much of the screen Jarvis takes — and it is the one fact
+  another process needs, so it belongs in the versioned identity file with the
+  palette and the voice (invariant 9). The height is MEASURED: 826 is what the
+  crowded stack of plates comes to, computed by `tools/hudshots/scene/
+  tst_fit.qml`, which fails with the number of pixels it is over. Putting a
+  measurement into theme.toml would invite a human to "tune" it and get a
+  cropped HealthPlate — the exact bug A70's paragraphs in shell.qml are about.
+  So one line moved and the one under it did not, with the reason written in
+  both files.
+- **AND `+ Theme.insetPx` STAYED THE BAR'S OWN ARITHMETIC.** The token is the
+  HUD's surface width; the HUD also sits `inset_px` off the screen edge, so
+  the corner the bar must leave alone is the sum. A token cannot carry that —
+  it is a fact about where the HUD is anchored, not how wide it is — so the
+  gate pins the whole expression (`Theme.hudCornerPx + Theme.insetPx`) in both
+  the shell and the staged strip rather than checking a total.
+- **THE GATES WERE THE REAL WORK, and they fail in an instructive way.**
+  `tools/hudscreens/sheet.py` and the three `tools/hudshots/scene/tst_*.qml`
+  drivers hold copies of the surface box; two suites kept them honest by
+  matching `implicitWidth:\s*(\d+)` against shell.qml. The moment the shell
+  stops carrying digits that regex matches nothing and passes `None` into
+  `int()` — a crash, not a verdict. That is the cheap half. The expensive half
+  is the version of this where the regex still matches SOMETHING and quietly
+  pins the wrong number. Both now go through one resolver in
+  `test_gen_theme_qml.py`, `hud_surface_box()`, which resolves the token and
+  refuses a shell that has gone back to a literal.
+- **`hud_corner_px` joined `REQUIRED`** in `tools/gen_theme_qml.py`, which is
+  the list of tokens a consumer is allowed to assume exists: the HUD is a
+  consumer of it now, so deleting it from theme.toml fails in the generator
+  rather than as a `Theme.hudCornerPx is undefined` in a shell at runtime.
+- **NOTHING ON SCREEN MOVED**, which is the intended outcome of a refactor and
+  is the kind of claim that is worth making only with pictures behind it. All
+  three shot sheets and the real-compositor run compared byte-for-byte clean
+  against what is committed: `hudsheet: all 9 shots match the sheet committed
+  at HEAD` three times over, and `hudscreens.sh` restored the six shots that
+  differed by the compositor's rounding. The real-compositor probe also
+  reports the blind HUD drawing at `(2284, 16, 2543, 103)` on a 2560 px
+  monitor — 300 px of box, 16 px off the edge — which is the token resolving
+  inside the built binary rather than in a test's arithmetic.
+- tests: `bash ops/ralph/verify.sh` GREEN — 7 gates over 12 paths (jv-brain,
+  jv-compat, jv-hud-bridge, tools **573 pass**, hudshots, notifyshots,
+  barshots), 196 s. Plus `bash ops/ralph/hudscreens.sh` by hand, which verify
+  named for `personality/theme.toml` + `shell/jv-hud`: 210 s, 9 screens, all
+  matching HEAD, working tree left clean.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: personality/theme.toml, tools/gen_theme_qml.py, shell/{jv-hud,jv-bar,
+  jv-notify}/Theme.qml (generated), shell/jv-hud/shell.qml,
+  shell/jv-bar/shell.qml, tools/barshots/scene/Strip.qml,
+  tools/tests/{test_gen_theme_qml,test_hudshots,test_hudscreens,
+  test_barshots}.py, ops/ralph/PLAN.md
+- next: **D33** is the leftover this raised and it is half a decision: the
+  three hudshots scene drivers can simply say `Theme.hudCornerPx` (they import
+  Theme already), while `tools/hudscreens/sheet.py` probably must NOT — that
+  file is read OUT OF GIT to learn what box the committed PNGs were taken
+  against, and a version reading theme.toml would ask today's identity about
+  yesterday's pictures. After that, **D17** is the bar's last empty half and
+  the first Track D item that needs a real SOURCE rather than a token (audio
+  via the bus, net via the link, battery never on a desktop), and **D32** is
+  still the open §06 question a picture asked.
