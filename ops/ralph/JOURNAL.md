@@ -9976,3 +9976,126 @@ it, exactly as A71's did.
   still blocked on human sentences and one seat at ares (A47 → A55 and four
   growth checks; A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
   B62/B67/B76 are still the loop-sized-but-undecided items in the B table.
+
+## 2026-09-25 — iteration 101 — the empty corner over a service that keeps dying
+
+Track A's table is human-blocked end to end and every item in
+`docs/optimization-backlog.md` is marked human-review, so this iteration
+began with PROMPT.md's brainstorm step — and the brainstorm was a sweep
+rather than a mood: every property of the thirteen topics
+`jv_hud_bridge.DEFAULT_TOPICS` forwards, against every name the shipped QML
+mentions. Fourteen fields came back unread. Three were worth a plan line
+(A78, A79, A80) and one of them was the only REQUIRED field of
+`schemas/sys.health.json` that nothing in `shell/jv-hud` reads.
+
+**What the field is for.** `uptime_s` counts from one process's own start,
+so it only ever rises while that process lives. Every unit in
+`modules/jarvis-services.nix` is `Restart=on-failure` — jv-ears' says so in
+a comment about the bug it is the recovery path for — so a service that
+crashes is replaced by a new process that heartbeats `starting`, then `ok`.
+`HealthState.rank("ok")` is 0. The corner over a jv-ears dying every eight
+seconds was therefore EMPTY, which is the one thing §06's earned emptiness
+has taught this HUD's reader to trust. Nothing on the bus says "I was
+restarted": the process that could is the one that just lost the memory.
+
+So `HealthState.lives` is the first memory in that file, and the comment
+says why it has to be one — `latestFrom` keeps a single frame per publisher,
+so the beat that proves a restart is gone by the time the next one lands.
+Three rules, each of them a refusal:
+
+- **`restarted` is the element's own word**, like `lost` and `unknown`. A
+  heartbeat that PUBLISHES it is outside the frozen enum and comes out
+  `unknown`, which is a test — otherwise any process could claim a death it
+  never had.
+- **It ties with `degraded` and loses the tie to the service.** A restarted
+  process is running and answering, which is the bracket `degraded` names;
+  ranking a completed death above a live impairment would push a jv-voice
+  that cannot reach the speakers off a list three lines deep for a jv-ears
+  that crashed once at boot.
+- **News for `period_s * 2`** — the same span this file already believes one
+  heartbeat for, and deliberately not a new constant. It reads off the
+  frame's own body, so **no timer is involved anywhere in this**: every
+  heartbeat carries a larger uptime than the last, and the beat carrying one
+  too large is the one that takes the row off. A service crash-looping
+  inside that window never stops reporting; one that restarted an hour ago
+  says nothing until it does it again, and then says `2x`.
+
+**The mutations were the interesting part, and four of five survivors failed
+the same way.** The first grading caught 7 of 11. Of the four that lived,
+one was genuinely dead code (`up >= 0` inside `uptimeOf`, redundant with the
+`< 0` its two callers recognise the refusal by — removed rather than tested,
+and the sentinel documented as "negative" instead of "-1"). The other three
+were tests that could not see their own subject: they drove the element at
+`uptime_s: 30` with a 5 s period, which is OUTSIDE the freshness window, so
+a version of the file that called a repeated uptime a death reported nothing
+and the assertion passed having proved only that 30 is more than two
+periods. Every one of them had to be rewritten around a number the window
+still calls new — and two of them needed a 1000 s heartbeat, because the
+damage (a corrupted high-water mark) is only visible when the number AFTER
+the bad frame is larger than the one before it and still inside the window.
+
+The fifth survivor was `isFinite`, and it taught me something about this
+harness. I wrote the test as a raw bridge line with `1e999` in it, copying
+`tst_earsbudgets.qml` — and QML's `JSON.parse` refuses that line WHOLE
+("unparseable bridge line dropped"), so the field never arrived and the
+guard looked dead. tst_earsbudgets knows this and says so in the test next
+to it; the infinity has to come through a hand-built bus, which is also what
+proves the link-loss forgetting, because `BusModel.applyLink` empties its
+caches BEFORE it lowers `linkUp` — so the frame-driven pass a drop triggers
+still sees a live link with nothing on it, and only the falling edge of
+`known` is left to notice. That ordering is why the forgetting is
+`onKnownChanged` and not a line in `observe()`.
+
+**One thing fixed on the way past.** `trust()` tested `period_s` with a bare
+`!(period_s > 0)`, which `"5" > 0` passes — the note A75 left about this
+file. It was harmless while the value was only ever multiplied by a
+coercible string; it stopped being harmless the moment it became the window
+inside which the HUD calls a service unwell. It is a `typeof` test now, and
+a string period is `unknown`, which is a finding.
+
+**The box did not grow.** Shot 16 is one plate and one line. `tst_fit`'s
+crowded corner now drives jv-act past the tally's cap — 101 heartbeats
+counting down is 100 deaths, one more than the two digits the plate prints —
+so `RESTARTED 99+x`, the widest DETAIL this plate can draw, is measured
+rather than argued, and it fits the 300 px surface with the existing crowd.
+The height is unchanged because the restart replaces jv-act's line rather
+than adding one.
+
+- tests: `bash ops/ralph/verify.sh --since HEAD~1` GREEN — 3 gates over the
+  7 changed paths, 117.2 s: `runtests.sh tools` 431 (was 429),
+  `qmltest.sh` 679 (was 653), `hudshots.sh` 23 with a 16th shot. The
+  working-tree run before the commit was RED on five `test_hudsheet.py`
+  tests and every one of them was the sheet comparing against HEAD, which
+  is the documented refresh (ops/ralph/README.md): look at the PNG, commit
+  it, and the next run is green. I looked at 16-restarting.png before
+  committing it. And the gate verify names but does not run:
+  `bash ops/ralph/hudscreens.sh` GREEN, 179.6 s, all 7 screens matching the
+  sheet at HEAD — none of them contains a restart, and `detailOf` returns
+  the same word it always did for every other state.
+  Mutations: 18 over three gradings, 5 survivors closed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins — `uptime_s` has been in
+  `schemas/sys.health.json` since v1 and is required there.
+- files: shell/jv-hud/core/HealthState.qml, shell/jv-hud/HealthPlate.qml,
+  shell/jv-hud/tests/tst_healthstate.qml, tools/hudshots/scene/{tst_shots,
+  tst_fit}.qml, docs/hud/README.md + 16-restarting.png, ops/ralph/PLAN.md
+- commits: 22b0a7a (the three ideas), 3b9bf1b (the restart row)
+- next: **A81** is the collapse this shipped with and it is a §06 question —
+  a service that is both `degraded` and crash-looping draws `DEGRADED` and
+  the count is dropped, because a bare `3x` beside a different word is a
+  tally of nothing a reader can name. It should be answered with A70, which
+  is already asking what the corner does with several stories at once.
+  **A82** is the honest limit: the memory starts when the HUD starts, so the
+  boot crash loop — the most likely one there is — is the one this cannot
+  see. systemd has the number and invariant 1 says the HUD may not ask it,
+  which makes it R5's `sys.roster` question with a second caller behind it.
+  **B78** is the terminal half: `jv health` is a snapshot and can never say
+  this, `jv tap` watches the stream and could. Two of the three unread
+  fields from this iteration's sweep are still on the table as **A79**
+  (`action.confirm.granted` — the reading half of A22, and nothing in
+  `core/` can currently tell a granted destructive tool from a denied one)
+  and **A80** (`context.system.load1` / `mem_used_pct`, whose whole design
+  question is the gate). Otherwise the tables are unchanged: Track A is
+  still blocked on human sentences and one seat at ares (A47 -> A55 and the
+  growth checks; A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
+  A76/A77 and B62/B67/B76/B77 are still the raised-but-undecided items.

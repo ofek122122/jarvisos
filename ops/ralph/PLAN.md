@@ -3187,20 +3187,35 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       may be missing a stretch). Do not build it before answering it.
       Raised with A75.
 
-- [ ] A78. **The service that keeps dying is the one that always says it
-      is fine.** `uptime_s` is the only REQUIRED field of
-      `schemas/sys.health.json` that nothing in the HUD reads, and every
-      unit in `modules/jarvis-services.nix` is `Restart=on-failure` — one
-      of them says so in a comment about a bug it is the recovery path
-      for. So a service that crashes publishes `starting`, then `ok`, and
-      `HealthPlate` draws NOTHING: an empty corner over a machine where
-      jv-ears has died four times in a minute, which is exactly the quiet
-      failure `core/HealthState.qml`'s own header names. No schema change
-      is needed to see it — `uptime_s` is monotonic within one process
-      life, so a trusted heartbeat whose `uptime_s` is BELOW the last one
-      from the same service is a different process. `jv health` already
-      prints the field (`cli.rs`); nothing derives a restart from it.
-      Raised in iteration 101.
+- [x] A78. **The service that keeps dying is the one that always says it
+      is fine.** — 3b9bf1b
+      (`HealthState.lives` is the only memory in that file and the comment
+      says why: `latestFrom` keeps one frame per publisher, so the beat that
+      proves a restart is gone by the time the next one lands. A trusted
+      heartbeat whose `uptime_s` is BELOW the last one from the same service
+      was written by a different process; `restarted` is the element's own
+      word, like `lost` and `unknown`, and a heartbeat that publishes it is
+      outside the frozen enum and comes out `unknown`. It ties with
+      `degraded` rather than outranking it — the service is running and
+      answering, and a three-line list would otherwise drop a jv-voice that
+      cannot reach the speakers for a jv-ears that crashed once at boot —
+      and it loses that tie to the service's own word. News for
+      `period_s * 2`, the same span this file already believes one heartbeat
+      for, read off the frame's own body, so **no timer is involved**: the
+      beat carrying too large an uptime is the one that takes the row off.
+      Forgotten whole on a link drop. `HealthPlate` draws `jv-ears
+      RESTARTED 3x`, capped at `99+x` because a tally is the only figure in
+      this corner not bounded by a name or an enum. Also: `trust()` now
+      requires `period_s` to be a NUMBER — the note A75 left about this file
+      (`"5" > 0` is true), acted on the iteration the value became a window
+      inside which the HUD calls a service unwell. 26 new QML tests (679,
+      was 653), 18 mutations over three gradings, five survivors closed —
+      four of them the freshness window hiding the mutation from the
+      assertion, one an infinity the bridge cannot deliver at all. Shot 16
+      on the contact sheet; `tst_fit`'s crowded corner now drives jv-act
+      past the cap (101 heartbeats counting down) so the widest tally this
+      plate can print is measured rather than argued. Raised: A81, A82,
+      B78.)
 
 - [ ] A79. **A confirmation's outcome is on the bus and the HUD throws it
       away.** `action.confirm.granted` is the one body field of that
@@ -3225,6 +3240,50 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       here is `SpeechState`'s `thinking` — the one moment a reader is
       waiting and the number is news. That crosses two elements, which is
       why it is a proposal and not a patch. Raised in iteration 101.
+
+- [ ] A81. The restart count VANISHES under a louder word, and the
+      collapse is documented rather than solved. `jv-voice DEGRADED` is
+      what a jv-voice that is both impaired and crash-looping draws:
+      `restarts` is still on the roster entry, and `HealthPlate.detailOf`
+      only prints it beside `RESTARTED`, because a bare `3x` next to a
+      different word is a tally of nothing a reader can name. The two
+      honest ways out are both design questions and neither is free — a
+      second line for the same service (the list is three deep, and A70
+      already asks what the corner does with several stories at once), or
+      a mark that is not a number (a second dot? a different tone?),
+      which spends the one vocabulary this plate has on a qualifier.
+      §06 question, worth deciding with A70 rather than alone.
+      Discovered in A78.
+
+- [ ] A82. **The memory starts when the HUD starts, and the boot crash is
+      exactly the one it misses.** A78 claims nothing about the first
+      heartbeat it hears — correctly, since a small `uptime_s` is what
+      every service looks like on a machine that just booted — but that
+      means a jv-ears which died four times before the HUD's bridge
+      connected is a jv-ears the corner says nothing about, and the boot
+      crash loop is the most likely one there is. systemd knows the
+      number (`NRestarts` on the unit), the bus does not, and invariant 1
+      says the HUD may not go and ask systemd. Which makes this R5's
+      question again with a second caller behind it: a `sys.roster` topic
+      that says which services are SUPPOSED to be running could carry how
+      many times each has been started, and one publisher reading systemd
+      is a different proposition from every consumer doing it. Do not
+      build it here — it is a schema, and R5 is already written.
+      Discovered in A78.
+
+- [ ] B78. The terminal view has the same blind spot the HUD just lost,
+      and only one of its two readers could close it. `jv health` prints
+      `uptime_s` (cli.rs) and is a SNAPSHOT — one read of `latest`, no
+      memory, no second frame to compare against — so it can never say a
+      service restarted, however long it runs. `jv tap` watches the
+      stream and could: it already holds per-turn state across frames,
+      and "jv-ears restarted (3rd time)" on the wire is the line that
+      would explain a turn that lost its ASR mid-sentence. Cheap, and it
+      is the B-track half of A78 rather than a new idea. What it must NOT
+      become is a second implementation of the rule: the freshness window
+      and the monotonicity argument live in `core/HealthState.qml`, and
+      two readers that disagreed about what a restart is would be worse
+      than one that cannot see them. Discovered in A78.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD
