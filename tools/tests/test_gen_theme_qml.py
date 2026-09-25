@@ -43,6 +43,7 @@ plate_opacity = 0.86
 
 [geometry]
 inset_px = 16
+hud_corner_px = 300
 """
 
 
@@ -1134,39 +1135,75 @@ def test_the_notifier_declares_no_capability_its_pixels_do_not_have():
         )
 
 
+def theme_tokens() -> dict[str, dict[str, object]]:
+    """personality/theme.toml, through the generator's own loader."""
+    return gen.load_tokens((ROOT / "personality" / "theme.toml").read_text("utf-8"))
+
+
+def hud_surface_box() -> tuple[int, int]:
+    """shell/jv-hud/shell.qml's surface box in px, with its WIDTH resolved.
+
+    The width is not a literal any more (PLAN D16): it is
+    `Theme.hudCornerPx`, i.e. `geometry.hud_corner_px`, because jv-bar has to
+    leave exactly that much of its strip empty and cannot ask another process
+    how wide it is. Every gate that measures against the HUD's box goes
+    through here, so a harness copy is still pinned to the shell's box and the
+    shell's box is pinned to the one declaration — and a gate that went back
+    to matching a run of digits after `implicitWidth:` would be pinning a
+    number the shell no longer contains, which a regex reports as `None`
+    rather than as a failure.
+
+    The height IS a literal, and that asymmetry is the point: the width is a
+    declared choice about how much of the corner Jarvis takes, the height is
+    the measured total of the crowded stack (tst_fit.qml), so it has no
+    business in a versioned identity file.
+    """
+    hud = strip_qml_comments((ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8"))
+    width = re.search(r"^\s*implicitWidth:\s*(.+)$", hud, re.M)
+    height = re.search(r"^\s*implicitHeight:\s*(\d+)\s*$", hud, re.M)
+    assert width and height, "shell/jv-hud/shell.qml no longer declares a fixed surface box"
+    assert width.group(1).strip() == "Theme.hudCornerPx", (
+        "the HUD's surface width should be the one declared corner, "
+        f"`Theme.hudCornerPx`; shell.qml says {width.group(1).strip()!r}"
+    )
+    return int(theme_tokens()["geometry"]["hud_corner_px"]), int(height.group(1))
+
+
 def test_the_bar_leaves_the_corner_the_hud_draws_in():
     """Two processes, two layers, one corner — and nothing can see the clash.
 
     The HUD sets `ExclusionMode.Ignore`, so it is NOT pushed down by the bar:
     its plates are drawn over the top-right of the bar's strip. Neither
     surface can detect the other (different process, different layer), so the
-    only thing keeping them apart is the number the bar reserves — and that
-    number is a copy of the HUD's box, in a file that cannot see it.
+    only thing keeping them apart is the width the bar reserves.
 
-    So this is the third party that reads both: the reserve has to cover the
-    HUD's own `implicitWidth` plus the §06 inset the HUD sits in. Grow the
-    HUD's corner and this fails, instead of a plate landing on the clock.
+    That width used to be a COPY of the HUD's box, typed into a file that
+    cannot see it, and this gate was the honest floor under the copy: it read
+    both and failed if the HUD outgrew the reserve. D16 removed the copy —
+    both shells now read `geometry.hud_corner_px` — so what is left to check
+    is that they still do, and that neither has quietly gone back to a
+    number. The arithmetic is checked too, because `+ Theme.insetPx` is the
+    half the token cannot carry: the HUD sits that far off the edge, so a
+    reserve of the bare corner would leave a plate over the last inset.
     """
-    hud = (ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8")
-    box = re.search(r"^\s*implicitWidth:\s*(\d+)", hud, re.M)
-    assert box, "shell/jv-hud/shell.qml no longer declares a fixed surface box"
-    inset = gen.load_tokens((ROOT / "personality" / "theme.toml").read_text("utf-8"))
-    inset = inset["geometry"]["inset_px"]
+    corner, _ = hud_surface_box()
+    inset = int(theme_tokens()["geometry"]["inset_px"])
 
     bar = strip_qml_comments((ROOT / "shell" / "jv-bar" / "shell.qml").read_text("utf-8"))
     reserve = re.search(r"property\s+int\s+hudReservePx:\s*(.+)$", bar, re.M)
     assert reserve, "shell/jv-bar/shell.qml no longer reserves the HUD's corner"
-    # The expression is arithmetic over integers and a token name; evaluate the
-    # literal part and require the token to be the inset it claims to be.
-    assert re.fullmatch(r"\d+\s*\+\s*Theme\.insetPx", reserve.group(1).strip()), (
-        "the reserve should read as `<the HUD's box> + Theme.insetPx`, so the "
-        f"§06 inset is spent rather than retyped; got {reserve.group(1)!r}"
+    assert reserve.group(1).strip() == "Theme.hudCornerPx + Theme.insetPx", (
+        "the reserve should read as `Theme.hudCornerPx + Theme.insetPx`, so "
+        "the HUD's corner and the §06 inset are both spent rather than "
+        f"retyped; got {reserve.group(1).strip()!r}"
     )
-    reserved = int(reserve.group(1).split("+")[0].strip()) + int(inset)
-    assert reserved >= int(box.group(1)) + int(inset), (
-        f"the bar reserves {reserved} px for the HUD, whose surface is "
-        f"{box.group(1)} px wide and sits {inset} px off the edge. The HUD "
-        f"would be drawn over the bar's own content."
+    # The two are now the same token by inspection, so there is no inequality
+    # left to check — what there is instead is a number worth being able to
+    # read off a failure, and a sanity floor on it: a corner narrower than the
+    # inset it sits in would be a HUD that is all margin.
+    assert corner > inset > 0, (
+        f"the HUD's corner is {corner} px and the §06 inset it sits in is "
+        f"{inset} px; the bar reserves {corner + inset} px for the pair"
     )
 
 

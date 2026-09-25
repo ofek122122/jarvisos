@@ -25,7 +25,12 @@ from pathlib import Path
 # One parser for the HUD's QML, not two: the theme gates already had to read
 # shell.qml's plate stack, and a second implementation of "what is inside
 # this block" would be a second thing to be subtly wrong.
-from test_gen_theme_qml import ROOT, plate_stack_children, strip_qml_comments
+from test_gen_theme_qml import (
+    ROOT,
+    hud_surface_box,
+    plate_stack_children,
+    strip_qml_comments,
+)
 
 # jv-guard's own scanner, its own verdict logic and its own PE fixture
 # builder — three imports, no copies. The sheet photographs one verdict that
@@ -1034,11 +1039,11 @@ def test_every_driver_renders_the_box_the_shell_asks_for():
     measures the real binary under a real compositor. Same failure, same
     fix; this is the half that lives in a QML engine.)
     """
-    shell = (SHELL / "shell.qml").read_text("utf-8")
-    box = (
-        int(re.search(r"^\s*implicitWidth:\s*(\d+)", shell, re.M).group(1)),
-        int(re.search(r"^\s*implicitHeight:\s*(\d+)", shell, re.M).group(1)),
-    )
+    # Through the one resolver, because the shell's WIDTH is no longer a
+    # literal: it is `Theme.hudCornerPx`, the corner jv-bar also has to know
+    # (PLAN D16). A regex for digits here would match nothing and pass `None`
+    # into int(), which is a crash rather than a verdict.
+    box = hud_surface_box()
     for driver in sorted(SCENE_DIR.glob("tst_*.qml")):
         text = strip_qml_comments(driver.read_text("utf-8"))
         width = re.search(r"^\s*width:\s*(\d+)", text, re.M)

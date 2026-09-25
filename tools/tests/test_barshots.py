@@ -125,11 +125,14 @@ def test_the_clock_asks_the_same_question_about_the_huds_corner():
 
 def test_the_reserved_corner_is_one_number_in_both():
     """The corner the HUD draws in, which this surface promises to keep empty.
-    It is a number in a file that cannot see the HUD (PLAN D16), and it is now
-    that number in TWO files — so a bar that shrank its promise and a sheet
-    that went on asserting the old one would be a sheet agreeing with
-    itself."""
-    reserve = "hudReservePx: 300 + Theme.insetPx"
+
+    The width in it is no longer a number in either file: D16 moved it into
+    `geometry.hud_corner_px`, so the bar and the HUD read one token and the
+    staged strip reads the same expression the bar does. What is left for
+    this gate is the half a token cannot fix — a sheet whose strip reserved
+    the corner differently from the bar would be a sheet agreeing with
+    itself, whatever the number in it came from."""
+    reserve = "hudReservePx: Theme.hudCornerPx + Theme.insetPx"
     for path in (SHELL / "shell.qml", STRIP):
         assert reserve in strip_qml_comments(path.read_text("utf-8")), path
 

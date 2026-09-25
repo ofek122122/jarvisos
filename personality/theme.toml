@@ -80,3 +80,12 @@ radius_px = 4
 hairline_px = 1
 # Glass: tint opacity of a HUD plate over whatever it covers.
 plate_opacity = 0.86
+# The width of the corner the HUD owns, and the one number two PROCESSES both
+# have to know: the HUD's surface is this wide, and jv-bar leaves exactly this
+# much of its right end empty (plus the inset above) because the HUD sets
+# ExclusionMode.Ignore and draws OVER the bar's strip. Two surfaces on two
+# layers, neither able to see the other, so the only thing keeping a plate off
+# the clock is that both shells read this token instead of typing the number
+# (PLAN D16). Declared, not measured — unlike the HUD's HEIGHT, which is the
+# crowded corner's measured total and belongs to the suite that measures it.
+hud_corner_px = 300

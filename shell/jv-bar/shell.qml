@@ -81,11 +81,19 @@ ShellRoot {
 
       required property var modelData
 
-      // The corner the HUD draws in: its 300 px surface plus the §06 edge
-      // inset it sits in. Kept as a number rather than an anchor because
-      // the HUD is a different process on a different layer — there is
-      // nothing here to anchor to, only a promise to keep.
-      readonly property int hudReservePx: 300 + Theme.insetPx
+      // The corner the HUD draws in: its own surface width plus the §06
+      // edge inset it sits in. Kept as a number rather than an anchor
+      // because the HUD is a different process on a different layer —
+      // there is nothing here to anchor to, only a promise to keep.
+      //
+      // The width is the HUD's, so it is not typed here (PLAN D16):
+      // `Theme.hudCornerPx` is `geometry.hud_corner_px`, the one place it
+      // is declared, and shell/jv-hud/shell.qml's `implicitWidth` is the
+      // same token. It used to be the literal 300 in both files, which is
+      // the copy neither surface could check — grow the HUD's corner and
+      // a plate lands on this bar's clock, with nothing on this machine
+      // able to see it happen.
+      readonly property int hudReservePx: Theme.hudCornerPx + Theme.insetPx
 
       screen: modelData
 

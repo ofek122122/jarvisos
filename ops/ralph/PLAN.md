@@ -298,14 +298,46 @@ human-reviewed step.
       tool the bar ASKS, not a `niri msg action` from the shell. Needs human
       review of the tool, so it is a proposal, not a task. `shell.qml` names
       this item.
-- [ ] D16. **The bar reserves the HUD's corner by a number, not by asking.**
-      `hudReservePx: 300 + Theme.insetPx` is a copy of the HUD's own
+- [x] D16. **The bar reserved the HUD's corner by a number, not by asking.**
+      `hudReservePx: 300 + Theme.insetPx` was a copy of the HUD's own
       `implicitWidth` in a file that cannot see it — two processes on two
-      layers, and neither can detect the clash. A tools test now reads both
-      and fails if the HUD's box grows past the reserve, which is the honest
-      floor; the real fix is one place that declares "the HUD's corner is this
-      wide" and both shells reading it (a geometry token in theme.toml would
-      do it). Found while finishing D1.
+      layers, and neither can detect the clash. The honest floor was a tools
+      test that read both; the real fix asked for here was one place
+      declaring "the HUD's corner is this wide" with both shells reading it.
+      DONE (iteration 124): `geometry.hud_corner_px = 300` in
+      `personality/theme.toml`, so `shell/jv-hud/shell.qml` says
+      `implicitWidth: Theme.hudCornerPx` and `shell/jv-bar/shell.qml` says
+      `hudReservePx: Theme.hudCornerPx + Theme.insetPx`. What is worth
+      knowing about it:
+      · **The width moved into identity and the HEIGHT did not**, which is
+        the whole distinction the item was hiding: the corner's width is a
+        DECLARED choice about how much of the screen Jarvis takes (and the
+        one fact a second process needs), while `implicitHeight: 826` is the
+        MEASURED total of the crowded stack — `tools/hudshots/scene/
+        tst_fit.qml` computes it and would fail with the number it is over.
+        A measurement has no business in a versioned theme, so it stayed a
+        literal in the shell.
+      · **`+ Theme.insetPx` is still the bar's own arithmetic**, because the
+        token cannot carry it: the HUD sits that far off the edge, so a bar
+        reserving the bare corner would leave a plate over the last inset.
+        The gate pins the whole expression rather than the sum.
+      · **Adding the token to `REQUIRED`** in `tools/gen_theme_qml.py` is
+        what makes deleting it from theme.toml fail in the generator instead
+        of in a shell — the HUD is now a consumer of it, and that table is
+        the list of tokens a consumer is allowed to assume exists.
+      · **Three harness copies of the box are now pinned to the token, not
+        to a literal.** `tools/tests/test_gen_theme_qml.py` gained one
+        resolver, `hud_surface_box()`, and `test_hudshots.py` (the three
+        scene drivers) and `test_hudscreens.py` (`sheet.py`'s `SURFACE_W`)
+        both read it. That mattered more than it looks: both of those gates
+        matched `implicitWidth:\s*(\d+)` and would have passed `None` into
+        `int()` the moment the shell stopped carrying digits — a crash, not
+        a verdict, which is the cheap half. The expensive half is a regex
+        that DOES still match something and pins the wrong thing.
+      · **Nothing on screen moved**, which is the intended outcome and is
+        evidence rather than a claim: all three shot sheets (hudshots,
+        notifyshots, barshots) and the real-compositor `hudscreens.sh`
+        compared byte-for-byte clean against the pictures at HEAD.
 - [ ] D17. **net · audio · battery on the bar, when each has a real source.**
       The original D1 sketch had all three mid-right and none shipped, on
       purpose: nothing in this repo publishes link state or volume, and ares
@@ -515,6 +547,25 @@ human-reviewed step.
       number somebody has seen. The fix wants a shot at the point of collision,
       which today would fail the sheet's own assertion — which is the right way
       round.
+
+- [ ] D33. **Two copies of the HUD's box survive D16, and both are outside a
+      shell.** The corner's width is one token now and both shells read it —
+      but `tools/hudshots/scene/tst_{shots,sequence,fit}.qml` still declare
+      `width: 300`, and `tools/hudscreens/sheet.py` still declares
+      `SURFACE_W = 300`. Neither is a drift risk today: `hud_surface_box()`
+      pins all four to the declaration, and that pin is what D16 rewired. The
+      question is whether they should stop being copies. The QML drivers
+      could simply say `Theme.hudCornerPx` — they already import Theme — and
+      the only argument for the literal is that a driver states the box it
+      renders into, which is also the argument for a comment. `sheet.py` is
+      the harder half and probably should NOT change: `shot_surface_box()`
+      reads that file OUT OF GIT to learn what box the committed PNGs were
+      photographed against, and a version of it that read theme.toml would be
+      asking today's identity about yesterday's pictures — the exact
+      confusion `test_the_shot_box_is_read_out_of_git_and_not_the_working_
+      copy` exists to prevent. So: take the three drivers, leave the sheet,
+      and write down why in the place that would otherwise look inconsistent.
+      Raised by D16.
 
 - [ ] D28. **The refusal D11 added is about PATHS, and the question it stands
       in for is about READS.** `tools/dependents.py` already walks the real

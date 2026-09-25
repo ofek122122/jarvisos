@@ -79,7 +79,7 @@ Rectangle {
 
   // --- shell.qml's surface, verbatim -----------------------------------
 
-  readonly property int hudReservePx: 300 + Theme.insetPx
+  readonly property int hudReservePx: Theme.hudCornerPx + Theme.insetPx
 
   implicitHeight: Theme.labelPx + Theme.padPx * 2
   color: Theme.groundDeep

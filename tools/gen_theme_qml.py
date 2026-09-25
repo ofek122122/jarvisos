@@ -80,7 +80,7 @@ REQUIRED = {
     "palette": ("ground", "text", "ember"),
     "type": ("family_mono", "label_px"),
     "motion": ("reduced_motion", "ease_ms"),
-    "geometry": ("inset_px",),
+    "geometry": ("inset_px", "hud_corner_px"),
 }
 
 # What this script writes into EVERY shell, and therefore registers into
