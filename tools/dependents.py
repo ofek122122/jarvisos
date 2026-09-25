@@ -834,7 +834,7 @@ DECLARED_GATES = (
         ),
         runs_here=False,
         note=(
-            "3m00s, a compositor, and seven pictures for a human — "
+            "3m00s, a compositor, and a sheet of pictures for a human — "
             "run it yourself, look at the shots, commit them"
         ),
     ),

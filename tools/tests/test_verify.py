@@ -550,10 +550,10 @@ def test_the_gate_that_evaluates_the_flake_is_a_step_like_any_other():
 def test_the_gate_it_will_not_run_is_printed_above_the_verdict():
     """B72's other half, and the harder one. `hudscreens.sh` reads the HUD and
     is not a step: measured at 3m00s in this sandbox, it boots a compositor and
-    takes seven photographs of the real shell for a human to look at. B74 took
+    takes photographs of the real shell for a human to look at. B74 took
     away half of B72's argument — the screens are no longer rewritten by a run
     that changed nothing — and left the other half standing: a run that DID
-    change the HUD puts seven new PNGs in the tree the plan was computed from.
+    change the HUD puts new PNGs in the tree the plan was computed from.
     That is not a verdict to collect; it is pictures for a human. So it is
     named, above the
     verdict rather than under it, where it cannot be read as a footnote to a

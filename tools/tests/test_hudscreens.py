@@ -1686,6 +1686,317 @@ def test_the_readme_says_the_screens_are_not_byte_reproducible():
     )
 
 
+# ------------------------- one heartbeat, two plates, a holed recording (A85)
+#
+# `06-lossy` is the first photograph in this repo of the recording light
+# saying anything but a bare `MIC`. Until it, the two ways an open
+# microphone stops being one you can trust — silent (`MIC NO AUDIO`) and
+# holed (`MIC LOSING AUDIO`) — existed only as prose and as an idle
+# window's stopwatch, and the wider of the two shipped unphotographed.
+#
+# The shot is also the sheet's only TWO-plate picture off a single frame,
+# and that is the interesting part rather than an economy: `CaptureMeter`
+# calls a losing device `degraded`, so ONE jv-ears beat is a MicPlate line
+# and a HealthPlate line at once. Everywhere else in this corner a second
+# line means a second publisher agreeing.
+#
+# So the gates here are about FIDELITY. The frames are composed, which
+# means nothing but this file stops them from being a heartbeat jv-ears
+# would never send — and a photograph of a machine that cannot exist is
+# worse than no photograph, because it looks exactly as real as the others.
+
+
+def lossy() -> dict:
+    for shot in sheet.SHOTS:
+        if shot["file"] == "06-lossy":
+            return shot
+    raise AssertionError(
+        "the sheet no longer takes 06-lossy — the only picture of a "
+        "microphone that is open, delivering, and losing chunks anyway"
+    )
+
+
+def ears_beats(shot: dict) -> list[dict]:
+    """Every jv-ears heartbeat body a shot puts on the bus, in any of the
+    three places a shot can put frames."""
+    out = []
+    for frame in [*shot["frames"], *shot.get("hold", []), *shot.get("grows_from", [])]:
+        pub = frame.get("publish")
+        if pub and pub["topic"] == "sys.health" and pub["src"] == "jv-ears":
+            out.append(pub["body"])
+    return out
+
+
+def capture_meter() -> str:
+    return (ROOT / "services" / "jv-ears" / "jv_ears" / "audio.py").read_text("utf-8")
+
+
+def test_the_lossy_body_is_a_legal_heartbeat():
+    """invariant 2: schemas are law. Hand-written, so checked rather than
+    trusted — a body with a key `sys.health` does not allow is one jarvisd
+    would refuse and the picture would be of an empty corner.
+    """
+    schema = json.loads((ROOT / "schemas" / "sys.health.json").read_text("utf-8"))
+    body = sheet.MIC_LOSSY["publish"]["body"]
+    missing = set(schema["required"]) - set(body)
+    assert not missing, f"sys.health: body is missing {sorted(missing)}"
+    extra = set(body) - set(schema["properties"])
+    assert not extra, f"sys.health: body has unknown keys {sorted(extra)}"
+    assert body["state"] in schema["properties"]["state"]["enum"], (
+        "core/HealthState.qml renders only the schema's own state words and "
+        "turns anything else into `unknown` — a different finding entirely"
+    )
+
+
+def test_the_lossy_gauges_are_the_whole_set_jv_ears_would_publish():
+    """The fixture is a photograph's worth of jv-ears, so it has to be the
+    gauges jv-ears really writes for this device — all of them, and nothing
+    invented. `CaptureMeter.metrics()` writes four unconditionally and two
+    more once there is something to measure, and a device that is open,
+    delivering AND losing has both of those.
+
+    MIC_OPEN and MIC_DEAF are deliberately NOT held to this: they carry the
+    narrower pre-A84 set, and A43's idle window is measured on the absence
+    of the loss pair (see the test above that pins it).
+    """
+    src = capture_meter()
+    body = re.search(r"\n    def metrics\(.*?\n    def ", src, re.S)
+    assert body, "jv_ears/audio.py no longer has a CaptureMeter.metrics()"
+    body = body.group(0)
+    always = set(re.findall(r'^\s+"(\w+)":', body, re.M))
+    conditional = set(re.findall(r'out\["(\w+)"\]', body))
+    assert always and conditional, (
+        "nothing was parsed out of CaptureMeter.metrics() — its shape moved, "
+        "and this gate is now asserting a fixture against an empty set"
+    )
+    assert set(sheet.MIC_LOSSY["publish"]["body"]["metrics"]) == always | conditional, (
+        f"the composed gauges are {sorted(sheet.MIC_LOSSY['publish']['body']['metrics'])} "
+        f"and jv-ears publishes {sorted(always | conditional)} for a device "
+        "that is open, delivering and losing — the photograph is of a "
+        "heartbeat this service does not send"
+    )
+
+
+def test_the_lossy_note_is_the_sentence_jv_ears_composes():
+    """`notes` reaches no plate — HealthPlate draws the service and the
+    word and nothing else — so this is fidelity for its own sake, and it
+    is worth it: the note is the only place the two culprits are named
+    apart, and the sheet is where a reader meets the format.
+    """
+    src = capture_meter()
+    note = sheet.MIC_LOSSY["publish"]["body"]["notes"]
+    for literal in (
+        '"microphone losing audio: " + " and ".join(parts) + " since start"',
+        'f"jv-ears dropped {lost.samples / self.rate:.1f}s"',
+        'f"{lost.overruns} device overrun{plural} (length unknown)"',
+    ):
+        assert literal in src, (
+            f"CaptureMeter.loss_note() no longer composes {literal} — re-read "
+            "it and rewrite the note this sheet publishes"
+        )
+    assert re.fullmatch(
+        r"microphone losing audio: jv-ears dropped \d+\.\ds and "
+        r"\d+ device overruns? \(length unknown\) since start",
+        note,
+    ), (
+        f"the sheet publishes {note!r}, which is not the sentence "
+        "CaptureMeter.loss_note() composes when both culprits lost audio"
+    )
+
+
+def test_the_lossy_frame_reads_as_losing_and_not_as_the_fault_above_it():
+    """`stalled` and `losing` are both degraded and only one can be drawn:
+    core/MicState.qml ranks a stall first, because no audio at all is the
+    bigger fact. So a fixture whose `capture_age_s` drifted past the stall
+    budget would still light two plates, still pass every gate about the
+    picture being lit, and put `MIC NO AUDIO` under a caption about holes.
+    """
+    m = sheet.MIC_LOSSY["publish"]["body"]["metrics"]
+    assert m["mic_open"] == 1, (
+        "the composed device is not open, so MicPlate draws nothing at all "
+        "and the picture is of an empty corner"
+    )
+    assert m["capture_age_s"] <= m["capture_stall_s"], (
+        f"the composed device last delivered {m['capture_age_s']}s ago "
+        f"against jv-ears' own {m['capture_stall_s']}s budget, so MicState "
+        "reads it as `stalled` and the plate says MIC NO AUDIO"
+    )
+    assert m["capture_loss_age_s"] <= m["capture_loss_window_s"], (
+        f"the composed loss is {m['capture_loss_age_s']}s old against a "
+        f"{m['capture_loss_window_s']}s window, so it is no longer news and "
+        "MicPlate says a confident bare MIC"
+    )
+    assert '"MIC LOSING AUDIO"' in (
+        ROOT / "shell" / "jv-hud" / "MicPlate.qml"
+    ).read_text("utf-8"), (
+        "MicPlate no longer draws the words this picture and its caption "
+        "are of"
+    )
+
+
+def test_this_is_the_only_photograph_of_a_microphone_in_trouble():
+    """The caption's claim, and the reason the shot is worth its two
+    seconds. It is an ASSERTION about the other shots rather than a
+    sentence: a loss gauge added to 02-heard would make that picture the
+    same picture, and this one's caption would be describing a first that
+    had stopped being one.
+    """
+    healthy = []
+    for shot in sheet.SHOTS:
+        if shot["file"] == lossy()["file"]:
+            continue
+        for body in ears_beats(shot):
+            m = body.get("metrics", {})
+            assert "capture_loss_age_s" not in m, (
+                f"{shot['file']} now reports a discarded chunk, so its "
+                "microphone is losing audio too and this shot is no longer "
+                "the first picture of one"
+            )
+            assert m["capture_age_s"] <= m["capture_stall_s"], (
+                f"{shot['file']} now photographs a stalled device, which is "
+                "the other half of the same caption"
+            )
+            healthy.append(shot["file"])
+    assert len(healthy) >= 2, (
+        f"only {healthy} photograph an open microphone that is keeping all "
+        "of it, so there is nothing in this sheet for the lossy picture to "
+        "be read against"
+    )
+
+
+def test_the_lossy_shot_lights_exactly_the_two_plates_its_caption_names():
+    """One frame, two plates, and every other plate dark. The two are
+    welded — a losing device IS `degraded`, by CaptureMeter — so the
+    caption cannot describe one of them; what it CAN stop describing is a
+    third, and a third would arrive silently.
+    """
+    shot = lossy()
+    assert "hold" not in shot and "grows_from" not in shot, (
+        "06-lossy now feeds or grows from something, so it is no longer the "
+        "one-frame shot its caption describes"
+    )
+    published = {(f["publish"]["topic"], f["publish"]["src"]) for f in shot["frames"]}
+    assert published == {("sys.health", "jv-ears")}, (
+        f"06-lossy publishes {sorted(published)} — one heartbeat from one "
+        "service is the whole of what this picture claims"
+    )
+
+    core = ROOT / "shell" / "jv-hud" / "core"
+    asks = {}
+    for path in sorted(core.glob("*.qml")):
+        text = path.read_text("utf-8")
+        if not re.search(r'(?:latestFrom|frameOn)\("sys\.health"|publishersOf\("sys\.health"\)', text):
+            continue
+        asks[path.stem] = set(re.findall(r'property string \w+: "([\w-]+)"', text))
+    assert sorted(asks) == [
+        "DropState",
+        "EarsBudgets",
+        "HealthState",
+        "MicState",
+        "OutputState",
+    ], (
+        f"{sorted(asks)} read sys.health now, and this shot was measured "
+        f"against five elements — a new reader may be drawing a plate the "
+        "caption does not mention"
+    )
+    for name in ("MicState", "EarsBudgets"):
+        assert asks[name] == {"jv-ears"}, (
+            f"core/{name}.qml no longer asks for jv-ears by name, so the "
+            "beat this shot publishes may not be the one it reads"
+        )
+    for name, whose in (("DropState", "jarvisd"), ("OutputState", "jv-voice")):
+        assert asks[name] == {whose} and "jv-ears" not in asks[name], (
+            f"core/{name}.qml now reads a jv-ears heartbeat, so this frame "
+            "lights a plate the caption does not name"
+        )
+    assert "publishersOf(\"sys.health\")" in (core / "HealthState.qml").read_text("utf-8"), (
+        "core/HealthState.qml no longer reads every publisher of sys.health, "
+        "so a degraded jv-ears may no longer reach HealthPlate and the "
+        "caption's second line is of a plate that is dark"
+    )
+
+    hud = ROOT / "shell" / "jv-hud"
+    plates = {path.stem: path.read_text("utf-8") for path in hud.glob("*Plate.qml")}
+
+    def instantiates(text: str, element: str) -> bool:
+        # The declaration, not a mention: every one of these files talks
+        # about the others in prose, and a plate that merely names an
+        # element draws nothing off it.
+        return re.search(rf"\b{element} {{", text) is not None
+
+    drawn = sorted(
+        name
+        for name, text in plates.items()
+        if instantiates(text, "MicState") or instantiates(text, "HealthState")
+    )
+    assert drawn == ["HealthPlate", "MicPlate"], (
+        f"{drawn} draw the elements this frame can light on its own, and "
+        "the caption describes two plates"
+    )
+    # The fifth reader is the odd one, and it is not a third plate.
+    # EarsBudgets carries jv-ears' own budgets into whichever plate asked
+    # for them and decides nothing; StatePlate takes them for the wake
+    # window and stays dark here, because the topics it draws off are not
+    # on this bus.
+    budgeted = sorted(
+        name for name, text in plates.items() if instantiates(text, "EarsBudgets")
+    )
+    assert budgeted == ["MicPlate", "StatePlate"], (
+        f"{budgeted} take jv-ears' budgets now — a new one may be a plate "
+        "this heartbeat lights"
+    )
+    speech = (core / "SpeechState.qml").read_text("utf-8")
+    subjects = set(re.findall(r'(?:frameOn|bus\.latest\w*)\("([\w.]+)"', speech))
+    assert subjects, "core/SpeechState.qml reads no topic at all"
+    assert not subjects & {topic for topic, _ in published}, (
+        f"core/SpeechState.qml now reads {sorted(subjects & {t for t, _ in published})}, "
+        "so StatePlate may light off this heartbeat and the caption names "
+        "two plates"
+    )
+
+
+def test_the_readme_reads_the_holed_recording_picture():
+    """A photograph nobody is told how to read is decoration, and this one
+    needs three things a reader cannot get from the pixels: which words are
+    on it, that ONE heartbeat put both of them there, and what the same
+    plate looks like when the microphone is fine.
+
+    The phrases below are therefore reserved: a rewrite that drops them
+    turns this gate red, which is the point — re-read the picture and
+    write the new sentence.
+    """
+    readme = readme_text()
+    for name in sheet.capture_files(lossy()):
+        assert name in readme, f"docs/hud/screens/README.md never shows {name}"
+    section = [s for s in readme.split("\n### ") if "06-lossy-primary.png" in s]
+    assert len(section) == 1
+    section = section[0]
+    assert "MIC LOSING AUDIO" in section, (
+        "the caption never names the line the picture is of"
+    )
+    assert "jv-ears DEGRADED" in section, (
+        "the caption never names the second plate, which is half of why "
+        "this shot exists"
+    )
+    assert re.search(r"\bone\b[^.]*\bheartbeat\b", section), (
+        "the caption never says the two lines come from ONE heartbeat — "
+        "without it this reads as two services agreeing, which is what "
+        "every other two-plate picture in this sheet actually is"
+    )
+    # By anchor, and it has to be: every PNG here is shown in exactly ONE
+    # `###` section (the gate that says which screens are recordings), so
+    # a caption cannot link to another picture by its file name.
+    assert "03-confirm-primary" in section, (
+        "the caption never points at a picture of the same plate over a "
+        "microphone that is keeping all of it, so there is nothing to read "
+        "the warn dot and the second word against"
+    )
+    assert "teal" in section, (
+        "the caption never says the dot stopped being teal, which is the "
+        "only part of this picture a reader sees before they read a word"
+    )
+
+
 # ------------------------------------------------ the numbers in the prose (A73)
 #
 # Every measurement above is derived: shoot.py checks the corner against
@@ -1913,7 +2224,7 @@ def test_the_prose_scanner_is_not_reading_ordinary_prose():
 # `hudshots.sh` has compared its own sheet against HEAD since B52. This
 # harness could not: it photographs a real compositor, and two runs of an
 # unchanged HUD do not agree to the byte. So for thirty iterations these
-# seven pictures were WRITTEN and never READ, and nothing in the repo could
+# the pictures were WRITTEN and never READ, and nothing in the repo could
 # tell a current screen from one taken four plates ago.
 
 
@@ -1922,7 +2233,7 @@ def test_the_harness_reads_its_own_sheet_back():
     cannot go stale out loud. It goes stale silently instead."""
     text = driver_text()
     assert "tools/hudsheet.py" in text, (
-        "ops/ralph/hudscreens.sh takes seven photographs and never compares "
+        "ops/ralph/hudscreens.sh takes its photographs and never compares "
         "one — a stale screen looks exactly as convincing as a current one"
     )
     assert "--sheet docs/hud/screens" in text, (

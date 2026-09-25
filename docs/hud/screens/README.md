@@ -485,3 +485,34 @@ true of INTERRUPTED too, and has been since the plate was built; this is
 the first place in the repo that says so. Whether a word nobody can read is
 worth drawing is a question for a human (PLAN B94), and it is a better
 question with a picture attached.
+
+### 06-lossy-primary.png
+
+![MIC LOSING AUDIO, with jv-ears DEGRADED under it, on the 1440p monitor](06-lossy-primary.png)
+
+**Composed** — nothing committed has recorded a microphone dropping
+chunks. The first photograph in this repo of the recording light saying
+anything but a bare **MIC**. The device is open and audio is arriving on
+time; what is wrong is that some of it never got here — `jv-ears`' hand-off
+queue overflowed, or the device discarded input before `jv-ears` ran — and
+every gauge the confident reading is built on stays perfectly fresh through
+that. Without a word of its own, this recording would look exactly like the
+one in [`03-confirm-primary`](#03-confirm-primarypng), which really is
+keeping all of it: the same plate, the same **teal** dot, the same three
+letters. (An anchor rather than the file name, because every PNG in this
+directory is shown in exactly one section and a gate says so.) Here the dot is `warn` and the line is **MIC LOSING AUDIO** (A84).
+
+**Both lines come from one heartbeat**, and that is the other half of what
+this picture is for. `jv-ears DEGRADED` is not a second service agreeing —
+it is the same `sys.health` frame read by a second element, because
+`CaptureMeter.health()` calls a losing device degraded in the beat that
+reports the loss. Every other two-plate picture in this sheet needs two
+publishers; these two cannot be photographed apart, and the corner shows
+the fault and who owns it in one arrival.
+
+What the picture cannot show is how much was lost or by whom. That is in
+the heartbeat's `notes` — *"microphone losing audio: jv-ears dropped 0.4s
+and 1 device overrun (length unknown) since start"*, both culprits named
+separately because they send you to different places — and `HealthPlate`
+draws the service and the word and nothing else. The HUD tells you the
+recording has holes in it; `journalctl -u jv-ears` tells you whose.

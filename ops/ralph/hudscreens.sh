@@ -62,14 +62,14 @@
 # plans; this one is named there instead, beside the paths that asked for it,
 # so a green verdict cannot quietly stand in for a sheet nobody took. Two
 # measured reasons, neither of them "it cannot run here" — it runs here fine:
-#   1. 3m00s, and what it produces is not a verdict to collect but seven
-#      pictures somebody has to look at.
+#   1. 3m00s, and what it produces is not a verdict to collect but a
+#      directory of pictures somebody has to look at.
 #   2. it REWRITES the screens it is pointed at — which B72 could not
 #      qualify and B74 now can. The rewrite is no longer unconditional:
 #      a screen that only moved by rounding is restored to its committed
 #      bytes, so a run of an unchanged HUD is idempotent and a dirty
 #      `git status` here now means something. What remains true is that a
-#      run which DID change the HUD leaves seven new PNGs in the tree,
+#      run which DID change the HUD leaves a new PNG per shot in the tree,
 #      which is the right outcome for a human at a keyboard and the wrong
 #      one for a gate computing a plan from that tree.
 # Reason 1 is the one that still carries this on its own, and B75 asked the
@@ -84,7 +84,7 @@
 #     probe  144.8 s  80.5%   ·   sheet  34.9 s  19.4%   of 179.8 s
 #
 # A run that kept no picture at all would still pay 2m25s of the 3m00s,
-# because the pictures are not what costs: `grim` and the seven PNG encodes
+# because the pictures are not what costs: `grim` and the PNG encodes
 # come to 0.9 s BETWEEN them, and almost the whole sheet half is the read-back
 # against HEAD (34.3 s). What costs is the idle probe — 97.6 s, 54% of
 # everything, five windows each deliberately holding still for ten seconds —
@@ -104,7 +104,7 @@ out="${1:-$root/docs/hud/screens}"
 # file: these three phases are the shell's, the rest are booked inside
 # tools/hudscreens/shoot.py, and `sheet.PHASES` says which half of the run
 # each belongs to — the half a verdict-only run would still pay, or the half
-# only the seven pictures need. The table is printed at the end, below.
+# only the pictures need. The table is printed at the end, below.
 #
 # `date` rather than bash's own $EPOCHREALTIME, and awk under LC_ALL=C:
 # neither the stamp nor the subtraction may depend on a locale's idea of
@@ -219,7 +219,7 @@ export SWAYMSG_BIN="$sway/bin/swaymsg"
 
 "$py/bin/python" "$root/tools/hudscreens/shoot.py"
 
-# And READ THEM BACK (B74). Until this line these were seven pictures that
+# And READ THEM BACK (B74). Until this line these were pictures that
 # could only be overwritten: `hudshots.sh` has compared its own sheet against
 # HEAD since B52, and the only reason this one did not was that it cannot do
 # it to the byte. The floor that makes it possible is measured — see

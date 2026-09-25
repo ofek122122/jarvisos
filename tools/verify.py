@@ -37,7 +37,7 @@ reads `.#nixosConfigurations.ares` and `ops/ralph/hudscreens.sh` photographs
 two are DECLARED in `dependents.DECLARED_GATES` against their own `# reads:`
 headers. `nixtest.sh` is a step like any other: 22 s, and it is the only thing
 in this repo that asserts what a module OPTION does to the unit text ares is
-handed. `hudscreens.sh` is not: 3m00s, a compositor, and seven photographs
+handed. `hudscreens.sh` is not: 3m00s, a compositor, and a sheet of photographs
 somebody has to look at and commit — and they are not reproducible, so a
 bound run would dirty the tree this verdict was computed from every single
 time. It is NAMED instead, beside the paths that asked for it, on every
@@ -251,12 +251,12 @@ def skipped(root: Path, paths: Iterable[str]) -> list[tuple[str, list[str], str]
     measured at 3m00s, of which 2m25s is the probes (B75: the run books its
     own phases now, and a version of it that kept no pictures would save 19%
     — the screens are not what it costs). It is out because what it produces is not a verdict to
-    collect: seven photographs a human looks at. B72 gave a second reason — it
+    collect: a sheet of photographs a human looks at. B72 gave a second reason — it
     rewrites the tree the plan was computed from, every run, because two runs
     of an unchanged HUD do not agree to the byte — and B74 measured that noise
     and put a floor under it, so a run that changed nothing now restores what
     it compared against and leaves the tree clean. What is left of that reason
-    is the run that DID change the HUD: seven new PNGs to look at, which is
+    is the run that DID change the HUD: new PNGs to look at, which is
     the right outcome at a keyboard and the wrong one inside a gate. So it is
     reported instead — on EVERY verdict, because the whole point of this file
     is that nothing which reads your change goes unmentioned.

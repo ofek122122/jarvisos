@@ -360,6 +360,48 @@ MIC_DEAF = _beat(
 )
 
 
+# The same jv-ears ONE FAULT ALONG, and the reason that fault needed a word
+# of its own (A84): the device is open, audio is arriving on time, and
+# chunks of the room are going missing anyway — ears' hand-off queue
+# overflowed, or the device discarded input before ears ran. Every gauge
+# the `live` reading is built on stays fresh through this, so a HUD that
+# could not see `capture_loss_age_s` would draw a confident bare `MIC` over
+# a recording with holes in it.
+#
+# ONE frame, two plates, exactly like MIC_DEAF above: MicPlate says
+# MIC LOSING AUDIO and jv-ears' own heartbeat says `degraded`, which is a
+# HealthPlate line. `CaptureMeter.health()` is what welds them — a losing
+# device IS degraded, by the same publisher, in the same beat — so the two
+# lines cannot be photographed apart and 06-lossy is a picture of both.
+#
+# Faithful to the service rather than merely legal, which the two fixtures
+# above are not and this one has a test for: the gauges are the whole set
+# `CaptureMeter.metrics()` writes for a device that is open, delivering and
+# losing, and `notes` is the sentence `loss_note()` composes — both
+# culprits named separately, both totals since start. MIC_OPEN and
+# MIC_DEAF carry a narrower gauge set that predates the loss pair, and
+# they have to keep it: A43's idle window is measured on the absence.
+MIC_LOSSY = _beat(
+    "jv-ears",
+    state="degraded",
+    metrics={
+        "mic_open": 1,
+        # MIC_OPEN's reading, unmoved: this device is not slow, it is lossy.
+        "capture_age_s": 0.02,
+        "captured_s": 1846.4,
+        "capture_stall_s": 2.0,
+        # Inside the loss window, which is what makes the hole still news.
+        # The window is `CaptureMeter.LOSS_S` itself.
+        "capture_loss_age_s": 0.3,
+        "capture_loss_window_s": 1.0,
+    },
+    notes=(
+        "microphone losing audio: jv-ears dropped 0.4s and "
+        "1 device overrun (length unknown) since start"
+    ),
+)
+
+
 # An ordinary jv-context snapshot: nothing muted, nothing at zero, so
 # core/OutputState.qml has nothing to say about it. context.system is the
 # only 1 Hz topic the HUD subscribes to (A40) — every other one is an
@@ -799,6 +841,32 @@ SHOTS = [
         # again. The whole shot is one plate saying one word.
         "frames": [VOICE_PREEMPTED],
     },
+    {
+        "file": "06-lossy",
+        "lit": True,
+        # The primary alone, and the first photograph in this repo of the
+        # recording light saying anything but a bare `MIC`. Every committed
+        # picture of an open microphone is of one that is keeping all of it
+        # (02-heard, 03-confirm); the two ways it can stop being that —
+        # silent, and holed — have only ever existed as prose.
+        "captures": ["primary"],
+        "source": (
+            "composed (nothing committed has recorded a microphone "
+            "dropping chunks)"
+        ),
+        # One heartbeat, and deliberately no `hold`: jv-ears declares
+        # `period_s: 5`, both elements that read it believe a beat for two
+        # of its own periods, and the whole shot is over about four seconds
+        # after the publish. 04-unheard needs a feed because a
+        # context.system snapshot expires in three SECONDS; this does not.
+        #
+        # It is also the sheet's only TWO-plate shot off a single frame.
+        # Everywhere else in this corner a second line means a second
+        # publisher agreeing; here MicPlate and HealthPlate are welded by
+        # CaptureMeter.health(), and a picture is the only place that
+        # coincidence is visible rather than argued.
+        "frames": [MIC_LOSSY],
+    },
 ]
 
 
@@ -825,7 +893,7 @@ def output_by_role(role):
 #
 # `ops/ralph/verify.sh` names this gate and does not run it. B72 gave two
 # reasons, B74 measured one of them away, and what was left standing was a
-# single number: minutes, and seven photographs rather than a verdict. B75
+# single number: minutes, and photographs rather than a verdict. B75
 # asks the obvious next question — is there a CHEAPER HALF? The probes (the
 # corner, the exclusive zone, the click, the idle frames) are verdicts a gate
 # could collect; the screens are not. Nobody could answer it, because that
@@ -838,7 +906,7 @@ def output_by_role(role):
 #           settles a plate needs before anything can be measured on it, and
 #           the `grim` exposures the corner and growth checks READ — a
 #           picture nobody keeps still has to be taken.
-#   SHEET — only the pictures need it: the PNG encodes, and reading the seven
+#   SHEET — only the pictures need it: the PNG encodes, and reading them
 #           back against the sheet committed at HEAD.
 #
 # The split is written down HERE, once, rather than at the ten call sites, so
