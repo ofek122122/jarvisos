@@ -74,8 +74,53 @@ human-reviewed step.
       Tests: `bash ops/ralph/verify.sh` GREEN; `nixos-rebuild build` green
       with `unit-jv-notify.service` in the closure. Never tested, never
       switched.
-- [ ] D3. **Lock screen**: swaylock-effects themed to §06 (dark ground, ember
-      accent, wordmark) as a first step; a Quickshell lock later.
+- [x] D3. **Lock screen** — `pkgs/jv-lock`, swaylock-effects with its whole
+      argv fixed at build time, installed on PATH and asked for BY HAND. It
+      shows the JarvisOS wallpaper (the same store PNG the wallpaper unit
+      hands swaybg — `nixtest.sh` holds the two equal), a `ground_deep` disc
+      with a `line` ring, and the clock in `face "mono"` at twice the type
+      scale's readout.
+      The decisions worth knowing:
+      · **It never photographs your desktop.** `--screenshots` and the whole
+        `--effect-*` family are refused: a blurred photograph of your desktop
+        is still your desktop — window shapes, the outline of a document, the
+        fact that you had eleven windows open — held on screen for as long as
+        you are away. Blur is not redaction (invariant 7).
+      · **No `--grace`.** A grace period is a stretch where the lock screen is
+        up and any keypress dismisses it without a password: a machine that
+        looks locked and is not, which is worse than one that is not locked,
+        because you walk away from it.
+      · **Teal is you, ember is the machine.** §06 assigns the two voices and
+        the states follow it exactly: a keypress highlights `teal`, and the
+        ONLY ember on this screen is the ring while your password is being
+        checked — the one moment something is actually being computed.
+        `risk` for a refusal, `warn` for Caps Lock (the thing that is about
+        to make you wrong), `text_3` for a backspace.
+      · **All fifteen state colours are declared**, because a channel this
+        file does not paint keeps swaylock's own default, which is
+        off-palette by construction — the identity would fail exactly in the
+        moments that matter (being checked, being refused).
+      · **`--timestr %H:%M`, not the default `%T`.** A seconds counter
+        repaints every output once a second for as long as the machine is
+        locked; §06 says 0 fps when idle, and that is a cost paid all night.
+      · **`--color` is set** because swaylock's default background is WHITE:
+        a full-brightness screen in a dark room the first time an image
+        cannot be read.
+      · **The geometry was LOOKED at**, not reasoned about — five
+        combinations rendered on a nested headless sway at 2560x1440 and
+        compared (see the journal). The ring is four hairlines because one
+        disappears at this radius, and an invisible ring is an invisible
+        "checking" and an invisible "wrong".
+      · **Nothing auto-locks.** No idle timer, no `loginctl lock-session`
+        handler, no before-sleep unit — see **D23**: arming an automatic lock
+        before a human has proven the unlock path on this machine is the one
+        way this surface can hurt somebody.
+      New tools gate `tools/tests/test_jv_lock.py` (14 cases, in a checkout
+      with no nix) plus 7 new `nixtest.sh` cases over the BUILT script and
+      the generated PAM stack. 14 mutations, 14 caught. Tests:
+      `bash ops/ralph/verify.sh` GREEN; `nixos-rebuild build` green with
+      `sw/bin/jv-lock` and `/etc/pam.d/swaylock` in the closure. Never
+      tested, never switched.
 - [ ] D4. **Migrate the niri config into the flake** (`environment.etc."niri/config.kdl"`
       or a module), preserving the user's keybinds/outputs, so the whole look is
       declarative — the one core piece currently living in the user's home file.
@@ -251,6 +296,41 @@ human-reviewed step.
       unit, so the bus starts the daemon on demand. Small, and it wants a
       thought about what "the daemon was not running" should look like —
       today it looks like nothing at all. Found while finishing D2.
+- [ ] D23. **Nothing on this machine can lock the screen for you, and that is
+      deliberate until a human has unlocked it once.** `jv-lock` exists and is
+      on PATH; nothing calls it. Three things want wiring and all three are
+      blocked on the same one-line verification (`jv-lock`, type the password,
+      get the desktop back): a niri keybind (which lands with **D4**, since
+      the niri config is still the user's own file), a `loginctl lock-session`
+      handler so other programs can ask, and a before-sleep unit. The order
+      matters: an automatic lock armed before the unlock path has ever been
+      proven on ares is the one way this surface can hurt somebody — the
+      failure mode is a screen that never opens, and the only way out of it is
+      a VT switch. The PAM stack is asserted (nixtest.sh) and swaylock fails
+      BEFORE locking when PAM is missing, so the risk is small; it is not
+      zero, and it is not the loop's to take.
+- [ ] D24. **The lock screen has no gate that LOOKS at it.** Its argv is read
+      as text (tools) and as built bytes (nixtest), and its pixels are read by
+      nobody: the five renders that chose its geometry were a one-off in
+      /tmp. `ops/ralph/hudscreens.sh` is the shape this wants — nested
+      headless sway at ares' geometry, `grim`, a sheet read back against HEAD
+      — and it is cheaper here than for the HUD (one client, no bus, no idle
+      probe; the whole render took about 30 s). What it CANNOT photograph
+      without a virtual-keyboard client is the four states that only exist
+      while somebody is typing (clear / verifying / wrong / Caps Lock), which
+      is exactly where the colour decisions live.
+- [ ] D25. **The lock screen inherits D10 whole.** It shows the same single
+      2560x1440 PNG, `--scaling fill`, on three differently-shaped outputs.
+      The fix is the same fix, and `-i <output>:<path>` per monitor is the
+      same blocked-on-**D4** option.
+- [ ] D26. **Three files now carry their own `token`/`face` helpers**
+      (modules/theme.nix, pkgs/jarvis-wallpaper, pkgs/jv-lock), and jv-lock
+      added a third helper shape (`num`, for the type scale and the motion
+      policy). They are identical by hand, which is the exact failure mode the
+      helpers exist to prevent one level down. A `nix/theme.nix` returning
+      `{ token; face; num; }` from one `fromTOML` would be read by all three;
+      the gate that discovers painters (`_bearing_files`) already works by
+      finding `token "x"` calls, so it would keep working unchanged.
 - [ ] D9. **Boot path onto §06** — blocked on human review (**R9**). Four
       files: `modules/grub-theme/{theme.txt,background.svg,default.nix}` and
       `modules/plymouth-theme/default.nix`. The real design in it is

@@ -1711,6 +1711,11 @@ def test_every_recorded_colour_exception_still_has_a_colour_in_it():
 PAINTERS = {
     "modules/theme.nix": 8,
     "pkgs/jarvis-wallpaper/default.nix": 6,
+    # The lock screen (PLAN D3). Eleven, because every state its indicator can
+    # be in is a colour it has to name: leave one out and swaylock keeps its
+    # own default there, which is off-palette by construction. The flags
+    # themselves are gated in tools/tests/test_jv_lock.py.
+    "pkgs/jv-lock/default.nix": 11,
 }
 
 TOKEN_CALL = re.compile(r'\btoken\s+"([a-z0-9_]+)"')

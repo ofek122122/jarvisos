@@ -15,6 +15,13 @@
 # BOUND rather than recommended, so `ops/ralph/verify.sh` runs it whenever the
 # evaluation it reads has changed underneath it (PLAN B72).
 #
+# It also asks two questions of a PACKAGE the evaluation produces rather than
+# of a unit (PLAN D3): the lock screen's built argv, and the PAM stack it has
+# to ask to let anybody back in. Both are still this layer — a store path is
+# what a module option evaluated TO — and neither can be asked anywhere else:
+# the Python suites run in a checkout with no nix, and nothing but an
+# evaluation can hold the lock screen and the wallpaper unit side by side.
+#
 # reads: flake.lock flake.nix hosts/ares modules nix pkgs
 #
 # Declared, because it cannot be derived: the subject of every case below is
@@ -111,6 +118,74 @@ out=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
   '(c: (c.extendModules { modules = [ { jarvis.voice.outputDevice = ""; } ]; }).config.system.build.toplevel.drvPath)' 2>&1)
 if grep -q 'jarvis.voice.outputDevice' <<<"$out"; then ok "$t"
 else bad "$t" "toplevel evaluated anyway: $(tail -3 <<<"$out")"; fi
+
+# --------------------------------------------------------- the lock screen
+# PLAN D3. pkgs/jv-lock is one wrapper whose whole argv is fixed at build
+# time, and tools/tests/test_jv_lock.py reads that argv as TEXT — in a bare
+# checkout, with no nix. What only an evaluation can ask is here: whether the
+# thing that would actually run on ares says the same, whether it shows the
+# same image as the desktop it covers, and whether there is a PAM stack for
+# it to ask. The last one is the only question in this file whose wrong
+# answer is a screen that never opens again.
+
+lock=$(nix build --no-link --print-out-paths '.#jv-lock' 2>&1 | tail -1)
+script="$lock/bin/jv-lock"
+
+t='the lock screen builds, and what it ships is one script'
+if [ -x "$script" ]; then ok "$t"
+else bad "$t" "no jv-lock at $script ($lock)"; fi
+
+# The refusals, in the BYTES rather than in the expression that produced
+# them. A `lib.optional` whose condition flipped, an interpolation that
+# evaluated to the wrong string, a flag appended by a wrapper: none of those
+# are visible in the source and all of them are visible here.
+if [ -x "$script" ]; then
+  t='the built lock screen photographs nothing and grants no grace'
+  spent=""
+  for flag in --screenshots --effect-blur --effect-pixelate --effect-greyscale \
+              --effect-compose --effect-custom --grace --daemonize; do
+    grep -q -- "$flag" "$script" && spent="$spent $flag"
+  done
+  if [ -z "$spent" ]; then ok "$t"; else bad "$t" "the built argv spends:$spent"; fi
+
+  t='the built lock screen forwards no arguments'
+  if grep -q '"\$@"' "$script"; then bad "$t" "$(grep -n '"\$@"' "$script")"
+  else ok "$t"; fi
+
+  t='it is swaylock that runs, out of the store, not a name on $PATH'
+  if grep -qE '^exec /nix/store/[^ ]*swaylock' "$script"; then ok "$t"
+  else bad "$t" "$(grep -m1 exec "$script")"; fi
+
+  # The one claim neither half of the test suite can make alone: two
+  # surfaces, two modules, one image. The wallpaper unit hands swaybg a PNG
+  # and the lock screen shows one, and if they ever stop being the same file
+  # the screen you lock stops being the desktop you were looking at.
+  t='the lock screen shows the same image the wallpaper unit paints'
+  wallpaper_unit=$(unit jarvis-wallpaper.service '')
+  png=$(grep -o '/nix/store/[^ ]*\.png' <<<"$wallpaper_unit" | head -1)
+  if ! is_unit "$wallpaper_unit"; then bad "$t" "no wallpaper unit: $(tail -3 <<<"$wallpaper_unit")"
+  elif [ -z "$png" ]; then bad "$t" "the wallpaper unit names no png: $(grep ExecStart <<<"$wallpaper_unit")"
+  elif grep -qF -- "$png" "$script"; then ok "$t"
+  else bad "$t" "unit paints $png; the lock screen shows $(grep -o '/nix/store/[^ ]*\.png' "$script" | head -1)"; fi
+fi
+
+# swaylock is not setuid: it asks PAM under its own service name, and with no
+# /etc/pam.d/swaylock there is nothing to ask and it refuses to start. The
+# flake declares the service in modules/theme.nix beside the surface itself;
+# nixpkgs' niri module also brings it in, which is exactly why this is
+# checked rather than assumed — an inherited default can be dropped by a
+# bump, and the symptom would be a lock screen that never opens.
+t='the lock screen has a PAM stack, and it can authenticate a password'
+pam=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+  '(c: c.config.security.pam.services.swaylock.text)' 2>&1)
+if grep -qE '^auth .*pam_unix\.so' <<<"$pam"; then ok "$t"
+else bad "$t" "no unix auth line in /etc/pam.d/swaylock: $(tail -3 <<<"$pam")"; fi
+
+t='the lock screen is on PATH, because a keybind can only spawn a name'
+names=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+  '(c: builtins.concatStringsSep "\n" (map (p: p.name) c.config.environment.systemPackages))' 2>&1)
+if grep -qx 'jv-lock' <<<"$names"; then ok "$t"
+else bad "$t" "jv-lock is not in environment.systemPackages: $(tail -3 <<<"$names")"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

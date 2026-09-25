@@ -11761,3 +11761,138 @@ is not worth chasing.)
   rather than a new one. **D11** has grown from "the bar cannot be graded" to
   "two of three shells cannot be graded", which makes it cheaper per shell
   than it was. **D22** (D-Bus activation for the daemon) is half an hour.
+
+## 2026-09-25 19:57 — the door, and what it refuses to show while it is shut
+- built: **jv-lock** (PLAN **D3**, and the second half of the human steer) —
+  this machine's lock screen. `pkgs/jv-lock` is swaylock-effects with its
+  whole argv fixed at build time; `modules/theme.nix` puts it on PATH and
+  declares its PAM stack; `tools/tests/test_jv_lock.py` (14 cases) reads that
+  argv in a checkout with no nix, and seven new `ops/ralph/nixtest.sh` cases
+  read the BUILT bytes and the generated /etc/pam.d/swaylock.
+- WHY A STORE SCRIPT AND NOT A CONFIG FILE, which is the shape the spec
+  implied ("swaylock-effects themed"). swaylock reads three config paths:
+  `$HOME/.swaylock/config`, `$XDG_CONFIG_HOME/swaylock/config` and
+  `SYSCONFDIR/swaylock/config`. This flake can guarantee none of them — the
+  first two are the user's own home, which is not declared anywhere here
+  (that is **D4**), and the third is the sysconfdir the PACKAGE was built
+  with, a directory inside its own store path, not /etc. So the configuration
+  IS the binary, the way pkgs/jv-bar pins `niri msg` into its wrapper instead
+  of looking one up on $PATH. There is nothing to copy into place and nothing
+  to forget.
+- MOST OF THIS SURFACE IS A REFUSAL, and each one is a decision:
+  · **`--screenshots`, and the whole `--effect-*` family that exists to
+    soften one.** This is the single most common swaylock-effects
+    configuration on the internet — lock, screenshot, blur — and it is a
+    photograph of your desktop held on screen for exactly as long as you are
+    away from the machine. Window shapes, the outline of a document, the
+    frame of a video, the fact that you had eleven things open. Blur is not
+    redaction. Invariant 7 says privacy is structural, so the lock screen
+    shows the wallpaper instead: the one image on this desktop that was
+    already being shown to the room.
+  · **`--grace`.** A grace period is a stretch in which the lock screen is on
+    the screen and ANY keypress dismisses it with no password. A machine that
+    looks locked and is not is worse than one that is not locked, because you
+    walk away from it.
+  · **`--daemonize`**, so whatever spawned it can see it exit.
+  · **forwarded arguments.** There is no `"$@"`. swaylock takes the LAST
+    occurrence of a repeated flag, so a caller appending `--grace 60
+    --screenshots` would silently win every refusal above.
+- AND THE OPPOSITE FAILURE, which is the one that made the tools gate worth
+  writing: a flag that is simply ABSENT does not fail, it falls back to
+  swaylock's own default, and three of those defaults are actively wrong
+  here. The background defaults to **WHITE** (a full-brightness screen in a
+  dark room the first time an image cannot be read). `--timestr` defaults to
+  **`%T`**, a seconds counter, which repaints every output once a second for
+  as long as the machine is locked — §06 says 0 fps when idle, and that one
+  is paid all night. And every indicator state whose colour is not declared
+  keeps swaylock's, which is off-palette by construction: all fifteen
+  (five states x ring/inside/text) are declared, and a test enumerates them.
+- THE COLOURS, and the one argument worth having: **teal is you, ember is the
+  machine.** §06 gives ember to "Jarvis is doing something" and teal to "your
+  own state", and the lock screen's states divide exactly along that line —
+  typing your password is YOU, checking it is the MACHINE. So a keypress
+  highlights `teal`, and the only ember on this screen is the ring while your
+  password is being verified: the one moment something is actually being
+  computed. `risk` for a refusal, `warn` for Caps Lock (the thing that is
+  about to make you wrong, rather than the wrongness itself), `text_3` for a
+  backspace and for a cleared field, `line` for the idle ring, `ground_deep`
+  for the plate. The ring and the word carry a refusal; the plate stays a
+  plate, so a wrong password does not turn the middle of the screen into a
+  red disc.
+- THE GEOMETRY WAS LOOKED AT, not reasoned about. §06's `[geometry]` is the
+  rhythm of a rectangular panel (inset, gap, pad, radius, hairline) and says
+  nothing about a ring in the middle of a screen, so swaylock was rendered on
+  a nested headless sway at ares' 2560x1440 — the hudscreens.sh trick, a
+  private XDG_RUNTIME_DIR and `grim`, about 30 s a shot — and five
+  combinations were photographed and compared (radius x thickness x clock:
+  64x3x17, 96x3x34, 88x2x26, 120x4x40, **120x4x34**). What the pictures said:
+  a 17 px clock is a clock you have to walk up to; a 2-3 px ring in `line`
+  disappears into the wallpaper, and an invisible ring is an invisible
+  "checking" and an invisible "wrong", because the ring is the channel every
+  state travels on; 40 px crowds the glyphs against it. The committed numbers
+  are the last one, and the final render was of the BUILT `.#jv-lock`, not of
+  a hand-assembled command line. Two of the three are still tokens: the clock
+  is twice `type.readout_px` (the same scale, read from the doorway instead
+  of from the desk) and the ring is four `geometry.hairline_px`. The radius
+  is the one number here with no source, and it says so.
+- THE WAY BACK IN. swaylock is not setuid and cannot read /etc/shadow: it
+  asks PAM under its own service name, and with no /etc/pam.d/swaylock there
+  is nothing to ask. Two findings, both by looking rather than assuming:
+  ares ALREADY has that file — nixpkgs' `programs/wayland/wayland-session.nix`,
+  which the niri module imports, sets `security.pam.services.swaylock = { }`
+  — and niri and swaylock both really speak `ext_session_lock_v1` (grepped
+  out of the two binaries, which is the difference between "the lock screen
+  works" and "it exits with a protocol error"). The flake declares the PAM
+  service anyway, because the one thing deciding whether this screen can ever
+  open again should not be an inherited side effect of another module's
+  default that a nixpkgs bump could drop; nixtest asserts the generated stack
+  still has a `pam_unix` auth line in it.
+- NOTHING AUTO-LOCKS, and that is the deliberate half. No idle timer, no
+  `loginctl lock-session` handler, no before-sleep unit — see **D23**. The
+  order matters: an automatic lock armed before a human has ever proven the
+  unlock path on ares is the one way this surface can hurt somebody, and the
+  failure mode (a screen that never opens; the way out is a VT switch) is not
+  the loop's risk to take. `jv-lock` is spawned by name from the user's own
+  niri config until **D4** moves that file in here. I never ran it outside
+  the nested compositor, for the obvious reason.
+- the cross-check only an evaluation can make: the lock screen shows the same
+  store PNG the wallpaper unit hands swaybg. Two surfaces, two modules, one
+  image — and if they ever stop being the same file, the screen you lock
+  stops being the desktop you were looking at. `nixtest.sh` reads the unit's
+  ExecStart and the built script and holds them equal.
+- 14 mutations, 14 caught — 11 through the tools gate (the white background,
+  a `--screenshots` and a `--grace 60` added, `%T` back, a state colour
+  dropped, the fade ungated, the clock size and the ring thickness cut loose
+  from theme.toml, a colour literal, the Caps Lock indicator dropped, jv-lock
+  off PATH) and 3 through the nix ones (the image pointed at a different
+  file; the PAM declaration deleted and commented out). Two of them LIVED at
+  first, both for the same reason and both worth the retelling: the gate was
+  reading the file INCLUDING its comments, and this file argues for each
+  refusal in a paragraph that quotes the flag it refuses — so "no `"$@"`"
+  passed on the prose explaining why there is no `"$@"`, and the PAM gate was
+  satisfied by the comment naming the option after the option was gone. Both
+  read only the code now.
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 6 paths (jv-compat,
+  jv-hud-bridge, tools **510 pass**, nixtest **14 pass**), 77.8 s.
+  `ops/ralph/hudscreens.sh` was named (flake.nix) and run: the HUD's pixels
+  did not move, which is what adding a package beside it should mean.
+  build: `nixos-rebuild build --flake .#ares` green, closure
+  q4swlszw4d9dcpgp9f8qx5nxpkxm0cy7, verified by reading the BUILT system
+  rather than the source — `sw/bin/jv-lock` resolves to the same store script
+  the screenshots were taken of, and `etc/pam.d/swaylock` carries the unix
+  auth line. No schema change, no jv-act, no boot path, no pins. Never
+  tested, never switched.
+- files: pkgs/jv-lock/default.nix (new), tools/tests/test_jv_lock.py (new),
+  flake.nix, modules/theme.nix, ops/ralph/nixtest.sh,
+  tools/tests/test_gen_theme_qml.py, ops/ralph/PLAN.md
+- next: **D24** is the honest gap this leaves — the lock screen's pixels are
+  read by nobody, the five renders that chose its geometry were a one-off in
+  /tmp, and the four states that only exist while somebody is typing (clear /
+  verifying / wrong / Caps Lock) are exactly where the colour decisions live
+  and exactly what a harness would need a virtual-keyboard client to
+  photograph. **D23** is the wiring, and it is blocked on one human minute at
+  the keyboard, not on code. **D18** remains the highest-value small one (it
+  closes D14 and D2's hand-rolled fade with a mechanism that already works),
+  and **D26** is new and cheap: three files now carry identical `token`/`face`
+  helpers by hand, which is the failure those helpers exist to prevent one
+  level down.
