@@ -536,6 +536,41 @@ QML_GATES = (
         ),
         also=("tools/hudsheet.py", "docs/hud"),
     ),
+    # And the notification corner's (PLAN D20), the same assembly one shell
+    # over. Same argument for a second script as for `notifytest.sh`: a change
+    # to a toast must rebuild THIS sheet and not the HUD's.
+    QmlGate(
+        script="ops/ralph/notifyshots.sh",
+        entry="tools/notifyshots/scene",
+        mounts=(
+            # The driver and the staged strip sit together in `$stage/shots`…
+            (".", ("tools/notifyshots/scene",)),
+            # …and `$stage` itself is the shell, with the two singletons that
+            # import Quickshell replaced: `Notifications` (it IS the D-Bus
+            # server) and `Motion`. `shell.qml` is deleted from the stage and
+            # is not a type, so nothing reaches it from here.
+            ("..", ("shell/jv-notify", "tools/notifyshots/stub")),
+        ),
+        also=("tools/hudsheet.py", "docs/notify"),
+    ),
+    # And the top bar's (PLAN D13), which makes it one harness per shell.
+    # Third script for the third shell, same argument as `bartest.sh`: what is
+    # derived from a path is which gate runs, and a change to a toast must not
+    # rebuild the strip.
+    QmlGate(
+        script="ops/ralph/barshots.sh",
+        entry="tools/barshots/scene",
+        mounts=(
+            # The driver and the staged strip sit together in `$stage/shots`…
+            (".", ("tools/barshots/scene",)),
+            # …and `$stage` itself is the shell, with the two singletons that
+            # import Quickshell replaced: `Niri` (it runs the event stream as a
+            # child process) and `Motion`. `shell.qml` is deleted from the
+            # stage and is not a type, so nothing reaches it from here.
+            ("..", ("shell/jv-bar", "tools/barshots/stub")),
+        ),
+        also=("tools/hudsheet.py", "docs/bar"),
+    ),
 )
 
 # `module`, `depends`, `plugin`… — qmldir lines that declare no type.

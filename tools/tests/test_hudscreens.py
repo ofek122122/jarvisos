@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from test_gen_theme_qml import ROOT
+from test_gen_theme_qml import ROOT, hud_surface_box
 
 sys.path.insert(0, str(ROOT / "tools" / "hudscreens"))
 import sheet  # noqa: E402
@@ -182,15 +182,14 @@ def test_the_surface_box_is_the_one_shell_qml_declares():
     its surface and the sheet does not hear about it, the check gets looser
     than the thing it is checking and stops being a check.
     """
-    shell = (ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8")
-    width = re.search(r"^\s*implicitWidth:\s*(\d+)", shell, re.M)
-    height = re.search(r"^\s*implicitHeight:\s*(\d+)", shell, re.M)
-    assert width and height, "shell.qml no longer declares a fixed surface box"
-    assert (int(width.group(1)), int(height.group(1))) == (
-        sheet.SURFACE_W,
-        sheet.SURFACE_H,
-    ), (
-        f"shell.qml's surface is {width.group(1)}x{height.group(1)} and "
+    # The width comes back resolved: the shell reads `Theme.hudCornerPx` for
+    # it now (PLAN D16), because jv-bar reserves the same corner and the two
+    # processes cannot see each other. sheet.py still carries plain numbers,
+    # which is what this gate is for — it is a Python module measuring PNGs,
+    # not a shell, so it has no Theme to read.
+    width, height = hud_surface_box()
+    assert (width, height) == (sheet.SURFACE_W, sheet.SURFACE_H), (
+        f"shell.qml's surface is {width}x{height} and "
         f"sheet.py measures against {sheet.SURFACE_W}x{sheet.SURFACE_H}"
     )
 

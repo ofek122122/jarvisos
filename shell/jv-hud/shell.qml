@@ -178,7 +178,20 @@ ShellRoot {
       // added to a plate that already exists costs the box exactly as much
       // per line as a plate would, and the suite is what said so rather
       // than a paragraph here guessing.
-      implicitWidth: 300
+      // THE WIDTH IS NOT THIS FILE'S ANY MORE (PLAN D16). It is
+      // `geometry.hud_corner_px` in personality/theme.toml, because a
+      // second process needs it: jv-bar leaves the top-right of its strip
+      // empty by exactly this number plus the inset, and it cannot ask —
+      // the HUD is another process on another layer, drawing OVER the bar
+      // with ExclusionMode.Ignore, so neither surface can detect a clash.
+      // While the number lived here, the bar held a copy of it, and the
+      // failure was silent both ways round: a plate over the clock, or a
+      // bar reserving an emptiness nothing needs. The HEIGHT stays a
+      // literal, and the difference is real — the width is a DECLARED
+      // choice about how much of the corner Jarvis takes, the height is
+      // the MEASURED total of the crowded stack above, owned by the suite
+      // that measures it.
+      implicitWidth: Theme.hudCornerPx
       implicitHeight: 826
       color: "transparent"
       mask: Region {} // empty: input passes through, always

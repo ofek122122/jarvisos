@@ -49,4 +49,5 @@ QtObject {
   readonly property int radiusPx: 4
   readonly property int hairlinePx: 1
   readonly property real plateOpacity: 0.86
+  readonly property int hudCornerPx: 300
 }

@@ -239,7 +239,7 @@ human-reviewed step.
       fire — a pip drawn from an event that might not arrive goes stale
       silently, which is the one failure mode a bar must not have.
       (`NiriModel.qml` names this item for that half.)
-- [ ] D13. **A render harness for the bar**, the way `hudshots.sh` is one for
+- [x] D13. **A render harness for the bar**, the way `hudshots.sh` is one for
       the HUD: stage `shell/jv-bar` with `Niri.qml` stubbed, drive
       `Workspaces`/`Clock` with the recorded desk, photograph the strip and
       read the sheet back. Today `Workspaces.qml`, `Clock.qml` and the strip
@@ -247,6 +247,39 @@ human-reviewed step.
       .#jv-bar` and the Python sweeps over `shell/**`, which is why
       `test_dependents.py` writes that gap down instead of letting it be
       invisible. `Workspaces.qml` names this item.
+      DONE (iteration 123): `ops/ralph/barshots.sh` + `tools/barshots/` +
+      `docs/bar/` — nine shots, one gate, and the bar's ungated set is now
+      exactly the other two shells' (`shell.qml` and the two Quickshell
+      singletons). The decisions worth knowing:
+      · **The shot is a WHOLE MONITOR**, 2560 or 1920 px wide by the 31 px the
+        shell derives from the type scale — not a box the harness chose. This
+        surface spans its output, so width is the one thing a harness cannot
+        pick for itself: both questions only this sheet can answer (is the
+        clock on screen, does the row reach the HUD's corner) are questions
+        about a particular monitor. A 640 px shot is there for the third case,
+        which ares does not have and `shell.qml` says "should fail visibly".
+      · **Two numbers are asserted, not just photographed.** `hudOverflowPx`
+        is 0 on every shot — the bar's side of a promise made in prose to a
+        process on another layer that draws in that corner and cannot be asked
+        — and `clockOverlapPx` is 0 against a clock centred on the SCREEN,
+        which therefore cannot move out of the way.
+      · **The paper is the bar's own ground**, unlike the other two sheets: a
+        bar is opaque and reserves its own strip, so there is nothing behind it
+        and a neutral grey would be the harness inventing one.
+      · **Six shots are ares' real desk** (the recorded `WorkspacesChanged`,
+        byte for byte, through the real `core/NiriModel.qml`); two are composed
+        because this machine has no named workspaces, and the composer's every
+        field is checked against the recording, so a composed shot cannot
+        quietly be a picture of a message shape niri does not send.
+      · **The caption and the colour are one decision.** `Workspaces.reading()`
+        names what a workspace is doing in a word and `tint()` turns that word
+        into a token, so the sheet cannot report `focused` over a label painted
+        `text_3` — `Toast.urgencyName`'s argument, one shell over.
+      · **The margin is printed, not pinned.** Every run says how much room is
+        left between the last workspace and the clock, because that is
+        arithmetic over glyph widths: asserting it would fail on a font update
+        with nothing wrong, and never measuring it is how it runs out. See
+        **D32**.
 - [x] D14. **The bar moves, once, and only where a signal moved.** Closed by
       **D18**: the bar has the generated `Ease`/`Motion`/`MotionPolicy`, and
       `Workspaces.qml` eases exactly one property — the label colour, which IS
@@ -265,14 +298,46 @@ human-reviewed step.
       tool the bar ASKS, not a `niri msg action` from the shell. Needs human
       review of the tool, so it is a proposal, not a task. `shell.qml` names
       this item.
-- [ ] D16. **The bar reserves the HUD's corner by a number, not by asking.**
-      `hudReservePx: 300 + Theme.insetPx` is a copy of the HUD's own
+- [x] D16. **The bar reserved the HUD's corner by a number, not by asking.**
+      `hudReservePx: 300 + Theme.insetPx` was a copy of the HUD's own
       `implicitWidth` in a file that cannot see it — two processes on two
-      layers, and neither can detect the clash. A tools test now reads both
-      and fails if the HUD's box grows past the reserve, which is the honest
-      floor; the real fix is one place that declares "the HUD's corner is this
-      wide" and both shells reading it (a geometry token in theme.toml would
-      do it). Found while finishing D1.
+      layers, and neither can detect the clash. The honest floor was a tools
+      test that read both; the real fix asked for here was one place
+      declaring "the HUD's corner is this wide" with both shells reading it.
+      DONE (iteration 124): `geometry.hud_corner_px = 300` in
+      `personality/theme.toml`, so `shell/jv-hud/shell.qml` says
+      `implicitWidth: Theme.hudCornerPx` and `shell/jv-bar/shell.qml` says
+      `hudReservePx: Theme.hudCornerPx + Theme.insetPx`. What is worth
+      knowing about it:
+      · **The width moved into identity and the HEIGHT did not**, which is
+        the whole distinction the item was hiding: the corner's width is a
+        DECLARED choice about how much of the screen Jarvis takes (and the
+        one fact a second process needs), while `implicitHeight: 826` is the
+        MEASURED total of the crowded stack — `tools/hudshots/scene/
+        tst_fit.qml` computes it and would fail with the number it is over.
+        A measurement has no business in a versioned theme, so it stayed a
+        literal in the shell.
+      · **`+ Theme.insetPx` is still the bar's own arithmetic**, because the
+        token cannot carry it: the HUD sits that far off the edge, so a bar
+        reserving the bare corner would leave a plate over the last inset.
+        The gate pins the whole expression rather than the sum.
+      · **Adding the token to `REQUIRED`** in `tools/gen_theme_qml.py` is
+        what makes deleting it from theme.toml fail in the generator instead
+        of in a shell — the HUD is now a consumer of it, and that table is
+        the list of tokens a consumer is allowed to assume exists.
+      · **Three harness copies of the box are now pinned to the token, not
+        to a literal.** `tools/tests/test_gen_theme_qml.py` gained one
+        resolver, `hud_surface_box()`, and `test_hudshots.py` (the three
+        scene drivers) and `test_hudscreens.py` (`sheet.py`'s `SURFACE_W`)
+        both read it. That mattered more than it looks: both of those gates
+        matched `implicitWidth:\s*(\d+)` and would have passed `None` into
+        `int()` the moment the shell stopped carrying digits — a crash, not
+        a verdict, which is the cheap half. The expensive half is a regex
+        that DOES still match something and pins the wrong thing.
+      · **Nothing on screen moved**, which is the intended outcome and is
+        evidence rather than a claim: all three shot sheets (hudshots,
+        notifyshots, barshots) and the real-compositor `hudscreens.sh`
+        compared byte-for-byte clean against the pictures at HEAD.
 - [ ] D17. **net · audio · battery on the bar, when each has a real source.**
       The original D1 sketch had all three mid-right and none shipped, on
       purpose: nothing in this repo publishes link state or volume, and ares
@@ -320,7 +385,7 @@ human-reviewed step.
       invariant 3's line that a human should draw it — and it needs a hover
       region that does not eat clicks meant for the window underneath. Same
       shape as **D15** (clicking a workspace): a proposal, not a task.
-- [ ] D20. **A render harness for the notification corner**, the way
+- [x] D20. **A render harness for the notification corner**, the way
       `hudshots.sh` is one for the HUD and **D13** wants one for the bar. It
       matters more here than for either: this is the only surface on the
       machine whose CONTENT comes from programs this repo did not write, so
@@ -329,6 +394,20 @@ human-reviewed step.
       pixels can answer. `Toast.qml`, `Fade.qml` and the strip are reached by
       no QML gate today — only qmllint inside `nix build .#jv-notify` and the
       Python sweeps over `shell/**`, which `test_dependents.py` writes down.
+      DONE (iteration 122): `ops/ralph/notifyshots.sh` stages the shell with
+      the two Quickshell singletons replaced (`Notifications`, `Motion`),
+      rebuilds shell.qml's column as `tools/notifyshots/scene/Strip.qml`,
+      drives the REAL `core/NotifyModel.qml`, and writes ten shots to
+      `docs/notify/` — then reads the sheet back against HEAD like B52. Each
+      shot asserts a caption the plate itself reports (`Toast.drew`: the
+      urgency as a word, the rows really drawn, and `…` when a row ELIDED),
+      so the elide is proved to have happened rather than to be configured.
+      **It found a real bug on its first run**: an `app_name` with no space in
+      it painted 656.5 px past a 320 px plate, over the desktop, on a surface
+      with no input region — the name row was the one row with no width of its
+      own. Bound and elided now, and every shot asserts `overflowPx == 0`.
+      The stand-in `Motion` is generated (D29's `STANDINS` table), not copied.
+      The gap `test_dependents.py` wrote down is now the HUD's three files.
 - [ ] D21. **A toast appears on all three monitors at once.** Correct today
       and not free: nothing in this repo publishes which output has focus, so
       one monitor could only be chosen by a guess, and a guess is how a
@@ -412,7 +491,18 @@ human-reviewed step.
       hole first (`STUB_SHELL` pointed at another shell survived, because a
       repo-root `--check` names all three and rendered the stand-in anyway),
       and closing it is what pins WHICH shell the stand-in rides out with.
-- [ ] D30. **The bar and the notifier now have an `Ease`, and no gate loads
+- [x] D30. **The bar now has an `Ease` and no gate loads it.** (Half closed by
+      **D20**, and CLOSED by **D13** (iteration 123): `barshots.sh` stages
+      `shell/jv-bar` whole and drives the real `Workspaces`, so the bar's
+      `Ease`, `Motion`, `Theme` and `core/MotionPolicy` are all loaded by a
+      gate now, and `03-focus-moved.png` is the picture of the one property
+      this shell eases. Every shell has a render harness; A11 —
+      `Motion.onBattery`/`fullscreen` have no source — is now the only part of
+      this that stands, in all three. The original text follows.) The earlier
+      half, from **D20**: `notifyshots.sh` loads `shell/jv-notify`'s `Ease`, `Toast` and
+      the strip, so the notifier's half of this is done and the remaining one
+      is the bar's — **D13**.) The original, for the half that stands:
+      **The bar and the notifier now have an `Ease`, and no gate loads
       either one.** `shell/jv-bar/Ease.qml`, `Motion.qml`, `Workspaces.qml`
       and `shell/jv-notify/Ease.qml`, `Motion.qml`, `Toast.qml` are reached by
       no QML gate at all (`test_dependents.py` writes it down); only qmllint
@@ -425,6 +515,114 @@ human-reviewed step.
       is now unsourced in three shells rather than one. Cheaper since D29:
       `render_motion_qml` takes a target now, so a bar shot harness needs a
       `MotionTarget`, not a second hand-written stand-in.
+- [ ] D31. **`--runner shots` is the HUD's alone, and the notifier now has a
+      render harness it could be pointed at.** D20 built `notifyshots.sh`,
+      which stages `shell/jv-notify` whole and drives the real toasts — the
+      exact thing `tools/mutate.py`'s `SHOTS` Language does with `hudshots.sh`
+      — so `Toast.qml` is gradeable for the first time and nothing can grade
+      it yet. The mechanism is already there and already general: `Language`
+      has a `shells` table and `for_target` resolves it (that is how
+      `--runner qml` picks between three scripts), so this is SHOTS gaining
+      two `Shell` rows rather than new machinery. Two things do need care:
+      `shots_baseline_hint` hard-codes `hudshots.sh`/`docs/hud`/`shell/jv-hud`
+      in a sentence it MEASURES (B53), and ~15 tests in `test_mutate.py` pin
+      the current single-suite shape. Worth doing before **D27**: the sweep
+      D27 asks for is over `core/`, and the toast is the file whose content a
+      stranger chooses. `tools/mutate.py`'s notify hint names this item.
+
+- [x] D32. **The bar's workspaces row has no width of its own, and D13
+      measured how much room is left: 274 px.** The row is a `Row`, which takes
+      its width from its children; the clock is centred on the SCREEN, so it
+      cannot move; and the HUD's corner is reserved by a number. Six
+      long-named workspaces on a 1920 px monitor (`docs/bar/08-crowded.png`)
+      leave 274 px before the two collide — about three more names. Nothing in
+      the shell stops the seventh, and what happens then is a real §06
+      decision rather than a clamp: dropping labels silently is the failure the
+      notifier's `+N EARLIER` line exists to prevent, and eliding every label
+      makes the one you are ON unreadable. The shape that fits this design
+      language is probably "as many whole labels as fit, then `+N`", with the
+      focused one never among the dropped — but that is a decision, and
+      `barshots.sh` is now the thing that can photograph the answer.
+      Discovered by D13, which prints the margin on every run so it stays a
+      number somebody has seen. The fix wants a shot at the point of collision,
+      which today would fail the sheet's own assertion — which is the right way
+      round. — 8cdfca9
+      · **The rule is `shell/jv-bar/core/RowFit.qml`**, pure arithmetic over
+        numbers with no font in it, tested at round widths in
+        `tests/tst_rowfit.qml`: as many whole labels as fit, then `+N` where
+        the row was cut, and the workspace the OUTPUT IS SHOWING never among
+        the dropped. "Showing" rather than "focused" because a monitor your
+        keyboard is not on has no focused workspace and still has one it is
+        displaying — and `NiriModel` will not let a workspace be focused
+        without being active, so it is one property.
+      · **The marker is a thing on screen, so it has a reading and a colour.**
+        `warn` when one of the workspaces you cannot see is urgent, `text_3`
+        otherwise — a row that hid a window's call for attention and said
+        nothing would be doing the exact thing the marker exists to prevent.
+        It is in `drew`, so the sheet's caption asserts it like any label.
+      · **The widths are MEASURED.** `bench` is one invisible copy of each
+        label in the row's own type; RowFit is handed what the words measure,
+        not `length * advance`, which would be right about JetBrains Mono and
+        wrong about the first name with an emoji in it — wrong in the
+        direction that paints into another process's corner. Before every
+        label is weighed the row is given no budget and draws everything.
+      · **`roomPx` is the SURFACE's arithmetic**, in shell.qml and in the
+        staged strip, because only the surface knows the monitor's width, the
+        clock's centre and the HUD's corner. A tools gate compares the two
+        expressions with the id normalised away, like `fits` before it.
+      · **Two shots, and the nine that existed are byte-identical.**
+        `docs/bar/10-collapsed.png` (keyboard on the first workspace: the run
+        stops, the number is last) and `11-collapsed-focus-last.png` (keyboard
+        on the last: "these, then some, then you", `+2` in warn). Both end
+        clear of the clock — 63 px and 88 px — and 0 px into the HUD's corner.
+
+- [ ] D34. **The one animation in this shell may never run, and the shot that
+      is named for it would look the same either way.** `Workspaces.qml` puts
+      `Ease on color` on its labels and `03-focus-moved.png` waits
+      `fadeInMs + easeMs` for it — but the Repeater's model is a JS array that
+      `NiriModel` REPLACES wholesale on every delta (it must: a list mutated in
+      place is a list no binding hears about). A Repeater given a new array
+      rebuilds its delegates, and a Behavior does not animate an initial
+      assignment — so the teal may be arriving snapped, in a new Text, with the
+      ease attached to nothing. Not measured, which is the point: nothing in
+      this repo can tell the two apart, because the shot is taken after the
+      ease would have finished either way. What would answer it is a driver
+      that grabs DURING the settle (A31's shape — "the sheet cannot photograph
+      time"), or a model keyed by workspace id so the delegate survives its own
+      desk changing. Raised by D32, which measured the labels and had to think
+      about when they are built.
+
+- [ ] D35. **A monitor narrower than the corner the HUD reserves gets an
+      unbounded row.** `roomPx` negative means "nobody has said" — the right
+      default, since a row that hid labels before its surface had a width would
+      hide them in the first frame of every session — but the surfaces compute
+      `(clock or width - hudReserve) - inset - gap`, which goes negative on an
+      output under ~340 px and reads as the same "nobody has said". There is no
+      such display; the 640 px shot is the narrowest thing anyone has asked
+      about. The fix is a sentinel that is not a number (or a clamp in the
+      surface, which is where the arithmetic is), and the reason it is not done
+      is that both answers want the one shot nobody can take: a picture of a
+      bar on a monitor that does not exist to photograph. Raised by D32.
+
+- [ ] D33. **Two copies of the HUD's box survive D16, and both are outside a
+      shell.** The corner's width is one token now and both shells read it —
+      but `tools/hudshots/scene/tst_{shots,sequence,fit}.qml` still declare
+      `width: 300`, and `tools/hudscreens/sheet.py` still declares
+      `SURFACE_W = 300`. Neither is a drift risk today: `hud_surface_box()`
+      pins all four to the declaration, and that pin is what D16 rewired. The
+      question is whether they should stop being copies. The QML drivers
+      could simply say `Theme.hudCornerPx` — they already import Theme — and
+      the only argument for the literal is that a driver states the box it
+      renders into, which is also the argument for a comment. `sheet.py` is
+      the harder half and probably should NOT change: `shot_surface_box()`
+      reads that file OUT OF GIT to learn what box the committed PNGs were
+      photographed against, and a version of it that read theme.toml would be
+      asking today's identity about yesterday's pictures — the exact
+      confusion `test_the_shot_box_is_read_out_of_git_and_not_the_working_
+      copy` exists to prevent. So: take the three drivers, leave the sheet,
+      and write down why in the place that would otherwise look inconsistent.
+      Raised by D16.
+
 - [ ] D28. **The refusal D11 added is about PATHS, and the question it stands
       in for is about READS.** `tools/dependents.py` already walks the real
       QML imports and can say that `shell/jv-bar/Workspaces.qml` is read by NO

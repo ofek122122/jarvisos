@@ -10,6 +10,7 @@ is in sync with the toml, they check the toml still agrees with the blueprint's
 
 from __future__ import annotations
 
+import dataclasses
 import html
 import json
 import re
@@ -42,6 +43,7 @@ plate_opacity = 0.86
 
 [geometry]
 inset_px = 16
+hud_corner_px = 300
 """
 
 
@@ -219,9 +221,14 @@ def test_one_environment_variable_stills_the_whole_desktop():
     assert gen.MOTION_ENV in (ROOT / "shell" / "jv-hud" / "README.md").read_text("utf-8")
 
 
-# --- D29: the shot harness's stand-in is the same file ---------------------
+# --- D29: a render harness's stand-in is the same file ---------------------
 
+# The one the HUD's contact sheet stages. There are two now (PLAN D20 added the
+# notification corner's), and the sweeps below run over `gen.STANDINS` so a
+# third is a table entry; this name is kept for the tests whose subject is one
+# particular file.
 STUB_MOTION = ROOT / "tools" / "hudshots" / "stub" / "Motion.qml"
+HUD_STANDIN = next(s for s in gen.STANDINS if s.shell == "jv-hud")
 
 
 def qml_code(text: str) -> list[str]:
@@ -250,13 +257,36 @@ def test_the_shots_stand_in_is_the_real_motion_with_three_lines_swapped():
     — for the reason the running HUD would."""
     tokens = gen.load_tokens(MINIMAL)
     real = set(qml_code(gen.render_motion_qml(tokens)))
-    stub = set(qml_code(gen.render_motion_qml(tokens, gen.STUB_MOTION)))
-    assert real - stub == {
-        "import Quickshell",
-        "Singleton {",
-        f'envOverride: Quickshell.env("{gen.MOTION_ENV}") || ""',
-    }
-    assert stub - real == {"QtObject {", 'envOverride: ""'}
+    # EVERY stand-in, not just the HUD's: the claim is about the mechanism, and
+    # a second harness that wandered off the shared body would be exactly the
+    # hand copy D29 removed, re-introduced one table row over.
+    for standin in gen.STANDINS:
+        stub = set(qml_code(gen.render_motion_qml(tokens, gen.standin_motion(standin))))
+        assert real - stub == {
+            "import Quickshell",
+            "Singleton {",
+            f'envOverride: Quickshell.env("{gen.MOTION_ENV}") || ""',
+        }, standin.shell
+        assert stub - real == {"QtObject {", 'envOverride: ""'}, standin.shell
+
+
+def test_every_stand_in_names_the_shell_it_replaces_and_the_script_that_stages_it():
+    """The prose is the only thing that differs between two stand-ins, and it is
+    the only thing telling a reader which file this one is standing in for. A
+    stand-in whose preface named the other harness would send whoever is
+    debugging a sheet to the wrong script."""
+    tokens = gen.load_tokens(MINIMAL)
+    for standin in gen.STANDINS:
+        text = gen.render_motion_qml(tokens, gen.standin_motion(standin))
+        assert f"shell/{standin.shell}/Motion.qml" in text
+        assert standin.script in text
+        assert "@SHELL@" not in text and "@SCRIPT@" not in text
+        # And the script it names exists and stages this exact file, so the
+        # table cannot point at a harness nobody wrote.
+        script = ROOT / standin.script
+        assert script.exists(), standin.script
+        rel = standin.dir.relative_to(ROOT).as_posix()
+        assert rel in script.read_text("utf-8"), f"{standin.script} never stages {rel}"
 
 
 def test_a_new_duration_token_reaches_the_shots_stand_in_too():
@@ -264,8 +294,9 @@ def test_a_new_duration_token_reaches_the_shots_stand_in_too():
     A duration that arrived in the HUD and not in the thing that photographs it
     would make every shot a picture of a shell nobody runs."""
     tokens = gen.load_tokens(MINIMAL.replace("ease_ms = 200", "ease_ms = 200\nslide_ms = 90"))
-    stub = gen.render_motion_qml(tokens, gen.STUB_MOTION)
-    assert "readonly property int slideMs: policy.ms(Theme.slideMs)" in stub
+    for standin in gen.STANDINS:
+        stub = gen.render_motion_qml(tokens, gen.standin_motion(standin))
+        assert "readonly property int slideMs: policy.ms(Theme.slideMs)" in stub, standin.shell
 
 
 def test_the_committed_stand_in_is_what_the_generator_renders():
@@ -273,18 +304,22 @@ def test_the_committed_stand_in_is_what_the_generator_renders():
     `--check` (below) covers it too; this one names it, so a stale stand-in
     fails as itself rather than as a line in a list."""
     rendered = gen.stub_outputs(ROOT / "personality" / "theme.toml")
-    assert rendered[STUB_MOTION] == STUB_MOTION.read_text("utf-8")
+    assert set(rendered) == {s.dir / "Motion.qml" for s in gen.STANDINS}
+    for path, text in rendered.items():
+        assert path.exists(), f"{path} is generated and not committed"
+        assert text == path.read_text("utf-8"), path
 
 
 def test_the_stand_in_imports_no_quickshell_at_all():
     """The whole reason it exists: ONE Quickshell import anywhere in the staged
     tree makes the entire directory unimportable to every engine but
     quickshell's own, and the shots do not have that engine."""
-    text = STUB_MOTION.read_text("utf-8")
-    # In the CODE. The comments name Quickshell freely, and have to: a reader
-    # who does not know why this file is here will delete it.
-    assert not [line for line in qml_code(text) if "Quickshell" in line]
-    assert "DO NOT EDIT" in text, "a stand-in nobody knows is generated gets edited"
+    for standin in gen.STANDINS:
+        text = (standin.dir / "Motion.qml").read_text("utf-8")
+        # In the CODE. The comments name Quickshell freely, and have to: a
+        # reader who does not know why this file is here will delete it.
+        assert not [line for line in qml_code(text) if "Quickshell" in line], standin.shell
+        assert "DO NOT EDIT" in text, "a stand-in nobody knows is generated gets edited"
 
 
 def test_a_build_sandbox_is_never_asked_for_the_stand_in(tmp_path):
@@ -302,18 +337,26 @@ def test_a_build_sandbox_is_never_asked_for_the_stand_in(tmp_path):
     theme = tmp_path / "theme.toml"
     theme.write_text(MINIMAL.replace("ease_ms = 200", "ease_ms = 201"), "utf-8")
     out = tmp_path / "shell"
-    before = STUB_MOTION.read_bytes()
-    try:
-        rc = gen.main(["--shell", "jv-hud", "--theme", str(theme), "--out-dir", str(out)])
-        after = STUB_MOTION.read_bytes()
-    finally:
-        # Put the checkout back before asserting anything: a failing test that
-        # leaves a generated file rewritten is a failure that spreads.
-        STUB_MOTION.write_bytes(before)
-    assert rc == 0
-    assert after == before, "a --out-dir run wrote the stand-in, outside its sandbox"
-    written = sorted(str(q.relative_to(out)) for q in out.rglob("*") if q.is_file())
-    assert written == sorted(gen.outputs(theme, gen.SHELLS["jv-hud"]))
+    # Every stand-in, because every one of them is a shell somebody builds:
+    # pkgs/jv-notify runs this the same way pkgs/jv-hud does (PLAN D20).
+    for standin in gen.STANDINS:
+        path = standin.dir / "Motion.qml"
+        before = path.read_bytes()
+        try:
+            rc = gen.main(
+                ["--shell", standin.shell, "--theme", str(theme), "--out-dir", str(out)]
+            )
+            after = path.read_bytes()
+        finally:
+            # Put the checkout back before asserting anything: a failing test
+            # that leaves a generated file rewritten is a failure that spreads.
+            path.write_bytes(before)
+        assert rc == 0
+        assert after == before, f"a --out-dir run wrote {path}, outside its sandbox"
+        written = sorted(str(q.relative_to(out)) for q in out.rglob("*") if q.is_file())
+        assert written == sorted(gen.outputs(theme, gen.SHELLS[standin.shell]))
+        for q in sorted(out.rglob("*"), key=lambda q: -len(q.parts)):
+            q.unlink() if q.is_file() else q.rmdir()
 
 
 def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeypatch):
@@ -325,24 +368,42 @@ def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeyp
     `--shell jv-hud` — which would have rewritten the HUD's Motion and left the
     sheet's behind, the exact drift D29 closed, reopened one level up.
 
-    Both halves are the claim. The HUD's run emits it, because that is the file
-    it stands in for; another shell's run does not, because a stand-in rewritten
-    by a run that has nothing to do with it is a surprise in someone else's diff.
-    Patching the two output roots keeps this out of the checkout entirely.
+    Both halves are the claim. A shell's run emits its own, because that is the
+    file it stands in for; it does not emit another shell's, because a stand-in
+    rewritten by a run that has nothing to do with it is a surprise in someone
+    else's diff. Patching the two output roots keeps this out of the checkout
+    entirely.
+
+    There used to be a third half — jv-bar, which carried no stand-in at all and
+    so had to write none of them. D13 gave it one, so every shell carries one
+    now and the "none" case has no example left. What is checked instead is the
+    count: three harnesses for three shells, so a fourth stand-in is a
+    deliberate edit here rather than a table that grew unnoticed.
     """
+    assert {s.shell for s in gen.STANDINS} == set(gen.SHELLS), (
+        "every shell this generator writes is photographed by a harness that "
+        "stages a stand-in Motion over it, and the table no longer says so"
+    )
     monkeypatch.setattr(gen, "SHELL_DIR", tmp_path / "shell")
-    monkeypatch.setattr(gen, "STUB_DIR", tmp_path / "stub")
+    moved = tuple(
+        dataclasses.replace(s, dir=tmp_path / "standin" / s.shell) for s in gen.STANDINS
+    )
+    monkeypatch.setattr(gen, "STANDINS", moved)
     theme = tmp_path / "theme.toml"
     theme.write_text(MINIMAL, "utf-8")
-    stub = tmp_path / "stub" / "Motion.qml"
 
-    assert gen.main(["--shell", "jv-bar", "--theme", str(theme)]) == 0
-    assert not stub.exists(), "another shell's run wrote the HUD's stand-in"
-
-    assert gen.main(["--shell", "jv-hud", "--theme", str(theme)]) == 0
-    assert stub.read_text("utf-8") == gen.render_motion_qml(
-        gen.load_tokens(MINIMAL), gen.STUB_MOTION
-    )
+    # Each shell writes its own stand-in and nobody else's.
+    for mine in moved:
+        assert gen.main(["--shell", mine.shell, "--theme", str(theme)]) == 0
+        assert (mine.dir / "Motion.qml").read_text("utf-8") == gen.render_motion_qml(
+            gen.load_tokens(MINIMAL), gen.standin_motion(mine)
+        )
+        for other in moved:
+            if other.shell != mine.shell:
+                assert not (other.dir / "Motion.qml").exists(), (
+                    f"{mine.shell}'s run wrote {other.shell}'s stand-in"
+                )
+        (mine.dir / "Motion.qml").unlink()
 
 
 # Every QML animation type. If one of these appears in a shell's file, that
@@ -1074,39 +1135,75 @@ def test_the_notifier_declares_no_capability_its_pixels_do_not_have():
         )
 
 
+def theme_tokens() -> dict[str, dict[str, object]]:
+    """personality/theme.toml, through the generator's own loader."""
+    return gen.load_tokens((ROOT / "personality" / "theme.toml").read_text("utf-8"))
+
+
+def hud_surface_box() -> tuple[int, int]:
+    """shell/jv-hud/shell.qml's surface box in px, with its WIDTH resolved.
+
+    The width is not a literal any more (PLAN D16): it is
+    `Theme.hudCornerPx`, i.e. `geometry.hud_corner_px`, because jv-bar has to
+    leave exactly that much of its strip empty and cannot ask another process
+    how wide it is. Every gate that measures against the HUD's box goes
+    through here, so a harness copy is still pinned to the shell's box and the
+    shell's box is pinned to the one declaration — and a gate that went back
+    to matching a run of digits after `implicitWidth:` would be pinning a
+    number the shell no longer contains, which a regex reports as `None`
+    rather than as a failure.
+
+    The height IS a literal, and that asymmetry is the point: the width is a
+    declared choice about how much of the corner Jarvis takes, the height is
+    the measured total of the crowded stack (tst_fit.qml), so it has no
+    business in a versioned identity file.
+    """
+    hud = strip_qml_comments((ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8"))
+    width = re.search(r"^\s*implicitWidth:\s*(.+)$", hud, re.M)
+    height = re.search(r"^\s*implicitHeight:\s*(\d+)\s*$", hud, re.M)
+    assert width and height, "shell/jv-hud/shell.qml no longer declares a fixed surface box"
+    assert width.group(1).strip() == "Theme.hudCornerPx", (
+        "the HUD's surface width should be the one declared corner, "
+        f"`Theme.hudCornerPx`; shell.qml says {width.group(1).strip()!r}"
+    )
+    return int(theme_tokens()["geometry"]["hud_corner_px"]), int(height.group(1))
+
+
 def test_the_bar_leaves_the_corner_the_hud_draws_in():
     """Two processes, two layers, one corner — and nothing can see the clash.
 
     The HUD sets `ExclusionMode.Ignore`, so it is NOT pushed down by the bar:
     its plates are drawn over the top-right of the bar's strip. Neither
     surface can detect the other (different process, different layer), so the
-    only thing keeping them apart is the number the bar reserves — and that
-    number is a copy of the HUD's box, in a file that cannot see it.
+    only thing keeping them apart is the width the bar reserves.
 
-    So this is the third party that reads both: the reserve has to cover the
-    HUD's own `implicitWidth` plus the §06 inset the HUD sits in. Grow the
-    HUD's corner and this fails, instead of a plate landing on the clock.
+    That width used to be a COPY of the HUD's box, typed into a file that
+    cannot see it, and this gate was the honest floor under the copy: it read
+    both and failed if the HUD outgrew the reserve. D16 removed the copy —
+    both shells now read `geometry.hud_corner_px` — so what is left to check
+    is that they still do, and that neither has quietly gone back to a
+    number. The arithmetic is checked too, because `+ Theme.insetPx` is the
+    half the token cannot carry: the HUD sits that far off the edge, so a
+    reserve of the bare corner would leave a plate over the last inset.
     """
-    hud = (ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8")
-    box = re.search(r"^\s*implicitWidth:\s*(\d+)", hud, re.M)
-    assert box, "shell/jv-hud/shell.qml no longer declares a fixed surface box"
-    inset = gen.load_tokens((ROOT / "personality" / "theme.toml").read_text("utf-8"))
-    inset = inset["geometry"]["inset_px"]
+    corner, _ = hud_surface_box()
+    inset = int(theme_tokens()["geometry"]["inset_px"])
 
     bar = strip_qml_comments((ROOT / "shell" / "jv-bar" / "shell.qml").read_text("utf-8"))
     reserve = re.search(r"property\s+int\s+hudReservePx:\s*(.+)$", bar, re.M)
     assert reserve, "shell/jv-bar/shell.qml no longer reserves the HUD's corner"
-    # The expression is arithmetic over integers and a token name; evaluate the
-    # literal part and require the token to be the inset it claims to be.
-    assert re.fullmatch(r"\d+\s*\+\s*Theme\.insetPx", reserve.group(1).strip()), (
-        "the reserve should read as `<the HUD's box> + Theme.insetPx`, so the "
-        f"§06 inset is spent rather than retyped; got {reserve.group(1)!r}"
+    assert reserve.group(1).strip() == "Theme.hudCornerPx + Theme.insetPx", (
+        "the reserve should read as `Theme.hudCornerPx + Theme.insetPx`, so "
+        "the HUD's corner and the §06 inset are both spent rather than "
+        f"retyped; got {reserve.group(1).strip()!r}"
     )
-    reserved = int(reserve.group(1).split("+")[0].strip()) + int(inset)
-    assert reserved >= int(box.group(1)) + int(inset), (
-        f"the bar reserves {reserved} px for the HUD, whose surface is "
-        f"{box.group(1)} px wide and sits {inset} px off the edge. The HUD "
-        f"would be drawn over the bar's own content."
+    # The two are now the same token by inspection, so there is no inequality
+    # left to check — what there is instead is a number worth being able to
+    # read off a failure, and a sanity floor on it: a corner narrower than the
+    # inset it sits in would be a HUD that is all margin.
+    assert corner > inset > 0, (
+        f"the HUD's corner is {corner} px and the §06 inset it sits in is "
+        f"{inset} px; the bar reserves {corner + inset} px for the pair"
     )
 
 
