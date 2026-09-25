@@ -785,25 +785,85 @@ human-reviewed step.
       a file that declares nothing — a trick, and a trick that the next
       alphabetical file would quietly inherit. Raised by D38.
 
-- [ ] D41. **Two of the three shells' `shell.qml` are never LOADED by
-      anything.** D39 closed the gap for the HUD, and in doing so measured
-      what it is: `ops/ralph/hudscreens.sh` is the only gate in this repo
-      that runs a real quickshell, and `shell/jv-hud/shell.qml` is the only
-      `shell.qml` any engine ever opens. The bar's and the notifier's are
-      qmllint-clean and nothing more — every shot harness deletes `shell.qml`
-      from its stage on purpose, because ShellRoot, PanelWindow and the
-      layer-shell attached properties cannot resolve outside quickshell's own
-      binary. So the two surfaces that reserve screen space and take D2's
-      D-Bus name have their outermost file held only by a linter, and the
-      D34/D39 shape — a `var` binding that throws and leaves the surface
-      plausible — is exactly what a linter cannot see.
-      The honest options, in rising price: (a) a probe-only run per shell —
-      the same headless sway, one quickshell, `Configuration Loaded`, and the
-      D39 scan, with no pictures and none of the 97.7 s idle probe, which is
-      most of what `hudscreens.sh` costs; (b) a full `barscreens.sh` /
-      `notifyscreens.sh` with their own sheets, which doubles the number of
-      3m00s gates nobody runs unattended. (a) is a verdict a gate could
-      collect and is probably the whole item. Raised by D39.
+- [x] D41. **Two of the three shells' `shell.qml` are never LOADED by
+      anything.** (Done: `ops/ralph/shellload.sh` + `tools/shellload/` +
+      `tools/tests/test_shellload.py`, option (a) exactly — one headless sway,
+      one real quickshell per shell, a wait on quickshell's own `Configuration
+      Loaded`, and the D39 scan per shell with its own `--prefix`. No pictures,
+      no sheet, none of the 97.7 s idle probe. **25 s**, so unlike
+      `hudscreens.sh` it is a verdict `verify.sh` collects: the third
+      `DeclaredGate`, `runs_here=True`.
+      **THE INSTRUMENT IS LIVE, PROVED BY INJECTION** rather than by reading
+      the code, three times. `property var injectedFault:
+      modelData.noSuchThing.count` on the bar's PanelWindow and on the
+      notifier's — the D34 shape, invisible to qmllint, so `nix build` was
+      GREEN for both — and the gate ends 1 naming `shell/jv-bar/shell.qml:83`
+      and `shell/jv-notify/Toast.qml:51`, three times each, once per monitor.
+      The third injection is the one that matters most: it was in `Toast.qml`,
+      which only exists on screen because the gate SENDS a notification, so it
+      proves the wake is doing real work.
+      **AND THE BUS WAS THE MEASUREMENT NOBODY EXPECTED.** Run without
+      `DBUS_SESSION_BUS_ADDRESS` replaced, `jv-notify` reaches the USER'S OWN
+      live session bus and races the real notification daemon for
+      `org.freedesktop.Notifications` — observed, as "presumably because one is
+      already registered". Had it won, a gate would have taken over the
+      notifications of the desktop it was running inside. So the run starts its
+      own `dbus-daemon` with a config that has NO `<servicedir>`: the first
+      version used `dbus-run-session`, which inherits the machine's service
+      directories and started four xdg portals and a keyring inside a gate
+      about three QML files.
+      **AND THE NOTIFIER NOW HAS A REAL CLIENT, which is D22's first half.**
+      `tools/shellload/load.py` asks the running daemon `GetCapabilities` over
+      the private bus and gets exactly `['body']` — the honesty declaration in
+      `Notifications.qml` surviving into the bus name, and a test holds the two
+      halves equal — then `Notify` returns id 1. Nothing in this repo had ever
+      proved that name was claimed or that it answered.)
+
+- [ ] D43. **The load probe evaluates almost none of the HUD's or the bar's
+      QML, and it is measured rather than feared.** `shellload.sh` runs the HUD
+      with no jarvisd (every plate unmapped, `Bus` blind) and the bar with no
+      niri (`linkUp` false, the workspaces row builds no delegates), so what it
+      covers for those two is the outermost file, the per-screen `Variants`
+      delegate, and every binding evaluated whatever the state — which is where
+      D34's and D39's faults both were, and is not the whole shell. The
+      notifier has a real client and is therefore the one shell whose PLATE is
+      covered; the proof is the third injection above. The HUD's half is cheap
+      and should be taken: `jarvisd` is a Rust binary that starts in
+      milliseconds and `harness/replay.py` already puts a recorded turn on a
+      bus, so one broker plus one `--instant` replay would light the plates and
+      bring every plate binding under the scan for a second or two of run time.
+      The bar's half has no cheap answer at all — `JV_BAR_NIRI` is `--set` into
+      the wrapper, so it cannot be pointed at a fake stream without staging the
+      shell, which is the one thing this gate refuses. Raised by D41.
+
+- [ ] D44. **"It loaded" is not "it mapped", and nothing asks the second
+      question for two of the three shells.** `Configuration Loaded` is
+      quickshell saying the root component built; a `PanelWindow` whose
+      layer-shell attached properties failed to attach would still get that
+      line, and `hudscreens.sh` is the only thing that ever looks at a surface
+      (through `grim`, for the HUD alone). There is a cheap verdict available
+      for the bar specifically, and it is the exact inverse of the check
+      `shoot.py` already makes: the bar sets `exclusionMode: ExclusionMode.
+      Normal` and `exclusiveZone: implicitHeight`, so sway's usable area on
+      every output must be SHORTER than the monitor by exactly the strip's
+      height — one `swaymsg -t get_workspaces`, no screenshot. That is the
+      strongest thing anybody could assert about the bar without a picture, and
+      it would have caught a bar that silently stopped reserving its strip.
+      The notifier and the HUD both set `ExclusionMode.Ignore`, so the same IPC
+      call is their assertion too, in the other direction. Raised by D41.
+
+- [ ] D42. **`Proc` exists twice now.** `tools/hudscreens/shoot.py` and
+      `tools/shellload/load.py` both hold a small class that starts a process,
+      redirects it to a file and waits for a line in it — the second is the
+      first without the log-offset machinery the frame counter needs. Two
+      copies is a coincidence and three would be a pattern; the reason it was
+      not extracted with D41 is that `shoot.py` is a declared read of a
+      3-minute gate, so touching it to move thirty lines would bind that gate
+      to a refactor. The right shape is probably `tools/qmlproc.py` beside
+      `tools/qmlerrors.py`, taken when something needs the third copy — and the
+      `wait_for` semantics are the part worth sharing, because both files got
+      "a process that EXITED is reported as itself rather than waited out"
+      right for the same reason. Raised by D41.
 
 - [ ] D35. **A monitor narrower than the corner the HUD reserves gets an
       unbounded row.** `roomPx` negative means "nobody has said" — the right

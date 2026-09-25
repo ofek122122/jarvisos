@@ -12921,3 +12921,98 @@ is not worth chasing.)
   the 97.7 s idle probe that is most of what `hudscreens.sh` costs. Then
   **D33** (the last copies of the HUD's box) and **D17** (the strip's empty
   right half, the first Track D item that wants a real SOURCE).
+
+## 2026-09-26 — iteration 131 — two of the three shells had never been
+## opened by an engine, only by a linter
+
+- built: **`ops/ralph/shellload.sh`** + `tools/shellload/{shells,load}.py` +
+  `tools/tests/test_shellload.py` — a gate that LOADS all three shells under a
+  real quickshell on a headless compositor and refuses a run whose QML threw
+  (PLAN D41, option (a) exactly). One sway, three quickshells, a wait on
+  quickshell's own `Configuration Loaded`, and `tools/qmlerrors.py` over what
+  each of them said, once per shell with its own `--prefix`.
+- **WHY IT HAD TO EXIST, and D39 is the iteration that could measure it.**
+  `ops/ralph/hudscreens.sh` was the only gate in this repo that ran a real
+  quickshell, so `shell/jv-hud/shell.qml` was the only `shell.qml` any engine
+  had ever opened. The bar's and the notifier's were qmllint-clean and nothing
+  more — every shot harness DELETES `shell.qml` from its stage on purpose,
+  because ShellRoot, PanelWindow and the layer-shell attached properties cannot
+  resolve outside quickshell's own binary. So the two surfaces that reserve
+  screen space and take this machine's `org.freedesktop.Notifications` name had
+  their outermost file held by a linter alone, and the D34/D39 shape — a `var`
+  binding that throws and leaves the surface plausible — is exactly what a
+  linter cannot see.
+- **THE INSTRUMENT IS LIVE, PROVED BY INJECTION THREE TIMES**, not by reading
+  the code. `property var injectedFault: modelData.noSuchThing.count` on the
+  bar's PanelWindow and on the notifier's — the D34 shape, invisible to
+  qmllint, so `nix build` was GREEN for both derivations — and the gate ends 1,
+  naming `shell/jv-bar/shell.qml:83` and `shell/jv-notify/shell.qml:80`, three
+  times each, once per monitor. The third injection is the one that earns its
+  keep: `root.toast.noSuchThing.count` inside **`Toast.qml`**, which only exists
+  on screen because this gate SENDS a notification — caught as
+  `shell/jv-notify/Toast.qml:51`, three times, which proves the wake is doing
+  real work and not decorating the log.
+- **THE SHARPEST THING IT MEASURED IS ABOUT THE BUS, and nobody predicted it.**
+  Run without `DBUS_SESSION_BUS_ADDRESS` replaced, `jv-notify` reaches the
+  USER'S OWN live session bus and races the real notification daemon for
+  `org.freedesktop.Notifications`. The observed line was `Could not register
+  notification server at org.freedesktop.Notifications, presumably because one
+  is already registered` — a harness losing a race it must never have been in,
+  and had it WON, a test gate would have taken over the notifications of the
+  desktop it was running inside. So the run starts its own `dbus-daemon`, and
+  with a config that has **no `<servicedir>`**: the first version used
+  `dbus-run-session`, which inherits the machine's service directories and duly
+  started xdg-desktop-portal, -gnome, -gtk and gnome-keyring inside a gate about
+  three QML files — none of them from this flake, all of them noise in the log
+  being scanned.
+- **AND THE NOTIFIER NOW HAS A REAL CLIENT, which is the first half of D22.**
+  `load.py` asks the running daemon `GetCapabilities` over the private bus and
+  gets exactly `['body']` — `Notifications.qml`'s honesty declaration surviving
+  into the bus name, with `actions` refused because the corner's input region is
+  empty — then `Notify` comes back with id 1. A test holds the two halves equal
+  by reading the QML's own flags, and another insists exactly one of them is
+  `true`. Nothing in this repo had ever proved that name was claimed, or that it
+  answered anybody.
+- **THE PRICE IS WHY IT IS A SECOND GATE RATHER THAN A FLAG ON THE FIRST.**
+  25.4 s, measured, against `hudscreens.sh`'s 3m15s — of which 97.7 s is an
+  idle probe holding still and the output is a directory of pictures somebody
+  has to look at. B75 asked whether there was a cheaper, bindable half of that
+  harness and answered no for the harness; this is the yes for the one question
+  that is a verdict. Third `DeclaredGate` in `tools/dependents.py`,
+  `runs_here=True`, so `verify.sh` runs it like any other step.
+- what it is NOT, written into the script's header and pinned by tests, because
+  every one of these is a limit somebody will otherwise read as coverage: not a
+  picture (nothing here looks at a pixel); the HUD runs with no jarvisd and the
+  bar with no niri, so for those two it covers the outermost file, the
+  per-screen delegate and the bindings evaluated whatever the state — which is
+  where D34's and D39's faults both were, and is not the whole shell (D43).
+  `shellload.sh` deliberately does NOT declare `services/jarvisd`: nothing here
+  starts a broker, so the bus cannot move this verdict.
+- the staging rule is the one `hudscreens.sh` already lives by and is worth
+  restating: the string `shell/` may not appear in any line this script
+  EXECUTES. The three roots live in `shells.py`, so the report can still name a
+  file a reader can open, and a `cp` out of the working tree — the natural fix
+  for a stubborn run — cannot be written here without failing a test.
+- also: the monitor list is stated in `shells.py` and held equal to
+  `sheet.OUTPUTS` by a test that reads both, rather than imported; an import
+  would have made every edit to the screen sheet's noise floor wake this gate.
+  Three outputs is the load-bearing part rather than the sizes — all three
+  shells build one surface per `Quickshell.screens` entry, so a one-output run
+  loads one delegate and calls it a shell.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 10 paths (tools **654
+  pass**, 35 of them new — 31 test functions, one of them parametrised five
+  ways; `shellload.sh` itself 25.4 s, all three shells clean). The gate was additionally run twice with faults injected (exit 1 both
+  times, naming all three injected lines) and the injections reverted. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/shells.py,
+  tools/shellload/load.py, tools/tests/test_shellload.py, tools/dependents.py,
+  tools/verify.py, tools/tests/test_qmlerrors.py (the scanner is read by two
+  gates now, not one), tools/tests/test_verify.py (the gate count, 10 -> 11),
+  ops/ralph/README.md, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D43**, the cheap half of what this gate cannot see — a `jarvisd` plus
+  one `--instant` replay would bring every HUD plate binding under the scan for
+  a second of run time, and the bar has no equivalent because `JV_BAR_NIRI` is
+  `--set` into its wrapper. Then **D44** ("it loaded" is not "it mapped": the
+  bar's exclusive zone is a verdict one `swaymsg -t get_workspaces` away, and
+  nothing has ever asked it), and **D33** (the last copies of the HUD's box).

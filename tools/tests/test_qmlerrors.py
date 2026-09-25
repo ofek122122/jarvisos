@@ -586,9 +586,16 @@ def test_the_real_hud_gate_hands_every_shells_log_to_this():
     assert "--prefix" in text, "the report would name paths relative to a store path"
 
 
-def test_the_real_hud_gate_declares_that_it_reads_this_scanner():
-    """It is a DECLARED gate — what it reads is a derivation, not an import
-    graph — so nothing can derive that it now opens a Python file. The
-    declaration is what makes a change to this scanner say so."""
+def test_every_gate_that_runs_a_real_quickshell_declares_that_it_reads_this():
+    """They are DECLARED gates — what they read is a derivation, not an import
+    graph — so nothing can derive that either now opens a Python file. The
+    declaration is what makes a change to this scanner say so.
+
+    Two of them since D41: `hudscreens.sh` photographs the HUD and
+    `shellload.sh` loads all three shells, and they are the only things in this
+    repo that ever run quickshell at all. A third would be a third
+    declaration."""
     got = dict(dependents.declared_readers(ROOT, ["tools/qmlerrors.py"]))
-    assert [g.script for g in got] == [HUDSCREENS], got
+    assert sorted(g.script for g in got) == sorted(
+        [HUDSCREENS, "ops/ralph/shellload.sh"]
+    ), got

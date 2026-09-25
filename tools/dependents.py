@@ -42,12 +42,14 @@ finds it two ways — the directories `import "..."` puts on the path, and the
 walks them, from the drivers outward, and a `core/` element three types below
 the contact sheet is reached.
 
-AND THE TWO GATES THAT ARE A NIX EVALUATION (B72). `ops/ralph/nixtest.sh` and
-`ops/ralph/hudscreens.sh` read `.#nixosConfigurations.ares` and `.#jv-hud` —
-flake attributes, not paths, so there is no syntax to walk. Those two are
-DECLARED, in `DECLARED_GATES`, and the declaration is checked against the
-`# reads:` header of the script it describes. One of them is not run for you,
-and says so where the plan is printed rather than being left out in silence.
+AND THE THREE GATES THAT ARE A NIX EVALUATION (B72, D41).
+`ops/ralph/nixtest.sh` reads `.#nixosConfigurations.ares`,
+`ops/ralph/hudscreens.sh` reads `.#jv-hud`, and `ops/ralph/shellload.sh` reads
+all three shell derivations — flake attributes, not paths, so there is no
+syntax to walk. Those three are DECLARED, in `DECLARED_GATES`, and the
+declaration is checked against the `# reads:` header of the script it
+describes. One of them is not run for you, and says so where the plan is
+printed rather than being left out in silence.
 
 AND THE GATES THEMSELVES (B73). Every rule above walks from a suite OUTWARD
 to the sources it reads, and none of them can walk to the script that does the
@@ -812,16 +814,19 @@ def qml_readers(
 
 # --------------------------------------------------------- declared gates
 #
-# Two gates are neither Python, nor QML, nor Rust, and nothing above can find
-# either, because what they read is a NIX EVALUATION (PLAN B72).
+# Three gates are neither Python, nor QML, nor Rust, and nothing above can find
+# any of them, because what they read is a NIX EVALUATION (PLAN B72, D41).
 # `ops/ralph/nixtest.sh` asserts what a module OPTION does to the unit text
 # ares is handed — its subject is the flake attribute
 # `.#nixosConfigurations.ares`, and an attribute is not a path that any syntax
 # tree names. `ops/ralph/hudscreens.sh` is the same shape one level further
 # out: it photographs the REAL `.#jv-hud` through a real compositor, so what
 # it reads is a derivation and not a set of QML imports.
+# `ops/ralph/shellload.sh` is that again for all three shells at once: it LOADS
+# `.#jv-hud`, `.#jv-bar` and `.#jv-notify` under a real quickshell and refuses
+# a run whose QML threw, which is the only gate two of those three files have.
 #
-# So these two are DECLARED rather than derived — and a declaration that
+# So these three are DECLARED rather than derived — and a declaration that
 # nothing checks is the prose that had already failed once (B68), so it is
 # checked twice: every path must exist, and the SCRIPT must say the same list
 # in its own `# reads:` header. `test_dependents.py` holds both, which is what
@@ -895,6 +900,43 @@ DECLARED_GATES = (
             "3m00s, a compositor, and a sheet of pictures for a human — "
             "run it yourself, look at the shots, commit them"
         ),
+    ),
+    DeclaredGate(
+        script="ops/ralph/shellload.sh",
+        # The three shells, as the derivations that build them — and this one
+        # IS a step (PLAN D41). It is the cheap half B75 asked `hudscreens.sh`
+        # for: one headless sway, one real quickshell per shell, a wait on
+        # `Configuration Loaded` and the D39 scan of what each one said. 25 s,
+        # no screenshots, no sheet to rewrite, and a verdict at the end — so
+        # unlike its sibling above there is nothing here a gate cannot collect.
+        #
+        # What it buys that nothing else does: the bar's and the notifier's
+        # `shell.qml` are never LOADED by any other gate in this repo. Every
+        # shot harness deletes `shell.qml` from its stage, because ShellRoot
+        # and the layer-shell attached properties cannot resolve outside
+        # quickshell's own binary — so those two files were held by qmllint
+        # alone, and a `var` binding that throws is invisible to a linter.
+        reads=(
+            "flake.lock",
+            "flake.nix",
+            # The generated Theme.qml in each shell is checked against this at
+            # build time, and a token that moved is a binding that re-evaluates.
+            "personality/theme.toml",
+            "pkgs/jv-bar",
+            "pkgs/jv-hud",
+            "pkgs/jv-notify",
+            "shell/jv-bar",
+            "shell/jv-hud",
+            "shell/jv-notify",
+            # The scanner that turns a loaded shell into a verdict. Without it
+            # this gate reports that three shells started, which is not the
+            # question it was written for.
+            "tools/qmlerrors.py",
+            "tools/shellload",
+        ),
+        # NOT `services/jarvisd`: nothing here starts a broker, so the HUD runs
+        # blind and a change to the bus cannot move this verdict. Binding it
+        # would spend these seconds on every Rust edit to learn that.
     ),
 )
 
@@ -1025,7 +1067,7 @@ def _report(
     lines += _skipped(skipped)
     lines += [
         "",
-        "(Python, QML, and the two nix gates that are declared. Rust is not read:",
+        "(Python, QML, and the three gates that are declared. Rust is not read:",
         " a change under services/jarvisd or services/jv-act is",
         " `bash ops/ralph/cargotest.sh <crate>`, always.)",
     ]

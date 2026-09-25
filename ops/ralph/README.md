@@ -33,6 +33,7 @@ bash ops/ralph/qmltest.sh             # the HUD's QML, headless
 bash ops/ralph/bartest.sh             # the bar's QML, headless
 bash ops/ralph/notifytest.sh          # the notifier's QML, headless
 bash ops/ralph/nixtest.sh             # the flake's own options -> the units ares gets
+bash ops/ralph/shellload.sh           # all three shells LOADED by a real quickshell
 bash ops/ralph/hudscreens.sh          # the HUD photographed through a real compositor
 ```
 
@@ -78,14 +79,16 @@ re-measured. Under the gate `runtests.sh` keeps its notice to itself
 (`RALPH_GATE=1`) — it would otherwise urge the reader, once per step, to run
 the suites the gate is running.
 
-The last two gates are neither Python, QML nor Rust: what they read is a nix
-EVALUATION (B72). `nixtest.sh` asserts what a module option does to the unit
-text ares gets — subject `.#nixosConfigurations.ares` — and `hudscreens.sh`
-photographs the real `.#jv-hud`; a flake attribute names no path, so both are
+The last three gates are neither Python, QML nor Rust: what they read is a nix
+EVALUATION (B72, D41). `nixtest.sh` asserts what a module option does to the
+unit text ares gets — subject `.#nixosConfigurations.ares` — `hudscreens.sh`
+photographs the real `.#jv-hud`, and `shellload.sh` LOADS all three shells;
+a flake attribute names no path, so all three are
 DECLARED, in `DECLARED_GATES`, against a `# reads:` header each script carries
 about itself, which `test_dependents.py` holds equal. `nixtest.sh` is then a
 step like any other (22 s, whenever `modules/`, `hosts/ares/`, `pkgs/`, `nix/`
-or the flake itself moves). `hudscreens.sh` is deliberately NOT one: it runs
+or the flake itself moves), and so is `shellload.sh` (25 s, whenever any shell,
+its package or the theme moves). `hudscreens.sh` is deliberately NOT one: it runs
 here fine — 3m00s, measured — but it boots a compositor and what it produces
 is seven photographs for a human rather than a verdict to collect. B74 took
 away the other half of that argument (a run that changed nothing now restores
@@ -97,6 +100,23 @@ bindable. It would not: the run books its own phases now, and 144.8 s of the
 NAMED on every verdict instead, green or red, beside the paths that asked for
 it, because a list of the gates that read your change which silently drops one
 reads as coverage.
+
+`shellload.sh` (D41) is the part of that question which DID have a cheap
+answer, and it is a different gate rather than a flag on the old one. Until it,
+`hudscreens.sh` was the only thing in this repo that ran a real quickshell, so
+`shell/jv-hud/shell.qml` was the only `shell.qml` any engine ever opened: every
+shot harness deletes `shell.qml` from its stage on purpose, because ShellRoot
+and the layer-shell attached properties cannot resolve outside quickshell's own
+binary. The bar's and the notifier's outermost file were held by qmllint alone
+— and a `var` binding that throws is invisible to a linter, which is D34's and
+D39's whole shape. So: one headless sway, one real quickshell per shell, a wait
+on quickshell's own `Configuration Loaded`, and `tools/qmlerrors.py` over what
+each said. 25 s, no screenshots, nothing to commit afterwards. It is not a
+picture and says nothing about a pixel; what it covers is the outermost file,
+the per-screen delegate and every binding evaluated whatever the state, because
+the HUD runs there with no jarvisd and the bar with no niri. The notifier is
+the exception and gets a real D-Bus client — which is also the first thing here
+ever to prove that name is claimed and answers.
 
 ## Grading the tests themselves
 Every journal entry claims a number like "six mutations, six caught" — the
