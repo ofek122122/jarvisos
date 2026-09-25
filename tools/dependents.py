@@ -42,6 +42,13 @@ finds it two ways — the directories `import "..."` puts on the path, and the
 walks them, from the drivers outward, and a `core/` element three types below
 the contact sheet is reached.
 
+AND THE TWO GATES THAT ARE A NIX EVALUATION (B72). `ops/ralph/nixtest.sh` and
+`ops/ralph/hudscreens.sh` read `.#nixosConfigurations.ares` and `.#jv-hud` —
+flake attributes, not paths, so there is no syntax to walk. Those two are
+DECLARED, in `DECLARED_GATES`, and the declaration is checked against the
+`# reads:` header of the script it describes. One of them is not run for you,
+and says so where the plan is printed rather than being left out in silence.
+
 WHAT IT STILL CANNOT SEE. Rust. `services/jarvisd` and `services/jv-act` are
 crates; their tests live inside the source they test and `cargotest.sh` takes
 a crate name, so there is nothing to derive. That is printed as a standing
@@ -683,6 +690,131 @@ def qml_readers(
     return out
 
 
+# --------------------------------------------------------- declared gates
+#
+# Two gates are neither Python, nor QML, nor Rust, and nothing above can find
+# either, because what they read is a NIX EVALUATION (PLAN B72).
+# `ops/ralph/nixtest.sh` asserts what a module OPTION does to the unit text
+# ares is handed — its subject is the flake attribute
+# `.#nixosConfigurations.ares`, and an attribute is not a path that any syntax
+# tree names. `ops/ralph/hudscreens.sh` is the same shape one level further
+# out: it photographs the REAL `.#jv-hud` through a real compositor, so what
+# it reads is a derivation and not a set of QML imports.
+#
+# So these two are DECLARED rather than derived — and a declaration that
+# nothing checks is the prose that had already failed once (B68), so it is
+# checked twice: every path must exist, and the SCRIPT must say the same list
+# in its own `# reads:` header. `test_dependents.py` holds both, which is what
+# it already does for the staging `hudshots.sh` performs.
+#
+# Nothing here is a licence to declare a gate that could have been derived. A
+# suite that reads a path in Python, or a QML gate reachable from a driver, is
+# found by the rules above and must not be written down.
+
+
+@dataclasses.dataclass(frozen=True)
+class DeclaredGate:
+    """One gate whose read-set is stated rather than worked out.
+
+    `reads` are path prefixes, tested the way everything else here is tested:
+    a changed path is read when the gate names it or a directory above it.
+
+    `runs_here` is the honest half. The loop's gate binds what it plans — it
+    RUNS every step — so a gate that must not be run unattended cannot simply
+    be planned, and the alternative is not silence: `note` says why, and is
+    printed beside the paths that asked for it, so a green verdict never
+    stands where a gate was skipped without saying so.
+    """
+
+    script: str
+    reads: tuple[str, ...]
+    runs_here: bool = True
+    note: str = ""
+
+
+DECLARED_GATES = (
+    DeclaredGate(
+        script="ops/ralph/nixtest.sh",
+        # The whole flake, because the whole flake is what an ares evaluation
+        # reads: `flake.nix` assembles the configuration out of `hosts/ares`,
+        # `modules`, `pkgs` and `nix`, and `flake.lock` decides which nixpkgs
+        # every one of those is evaluated against. Not `services`: a service's
+        # source changes the store path inside an ExecStart and nothing this
+        # gate asserts, and paying 22 s on every Python edit to learn that
+        # would be the noise that gets a gate switched off.
+        reads=("flake.lock", "flake.nix", "hosts/ares", "modules", "nix", "pkgs"),
+    ),
+    DeclaredGate(
+        script="ops/ralph/hudscreens.sh",
+        # Everything the pictures are OF. The flake is in the list on the
+        # script's own argument: it realizes sway and Qt out of the pinned
+        # nixpkgs, because a sheet rendered against a different Qt is a
+        # picture of a different machine.
+        reads=(
+            "docs/hud/screens",
+            "flake.lock",
+            "flake.nix",
+            "personality/theme.toml",
+            "pkgs/jv-hud",
+            "services/jarvisd",
+            "shell/jv-hud",
+            "tools/hudscreens",
+        ),
+        runs_here=False,
+        note=(
+            "2m25s, a compositor, and it REWRITES docs/hud/screens/ — "
+            "run it yourself, look at the shots, commit them"
+        ),
+    ),
+)
+
+
+def declared_readers(
+    root: Path,
+    paths: Iterable[str],
+    *,
+    exclude: Iterable[str] = (),
+) -> list[tuple[DeclaredGate, list[str]]]:
+    """Every declared gate that reads `paths`, in declaration order.
+
+    Both kinds, runnable or not: a caller that wants one asks for one. The
+    existence of the script is checked the same way the QML gates check it —
+    a gate whose script is not in this repo is not offered, because a command
+    that cannot run is worse advice than none.
+
+    The script counts as part of its own read-set, and that is implicit rather
+    than declared: editing a gate is the change most likely to break it, and a
+    `# reads:` header that had to name itself would be stating a rule instead
+    of a subject. This iteration is the case in point — B72 rewrote the header
+    of `nixtest.sh` and without this nothing would have run it.
+    """
+    skip = set(exclude)
+    want = sorted({rel for given in paths for rel in _expand(root, given)})
+    out: list[tuple[DeclaredGate, list[str]]] = []
+    for gate in DECLARED_GATES:
+        if gate.script in skip or not (root / gate.script).is_file():
+            continue
+        hit = [p for p in want if is_read((*gate.reads, gate.script), p)]
+        if hit:
+            out.append((gate, hit))
+    return out
+
+
+def unrun(
+    root: Path,
+    paths: Iterable[str],
+    *,
+    exclude: Iterable[str] = (),
+) -> list[tuple[DeclaredGate, list[str]]]:
+    """The gates that read what changed and are deliberately NOT run for you."""
+    return [
+        (gate, why)
+        for gate, why in declared_readers(root, paths, exclude=exclude)
+        if not gate.runs_here
+    ]
+
+
+
 # ----------------------------------------------------------- the worktree
 
 
@@ -713,7 +845,33 @@ def changed(root: Path) -> list[str]:
 # ------------------------------------------------------------------- CLI
 
 
-def _report(root: Path, paths: Sequence[str], found: dict[str, list[str]]) -> list[str]:
+def _why(why: Sequence[str]) -> str:
+    """The paths that pulled a gate in, three of them and a count."""
+    return ", ".join(why[:3]) + (f", +{len(why) - 3} more" if len(why) > 3 else "")
+
+
+def _skipped(skipped: Sequence[tuple["DeclaredGate", list[str]]]) -> list[str]:
+    """The gates that read what changed and are not offered as a command.
+
+    Printed at all because the alternative is what this said before B72:
+    nothing. A list headed "the suites that read what changed" which quietly
+    drops one is worse than no list, and it is worse in the direction that
+    matters — it reads as coverage.
+    """
+    if not skipped:
+        return []
+    lines = ["", "Not run for you, and reading what changed:"]
+    for gate, why in skipped:
+        lines += [f"  {gate.script}   # {_why(why)}", f"      {gate.note}"]
+    return lines
+
+
+def _report(
+    root: Path,
+    paths: Sequence[str],
+    found: dict[str, list[str]],
+    skipped: Sequence[tuple["DeclaredGate", list[str]]] = (),
+) -> list[str]:
     """The notice, as the author reads it at the moment they would commit.
 
     Commands, not names: a suite name is a fact, and a command is the thing a
@@ -724,7 +882,7 @@ def _report(root: Path, paths: Sequence[str], found: dict[str, list[str]]) -> li
         return [
             f"dependents: no suite or gate reads any of the "
             f"{len(paths)} path{'s' if len(paths) != 1 else ''} that changed."
-        ]
+        ] + _skipped(skipped)
     width = max(len(cmd) for cmd in found)
     head = (
         "dependents: one suite reads what changed — run it:"
@@ -733,12 +891,13 @@ def _report(root: Path, paths: Sequence[str], found: dict[str, list[str]]) -> li
     )
     lines = [head, ""]
     for cmd, why in found.items():
-        shown = ", ".join(why[:3]) + (f", +{len(why) - 3} more" if len(why) > 3 else "")
-        lines.append(f"  {cmd.ljust(width)}   # {shown}")
+        lines.append(f"  {cmd.ljust(width)}   # {_why(why)}")
+    lines += _skipped(skipped)
     lines += [
         "",
-        "(Python and QML. Rust is not read: a change under services/jarvisd or",
-        " services/jv-act is `bash ops/ralph/cargotest.sh <crate>`, always.)",
+        "(Python, QML, and the two nix gates that are declared. Rust is not read:",
+        " a change under services/jarvisd or services/jv-act is",
+        " `bash ops/ralph/cargotest.sh <crate>`, always.)",
     ]
     return lines
 
@@ -762,6 +921,13 @@ def commands(
             for script, why in qml_readers(
                 root, paths, exclude=exclude, warn=warn
             ).items()
+        }
+    )
+    out.update(
+        {
+            f"bash {gate.script}": why
+            for gate, why in declared_readers(root, paths, exclude=exclude)
+            if gate.runs_here
         }
     )
     return out
@@ -804,7 +970,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("dependents: nothing changed.")
         return 0
 
-    for line in _report(root, paths, commands(root, paths, exclude=args.exclude)):
+    for line in _report(
+        root,
+        paths,
+        commands(root, paths, exclude=args.exclude),
+        unrun(root, paths, exclude=args.exclude),
+    ):
         print(line)
     return 0
 

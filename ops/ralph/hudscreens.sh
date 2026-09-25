@@ -41,6 +41,27 @@
 #
 # Run it after any change to shell/jv-hud or personality/theme.toml and
 # commit docs/hud/screens/.
+#
+# reads: docs/hud/screens flake.lock flake.nix personality/theme.toml
+#        pkgs/jv-hud services/jarvisd shell/jv-hud tools/hudscreens
+#
+# Declared and NOT bound (PLAN B72). `ops/ralph/verify.sh` runs every gate it
+# plans; this one is named there instead, beside the paths that asked for it,
+# so a green verdict cannot quietly stand in for a sheet nobody took. Two
+# measured reasons, neither of them "it cannot run here" — it runs here fine:
+#   1. 2m25s, and what it produces is not a verdict to collect but seven
+#      pictures somebody has to look at.
+#   2. it REWRITES the screens it is pointed at, and they are not
+#      reproducible: two runs on an unchanged tree differ in five of the
+#      seven files — 3 and 4 pixels of 3.7 M, one channel, by one — so a
+#      bound run would dirty the tree the plan was computed from, every
+#      time, with churn no eye can tell from a real change. (The plain-QML
+#      sheet `hudshots.sh` renders IS byte-identical run to run, which is
+#      why that one can compare itself against HEAD and this one cannot.)
+# The path list above is in `DECLARED_GATES` in tools/dependents.py, held
+# equal to this one by tools/tests/test_dependents.py; `flake.lock` is in it
+# on this script's own argument, that a sheet rendered against a different Qt
+# or a different sway is a picture of a different machine.
 set -euo pipefail
 
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"

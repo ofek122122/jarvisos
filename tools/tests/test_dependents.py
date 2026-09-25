@@ -731,6 +731,124 @@ def test_the_cli_names_the_qml_gates_it_used_to_apologise_for():
     assert "bash ops/ralph/hudshots.sh" in done.stdout
 
 
+# ------------------------------------------- the two gates that are a nix eval
+#
+# `nixtest.sh` and `hudscreens.sh` read a flake ATTRIBUTE, so neither the
+# Python rule nor the QML walk can find them and both are declared by hand
+# (PLAN B72). A declaration nothing checks is the prose that already failed
+# once, so these hold it to the script it describes.
+
+
+READS = re.compile(r"^#\s*reads:(.*)$")
+CONTINUED = re.compile(r"^#\s{4,}(\S.*)$")
+
+
+def declares(script: str) -> tuple[str, ...]:
+    """The `# reads:` header a gate script writes about itself.
+
+    The header is the script's own statement of its subject, for whoever opens
+    it — the table in `dependents.py` is the same statement in the one place
+    the planner can see. Two copies, held equal below, is the price of a gate
+    whose real read-set lives inside a nix evaluation.
+    """
+    words: list[str] = []
+    inside = False
+    for line in (ROOT / script).read_text("utf-8").splitlines():
+        if not inside:
+            m = READS.match(line)
+            if m:
+                inside = True
+                words += m.group(1).split()
+            continue
+        m = CONTINUED.match(line)
+        if not m:
+            break
+        words += m.group(1).split()
+    return tuple(sorted(words))
+
+
+def test_each_declared_gate_reads_what_its_own_script_says_it_reads():
+    """The seam, and it is the same seam as the staging one above: everything
+    else here is derived from a file, and this is written down twice. The way
+    it can lie is a script whose subject moves while the table stays — a
+    `modules/` that becomes `nixos/`, a gate taught to read `services/` — and
+    nothing else in the repo would notice, because the table would go on
+    naming paths that still exist and the gate would go on passing."""
+    for gate in dependents.DECLARED_GATES:
+        assert (ROOT / gate.script).is_file(), gate.script
+        assert declares(gate.script) == tuple(sorted(gate.reads)), gate.script
+        for rel in gate.reads:
+            assert (ROOT / rel).exists(), f"{gate.script} declares missing {rel}"
+
+
+def test_a_change_to_the_evaluation_names_the_gate_built_to_read_it():
+    """B72's headline: `modules/` and `hosts/ares/` are what `nixtest.sh` is
+    ABOUT, and until now a change to either named `tools` — which reads them as
+    text for the fonts check — and never the gate that evaluates them."""
+    for rel in (
+        "modules/jarvis-services.nix",
+        "hosts/ares/default.nix",
+        "pkgs/jv-hud/default.nix",
+        "flake.nix",
+    ):
+        assert "bash ops/ralph/nixtest.sh" in dependents.commands(ROOT, [rel]), rel
+
+
+def test_the_nix_gate_is_not_woken_by_a_service_it_cannot_assert_anything_about():
+    """The deliberate narrowing, and the reason it is deliberate: a service's
+    source moves a store path inside an ExecStart and nothing `nixtest.sh`
+    asserts, so binding it to `services/` would spend 22 s on every Python edit
+    to learn that. A gate that is mostly noise is a gate somebody switches
+    off."""
+    got = dependents.commands(ROOT, ["services/jv-voice/jv_voice/config.py"])
+    assert "bash ops/ralph/nixtest.sh" not in got, got
+
+
+def test_the_gate_that_is_not_run_for_you_is_named_instead_of_left_out():
+    """The other half of B72. `hudscreens.sh` reads the HUD and is not a step:
+    it boots a compositor for two and a half minutes and rewrites seven
+    screens that a human then looks at. What it must not be is absent — a list
+    headed "the gates that read what changed" which silently drops one reads
+    as coverage, which is the exact failure this whole file exists to prevent.
+    """
+    hud = ["shell/jv-hud/core/HeardState.qml"]
+    assert "bash ops/ralph/hudscreens.sh" not in dependents.commands(ROOT, hud)
+    skipped = dependents.unrun(ROOT, hud)
+    assert [g.script for g, _ in skipped] == ["ops/ralph/hudscreens.sh"]
+    assert skipped[0][1] == hud
+    assert skipped[0][0].note
+
+
+def test_editing_a_declared_gate_runs_it():
+    """The change most likely to break a gate is a change to the gate, and it
+    is the one case the `# reads:` header cannot state without turning into a
+    rule about itself — so the script is part of its own read-set, implicitly.
+    B72 is the example: it rewrote the header of `nixtest.sh`, and without
+    this nothing in the plan would have run the file that was edited."""
+    assert "bash ops/ralph/nixtest.sh" in dependents.commands(
+        ROOT, ["ops/ralph/nixtest.sh"]
+    )
+    skipped = dependents.unrun(ROOT, ["ops/ralph/hudscreens.sh"])
+    assert [g.script for g, _ in skipped] == ["ops/ralph/hudscreens.sh"]
+
+
+def test_a_declared_gate_is_a_script_and_is_not_offered_where_it_is_not(tmp_path):
+    """Same rule the QML gates follow: the table is about THIS repo, and a
+    command naming a script that is not there is worse advice than none."""
+    root = mkrepo(tmp_path)
+    (root / "modules").mkdir()
+    (root / "modules" / "audio.nix").write_text("{}\n", "utf-8")
+    assert dependents.declared_readers(root, ["modules/audio.nix"]) == []
+
+
+def test_a_declared_path_does_not_claim_the_sibling_beside_it():
+    """`hosts/ares-spare` is not inside `hosts/ares`. Every prefix test in this
+    file is per path SEGMENT, and this one is written down rather than derived,
+    so it is the one most likely to be read as a string."""
+    assert not dependents.is_read(("hosts/ares",), "hosts/ares-spare/default.nix")
+    assert dependents.is_read(("hosts/ares",), "hosts/ares/default.nix")
+
+
 # ----------------------------------------------------------------- the CLI
 
 
@@ -764,6 +882,18 @@ def test_the_cli_says_what_it_cannot_see():
     it says so whenever it has anything to say."""
     done = run_cli("--root", str(ROOT), "shell/jv-hud/shell.qml")
     assert "cargotest.sh" in done.stdout
+
+
+def test_the_cli_names_the_gate_it_will_not_run(tmp_path):
+    """Printed, with the paths that asked for it and the reason it is not a
+    command. Before B72 the notice simply did not mention `hudscreens.sh`, and
+    an omission in a list of readers is indistinguishable from there being no
+    reader."""
+    done = run_cli("--root", str(ROOT), "shell/jv-hud/core/HeardState.qml")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "Not run for you" in done.stdout
+    assert "ops/ralph/hudscreens.sh" in done.stdout
+    assert "shell/jv-hud/core/HeardState.qml" in done.stdout
 
 
 def test_the_cli_says_so_when_nothing_reads_what_changed(tmp_path):

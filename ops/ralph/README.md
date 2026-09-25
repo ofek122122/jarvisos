@@ -74,8 +74,24 @@ jv-ears; a service change is that service plus `tools`, seconds; a HUD change
 is about 80 s. Every step prints its own seconds so the figure can be
 re-measured. Under the gate `runtests.sh` keeps its notice to itself
 (`RALPH_GATE=1`) — it would otherwise urge the reader, once per step, to run
-the suites the gate is running. What `verify.sh` still cannot plan is
-`nixtest.sh` and `hudscreens.sh`: PLAN B72.
+the suites the gate is running.
+
+The last two gates are neither Python, QML nor Rust: what they read is a nix
+EVALUATION (B72). `nixtest.sh` asserts what a module option does to the unit
+text ares gets — subject `.#nixosConfigurations.ares` — and `hudscreens.sh`
+photographs the real `.#jv-hud`; a flake attribute names no path, so both are
+DECLARED, in `DECLARED_GATES`, against a `# reads:` header each script carries
+about itself, which `test_dependents.py` holds equal. `nixtest.sh` is then a
+step like any other (22 s, whenever `modules/`, `hosts/ares/`, `pkgs/`, `nix/`
+or the flake itself moves). `hudscreens.sh` is deliberately NOT one: it runs
+here fine — 2m25s, measured — but it boots a compositor and rewrites seven
+screens that are not reproducible (two runs on an unchanged tree differ in
+five of the seven, by 3 and 4 pixels of 3.7 M, one channel, by one), so
+binding it would dirty the tree the plan was computed from, every time, with
+churn no eye can tell from a real change. It is
+NAMED on every verdict instead, green or red, beside the paths that asked for
+it, because a list of the gates that read your change which silently drops one
+reads as coverage.
 
 ## Grading the tests themselves
 Every journal entry claims a number like "six mutations, six caught" — the

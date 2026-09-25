@@ -29,9 +29,15 @@ cannot possibly have guessed the readers, which is the entire reason any of
 this exists. A rule that drops coverage exactly where coverage is the point is
 not a compromise.
 
+B72 then added the two gates that are a nix EVALUATION rather than a suite.
+`nixtest.sh` is planned like anything else now — declared, because its subject
+is a flake attribute and not a path — and `hudscreens.sh` is deliberately not:
+it is NAMED on every verdict instead, because a list of what read your change
+that quietly drops one entry reads as coverage.
+
 What it does NOT do is claim to be the whole gate: `nixos-rebuild build
---flake .#ares`, `nix build .#jarvisd` and `ops/ralph/nixtest.sh` are not test
-suites derived from what you touched, and PROMPT.md still names them.
+--flake .#ares` and `nix build .#jarvisd` are not test suites derived from
+what you touched, and PROMPT.md still names them.
 """
 
 from __future__ import annotations
@@ -430,6 +436,80 @@ def test_a_change_to_the_broker_is_cargo_and_the_python_that_reads_it():
     other and the gate is the union."""
     cmds = [s.command for s in verify.plan(ROOT, ["services/jarvisd/src/main.rs"])]
     assert "bash ops/ralph/cargotest.sh jarvisd" in cmds
+
+
+def test_the_gate_that_evaluates_the_flake_is_a_step_like_any_other():
+    """B72's cheap half. `nixtest.sh` is the only thing in this repo that
+    asserts what a module OPTION does to the unit text ares is handed, and
+    until now a change to `modules/` named `tools` — which reads those files
+    as TEXT, for the fonts check — and never the gate that evaluates them."""
+    for rel in ("modules/jarvis-services.nix", "hosts/ares/default.nix"):
+        cmds = [s.command for s in verify.plan(ROOT, [rel])]
+        assert "bash ops/ralph/nixtest.sh" in cmds, (rel, cmds)
+        # …and it is RUN, not merely named. The skipped block is for the gate
+        # that is deliberately left out; a gate that ends up in both lists has
+        # been planned and disowned in the same breath.
+        assert verify.skipped(ROOT, [rel]) == [], rel
+
+
+def test_the_gate_it_will_not_run_is_printed_above_the_verdict():
+    """B72's other half, and the harder one. `hudscreens.sh` reads the HUD and
+    is not a step: measured at 2m25s in this sandbox, it boots a compositor and
+    REWRITES the seven screens in `docs/hud/`, which are not reproducible —
+    two runs on an unchanged tree differ in five of the seven files, by 3 and 4
+    pixels of 3.7 M, one channel, by one. A gate that dirties the tree the plan
+    was computed from, with churn no eye can tell from a real change, is not a
+    verdict to collect; it is pictures for a human. So it is named, above the
+    verdict rather than under it, where it cannot be read as a footnote to a
+    GREEN."""
+    hud = ["shell/jv-hud/core/HeardState.qml"]
+    skips = verify.skipped(ROOT, hud)
+    assert [script for script, _, _ in skips] == ["ops/ralph/hudscreens.sh"]
+    out = "\n".join(verify.report([], hud, skips))
+    assert "NOT RUN" in out
+    assert out.index("NOT RUN") < out.index("GREEN")
+    assert "ops/ralph/hudscreens.sh" in out
+
+
+def test_a_red_verdict_names_it_too():
+    """The failure mode is a reader who takes the summary for the whole story,
+    and that reader exists in both directions: a RED that lists two gates has
+    to say the third was never asked."""
+    step = verify.Step(command="bash ops/ralph/qmltest.sh", why=("x",))
+    out = "\n".join(
+        verify.report(
+            [verify.Result(step=step, status=1, seconds=1.0)],
+            ["shell/jv-hud/core/HeardState.qml"],
+            verify.skipped(ROOT, ["shell/jv-hud/core/HeardState.qml"]),
+        )
+    )
+    assert "NOT RUN" in out and "RED" in out
+    assert out.index("NOT RUN") < out.index("RED")
+
+
+def test_nothing_is_skipped_when_nothing_skippable_was_touched():
+    """The block has to be silent on the ordinary change, or it becomes the
+    boilerplate nobody reads — which is the state it is replacing."""
+    assert verify.skipped(ROOT, ["services/jv-compat/jv_compat/prefix.py"]) == []
+    out = "\n".join(verify.report([], ["services/jv-compat/jv_compat/prefix.py"]))
+    assert "NOT RUN" not in out
+
+
+def test_listing_the_plan_shows_both_what_runs_and_what_will_not():
+    """`--list` is the form you read before paying for the run, so it is the
+    form that must be complete: the price AND the gate the price does not
+    include."""
+    done = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "verify.py"), "--root", str(ROOT),
+         "--list", "shell/jv-hud/core/HeardState.qml"],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "bash ops/ralph/qmltest.sh" in done.stdout
+    assert "bash ops/ralph/hudscreens.sh" in done.stdout
+
 
 
 # ------------------------------------------------------------ and the harness

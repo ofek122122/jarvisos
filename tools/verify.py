@@ -31,10 +31,22 @@ and that case is the only one where the author could not possibly have guessed
 the readers. Every step prints its own seconds so the table above can be
 re-measured by anyone who thinks it has drifted.
 
+AND THE TWO GATES THAT ARE A NIX EVALUATION (B72). `ops/ralph/nixtest.sh`
+reads `.#nixosConfigurations.ares` and `ops/ralph/hudscreens.sh` photographs
+`.#jv-hud`, and a flake attribute is not a path anything can walk — so those
+two are DECLARED in `dependents.DECLARED_GATES` against their own `# reads:`
+headers. `nixtest.sh` is a step like any other: 22 s, and it is the only thing
+in this repo that asserts what a module OPTION does to the unit text ares is
+handed. `hudscreens.sh` is not: 2m25s, a compositor, and seven photographs
+somebody has to look at and commit — and they are not reproducible, so a
+bound run would dirty the tree this verdict was computed from every single
+time. It is NAMED instead, beside the paths that asked for it, on every
+verdict — green or red — because the failure being prevented here is a gate
+that is quietly not in the list.
+
 WHAT THIS IS NOT. It is not the whole verify gate. `nixos-rebuild build
---flake .#ares` is, and so is `nix build .#jarvisd`, and `ops/ralph/nixtest.sh`
-reads `modules/` in a way nothing here can derive (see PLAN B72). Those are
-named in PROMPT.md and run beside this.
+--flake .#ares` is, and so is `nix build .#jarvisd`. Those are named in
+PROMPT.md and run beside this.
 
 AND IT IS ABOUT THE TREE. `git status`, not the index: the failure in 5a3f1e9
 was a green working tree whose commit took 31 of its 33 files, and no verdict
@@ -209,7 +221,29 @@ def run(
 # ----------------------------------------------------------------- the report
 
 
-def report(results: Sequence[Result], paths: Sequence[str]) -> list[str]:
+def skipped(root: Path, paths: Iterable[str]) -> list[tuple[str, list[str], str]]:
+    """The gates that read what changed and that this deliberately does not run.
+
+    One today: `hudscreens.sh`, and not for being hard — it runs here fine,
+    measured at 2m25s. It is out because what it produces is not a verdict to
+    collect: seven photographs a human looks at, written over the committed
+    ones, and two runs on an UNCHANGED tree differ in five of the seven (3 and
+    4 pixels of 3.7 M, one channel, by one). A gate that rewrites the tree the
+    plan was computed from, with churn nobody can tell from a real change, is
+    not a step. So it is reported instead — on EVERY verdict, because the whole
+    point of this file is that nothing which reads your change goes unmentioned.
+    """
+    return [
+        (gate.script, why, gate.note)
+        for gate, why in dependents.unrun(root, list(paths))
+    ]
+
+
+def report(
+    results: Sequence[Result],
+    paths: Sequence[str],
+    skips: Sequence[tuple[str, list[str], str]] = (),
+) -> list[str]:
     """The table at the end, which is the part that is actually read.
 
     A real run of this is minutes of somebody else's test runner scrolling
@@ -238,9 +272,10 @@ def report(results: Sequence[Result], paths: Sequence[str]) -> list[str]:
                 f"{r.step.command.ljust(width)}{note}"
             )
         lines.append("")
-        if bad:
-            lines += ["verify: RED. Do not commit.", ""]
-            return lines
+    lines += _skips(skips)
+    if results and any(not r.ok for r in results):
+        lines += ["verify: RED. Do not commit.", ""]
+        return lines
 
     lines += [
         f"verify: GREEN over {_n(paths, 'path')}:",
@@ -254,6 +289,19 @@ def report(results: Sequence[Result], paths: Sequence[str]) -> list[str]:
         "`verify.sh --since HEAD~1` asks the question again about what it took.",
         "",
     ]
+    return lines
+
+
+def _skips(skips: Sequence[tuple[str, list[str], str]]) -> list[str]:
+    """The named-not-run block. Loud, and above the verdict rather than under
+    it, so it cannot be read as a footnote to a GREEN."""
+    if not skips:
+        return []
+    lines = [f"verify: NOT RUN here, and reading what you changed — "
+             f"{_n(skips, 'gate')}:", ""]
+    for script, why, note in skips:
+        shown = ", ".join(why[:3]) + (f", +{len(why) - 3} more" if len(why) > 3 else "")
+        lines += [f"  bash {script}   # {shown}", f"      {note}", ""]
     return lines
 
 
@@ -333,14 +381,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     steps = plan(root, paths)
+    skips = skipped(root, paths)
     if args.list_only:
         print(f"verify: {_n(steps, 'gate')} would run over {_n(paths, 'path')}:")
         for step in steps:
             print(f"  {step.command}")
+        for line in ([""] + _skips(skips) if skips else []):
+            print(line)
         return 0
 
     results = run(root, steps)
-    for line in report(results, paths):
+    for line in report(results, paths, skips):
         print(line)
     return 1 if any(not r.ok for r in results) else 0
 

@@ -11,8 +11,20 @@
 # present in the attrset).
 #
 # Fast: each case is one `nix eval` of an `extendModules`-overridden ares, ~2 s
-# against a warm eval cache. This is an INNER loop, not the gate — the gate is
-# still `nixos-rebuild build --flake .#ares`.
+# against a warm eval cache — 22 s for the file. That is cheap enough to be
+# BOUND rather than recommended, so `ops/ralph/verify.sh` runs it whenever the
+# evaluation it reads has changed underneath it (PLAN B72).
+#
+# reads: flake.lock flake.nix hosts/ares modules nix pkgs
+#
+# Declared, because it cannot be derived: the subject of every case below is
+# the flake attribute `.#nixosConfigurations.ares`, and an attribute names no
+# path that any reader of this file could walk. `flake.nix` assembles that
+# configuration out of `hosts/ares`, `modules`, `pkgs` and `nix`, and
+# `flake.lock` decides which nixpkgs all of it is evaluated against. NOT
+# `services`: a service's source moves a store path inside an ExecStart and
+# nothing asserted here. The same list is in `DECLARED_GATES` in
+# tools/dependents.py, and tools/tests/test_dependents.py holds the two equal.
 set -uo pipefail
 
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
