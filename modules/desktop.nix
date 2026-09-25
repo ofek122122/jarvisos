@@ -5,6 +5,18 @@
 {
   programs.niri.enable = true;
 
+  # nix-ld: run prebuilt (non-Nix) dynamic binaries on NixOS by providing the
+  # loader + a common library set. This is what lets Claude Code's OWN native
+  # auto-update work: the store-built claude-code below can't rewrite itself
+  # (/nix/store is read-only), so the official installer drops a writable,
+  # self-updating claude into ~/.local/bin, and nix-ld makes that binary run.
+  programs.nix-ld.enable = true;
+
+  # Put ~/.local/bin on PATH (ahead of the system profile), so the
+  # self-updating claude there shadows the pinned store one, which stays as a
+  # fallback in environment.systemPackages.
+  environment.localBinInPath = true;
+
   services.greetd = {
     enable = true;
     settings.default_session = {
