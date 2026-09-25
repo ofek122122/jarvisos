@@ -15,6 +15,12 @@ the HUD. Do NOT touch the login greeter's session command untested (a broken
 greetd locks the user out) — style only, and leave the graphical greeter for a
 human-reviewed step.
 
+> **STEER (2026-09-25, human directive): do D2 (notifications) THEN D3 (lock
+> screen) NEXT, before any more bar polish (D11–D17) or other Track D items.**
+> The user wants the next *visible new surfaces*, not internal hardening. Give
+> each a real, on-screen, §06 slice that a human can see; the polish items wait
+> until D2 and D3 both exist. (This overrides the priority ladder for now.)
+
 - [x] D1. **Top bar** (Quickshell, own module `shell/jv-bar` + `pkgs/jv-bar` +
       user service): slim bar — niri workspaces (left), clock (center).
       Leave the top-right corner for the HUD. Consume the shared Theme.
