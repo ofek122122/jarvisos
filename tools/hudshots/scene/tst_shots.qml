@@ -45,7 +45,7 @@ Item {
   // empty two-thirds is the point — §06's earned emptiness is a thing you
   // have to SEE to have an opinion about.
   width: 300
-  height: 745
+  height: 807
 
   // NOT the HUD. The real surface is `color: "transparent"` and floats
   // over whatever Niri has on screen; a PNG has to put something behind
@@ -318,6 +318,52 @@ Item {
         "duration_ms": 214,
         "error": "execution_failed",
         "detail": "gtk-launch: no such application obsidian"
+      });
+    }
+
+    // COMPOSED, over a real recording. The question is `hey-jarvis-clean`
+    // replayed whole, so the wake and the transcript are what jv-ears
+    // really published; the two frames that end the turn are written by
+    // hand, because nothing committed has ever recorded jv-voice speaking
+    // or jv-brain answering (B10/A28).
+    //
+    // What it photographs is the one outcome of a turn with no other
+    // route to a screen (A71): `finish_reason: "length"` — the context or
+    // token limit was hit and THE TEXT IS TRUNCATED, in the frozen
+    // schema's own words. The user hears the reply stop mid-sentence and
+    // every service in this picture says `ok`, because nothing is broken:
+    // on ares the brain runs on a CPU rung with a 2048-token context
+    // (invariant 6's ladder against 943 MiB of free VRAM) and this is
+    // that ladder's cost arriving in the conversation.
+    //
+    // `speaking` is stamped AFTER the response on purpose, and it is the
+    // ordinary order rather than a contrivance: jv-brain publishes
+    // brain.response when the STREAM closes, and jv-voice is still
+    // working through the sentences it was handed. It is also the frame
+    // that would have taken this plate down if ReplyState had borrowed
+    // ActionState's exit — so the picture is of the decision as well as
+    // of the plate.
+    //
+    // The reply TEXT is in the frame and reaches no pixel (invariant 7).
+    // The HUD has a place for what you were heard SAYING and none for
+    // what Jarvis said back; this plate says only that the answer stopped
+    // early.
+    function shot_cutoff() {
+      Bus.ingest('{"t":"link","up":true}');
+      suite.replay("hey-jarvis-clean");
+      suite.micOpen();
+      suite.send("brain.response", "jv-brain", {
+        "text": "The meeting is at three, and the one after it is",
+        "finish_reason": "length",
+        "conversation_id": "5ab8fecf-13d0-4f86-aa5d-0b2cc23b4d5d",
+        "utterance_id": "5ab8fecf-13d0-4f86-aa5d-0b2cc23b4d5d",
+        "model": "Qwen3-8B-Q4_K_M.gguf",
+        "backend": "cpu",
+        "latency_ms": 8412
+      });
+      suite.send("speech.state", "jv-voice", {
+        "state": "speaking",
+        "utterance_id": "5ab8fecf-13d0-4f86-aa5d-0b2cc23b4d5d"
       });
     }
 
@@ -638,7 +684,13 @@ Item {
       // element as 10-guard.png, one word and one colour apart, and
       // unreachable code until jv-guard grew something that could say
       // `suspicious` out loud.
-      { "file": "13-suspicious.png", "build": suite.shot_suspicious, "plates": ["guard", "mic"] }
+      { "file": "13-suspicious.png", "build": suite.shot_suspicious, "plates": ["guard", "mic"] },
+      // The end of a turn that ran out of room (A71). `heard` is down and
+      // that is the assertion: HeardState lets the words go the moment
+      // Jarvis starts answering, so a caption reading `state reply mic`
+      // says the reply plate is up on its own account rather than riding
+      // a transcript that never left.
+      { "file": "14-cut-off.png", "build": suite.shot_cutoff, "plates": ["state", "reply", "mic"] }
     ]
 
     function test_the_sheet() {

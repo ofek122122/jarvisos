@@ -326,7 +326,7 @@ def test_the_committed_sheet_is_what_git_says_it_is():
 
 def test_every_committed_shot_is_the_surface_box_the_scene_declares():
     """The first thing in this repo to open a committed PNG. shell.qml's
-    surface is 300x745 and the scene renders that box exactly (A29), so a
+    surface is 300x807 and the scene renders that box exactly (A29), so a
     shot of any other size is a sheet taken with a different harness."""
     text = SCENE.read_text("utf-8")
     box = (

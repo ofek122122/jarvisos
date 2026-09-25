@@ -18,5 +18,6 @@ OutputState 1.0 OutputState.qml
 VramState 1.0 VramState.qml
 GuardState 1.0 GuardState.qml
 InstallState 1.0 InstallState.qml
+ReplyState 1.0 ReplyState.qml
 PlateStack 1.0 PlateStack.qml
 EarsBudgets 1.0 EarsBudgets.qml

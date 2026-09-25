@@ -50,7 +50,7 @@ Item {
   // file never grabs an image — the layout matters only so that a plate
   // that is too wide for the surface would still be too wide here.
   width: 300
-  height: 745
+  height: 807
 
   // The same corner shell.qml composes, in the same order: one file, two
   // harnesses (tools/tests/test_hudshots.py pins it to shell.qml).
@@ -81,7 +81,7 @@ Item {
     // Every plate the shell can put up, as the plates name themselves.
     // Anything outside this set is a plate that invented a name, which is
     // the one way `litNames` could lie without any test noticing.
-    readonly property var everyPlate: ["link", "confirm", "state", "output", "heard", "action", "guard", "install", "mic", "health"]
+    readonly property var everyPlate: ["link", "confirm", "state", "output", "heard", "reply", "action", "guard", "install", "mic", "health"]
 
     function initTestCase() {
       // See the header: the trajectories below are about frames, not fades.

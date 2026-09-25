@@ -77,6 +77,7 @@ COMPONENTS = (
     ("OutputPlate", "OutputPlate.qml"),  # speaking into a silent output (A40)
     ("GuardPlate", "GuardPlate.qml"),  # the binary this machine refused (A51)
     ("InstallPlate", "InstallPlate.qml"),  # the app that did not install (A52)
+    ("ReplyPlate", "ReplyPlate.qml"),  # the answer that was cut off (A71)
 )
 
 # shell/jv-hud/core — the Quickshell-free half of the HUD. Importing a
@@ -101,6 +102,7 @@ CORE = (
     ("VramState", "VramState.qml"),  # how much of the card is left? (B40)
     ("GuardState", "GuardState.qml"),  # was a binary refused, and which? (A51)
     ("InstallState", "InstallState.qml"),  # did an install fail, and which? (A52)
+    ("ReplyState", "ReplyState.qml"),  # was the last reply cut off? (A71)
     ("PlateStack", "PlateStack.qml"),  # is ANYTHING on screen? (A15)
     ("EarsBudgets", "EarsBudgets.qml"),  # how is jv-ears tuned? (A14)
 )

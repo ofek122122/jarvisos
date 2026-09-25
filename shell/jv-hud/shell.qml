@@ -38,7 +38,10 @@
 // interrupted; `OutputPlate` (A40) — that the sink Jarvis is speaking into
 // is muted, which is the one way every service can report `ok` while you
 // hear nothing; `HeardPlate` (A26) — the words jv-ears took down, for as
-// long as Jarvis has not started answering them; `ActionPlate` (A37) —
+// long as Jarvis has not started answering them; `ReplyPlate` (A71) —
+// that the answer you just heard was cut off by the context limit, which
+// is the one outcome of a turn nothing else on this machine reports;
+// `ActionPlate` (A37) —
 // what jv-act tried to do to this machine and could not; `GuardPlate`
 // (A51) — the Windows binary jv-guard refused to let onto it, which is
 // the one time JarvisOS says no to something you asked for;
@@ -147,11 +150,11 @@ ShellRoot {
       // by more than five hundred. tools/hudshots/scene/tst_fit.qml builds
       // the case these paragraphs are about — every plate but `link`, each
       // drawing the widest thing its own cap allows, over a health list as
-      // long as this machine has services — and that corner is 713 px tall.
-      // It did not fit. A layer-shell panel floating over every window was
-      // cutting its BOTTOM plate in half, and the bottom plate is
-      // `HealthPlate`: the thing that says what is wrong, cropped exactly
-      // when everything is.
+      // long as this machine has services — and that corner was 713 px
+      // tall. It did not fit. A layer-shell panel floating over every
+      // window was cutting its BOTTOM plate in half, and the bottom plate
+      // is `HealthPlate`: the thing that says what is wrong, cropped
+      // exactly when everything is.
       //
       // So the height is no longer an argument. It is 2 x insetPx + the
       // measured corner — the same edge gap §06 gives the top and the
@@ -159,8 +162,16 @@ ShellRoot {
       // flush with the edge of a floating panel reads as a crop whether or
       // not it is one. Grow a plate, add a plate, or add a service to this
       // machine and that suite fails with the number of pixels it is over.
+      //
+      // Which is what ReplyPlate (A71) did: the crowd measured 775 px, 62
+      // px more than before — two 11 px rows and the gap above them — so
+      // this is 807. The growth is not free and is worth writing down
+      // where A70 can read it: the crowded corner is now more than half a
+      // 1440p screen, and whether a corner that tall should exist at all
+      // is the open question A70 asks, unchanged by this except that the
+      // number in it is bigger.
       implicitWidth: 300
-      implicitHeight: 745
+      implicitHeight: 807
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
@@ -235,12 +246,25 @@ ShellRoot {
           anchors.right: parent.right
         }
 
+        // How the last answer ENDED, from jv-brain's own brain.response —
+        // and only when the context or token limit cut it off. Directly
+        // under the heard line because it closes the sentence those two
+        // start: Jarvis is thinking, this is what you asked, and the
+        // answer you just heard stops early because it ran out of room.
+        // It is the one outcome of a turn with no other route to a
+        // screen — a finished reply is its own report, and a brain that
+        // could not answer at all already arrives as a degraded
+        // heartbeat on the plate at the bottom of this stack.
+        ReplyPlate {
+          anchors.right: parent.right
+        }
+
         // What came of the last thing Jarvis did to this machine, from
         // jv-act's own action.result — and only when it did not work.
-        // Directly under the heard line because it is the end of the same
-        // story the three plates above tell: Jarvis is doing something,
-        // this is what you asked for, and this is why nothing happened.
-        // On a machine whose actions all worked it is never here at all.
+        // Directly under the reply line because it is the end of the same
+        // story the plates above tell: Jarvis is doing something, this is
+        // what you asked for, and this is why nothing happened. On a
+        // machine whose actions all worked it is never here at all.
         ActionPlate {
           anchors.right: parent.right
         }

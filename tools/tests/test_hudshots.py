@@ -592,6 +592,18 @@ def compat_refusals(verdict: dict) -> set[str]:
     here instead would be a copy of the rule, and a copy that stayed
     green when jv-compat reworded the sentence is exactly the drift every
     other gate in this file exists to catch.
+
+    ONLY the refusals that are ABOUT A VERDICT. jv-compat grew a fourth
+    `blocked` event in B65 whose sentence is built out of a recipe's grant
+    problems and never touches the screening at all, and this helper has
+    exactly one thing to hand it: the verdict in the photograph. An
+    expression naming anything else is skipped rather than guessed at — it
+    is not a sentence this shot could be showing, and evaluating it with an
+    invented binding would put a made-up refusal into the set the shot is
+    checked against. (Before this line existed it did not skip and did not
+    guess: it raised `NameError` out of the gate, which is how B65 left the
+    tools suite red for two iterations — `runtests.sh jv-compat` was the
+    suite that got run, and this gate reads jv-compat from next door.)
     """
     src = (COMPAT / "jv_compat" / "install.py").read_text("utf-8")
     out = set()
@@ -604,9 +616,13 @@ def compat_refusals(verdict: dict) -> set[str]:
         if not (node.args and getattr(node.args[0], "value", None) == "blocked"):
             continue
         for kw in node.keywords:
-            if kw.arg == "error":
-                out.add(eval(ast.unparse(kw.value), {"__builtins__": {}}, {"verdict": verdict}))
-    assert out, "jv-compat's installer no longer refuses anything"
+            if kw.arg != "error":
+                continue
+            free = {n.id for n in ast.walk(kw.value) if isinstance(n, ast.Name)}
+            if free - {"verdict"}:
+                continue  # a refusal about something other than the screening
+            out.add(eval(ast.unparse(kw.value), {"__builtins__": {}}, {"verdict": verdict}))
+    assert out, "jv-compat's installer no longer refuses anything about a verdict"
     return out
 
 
@@ -789,6 +805,64 @@ def act_error_words() -> set[str]:
         words |= set(pair)
     assert "execution_failed" in words, "jv-act's error vocabulary moved"
     return words
+
+
+def test_the_cut_off_shot_photographs_a_turn_jv_brain_can_end():
+    """A71. `14-cut-off.png` is a picture of one word out of a frozen enum,
+    so the word has to be one the enum has AND one jv-brain can reach.
+
+    Three things are checkable and none of them is prose:
+
+    · the enum. `schemas/brain.response.json` freezes `finish_reason` at
+      three words, and the plate draws whichever one arrives — so a frame
+      inventing a fourth would render a caption no reader could look up.
+    · the producer. jv-brain does not forward llama-server's word: it
+      normalises it in one line of `_stream_turn`, and `tool_calls` (which
+      the enum has no word for) never leaves that function, because the
+      tool loop only returns when there are none. `length` has to be a
+      word that line can still produce, or this shot photographs a state
+      the service stopped being able to publish.
+    · the schema's own rule about `text`, which is the reason
+      `core/ReplyState.qml` refuses an empty truncation: an empty string
+      is allowed "only with finish_reason=error". A `length` with nothing
+      in it would draw a plate about words nobody ever heard.
+
+    Not checked: the text, the model name and the latency. They are a
+    composed sentence, a GGUF filename and a plausible number in a
+    composed frame, and not one of them reaches a pixel.
+    """
+    schema = json.loads((ROOT / "schemas" / "brain.response.json").read_text("utf-8"))
+    enum = schema["properties"]["finish_reason"]["enum"]
+    backends = schema["properties"]["backend"]["enum"]
+    brain = (BRAIN / "jv_brain" / "service.py").read_text("utf-8")
+    normalise = re.search(r'^\s*reason = .*finish == "length".*$', brain, re.M)
+    assert normalise, (
+        "jv-brain no longer normalises llama-server's finish_reason in one "
+        "line of _stream_turn — this gate was reading that line"
+    )
+    saw = 0
+    for topic, src, body in frames_in("cutoff"):
+        if topic != "brain.response":
+            continue
+        saw += 1
+        assert src == "jv-brain", f"{src} does not publish brain.response"
+        word = body.get("finish_reason")
+        assert word in enum, (
+            f"`{word}` is not one of schemas/brain.response.json's {enum}, so "
+            "the plate would draw a caption nobody can look up"
+        )
+        assert f'"{word}"' in normalise.group(0), (
+            f"jv-brain's _stream_turn cannot produce `{word}` any more; this "
+            "shot photographs a turn the service no longer ends that way"
+        )
+        assert body["text"], (
+            "the schema allows an empty `text` only with finish_reason=error, "
+            "and core/ReplyState.qml refuses a truncation with nothing in it"
+        )
+        assert body.get("backend") in backends, (
+            f"`{body.get('backend')}` is not one of {backends}"
+        )
+    assert saw == 1, f"the cut-off shot carries {saw} brain.response frames"
 
 
 def test_the_action_shot_photographs_a_call_and_a_failure_jv_act_can_produce():

@@ -48,6 +48,10 @@ PlateStack {
     anchors.right: parent.right
   }
 
+  ReplyPlate {
+    anchors.right: parent.right
+  }
+
   ActionPlate {
     anchors.right: parent.right
   }

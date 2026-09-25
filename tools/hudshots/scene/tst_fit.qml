@@ -2,7 +2,7 @@
 // widest thing it will ever draw, measured against the surface it has to fit
 // inside (PLAN A63).
 //
-// shell.qml's box is 300x745, and until this file every digit of that number
+// shell.qml's box is 300x807, and until this file every digit of that number
 // came out of an ARGUMENT about co-occurrence: LinkPlate "can never share the
 // surface, but a box sized by an argument about how other elements behave is
 // a box that clips"; ConfirmPlate and HeardPlate each wrap to three lines;
@@ -35,15 +35,15 @@
 // photographs what the machine says and this one measures what the plate
 // will not exceed.
 //
-// THREE PLATES ARE NOT AT THEIR LONGEST WORD, and it does not matter.
-// `StatePlate`, `OutputPlate` and `MicPlate` draw one word out of a fixed
-// vocabulary, so their widest is INTERRUPTED rather than SPEAKING and there
-// is no cap to sit at. None of them can be the binding constraint either
-// way: the widest of the three is 132 px against a 260 px capped plate, and
-// their HEIGHT — the only thing the box is short of — is one row regardless
-// of the word. `state` is held at `speaking` here because that is what makes
-// `output` truthful, and a crowd that traded one for the other would be a
-// smaller crowd.
+// FOUR PLATES ARE NOT AT THEIR LONGEST WORD, and it does not matter.
+// `StatePlate`, `OutputPlate`, `MicPlate` and `ReplyPlate` draw one word out
+// of a fixed vocabulary, so their widest is INTERRUPTED rather than SPEAKING
+// and there is no cap to sit at. None of them can be the binding constraint
+// either way: the widest of the four is 132 px against a 260 px capped plate,
+// and their HEIGHT — the only thing the box is short of — is fixed regardless
+// of the word (one row, or the reply plate's two). `state` is held at
+// `speaking` here because that is what makes `output` truthful, and a crowd
+// that traded one for the other would be a smaller crowd.
 //
 // WHY MOTION IS OFF. Same reason as tst_sequence.qml: a plate's `lit` is
 // `opacity > 0` through `Ease`, so with fades running, WHICH plates are in
@@ -63,7 +63,7 @@ Item {
   // grew there and not here would leave this check asserting yesterday's
   // edge, which is the failure mode that makes a check worse than none.
   width: 300
-  height: 745
+  height: 807
 
   // The same corner shell.qml composes, in the same order, from the one file
   // both other drivers use.
@@ -85,11 +85,11 @@ Item {
     property int seq: 0
 
     // Every plate the shell can put up, in stack order.
-    readonly property var everyPlate: ["link", "confirm", "state", "output", "heard", "action", "guard", "install", "mic", "health"]
+    readonly property var everyPlate: ["link", "confirm", "state", "output", "heard", "reply", "action", "guard", "install", "mic", "health"]
 
-    // The one plate that excludes every other: each of the nine below gates
+    // The one plate that excludes every other: each of the ten below gates
     // on `Bus.linkUp`, so a HUD that cannot see the bus draws this and
-    // nothing else. The crowd is therefore the other nine, and `test_the_
+    // nothing else. The crowd is therefore the other ten, and `test_the_
     // two_crowds_are_the_only_two` holds that split rather than assuming it.
     readonly property string blindPlate: "link"
 
@@ -161,9 +161,10 @@ Item {
     // the `speaking` frame is OLDER than the transcript, which is exactly the
     // barge-in core/HeardState.qml is written around), jv-act is holding a
     // confirmation open and has separately failed a different call (confirm +
-    // action), jv-guard has refused a binary and jv-compat has failed an
-    // install (guard + install), the microphone is live (mic), and the
-    // services are complaining (health). Nobody will see this HUD. The box is
+    // action), the answer being read out ran out of context (reply),
+    // jv-guard has refused a binary and jv-compat has failed an install
+    // (guard + install), the microphone is live (mic), and the services are
+    // complaining (health). Nobody will see this HUD. The box is
     // sized for it anyway, which is the only reason there is a height in
     // shell.qml at all.
     function crowd() {
@@ -183,6 +184,17 @@ Item {
       suite.send("speech.state", "jv-voice", {
         "state": "speaking",
         "utterance_id": "5ab8fecf-13d0-4f86-aa5d-0b2cc23b4d5d"
+      });
+      // …reading out an answer that jv-brain had already run out of room
+      // for. brain.response is published when the STREAM closes, so a
+      // truncated reply and a jv-voice still working through its sentences
+      // are the ordinary pair rather than a contrived one.
+      suite.send("brain.response", "jv-brain", {
+        "text": "The meeting is at three, and the one after it is",
+        "finish_reason": "length",
+        "conversation_id": "5ab8fecf-13d0-4f86-aa5d-0b2cc23b4d5d",
+        "backend": "cpu",
+        "latency_ms": 8412
       });
       // …which jv-context says is muted.
       suite.send("context.system", "jv-context", {
@@ -304,7 +316,7 @@ Item {
               "the crowd is not the crowd");
     }
 
-    // The two crowds are the only two: `link` alone, or the other nine. Every
+    // The two crowds are the only two: `link` alone, or the other ten. Every
     // plate below LinkPlate gates on the same link it reports on, so a HUD
     // that cannot see the bus has exactly one thing to say — and if that ever
     // stops being true, the box has a taller case than the one measured here

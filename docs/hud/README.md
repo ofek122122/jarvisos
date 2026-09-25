@@ -12,7 +12,7 @@ something to look at without sitting at the machine.
 
 ## What you are looking at
 
-Each PNG is **one HUD surface, at its real size** — 300 × 745 px, the box
+Each PNG is **one HUD surface, at its real size** — 300 × 807 px, the box
 `shell.qml` asks the compositor for, anchored top-right. The empty two thirds
 is not a crop artifact; it is §06's earned emptiness, and it is most of what
 this HUD looks like most of the time.
@@ -428,10 +428,16 @@ plate that can be up at once, each drawing the widest thing its own cap
 allows — is measured in `tools/hudshots/scene/tst_fit.qml` (PLAN A63), and
 the first time it ran the corner was **713 px in a 688 px box**: the HUD
 was cropping its own bottom plate, which is `HealthPlate`, the one that
-says what is wrong. The surface is 745 px now — two insets and the
-measurement — and no picture of that corner is taken here on purpose: a
-photograph of eight unrelated plates 8 px apart is a picture of the
-question A62 is asking a human, not an answer to it.
+says what is wrong. The surface is two insets plus that measurement now, and
+no picture of that corner is taken here on purpose: a photograph of nine
+unrelated plates 8 px apart is a picture of the question A62 is asking a
+human, not an answer to it.
+
+Adding `ReplyPlate` (shot 14, PLAN A71) moved the measurement again: the
+crowd is **775 px** and the surface is **807**. That is worth reading
+alongside A70, which asks whether a corner that tall should exist at all —
+it is now more than half a 1440p screen, and this change made the number
+bigger rather than answering the question.
 
 **It is not the sequence A61 assumed, and finding that out is most of what
 this shot bought.** The obvious story is a refusal and a retry: jv-guard
@@ -529,6 +535,56 @@ nothing has wired that override to this verdict, so a packed installer stops
 here and the only thing on offer is a confirmation nobody can give. That is
 invariant 8 behaving exactly as written (untrusted by default, fail closed),
 and it is PLAN A65 asking a human which of three ways out to take.
+
+### 14 — an answer that ran out of room
+
+![14-cut-off.png](14-cut-off.png)
+
+**On screen:** `state` · `reply` · `mic`
+
+`composed`, over a real recording. The question is `hey-jarvis-clean`
+replayed whole — the wake and the transcript are what jv-ears really
+published — and the two frames that end the turn are written by hand, for
+the same reason shot 04 is: nothing committed has ever recorded jv-voice
+speaking or jv-brain answering (PLAN B10/A28).
+
+`schemas/brain.response.json` ends every turn with one of three words, and
+this is the only one with nowhere else to go. `stop` is the ordinary case and
+draws nothing. `error` already reaches this corner: the same `except` block
+in jv-brain that publishes it publishes a `degraded` heartbeat one `await`
+later, and `HealthPlate` draws that — reporting it twice, in two colours, in
+one corner is the confusion A62 is about. `length` means the context or token
+limit was reached and **the text is truncated**, and until A71 nothing on
+this machine said so: no service calls it a fault, so no heartbeat changes;
+jv-brain speaks the reply as it streams, so there is no later sentence to put
+the news in; and the frame that carries the word is a well-formed frame on a
+healthy machine. The user simply hears the answer stop.
+
+On ares that is not the exotic case. The brain runs on a CPU rung with a
+2048-token context — invariant 6's ladder doing its job against the 943 MiB
+of free VRAM in shot 06 — while the conversation budget is sized for rung 0
+(`docs/optimization-backlog.md` §4). The limit is reachable in ordinary
+conversation, and that backlog item is a human's to answer; this plate is
+only the part the screen owes the user.
+
+**`heard` is down, and that is an assertion rather than an omission.**
+`HeardState` lets the words go the moment Jarvis starts answering, so a
+caption reading `state` · `reply` · `mic` says the reply plate is up on its
+own account and not riding a transcript that never left.
+
+**`speaking` is stamped after the response, and that is the ordinary
+order.** jv-brain publishes `brain.response` when the stream closes, and
+jv-voice is still working through the sentences it was handed — which is
+exactly why `core/ReplyState.qml` does not take this plate down when Jarvis
+starts speaking, the way `ActionState` does. That frame would be the
+truncated reply still being read out. The picture is of the decision as much
+as of the plate.
+
+**Not one word of the reply is on screen.** The text is in the frame, because
+the bridge forwards whole envelopes, and it reaches no pixel: the HUD has a
+place for what you were heard *saying* and none for what Jarvis said back.
+What a glance gets you is that the answer stopped early, and the schema's own
+word for why.
 
 ## Regenerating
 
