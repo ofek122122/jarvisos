@@ -359,4 +359,131 @@ TestCase {
     compare(model.expiry.running, false);
     compare(handle.expired, 0);
   }
+
+  // --- the list the surface repeats over (PLAN D37) ----------------------
+  //
+  // `toasts` is what is up; `onScreen` is the same thing as ROWS, keyed by the
+  // notification's id, and the difference is the whole of why the corner
+  // stopped blinking. A Repeater handed the array rebuilt every plate whenever
+  // anything changed, and a rebuilt Toast fades in again — so a download
+  // updating its own progress made all three plates announce themselves as
+  // new. What the pixels do is measured in tools/notifyshots/scene/
+  // tst_settle.qml; what is asserted HERE is the property that makes it
+  // possible, which is that the rows stay the SAME rows.
+
+  // Every row a plate draws, and nothing a plate does not: a ListModel holds
+  // values, so `handle` in a role would be an object flattened into something
+  // nobody meant, and `deadline` is the lifecycle's business.
+  function rowOf(model, i) {
+    return model.onScreen.get(i);
+  }
+
+  function test_the_rows_carry_what_a_plate_draws_and_no_more() {
+    const model = makeModel();
+    model.push(sent("dl", {
+      "appName": "firefox",
+      "summary": "Downloading",
+      "body": "jarvis.iso",
+      "urgency": 2,
+      "timeoutMs": 3000,
+      "handle": fakeHandle()
+    }));
+
+    compare(model.onScreen.count, 1);
+    const row = rowOf(model, 0);
+    compare(row.key, "dl");
+    compare(row.appName, "firefox");
+    compare(row.summary, "Downloading");
+    compare(row.body, "jarvis.iso");
+    compare(row.urgency, 2);
+    compare(row.handle, undefined, "the sender-facing object is not a role");
+    compare(row.deadline, undefined, "nor is the deadline: a plate does not draw one");
+  }
+
+  function test_the_rows_are_the_toasts_in_the_same_order() {
+    const model = makeModel();
+    for (let i = 1; i <= 5; i++)
+      model.push(sent("" + i, {
+        "summary": "note " + i
+      }));
+
+    // Past the cap, so this is `toasts` and not `entries`: what is ON SCREEN
+    // is what the Repeater is given.
+    compare(model.onScreen.count, model.toasts.length);
+    for (let i = 0; i < model.toasts.length; i++) {
+      compare(rowOf(model, i).key, model.toasts[i].key, "row " + i);
+      compare(rowOf(model, i).summary, model.toasts[i].summary, "row " + i);
+    }
+  }
+
+  // THE ONE THAT MATTERS. A sender updating its own notification, and a
+  // notification arriving beside it, must both leave the OTHER rows alone —
+  // because a row that survives is a delegate that survives, and a delegate
+  // that survives does not fade in again. The ListModel has no way to say
+  // "this delegate is the same one", so what is asserted is the thing that
+  // decides it: the key at each index, before and after.
+  function test_a_row_that_is_still_there_is_still_the_same_row() {
+    const model = makeModel();
+    model.push(sent("dl", {
+      "summary": "Downloading 40%"
+    }));
+    model.push(sent("mail", {
+      "summary": "Mail"
+    }));
+    compare(model.onScreen.count, 2);
+    compare(rowOf(model, 0).key, "dl");
+    compare(rowOf(model, 1).key, "mail");
+
+    // A replacement: same id, new words, same place.
+    model.push(sent("dl", {
+      "summary": "Downloading 80%"
+    }));
+    compare(model.onScreen.count, 2, "an update is one story, not a second one");
+    compare(rowOf(model, 0).key, "dl", "the same row, which is the same plate");
+    compare(rowOf(model, 0).summary, "Downloading 80%", "saying something new");
+    compare(rowOf(model, 1).key, "mail", "and the one beside it, untouched");
+
+    // A third sender, while both are up.
+    model.push(sent("build", {
+      "summary": "Build finished"
+    }));
+    compare(model.onScreen.count, 3);
+    compare(rowOf(model, 0).key, "dl", "still the first plate");
+    compare(rowOf(model, 1).key, "mail", "still the second");
+    compare(rowOf(model, 2).key, "build", "and the new one is the new row");
+
+    // And one leaving takes only its own row.
+    model.drop("mail");
+    compare(model.onScreen.count, 2);
+    compare(rowOf(model, 0).key, "dl");
+    compare(rowOf(model, 1).key, "build");
+  }
+
+  // Past the cap, the row that scrolls into view IS a new plate — it has not
+  // been on screen, so it arrives, and the fade is telling the truth. This is
+  // the case where a key changing index is correct rather than a bug.
+  function test_a_notification_coming_into_view_is_a_new_row() {
+    const model = makeModel();
+    for (let i = 1; i <= 4; i++)
+      model.push(sent("" + i, {
+        "summary": "note " + i
+      }));
+    compare(model.onScreen.count, 3);
+    compare(rowOf(model, 0).key, "2", "the first one is off screen");
+
+    // The one at the front expires; the one that was counted takes its place.
+    model.drop("2");
+    compare(model.onScreen.count, 3);
+    compare(rowOf(model, 0).key, "1", "the one that was only counted before");
+    compare(rowOf(model, 1).key, "3", "and the two that were already up");
+    compare(rowOf(model, 2).key, "4");
+  }
+
+  function test_an_empty_corner_has_no_rows() {
+    const model = makeModel();
+    model.push(sent("1"));
+    compare(model.onScreen.count, 1);
+    model.clear();
+    compare(model.onScreen.count, 0, "an unmapped surface repeats over nothing");
+  }
 }

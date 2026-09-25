@@ -105,6 +105,17 @@ Item {
   // move. Asserted per plate on every shot (PLAN D20).
   readonly property real overflowPx: Math.max(0, header.implicitWidth - (root.plateWidthPx - Theme.padPx * 2))
 
+  // WHAT THE PLATE IS PAINTED AT, RIGHT NOW — not what `arrived` says it
+  // should be. The two differ for exactly as long as the fade below runs, and
+  // that gap is the only thing that can tell an arrival from a repaint:
+  // `tools/notifyshots/scene/tst_settle.qml` samples this DURING a second
+  // notification landing, and requires that a plate already on screen never
+  // leaves `Theme.plateOpacity` while it happens (PLAN D37). The bar's row
+  // exposes `painted` for the same reason and found the same class of fault
+  // (D34) — a still picture of a settled surface cannot see a plate that
+  // blinked on its way there.
+  readonly property real paintedOpacity: plate.opacity
+
   // Arrival. The plate is built at zero and fades up to its tint on the frame
   // after it exists, so something appearing in a corner you were not looking
   // at reads as an arrival rather than as a repaint. LEAVING IS INSTANT, on

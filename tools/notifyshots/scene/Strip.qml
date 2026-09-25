@@ -68,6 +68,21 @@ Column {
     return out;
   }
 
+  // Each plate's opacity AS PAINTED, in the same order. The one read-back on
+  // this strip that is about a moment rather than about a layout: a shot waits
+  // past `fadeInMs` before it grabs, so every PNG on the sheet holds a settled
+  // plate and none of them can see a plate that blinked on the way there.
+  // `tst_settle.qml` samples this while a second notification lands (PLAN
+  // D37).
+  function opacities(): var {
+    const out = [];
+    for (let i = 0; i < plates.count; i++) {
+      const plate = plates.itemAt(i) as Toast;
+      out.push(plate ? plate.paintedOpacity : -1);
+    }
+    return out;
+  }
+
   // How far each plate paints past its own border, in the same order. Must be
   // zeroes: this surface has no input region, so paint outside a plate is paint
   // on the desktop that nothing can move.
@@ -96,15 +111,35 @@ Column {
     textFormat: Text.PlainText
   }
 
+  // Keyed by the notification's id, never by position (PLAN D37).
+  // `Notifications.onScreen` is a ListModel `NotifyModel` keeps in step
+  // with `toasts`, so a plate that is still up keeps its delegate — and
+  // a delegate that survives keeps `arrived` true and does not fade in
+  // again. Repeating over the array instead meant every plate in the
+  // corner was destroyed and rebuilt whenever ANY notification arrived,
+  // was replaced or went away, so all three blinked and the fade stopped
+  // meaning "this one is new".
+  //
+  // The record is rebuilt from the roles because a ListModel holds
+  // values, not objects: `Toast` takes one record, which is what lets it
+  // import nothing but QtQuick and the generated Theme.
   Repeater {
     id: plates
 
-    model: Notifications.toasts
+    model: Notifications.onScreen
 
     Toast {
-      required property var modelData
+      required property string appName
+      required property string summary
+      required property string body
+      required property int urgency
 
-      toast: modelData
+      toast: ({
+          "appName": appName,
+          "summary": summary,
+          "body": body,
+          "urgency": urgency
+        })
     }
   }
 }

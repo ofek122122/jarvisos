@@ -36,6 +36,12 @@ Singleton {
   id: root
 
   readonly property alias toasts: model.toasts
+  // What the surface repeats over: the same toasts, as rows keyed by the
+  // notification's own id, so a plate already on screen keeps its delegate
+  // when another one arrives (PLAN D37). `toasts` stays exported because it is
+  // the answer to "what is up", which is a different question from "what does
+  // the Repeater build".
+  readonly property alias onScreen: model.onScreen
   readonly property alias earlier: model.earlier
   readonly property alias anyLit: model.anyLit
 

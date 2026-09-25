@@ -191,6 +191,64 @@ def test_the_generated_types_are_registered_without_any_shell_naming_them(shell)
     )
 
 
+@SHELLS
+def test_a_shared_core_type_is_generated_into_exactly_the_shells_that_ask(shell):
+    """The third category, between "every shell gets it" and "this shell wrote
+    it" (PLAN D37).
+
+    `MotionPolicy` is §06's stillness RULE and applies to a shell by the shell
+    existing, so it is in every registry without being asked for.
+    `KeyedRows` is MACHINERY — it only means anything to a shell that repeats
+    over a list something replaces wholesale — so its body lives in this
+    script and a shell opts in by naming it in its own `*_CORE` table. Two
+    things can then come apart, and both are silent: a shell that lists a
+    shared type it is not written the file for has a qmldir line pointing at
+    nothing, and a renderer nobody names is dead code that still looks
+    maintained. This pins the pair together at the one place they meet,
+    `outputs()`.
+    """
+    written = gen.outputs(gen.THEME_TOML, shell)
+    for name, filename in shell.core:
+        if name in gen.SHARED_CORE:
+            assert f"core/{filename}" in written, (
+                f"{shell.name} registers the shared type {name} and is not "
+                f"written core/{filename}"
+            )
+            assert (ROOT / "shell" / shell.name / "core" / filename).exists()
+
+
+def test_every_shared_core_renderer_is_named_by_some_shell():
+    """A body in SHARED_CORE that no registry lists is a file this script can
+    render and nothing on disk has: dead code wearing a generated header."""
+    named = {
+        name
+        for s in gen.SHELLS.values()
+        for name, _ in s.core
+    }
+    assert set(gen.SHARED_CORE) <= named, (
+        f"{sorted(set(gen.SHARED_CORE) - named)} is rendered by nothing that asks for it"
+    )
+
+
+def test_the_shells_that_share_a_core_type_share_it_byte_for_byte():
+    """The same reason as the motion trio: they cannot share a FILE (`import
+    "."` resolves inside one store copy), so they share a renderer, and this is
+    what says the copies never drifted. Two shells with two slightly different
+    answers to "are these rows the same rows" is exactly how one of them gets
+    a fade that means nothing again."""
+    for name, filename in sorted({e for s in gen.SHELLS.values() for e in s.core}):
+        if name not in gen.SHARED_CORE:
+            continue
+        copies = {
+            s.name: (ROOT / "shell" / s.name / "core" / filename).read_text("utf-8")
+            for s in gen.SHELLS.values()
+            if (name, filename) in s.core
+        }
+        assert len(set(copies.values())) == 1, (
+            f"{filename} differs between {sorted(copies)}"
+        )
+
+
 def test_motion_republishes_every_duration_token_gated():
     """`Motion.<token>` is 0 while motion is suppressed; `Theme.<token>` is not.
 
