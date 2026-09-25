@@ -39,11 +39,24 @@
 # it has nothing to say" — which is exactly what A13/A27 are blocked on,
 # and not the same question as "does it look right".
 #
+# It then READS THE SHEET BACK (B74), the way hudshots.sh has since B52 —
+# every screen it just took, against the one committed at HEAD, through
+# tools/hudsheet.py. It cannot do that to the byte: two runs of an untouched
+# HUD differ on antialiased glyph edges. So the comparison carries a MEASURED
+# floor (`sheet.NOISE_PIXELS` / `sheet.NOISE_CHANNEL`, and the measurement is
+# written down beside them), a difference under it is reported as the
+# compositor's rounding rather than as news, and — when this is writing over
+# the committed sheet — those files are put back to the bytes they were
+# compared against, so a run of an unchanged HUD leaves a clean tree.
+#
 # Run it after any change to shell/jv-hud or personality/theme.toml and
-# commit docs/hud/screens/.
+# commit docs/hud/screens/. A run that really did change the HUD ends
+# nonzero, naming the screens that moved: that is the refresh telling you
+# what you changed, not a failure — look at the new PNGs and commit them.
 #
 # reads: docs/hud/screens flake.lock flake.nix personality/theme.toml
 #        pkgs/jv-hud services/jarvisd shell/jv-hud tools/hudscreens
+#        tools/hudsheet.py
 #
 # Declared and NOT bound (PLAN B72). `ops/ralph/verify.sh` runs every gate it
 # plans; this one is named there instead, beside the paths that asked for it,
@@ -51,13 +64,16 @@
 # measured reasons, neither of them "it cannot run here" — it runs here fine:
 #   1. 2m25s, and what it produces is not a verdict to collect but seven
 #      pictures somebody has to look at.
-#   2. it REWRITES the screens it is pointed at, and they are not
-#      reproducible: two runs on an unchanged tree differ in five of the
-#      seven files — 3 and 4 pixels of 3.7 M, one channel, by one — so a
-#      bound run would dirty the tree the plan was computed from, every
-#      time, with churn no eye can tell from a real change. (The plain-QML
-#      sheet `hudshots.sh` renders IS byte-identical run to run, which is
-#      why that one can compare itself against HEAD and this one cannot.)
+#   2. it REWRITES the screens it is pointed at — which B72 could not
+#      qualify and B74 now can. The rewrite is no longer unconditional:
+#      a screen that only moved by rounding is restored to its committed
+#      bytes, so a run of an unchanged HUD is idempotent and a dirty
+#      `git status` here now means something. What remains true is that a
+#      run which DID change the HUD leaves seven new PNGs in the tree,
+#      which is the right outcome for a human at a keyboard and the wrong
+#      one for a gate computing a plan from that tree.
+# Reason 1 is the one that still carries this on its own; whether reason 2
+# survives its own measurement is PLAN B75, for a human.
 # The path list above is in `DECLARED_GATES` in tools/dependents.py, held
 # equal to this one by tools/tests/test_dependents.py; `flake.lock` is in it
 # on this script's own argument, that a sheet rendered against a different Qt
@@ -162,3 +178,27 @@ export WEV_BIN="$wev/bin/wev"
 export SWAYMSG_BIN="$sway/bin/swaymsg"
 
 "$py/bin/python" "$root/tools/hudscreens/shoot.py"
+
+# And READ THEM BACK (B74). Until this line these were seven pictures that
+# could only be overwritten: `hudshots.sh` has compared its own sheet against
+# HEAD since B52, and the only reason this one did not was that it cannot do
+# it to the byte. The floor that makes it possible is measured — see
+# NOISE_PIXELS in tools/hudscreens/sheet.py — and it is stated in the report
+# every time it absorbs anything, because a comparison whose tolerance is
+# silent is a comparison nobody can audit.
+#
+# --accept-noise ONLY when this run is writing over the committed sheet: it
+# puts the committed bytes back over screens that moved by rounding alone,
+# which is what makes the run idempotent. A run pointed at a scratch
+# directory — a measurement, or a grading run — must leave exactly what it
+# rendered, or the next person to measure the noise measures the restore.
+floor=$("$py/bin/python" -c "
+import sys; sys.path.insert(0, '$root/tools/hudscreens'); import sheet
+print(sheet.NOISE_PIXELS, sheet.NOISE_CHANNEL)")
+accept=()
+[ "$(realpath -m "$out")" = "$(realpath -m "$root/docs/hud/screens")" ] && accept=(--accept-noise)
+"$py/bin/python" "$root/tools/hudsheet.py" \
+  --root "$root" --out "$out" --sheet docs/hud/screens \
+  --rerun "bash ops/ralph/hudscreens.sh" \
+  --tolerance-pixels "${floor% *}" --tolerance-channel "${floor#* }" \
+  "${accept[@]}"

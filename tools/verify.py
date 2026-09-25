@@ -226,12 +226,15 @@ def skipped(root: Path, paths: Iterable[str]) -> list[tuple[str, list[str], str]
 
     One today: `hudscreens.sh`, and not for being hard — it runs here fine,
     measured at 2m25s. It is out because what it produces is not a verdict to
-    collect: seven photographs a human looks at, written over the committed
-    ones, and two runs on an UNCHANGED tree differ in five of the seven (3 and
-    4 pixels of 3.7 M, one channel, by one). A gate that rewrites the tree the
-    plan was computed from, with churn nobody can tell from a real change, is
-    not a step. So it is reported instead — on EVERY verdict, because the whole
-    point of this file is that nothing which reads your change goes unmentioned.
+    collect: seven photographs a human looks at. B72 gave a second reason — it
+    rewrites the tree the plan was computed from, every run, because two runs
+    of an unchanged HUD do not agree to the byte — and B74 measured that noise
+    and put a floor under it, so a run that changed nothing now restores what
+    it compared against and leaves the tree clean. What is left of that reason
+    is the run that DID change the HUD: seven new PNGs to look at, which is
+    the right outcome at a keyboard and the wrong one inside a gate. So it is
+    reported instead — on EVERY verdict, because the whole point of this file
+    is that nothing which reads your change goes unmentioned.
     """
     return [
         (gate.script, why, gate.note)

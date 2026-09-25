@@ -806,8 +806,8 @@ def test_the_nix_gate_is_not_woken_by_a_service_it_cannot_assert_anything_about(
 
 def test_the_gate_that_is_not_run_for_you_is_named_instead_of_left_out():
     """The other half of B72. `hudscreens.sh` reads the HUD and is not a step:
-    it boots a compositor for two and a half minutes and rewrites seven
-    screens that a human then looks at. What it must not be is absent — a list
+    it boots a compositor for two and a half minutes and takes seven
+    photographs that a human then looks at. What it must not be is absent — a list
     headed "the gates that read what changed" which silently drops one reads
     as coverage, which is the exact failure this whole file exists to prevent.
     """

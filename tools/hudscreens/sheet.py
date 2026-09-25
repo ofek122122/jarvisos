@@ -62,6 +62,47 @@ SURFACE_H = 807
 INSET = 16
 
 
+# ----------------------------------- the floor under the compositor (B74)
+#
+# These screens are the one sheet in this repo that cannot be byte-compared.
+# `hudshots.sh` renders its plates with an offscreen QML engine and gets the
+# same bytes every time (A45), so it can hold itself against the sheet
+# committed at HEAD and say what moved. This harness photographs a REAL
+# compositor, and two runs of an untouched HUD do not agree to the byte: the
+# glyph edges inside a plate land a fraction of a pixel over and round the
+# other way.
+#
+# For thirty iterations that meant the screens could only be WRITTEN. Nothing
+# ever checked that they still showed the HUD this repo draws, and a stale
+# screen is exactly as convincing as a current one.
+#
+# So: a floor, measured rather than guessed. Four renders of an unchanged HUD
+# (three back to back, plus the sheet committed at HEAD), compared six ways,
+# over seven files:
+#
+#   01-quiet and 04-unheard   identical, every time, in all six comparisons
+#   02-heard, 03-confirm      3..111 px, always inside the plate, on glyph
+#                             edges and the plate's own rounded corner
+#   the largest channel move  3, and 1 between renders taken back to back
+#
+# `NOISE_PIXELS` is a little over twice the largest count measured, which is
+# 0.003% of the desk shot. It cannot be set below the smallest change a plate
+# can make — A34's 4x4 ember square is 16 px, and the noise is already past
+# that — so it is NOT the bound that discriminates. `NOISE_CHANNEL` is: the
+# theme's text sits ~180 away from the glass it is drawn on, so every word,
+# colour and box a plate can change moves a channel by a hundred or more,
+# and antialiasing moves it by one to three. The count is the backstop for
+# the change that is faint AND enormous — a plate opacity of 0.86 -> 0.855
+# moves every pixel of the glass by one, and 256 px catches it.
+#
+# Re-measure when the HUD grows: the noise is proportional to how many glyph
+# edges are on screen. Being wrong in that direction is loud (the harness
+# reports a sheet that did not change as changed) and not silent, which is
+# the right way round.
+NOISE_PIXELS = 256
+NOISE_CHANNEL = 3
+
+
 # ------------------------------------- the box the committed pictures were taken at
 #
 # Everything else here describes the HUD the harness would photograph

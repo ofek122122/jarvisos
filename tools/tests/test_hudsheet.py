@@ -463,9 +463,9 @@ def test_the_sheet_tells_its_reader_that_it_is_compared():
     assert "not byte-compared" not in readme
 
 
-def run_cli(out: Path) -> subprocess.CompletedProcess:
+def run_cli(out: Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "hudsheet.py"), "--root", str(ROOT), "--out", str(out)],
+        [sys.executable, str(ROOT / "tools" / "hudsheet.py"), "--root", str(ROOT), "--out", str(out), *extra],
         capture_output=True,
         text=True,
     )
@@ -518,3 +518,248 @@ def test_the_cli_says_nothing_about_shots_that_did_not_move(tmp_path):
 
     done = run_cli(out)
     assert "03-heard.png" not in done.stdout
+
+
+# ------------------------- the floor under a sheet that cannot be compared (B74)
+#
+# Everything above is about `docs/hud`, which is byte-reproducible and keeps
+# `EXACT`. `docs/hud/screens` is not: it is photographed through a real
+# compositor, and two runs of an UNCHANGED HUD land a few dozen pixels apart
+# on antialiased glyph edges. For thirty iterations that meant those seven
+# screens could only be overwritten — nothing ever asked whether they still
+# showed the HUD this repo draws, and a stale screen is exactly as convincing
+# as a current one.
+#
+# The floor that makes them checkable is measured (see NOISE_PIXELS in
+# tools/hudscreens/sheet.py). What these tests hold is the shape of it: that
+# it absorbs the rounding, that it absorbs NOTHING else, that it says out loud
+# whenever it absorbed anything, and that the sheet which does not need it
+# does not get it.
+
+FLOOR = hudsheet.Tolerance(pixels=256, channel=3)
+
+GLASS = (0x0C, 0x11, 0x16)
+
+
+def nudged(rows, count: int, delta: int):
+    """A copy of `rows` with `count` pixels moved by `delta` on one channel.
+
+    The shape the compositor's rounding actually takes, and the reason the
+    count alone cannot grade it: single values, one channel, scattered.
+    """
+    out = [list(r) for r in rows]
+    width = len(rows[0])
+    for i in range(count):
+        y, x = divmod(i, width)
+        r, g, b = out[y][x][:3]
+        out[y][x] = (r, g + delta, b)
+    return out
+
+
+def test_a_faint_scatter_is_the_compositors_rounding_and_not_a_finding():
+    rows = flat(40, 40, GLASS)
+    grade = hudsheet.grade_shot(png(rows), png(nudged(rows, 30, 1)), tolerance=FLOOR)
+    assert grade.finding is None
+    assert grade.absorbed == (30, 1), grade
+
+
+def test_the_same_scatter_is_a_finding_on_the_sheet_that_has_no_floor():
+    """The contact sheet renders offscreen and IS reproducible (A45), so one
+    pixel out of place there is news. The floor is a property of the sheet
+    being compared, not of this comparator, and the default is no floor."""
+    rows = flat(40, 40, GLASS)
+    finding = hudsheet.compare_shot(png(rows), png(nudged(rows, 30, 1)))
+    assert finding is not None and "30 px" in finding
+    assert "floor" not in finding, "a sheet with no floor must not talk about one"
+
+
+def test_a_faint_change_too_wide_to_be_rounding_is_a_finding():
+    """The backstop, and the reason the count is in the floor at all: a plate
+    opacity of 0.86 -> 0.855 moves every pixel of the glass by one. Each of
+    those pixels is indistinguishable from rounding; there are just far too
+    many of them."""
+    rows = flat(40, 40, GLASS)
+    finding = hudsheet.compare_shot(
+        png(rows), png(nudged(rows, FLOOR.pixels + 1, 1)), tolerance=FLOOR
+    )
+    assert finding is not None
+    assert f"{FLOOR.pixels + 1} px against a floor of {FLOOR.pixels}" in finding
+    assert "per channel against" not in finding, (
+        "the amplitude was inside the floor and the report blamed it anyway"
+    )
+
+
+def test_one_loud_pixel_is_a_finding_however_few():
+    """The bound that actually discriminates. Anything a plate can SAY — a
+    word, a colour, a box — moves a channel by a hundred or more, so a single
+    pixel past the amplitude floor is a change however small the count."""
+    rows = flat(40, 40, GLASS)
+    finding = hudsheet.compare_shot(
+        png(rows), png(nudged(rows, 1, FLOOR.channel + 1)), tolerance=FLOOR
+    )
+    assert finding is not None
+    assert f"{FLOOR.channel + 1} per channel against a floor of {FLOOR.channel}" in finding
+    assert "px against a floor" not in finding
+
+
+def test_the_worst_channel_is_the_worst_and_not_the_first():
+    """One loud pixel among three hundred faint ones is still a change, and a
+    report that read only the first differing pixel would absorb it."""
+    rows = flat(40, 40, GLASS)
+    after = nudged(rows, 30, 1)
+    after[20][20] = (0xF0, 0x71, 0x4A)
+    finding = hudsheet.compare_shot(png(rows), png(after), tolerance=FLOOR)
+    assert finding is not None and "per channel against a floor" in finding
+
+
+def test_a_shot_that_is_missing_or_new_is_never_absorbed():
+    """Neither is a difference of degree, so no floor may reach them: a
+    driver that quietly stops photographing a plate must not be graded as
+    rounding."""
+    one = png(flat(4, 4, GLASS))
+    gone = hudsheet.grade_sheet({"a.png": one}, {}, tolerance=FLOOR)["a.png"]
+    fresh = hudsheet.grade_sheet({}, {"a.png": one}, tolerance=FLOOR)["a.png"]
+    assert gone.finding and gone.absorbed is None
+    assert fresh.finding and fresh.absorbed is None
+
+
+def test_an_unreadable_or_resized_shot_is_never_absorbed():
+    rows = flat(8, 8, GLASS)
+    bigger = hudsheet.grade_shot(png(rows), png(flat(9, 8, GLASS)), tolerance=FLOOR)
+    broken = hudsheet.grade_shot(png(rows), b"not a png at all", tolerance=FLOOR)
+    assert bigger.finding and bigger.absorbed is None
+    assert broken.finding and broken.absorbed is None
+
+
+def test_restore_writes_back_exactly_what_it_compared_against(tmp_path):
+    """The idempotence half. What it writes is the bytes it graded the file
+    against — not a re-encode, not a copy of something else on disk — because
+    the only thing that makes overwriting a photograph honest is that the
+    photograph it replaces was just proved to be the same picture."""
+    out = tmp_path / "shots"
+    out.mkdir()
+    committed = png(flat(8, 8, GLASS))
+    (out / "01.png").write_bytes(png(nudged(flat(8, 8, GLASS), 4, 1)))
+    hudsheet.restore(out, {"01.png": committed}, ["01.png"])
+    assert (out / "01.png").read_bytes() == committed
+
+
+# ------------------------------------------------------------ and through the CLI
+
+
+def nudge_file(path: Path, count: int, delta: int) -> None:
+    """Move `count` pixels of a real committed shot by `delta`, in place."""
+    img = hudsheet.decode_png(path.read_bytes())
+    rows = [[img.pixel(x, y)[:3] for x in range(img.width)] for y in range(img.height)]
+    path.write_bytes(png(nudged(rows, count, delta)))
+
+
+@pytest.fixture
+def copied_sheet(tmp_path) -> Path:
+    out = tmp_path / "shots"
+    out.mkdir()
+    for p in SHEET.glob("*.png"):
+        shutil.copy(p, out / p.name)
+    return out
+
+
+FLOOR_ARGS = ("--tolerance-pixels", str(FLOOR.pixels), "--tolerance-channel", str(FLOOR.channel))
+
+
+def test_the_cli_absorbs_the_rounding_stays_green_and_says_what_it_absorbed(copied_sheet):
+    """A floor nobody is told about is a comparison nobody can audit, so the
+    count and the amplitude it forgave are printed on a GREEN run."""
+    nudge_file(copied_sheet / "01-quiet.png", 30, 1)
+    done = run_cli(copied_sheet, *FLOOR_ARGS)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "30 px" in done.stdout and "1 per channel" in done.stdout
+    assert "left as rendered" in done.stdout
+    assert "shots match" in done.stdout
+
+
+def test_the_cli_leaves_the_rendered_file_alone_unless_asked(copied_sheet):
+    """A grading run into a scratch directory — or the next person measuring
+    the noise — must get back exactly what was rendered."""
+    nudge_file(copied_sheet / "01-quiet.png", 30, 1)
+    before = (copied_sheet / "01-quiet.png").read_bytes()
+    run_cli(copied_sheet, *FLOOR_ARGS)
+    assert (copied_sheet / "01-quiet.png").read_bytes() == before
+
+
+def test_accept_noise_puts_the_committed_bytes_back(copied_sheet):
+    """What makes a screens run idempotent: an unchanged HUD leaves a clean
+    tree, so a dirty `git status` after a run means something again."""
+    nudge_file(copied_sheet / "01-quiet.png", 30, 1)
+    done = run_cli(copied_sheet, *FLOOR_ARGS, "--accept-noise")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "restored to the committed bytes" in done.stdout
+    assert (copied_sheet / "01-quiet.png").read_bytes() == (SHEET / "01-quiet.png").read_bytes()
+
+
+def test_accept_noise_does_not_touch_a_shot_that_really_moved(copied_sheet):
+    """The dangerous mutation, and the one this file exists to catch: a
+    restore that ran on findings would delete the evidence of a changed HUD
+    and report it green."""
+    nudge_file(copied_sheet / "01-quiet.png", 4, 40)
+    changed = (copied_sheet / "01-quiet.png").read_bytes()
+    done = run_cli(copied_sheet, *FLOOR_ARGS, "--accept-noise")
+    assert done.returncode == 1
+    assert (copied_sheet / "01-quiet.png").read_bytes() == changed
+
+
+def test_accept_noise_restores_the_rounding_and_only_the_rounding(copied_sheet):
+    """The refresh a real HUD change produces: one screen drew something
+    else, and the other six jittered on a glyph edge the way they always do.
+    The restore has to run — that is what keeps the diff down to the picture
+    that moved — and it has to touch NOTHING else, or the evidence of the
+    change is overwritten by the bytes it was supposed to be compared with,
+    and the run reports it green.
+    """
+    nudge_file(copied_sheet / "01-quiet.png", 30, 1)
+    moved = copied_sheet / "02-listening.png"
+    nudge_file(moved, 4, 40)
+    changed = moved.read_bytes()
+
+    done = run_cli(copied_sheet, *FLOOR_ARGS, "--accept-noise")
+    assert done.returncode == 1
+    assert "02-listening.png" in done.stdout
+    assert (copied_sheet / "01-quiet.png").read_bytes() == (SHEET / "01-quiet.png").read_bytes()
+    assert moved.read_bytes() == changed, (
+        "the restore reached a shot that really moved: a changed HUD would be "
+        "put back to its old picture and the change reported green"
+    )
+
+
+def test_accept_noise_without_a_floor_is_refused(copied_sheet):
+    """There is nothing to accept, and a flag that silently does nothing is
+    how a screens run would quietly stop being idempotent."""
+    done = run_cli(copied_sheet, "--accept-noise")
+    assert done.returncode == 2
+    assert "no floor" in done.stderr
+
+
+def test_a_green_run_with_nothing_absorbed_says_nothing_about_a_floor(copied_sheet):
+    done = run_cli(copied_sheet, *FLOOR_ARGS)
+    assert done.returncode == 0
+    assert "rounding" not in done.stdout
+
+
+def test_the_report_names_the_harness_that_would_refresh_this_sheet(copied_sheet):
+    """Two harnesses share this comparator now, and a screens run that told
+    the reader to re-run `hudshots.sh` would send them to the wrong sheet."""
+    shutil.copy(SHEET / "01-quiet.png", copied_sheet / "04-speaking.png")
+    done = run_cli(copied_sheet, "--rerun", "bash ops/ralph/hudscreens.sh")
+    assert done.returncode == 1
+    assert "bash ops/ralph/hudscreens.sh" in done.stdout
+    assert "hudshots" not in done.stdout
+
+
+def test_the_contact_sheet_is_still_compared_to_the_byte():
+    """The floor belongs to the screens and to nothing else. `hudshots.sh`
+    renders offscreen and is byte-reproducible (A45), so a tolerance there
+    would be teeth removed from the gate that has them."""
+    shots = (ROOT / "ops" / "ralph" / "hudshots.sh").read_text("utf-8")
+    assert "--tolerance" not in shots and "--accept-noise" not in shots, (
+        "ops/ralph/hudshots.sh compares its sheet with a floor — that sheet "
+        "is byte-reproducible and has no honest reason to move at all"
+    )

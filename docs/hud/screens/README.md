@@ -349,12 +349,27 @@ are worth stating because a journal entry has already read a clean
 `git status` here as evidence that nothing moved (A45). Re-running this
 harness against an untouched `shell/jv-hud` changes `02-heard` and
 `03-confirm` by a **handful of pixels per monitor** — single values, one
-channel, on antialiased glyph edges inside the plate. Over three runs,
-`01-quiet` (which draws nothing) and `04-unheard` (two short monospace
-labels) came back byte for byte every time, and the two shots carrying a
-long wrapped sentence never did. So a dirty `git status` after a
-re-run is not a regression and a clean one is not a pass. Look at the
-picture; the measurements above are what the run actually asserts.
+channel, on antialiased glyph edges inside the plate and on the plate's
+own rounded corner. Over four renders compared six ways, `01-quiet`
+(which draws nothing) and `04-unheard` (two short monospace labels) came
+back byte for byte every time, and the two shots carrying a long wrapped
+sentence never did: 3 to 111 pixels, never more than 3 per channel, and
+never more than 1 between two renders taken back to back.
+
+**These screens are compared anyway** (B74). The run reads every picture
+it just took against the one committed in git, through the same
+`tools/hudsheet.py` the contact sheet uses — with a floor under it, of
+**256 px** per screen and **3 per channel**, which is the measurement
+above with a little room and nowhere near what a plate can say. §06's
+quietest ink sits more than a hundred values from the glass it is drawn
+on, so every word, colour and box the HUD can change is two orders of
+magnitude above this floor; what the floor cannot see is a glyph landing
+a fraction of a pixel over, which is the thing it is made of. A screen
+that only moved by that much is **restored to its committed bytes**, so
+a run that changed nothing leaves a clean tree — and a dirty `git status`
+here now means the HUD really did draw something else. Look at it, and
+commit it. A run that finds a real change ends nonzero and names the
+screens that moved.
 
 ---
 

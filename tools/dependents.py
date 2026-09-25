@@ -759,10 +759,15 @@ DECLARED_GATES = (
             "services/jarvisd",
             "shell/jv-hud",
             "tools/hudscreens",
+            # The comparator it reads its own sheet back with (B74). Nothing
+            # in a nix evaluation names it, and it is the half of this gate
+            # that can go wrong quietly: a floor set too high turns a changed
+            # HUD into a green run.
+            "tools/hudsheet.py",
         ),
         runs_here=False,
         note=(
-            "2m25s, a compositor, and it REWRITES docs/hud/screens/ — "
+            "2m25s, a compositor, and seven pictures for a human — "
             "run it yourself, look at the shots, commit them"
         ),
     ),

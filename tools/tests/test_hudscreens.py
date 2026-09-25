@@ -23,6 +23,7 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,9 @@ from test_gen_theme_qml import ROOT
 
 sys.path.insert(0, str(ROOT / "tools" / "hudscreens"))
 import sheet  # noqa: E402
+
+sys.path.insert(0, str(ROOT / "tools"))
+import hudsheet  # noqa: E402
 
 SCREENS = ROOT / "docs" / "hud" / "screens"
 DRIVER = ROOT / "ops" / "ralph" / "hudscreens.sh"
@@ -1697,3 +1701,95 @@ def test_the_prose_scanner_is_not_reading_ordinary_prose():
     assert sheet.boxes_in_prose("an 11 px label at 0.86 opacity") == set()
     assert sheet.boxes_in_prose("the region (2284, 16, 2543, 178)") == set()
     assert sheet.boxes_in_prose("six windows, 807 px tall, 745 before") == set()
+
+
+# ------------------------- reading the screens back, with a floor (B74)
+#
+# `hudshots.sh` has compared its own sheet against HEAD since B52. This
+# harness could not: it photographs a real compositor, and two runs of an
+# unchanged HUD do not agree to the byte. So for thirty iterations these
+# seven pictures were WRITTEN and never READ, and nothing in the repo could
+# tell a current screen from one taken four plates ago.
+
+
+def test_the_harness_reads_its_own_sheet_back():
+    """The whole of B74: a sheet that can only be overwritten is a sheet that
+    cannot go stale out loud. It goes stale silently instead."""
+    text = driver_text()
+    assert "tools/hudsheet.py" in text, (
+        "ops/ralph/hudscreens.sh takes seven photographs and never compares "
+        "one — a stale screen looks exactly as convincing as a current one"
+    )
+    assert "--sheet docs/hud/screens" in text, (
+        "the screens are compared against some other sheet than their own"
+    )
+
+
+def test_the_floor_it_compares_with_is_the_measured_one():
+    """Written down twice is how a measurement goes out of date. The numbers
+    live in tools/hudscreens/sheet.py, beside the measurement that set them,
+    and the driver reads them from there."""
+    text = driver_text()
+    assert "sheet.NOISE_PIXELS" in text and "sheet.NOISE_CHANNEL" in text, (
+        "ops/ralph/hudscreens.sh does not take its floor from sheet.py"
+    )
+    for literal in (str(sheet.NOISE_PIXELS), str(sheet.NOISE_CHANNEL)):
+        assert f"--tolerance-pixels {literal}" not in text
+        assert f"--tolerance-channel {literal}" not in text
+
+
+def test_it_restores_only_over_the_sheet_it_was_compared_against():
+    """--accept-noise puts committed bytes over rendered ones, which is only
+    honest for the committed sheet itself. A run pointed at a scratch
+    directory is a measurement or a grading run, and must come back holding
+    exactly what it rendered — the next person measuring the noise would
+    otherwise be measuring the restore."""
+    code = [
+        line
+        for line in driver_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    guarded = [line for line in code if "--accept-noise" in line]
+    assert len(guarded) == 1, guarded
+    assert "docs/hud/screens" in guarded[0], (
+        "ops/ralph/hudscreens.sh restores committed bytes without first "
+        f"checking that it is writing over the committed sheet: {guarded[0]!r}"
+    )
+
+
+def test_the_floor_is_far_below_anything_a_plate_can_say():
+    """The bound that does the discriminating, checked against the palette it
+    is an argument about. §06's text on §06's glass is the FAINTEST thing the
+    HUD draws, and it is two orders of magnitude past the floor; the ember is
+    further still. A floor raised to where it could swallow a word would fail
+    here rather than in a photograph nobody compared.
+    """
+    palette = tomllib.loads((ROOT / "personality" / "theme.toml").read_text("utf-8"))["palette"]
+    glass = hudsheet.parse_hex(palette["ground_deep"])
+    for quietest in ("text_3", "teal", "ember"):
+        ink = hudsheet.parse_hex(palette[quietest])
+        apart = max(abs(a - b) for a, b in zip(ink, glass))
+        assert apart > 10 * sheet.NOISE_CHANNEL, (
+            f"{quietest} is {apart} from the plate it is drawn on and the "
+            f"screens' floor forgives {sheet.NOISE_CHANNEL} per channel — "
+            "the floor is close enough to a legible change to hide one"
+        )
+
+
+def test_the_readme_states_the_floor_the_harness_compares_with():
+    """The numbers in the prose, pinned to the numbers in the code (A73's
+    rule, applied to B74's). A README that quotes a floor the harness no
+    longer uses is worse than one that quotes none."""
+    readme = (SCREENS / "README.md").read_text("utf-8")
+    # Both numbers in the units they are quoted in, because a bare `256` is
+    # also the first three digits of this monitor and a bare `3` is in every
+    # other sentence on the page — a gate either reads the claim or it reads
+    # the page it happens to be printed on.
+    assert f"{sheet.NOISE_PIXELS} px" in readme, (
+        "docs/hud/screens/README.md does not say how many pixels the harness "
+        f"forgives, which is {sheet.NOISE_PIXELS}"
+    )
+    assert f"{sheet.NOISE_CHANNEL} per channel" in readme, (
+        "docs/hud/screens/README.md does not say how faint a difference has "
+        f"to be to be forgiven, which is {sheet.NOISE_CHANNEL} per channel"
+    )

@@ -1804,24 +1804,47 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       one affects every suite and the honest plan is arguably all of them.
       Discovered in B72.
 
-- [ ] B74. Nothing checks that `docs/hud/screens/` still shows the HUD this
-      repo draws. `hudshots.sh` compares every PNG it renders against the one
-      committed at HEAD (B52) and so cannot go stale; `hudscreens.sh` only
-      writes, and B72 measured why it cannot do the same — two runs on an
-      unchanged tree differ in five of seven files, 3 and 4 pixels of 3.7 M,
-      one channel, by one, which is compositor rounding and not content. So
-      the committed screens are accurate only for as long as somebody keeps
-      re-running it by hand, and a stale screen looks exactly as convincing
-      as a current one (A34's argument about orphans, one level up). The
-      cheap answer is a tolerant comparator — a sheet that differs in under
-      ~100 pixels by at most 1 is the same sheet — which would give the
-      screens the HEAD comparison the shots have, let the harness say "the
-      committed sheet is stale" instead of silently overwriting it, and
-      make the run idempotent enough that B72's decision could be revisited.
-      The number needs measuring rather than guessing: three runs, the
-      distribution of the noise, and a threshold under the smallest real
-      change any plate can make (a 4 px ember square was A34's smallest, and
-      it is 16 pixels). Discovered in B72.
+- [x] B74. `docs/hud/screens/` is compared against the HUD this repo draws,
+      and stops being a sheet that can only be overwritten. — PENDING
+      (`hudsheet.Tolerance`, a floor of **256 px per screen and 3 per
+      channel**, measured rather than guessed: four renders of an untouched
+      HUD compared six ways, 3..111 px apart, never more than 3 on one
+      channel and never more than 1 between two renders taken back to back,
+      always inside the plate on glyph edges and its own rounded corner.
+      B74's premise was half wrong and the measurement says so: a COUNT can
+      never discriminate here, because the noise (111 px) is already past
+      A34's smallest real change (a 4x4 ember square, 16 px). What separates
+      them is AMPLITUDE — §06's quietest ink is >100 from the glass it is
+      drawn on, so every word, colour and box a plate can change is two
+      orders of magnitude above the floor, and the count is the backstop for
+      the one change that is faint AND enormous (a plate opacity of
+      0.86 -> 0.855 moves every pixel of the glass by one). `hudscreens.sh`
+      now ends by reading its own sheet back, names what the floor absorbed
+      on every green run, and — only when it is writing over the committed
+      sheet — restores the screens that moved by rounding alone to the bytes
+      they were compared against. So the run is idempotent: 5 of 7 screens
+      absorbed, `git status` clean, and a dirty one now means the HUD really
+      did draw something else. Tests: `runtests.sh tools` 407 (was 385), nine
+      mutations, nine caught — including the one that survived the first pass
+      and the test it earned, a refresh where one screen changed for real
+      while the other six jittered. Raised: **B75**, whether B72's decision
+      survives losing half its argument.)
+
+- [ ] B75. B72 kept `hudscreens.sh` out of the verify gate for two reasons
+      and B74 measured one of them away. The rewrite is no longer
+      unconditional — a run that changed nothing now restores what it
+      compared against and leaves a clean tree — so "it dirties the tree the
+      plan was computed from" is only true of a run that DID change the HUD,
+      which is the run whose output a human is supposed to look at anyway.
+      What still carries the decision on its own is reason 1: 2m25s, and
+      seven pictures rather than a verdict. The honest options are (a) leave
+      it named-but-not-run, which is today; (b) bind it, and accept 2m25s on
+      every change to `shell/jv-hud`; (c) bind a CHEAPER half — the probes
+      (corner, exclusive zone, click, idle frames) are verdicts and the
+      screens are not, and nothing has measured what the probes cost without
+      the seven `grim` captures and the comparison. (c) is the one that needs
+      a measurement before anyone can choose, and the loop can take it.
+      Discovered in B74.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
