@@ -55,10 +55,24 @@
 # that suite really imports it from, and the abort says SHADOWED and names the
 # other copy, or says the copy is right, or (no answer) says nothing.
 #
+# BEING KILLED PUTS THE TREE BACK (B71). The restore is a `finally`, and a
+# `finally` is code: SIGTERM's default action ends the process without running
+# any, so a timeout or a Ctrl-C used to leave the worktree holding whichever
+# mutation was in flight — and the next run said "the baseline suite is RED
+# before any mutation", which is true and points at nothing. Two halves now:
+# INT/TERM/HUP are trapped and unwind through the ordinary restore (one-shot,
+# so a second Ctrl-C cannot interrupt the restore the first one asked for);
+# and every mutant write is preceded by a note in this worktree's git
+# directory saying what was overwritten and with what, which is what covers
+# SIGKILL and a power cut. The next run reads that note FIRST, before it reads
+# a single original, and either puts the file back and says RECOVERED, or —
+# if the file is now neither the mutant nor the original, i.e. somebody has
+# edited it since — refuses and tells you where the original text is kept.
+#
 # Exit: 0 every mutation caught · 1 a mutation survived · 2 the harness
 # cannot make an honest claim (red baseline, a file that survived every canary
 # it was offered — so the suite neither runs nor reads it — a bad spec, a tree
-# still red after the last restore).
+# still red after the last restore, a killed run).
 #
 # WHERE THE OUTPUT WENT (B56). One line of each suite run is printed, prefixed
 # with the run it came from (run003). The WHOLE of it is in that run's own

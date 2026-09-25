@@ -173,15 +173,41 @@ lines is a deletion.
 The file is restored after every run, and the suite is run once more at the
 end with the tree clean — because "the tree is green again" is the claim
 iteration 70 got wrong, and it is worth one more suite run to make it.
+
+B71 makes that restore survive the harness being killed, which it did not.
+The restore is a `finally` and a `finally` is code, so SIGTERM's default
+action — end the process, run nothing — left the worktree holding the mutant,
+and the next run reported a RED baseline and pointed at nothing. It cost
+fifteen minutes in iteration 91 and would have cost far more had that
+iteration committed instead of re-running. Two halves, because no single one
+covers every way a process dies: `restore_on_signal` traps INT/TERM/HUP and
+turns them into an unwind, so the ordinary restore path runs; and `InFlight`
+writes a note before every mutant write, which is the only thing that can
+help a SIGKILL. `recover_inflight` reads that note at the very top of `run()`
+— before a single original is read, because a stale mutant captured as the
+"original" is the one way this harness could make the damage permanent.
+
+Not taken: staging a copy of the worktree per run instead of mutating in
+place, which is proof against every signal and costs a copy of the repo per
+mutation. The note buys most of that guarantee for a few hundred bytes: a
+kill between the note and the write leaves the original on disk and the next
+run just sweeps the note, and a kill part-way THROUGH the write leaves a file
+that is neither text, which the next run refuses to touch and reports. What
+a copy-per-run would still buy over this is that last case, and it is one
+`write_text` wide.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
+import hashlib
+import json
 import math
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -217,6 +243,19 @@ SUITE_LOG = "suite.log"
 WHAT = "WHAT"
 INDEX = "INDEX"
 
+# The breadcrumb a killed run leaves behind (B71). The restore below is a
+# `finally`, and a `finally` is code: SIGTERM's default action kills the
+# process without running any, and SIGKILL does not even ask. Either way the
+# worktree keeps whichever mutation was in flight, and the NEXT run reports
+# "the baseline suite is RED before any mutation" — true, and pointing at
+# nothing. So every write of a mutant is preceded by a note saying what was
+# overwritten and with what, and the next run reads it.
+#
+# It lives in the WORKTREE'S GIT DIRECTORY and not in the tree, so it can
+# never be committed by accident and never shows up in `git status` — and not
+# in /tmp, because it has to be found by a run that may happen after a reboot.
+INFLIGHT = "jv-mutate-inflight.json"
+
 
 class SpecError(Exception):
     """The spec could not be read as mutations."""
@@ -224,6 +263,22 @@ class SpecError(Exception):
 
 class HarnessError(Exception):
     """The harness cannot make an honest claim and is not going to make one."""
+
+
+class Killed(Exception):
+    """A signal, turned into an unwind so the restores can run (B71).
+
+    Not a HarnessError: nothing about the grading went wrong. The run was
+    ended from outside and the only thing that matters is that the tree came
+    back."""
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signal.Signals(signum).name)
+
+    @property
+    def name(self) -> str:
+        return signal.Signals(self.signum).name
 
 
 @dataclasses.dataclass(frozen=True)
@@ -252,6 +307,9 @@ class Report:
     # (B55). Measured, not declared — it is whichever canary killed the suite.
     # Empty only on a Report nobody graded (the CLI's own test doubles).
     relations: Mapping[str, str] = dataclasses.field(default_factory=dict)
+    # What a previous, KILLED run left behind and this one put back (B71).
+    # None on every ordinary run, which is nearly all of them.
+    recovered: str | None = None
 
     @property
     def caught(self) -> int:
@@ -824,6 +882,184 @@ class Stamps:
         return at
 
 
+# --------------------------------------------------- surviving being killed
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def inflight_path(root: Path) -> Path:
+    """Where this worktree's breadcrumb lives (B71).
+
+    The git directory, asked for rather than guessed: in a worktree `.git` is
+    a FILE pointing at `…/.git/worktrees/<name>`, and that per-worktree
+    directory is exactly the right scope — two worktrees of this repo grade
+    different trees and must never read each other's note. Falling back to the
+    root keeps the harness usable outside a repo (every test fixture here is
+    an ordinary temp directory), where "it cannot be committed" is free.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--absolute-git-dir"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        out = ""
+    return Path(out or root) / INFLIGHT
+
+
+@dataclasses.dataclass(frozen=True)
+class InFlight:
+    """The note that says "this file is mutated right now, and here is what it
+    said before". Armed BEFORE the mutant is written and cleared AFTER the
+    restore, so the window it covers is exactly the window in which a kill
+    would leave the worktree wrong."""
+
+    note: Path
+    target: Path
+    rel: str
+    original: str
+
+    def swap_in(self, mutant: str, write: Callable[[Path, str], None], *, what: str = "") -> None:
+        """Arm the note, THEN write the mutant. The order is the whole point
+        and it is a method rather than two statements at the call site so that
+        it can be asserted directly: a note written after the mutant covers
+        nothing, and a kill in that window is exactly the one this note exists
+        for. `write` is the caller's stamping write (see Stamps)."""
+        self.arm(mutant, what=what)
+        write(self.target, mutant)
+
+    def arm(self, mutant: str, *, what: str = "") -> None:
+        self.note.parent.mkdir(parents=True, exist_ok=True)
+        self.note.write_text(
+            json.dumps(
+                {
+                    "rel": self.rel,
+                    "abs": str(self.target),
+                    "original": self.original,
+                    "mutant_sha256": _sha(mutant),
+                    "what": what,
+                    "pid": os.getpid(),
+                    "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                },
+                indent=1,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def disarm(self) -> None:
+        self.note.unlink(missing_ok=True)
+
+
+def recover_inflight(note: Path, *, now: Callable[[], float] = time.time) -> str | None:
+    """Put back what a killed run left mutated, and say so. Returns None when
+    there is nothing to recover — which is every ordinary run.
+
+    Three cases, and only one of them writes. The file still holds EXACTLY the
+    mutant the note records: nobody has touched it since the kill, so putting
+    the original back is provably safe and is done. The file already holds the
+    original: the restore did run and only the note outlived it, so the note
+    goes. Anything else — an edit, a different mutation, a half-written file —
+    is a tree this harness cannot reason about, and it refuses rather than
+    overwriting somebody's work with a text from a dead process.
+    """
+    if not note.is_file():
+        return None
+    try:
+        rec = json.loads(note.read_text(encoding="utf-8"))
+        rel, original = rec["rel"], rec["original"]
+        target, mutant_sha = Path(rec["abs"]), rec["mutant_sha256"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HarnessError(
+            f"{note} is a killed run's note and cannot be read ({exc}). Check "
+            f"`git status`, put any half-mutated file back by hand, and delete it."
+        ) from exc
+
+    when = f"{rec.get('at', 'an earlier run')} (pid {rec.get('pid', '?')})"
+    if not target.is_file():
+        raise HarnessError(
+            f"a run of this harness was killed while {rel} was mutated — {when} "
+            f"— and that file is GONE. Its original text is in {note}, under "
+            f'"original". Put it back by hand and delete that note.'
+        )
+
+    current = target.read_text(encoding="utf-8")
+    if current == original:
+        note.unlink()
+        return (
+            f"a run of this harness was killed with {rel} mutated — {when} — but "
+            f"the file was already back as it was. Only the note was left; it is "
+            f"gone now."
+        )
+    if _sha(current) != mutant_sha:
+        raise HarnessError(
+            f"a run of this harness was killed while {rel} was mutated — {when} "
+            f"— and that file is now NEITHER the mutant it left nor the original "
+            f"it started from. The harness will not overwrite it. The original "
+            f'text is in {note}, under "original": put it back by hand if that '
+            f"is what you want, then delete that note."
+        )
+
+    # Strictly newer than the mutant it replaces, for the same reason every
+    # other write here is (see Stamps): the killed run may have stamped the
+    # mutant into the FUTURE, and a restore that looked older than the
+    # artifacts built from the mutant is iteration 70's bug wearing a new hat.
+    # Read BEFORE the write, which is the whole trick: `write_text` resets the
+    # mtime to the clock, and the number that has to be beaten is the one the
+    # dead run left.
+    floor = max(now(), target.stat().st_mtime)
+    target.write_text(original, encoding="utf-8")
+    Stamps(floor).stamp(target)
+    note.unlink()
+    return (
+        f"a run of this harness was killed while {rel} was mutated — {when}. "
+        f"That file has been put back as it was; nothing else was touched. "
+        f"(Without this note the run you just started would have reported a RED "
+        f"baseline and pointed at nothing.)"
+    )
+
+
+_TRAPPED = tuple(
+    s for s in (getattr(signal, n, None) for n in ("SIGINT", "SIGTERM", "SIGHUP")) if s
+)
+
+
+@contextlib.contextmanager
+def restore_on_signal(signums: Sequence[int] = _TRAPPED):
+    """Turn a kill into an exception, so every `finally` below gets to run.
+
+    SIGTERM's default action is to end the process on the spot — no unwind, no
+    restore, and a worktree left holding a mutant. Raising instead costs one
+    handler and puts the ordinary restore path in charge of the ordinary way
+    this harness dies (a timeout, a Ctrl-C, a loop that gave up).
+
+    The handler is ONE-SHOT: the first signal disarms all of them, so a second
+    Ctrl-C from an impatient hand cannot interrupt the restore it just asked
+    for. SIGKILL is the case this cannot help, and it is what the note is for.
+    """
+    previous: dict[int, object] = {}
+
+    def handler(signum, frame):  # pragma: no cover - exercised in a subprocess
+        for s in previous:
+            signal.signal(s, signal.SIG_IGN)
+        raise Killed(signum)
+
+    try:
+        for s in signums:
+            try:
+                previous[s] = signal.signal(s, handler)
+            except ValueError:
+                pass  # not the main thread; the caller keeps the old behaviour
+        yield
+    finally:
+        for s, old in previous.items():
+            signal.signal(s, old)
+
+
 # --------------------------------------------------------------------- run
 
 Runner = Callable[[Mapping[str, str], Path], bool]
@@ -881,6 +1117,7 @@ def run(
     root: Path,
     lang: Language = PYTHON,
     origin: Origin | None = None,
+    inflight: Path | None = None,
 ) -> Report:
     """Grade `mutations`. `runner(env, scratch)` runs the suite and returns
     True if it passed; `env` carries this run's private cache settings and
@@ -901,10 +1138,21 @@ def run(
     thirteen PNGs; a survivor or an abort is precisely the case where the
     alternative was re-running a 53 s suite by hand to see what happened.
     Every abort below names the one run that went wrong rather than the tree.
+
+    `inflight` is the breadcrumb a killed run leaves (B71), defaulting to this
+    worktree's. It is read FIRST — before a single original is read — because
+    a tree still holding yesterday's mutant would otherwise have that mutant
+    recorded as the text to restore, which is the one way this harness could
+    make the damage permanent.
     """
     mutations = list(mutations)
     if not mutations:
         raise HarnessError("no mutations in the spec; a perfect score of zero is not a claim")
+
+    note = inflight_path(root) if inflight is None else inflight
+    recovered = recover_inflight(note)
+    if recovered:
+        print(f"RECOVERED: {recovered}", file=sys.stderr, flush=True)
 
     targets: dict[str, Path] = {}
     controls: dict[str, tuple[str, ...]] = {}
@@ -938,11 +1186,13 @@ def run(
     def swapped(rel: str, text: str, what: str) -> tuple[bool, Path]:
         """Run the suite with `rel` holding `text`, then put it back."""
         path = targets[rel]
+        crumb = InFlight(note, path, rel, originals[rel])
         try:
-            write(path, text)
+            crumb.swap_in(text, write, what=what)
             return suite(what)
         finally:
             write(path, originals[rel])
+            crumb.disarm()
 
     keep = True
     try:
@@ -1000,6 +1250,7 @@ def run(
             outcomes,
             logs=base if any(o.status == "survived" for o in outcomes) else None,
             relations=relations,
+            recovered=recovered,
         )
         keep = report.logs is not None
         return report
@@ -1109,13 +1360,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     if lang.origin is not None:
         probe = lambda module: lang.origin(root, args.target, module)  # noqa: E731
     try:
-        report = run(
-            muts,
-            script_runner(root, lang, args.target),
-            root=root,
-            lang=lang,
-            origin=probe,
+        # The trap, not decoration: without it a SIGTERM (a timeout, a Ctrl-C,
+        # a loop that decided the run was too slow) ends the process between
+        # the mutant write and the restore, and the worktree keeps the mutation
+        # (B71).
+        with restore_on_signal():
+            report = run(
+                muts,
+                script_runner(root, lang, args.target),
+                root=root,
+                lang=lang,
+                origin=probe,
+            )
+    except Killed as exc:
+        print(
+            f"\nHARNESS: killed by {exc.name}. Every file this run touched was "
+            f"put back and nothing was graded.",
+            file=sys.stderr,
         )
+        return 2
     except HarnessError as exc:
         print(f"\nHARNESS: {exc}", file=sys.stderr)
         return 2

@@ -58,9 +58,11 @@ that commit.
 from __future__ import annotations
 
 import dataclasses
+import json
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -1530,3 +1532,312 @@ def test_a_module_the_suite_has_never_heard_of_is_no_answer_and_not_a_crash():
     nothing touches — so the probe answers "no answer" and the abort says
     nothing extra, which is the right amount to say."""
     assert mutate.python_origin(ROOT, "jv-guard", "jv_brain.service") is None
+
+
+# ------------------------------------------------- surviving being killed
+
+
+DRIVER = '''\
+import pathlib, sys, time
+sys.path.insert(0, {tools!r})
+import mutate
+
+root = pathlib.Path({root!r})
+src = root / "svc" / "thing.py"
+ready = root / "ready"
+note = root / "note.json"
+
+
+def suite(env, scratch):
+    text = src.read_text(encoding="utf-8")
+    if mutate.CANARY_MARK in text:
+        return False
+    if "MUTANT" in text:
+        ready.write_text("now", encoding="utf-8")
+        time.sleep(120)  # hang here, holding the mutation, until we are killed
+    return True
+
+
+def grade():
+    mutate.run(mutate.parse_spec({spec!r}), suite, root=root, inflight=note)
+
+
+if {trap}:
+    with mutate.restore_on_signal():
+        grade()
+else:
+    grade()  # the control: the harness as it was before B71
+'''
+
+
+def _hang_mid_mutation(tmp_path, src, *, trap=True):
+    """Start a real grading run in a real subprocess and block it with the
+    mutation written to disk. Returns the live process — the caller decides
+    which signal ends it, which is the whole point of these tests."""
+    import os
+
+    driver = tmp_path / "driver.py"
+    driver.write_text(
+        DRIVER.format(tools=str(ROOT / "tools"), root=str(tmp_path), spec=SPEC, trap=trap),
+        encoding="utf-8",
+    )
+    env = dict(os.environ, TMPDIR=str(tmp_path))
+    proc = subprocess.Popen([sys.executable, str(driver)], env=env)
+    ready = tmp_path / "ready"
+    for _ in range(600):
+        if ready.exists():
+            break
+        if proc.poll() is not None:
+            raise AssertionError(f"the driver died before mutating (rc={proc.returncode})")
+        time.sleep(0.05)
+    else:
+        proc.kill()
+        raise AssertionError("the driver never reached the mutation")
+    assert "MUTANT" in src.read_text(encoding="utf-8"), "the mutation is not on disk yet"
+    return proc
+
+
+def test_a_sigterm_mid_run_puts_the_file_back(tree):
+    """B71's bug, reproduced against the real signal. Before the trap, SIGTERM
+    ended the process between the mutant write and the `finally` that undoes
+    it — no unwind, no restore — and the worktree kept the mutation."""
+    import signal as sig
+
+    root, src = tree
+    before = src.read_bytes()
+    proc = _hang_mid_mutation(root, src)
+    proc.send_signal(sig.SIGTERM)
+    assert proc.wait(timeout=30) != 0, "a killed run must not report success"
+    assert src.read_bytes() == before, "SIGTERM left the mutation in the worktree"
+    assert not (root / "note.json").exists(), "the restore ran but left its note"
+
+
+def test_the_same_sigterm_without_the_trap_is_the_bug_itself(tree):
+    """The control, and it is B71 verbatim. Take the trap away and the same
+    signal at the same instant leaves the mutation in the worktree — so the
+    test above measures the trap and not some accident of how a driver exits.
+    The note is what is left, and it is what the next run reads."""
+    import signal as sig
+
+    root, src = tree
+    proc = _hang_mid_mutation(root, src, trap=False)
+    proc.send_signal(sig.SIGTERM)
+    proc.wait(timeout=30)
+    assert "MUTANT" in src.read_text(encoding="utf-8")
+    assert (root / "note.json").is_file()
+
+
+def test_a_sigkill_leaves_a_note_the_next_run_puts_back(tree):
+    """The trap cannot help a SIGKILL, so the note does. The next run reads it
+    BEFORE it reads any original, puts the file back, and says so — where
+    today it would report a red baseline and point at nothing."""
+    import signal as sig
+
+    root, src = tree
+    before = src.read_bytes()
+    proc = _hang_mid_mutation(root, src)
+    proc.send_signal(sig.SIGKILL)
+    proc.wait(timeout=30)
+    note = root / "note.json"
+    assert note.is_file(), "nothing was left to recover from"
+
+    report = mutate.run(mutate.parse_spec(SPEC), FakeSuite(src), root=root, inflight=note)
+    assert report.recovered and "svc/thing.py" in report.recovered
+    assert "killed" in report.recovered
+    assert src.read_bytes() == before
+    assert not note.exists()
+    assert report.caught == 1, "the recovered tree graded normally afterwards"
+
+
+def test_the_note_is_armed_before_the_mutant_and_gone_after_the_restore(tree):
+    root, src = tree
+    note = root / "note.json"
+    seen: list[tuple[str, bool, str]] = []
+
+    def watch(env, scratch):
+        text = src.read_text(encoding="utf-8")
+        kind = "canary" if mutate.CANARY_MARK in text else "mutant" if "MUTANT" in text else "clean"
+        armed = note.is_file()
+        original = json.loads(note.read_text(encoding="utf-8"))["original"] if armed else ""
+        seen.append((kind, armed, original))
+        return kind == "clean"
+
+    mutate.run(mutate.parse_spec(SPEC), watch, root=root, inflight=note)
+    assert [(k, a) for k, a, _ in seen] == [
+        ("clean", False),  # the baseline touches nothing, so there is nothing to note
+        ("canary", True),
+        ("mutant", True),
+        ("clean", False),  # and the closing baseline runs on a tree with no note
+    ]
+    assert all(o == "VALUE = 1\nOTHER = 2\n" for _, a, o in seen if a)
+    assert not note.exists()
+
+
+def test_the_note_is_on_disk_before_the_mutant_is(tree):
+    """A note written AFTER the mutant covers nothing: the window it exists
+    for is the one that opens the instant the file stops being the original.
+    Asserted at the moment of the write, which is the only moment it can be
+    asked — afterwards both orderings look identical."""
+    root, src = tree
+    note = root / "note.json"
+    crumb = mutate.InFlight(note, src, "svc/thing.py", src.read_text(encoding="utf-8"))
+    seen: list[tuple[bool, str]] = []
+
+    def write(path, text):
+        seen.append((note.is_file(), json.loads(note.read_text())["original"] if note.is_file() else ""))
+        path.write_text(text, encoding="utf-8")
+
+    crumb.swap_in("VALUE = 'MUTANT'\nOTHER = 2\n", write)
+    assert seen == [(True, "VALUE = 1\nOTHER = 2\n")]
+
+
+def test_a_note_whose_file_was_already_put_back_is_just_swept(tree):
+    root, src = tree
+    note = root / "note.json"
+    mutate.InFlight(note, src, "svc/thing.py", src.read_text(encoding="utf-8")).arm("whatever")
+    said = mutate.recover_inflight(note)
+    assert said and "already back" in said
+    assert not note.exists()
+
+
+def test_a_file_edited_since_the_kill_is_never_overwritten(tree):
+    """The one case where putting the original back would destroy work: the
+    file is neither the mutant the dead run left nor the text it started from,
+    so somebody has been here since. Refuse, and say where the original is."""
+    root, src = tree
+    note = root / "note.json"
+    original = src.read_text(encoding="utf-8")
+    mutate.InFlight(note, src, "svc/thing.py", original).arm("VALUE = 'MUTANT'\nOTHER = 2\n")
+    src.write_text("VALUE = 3\nOTHER = 2\n", encoding="utf-8")  # a human, mid-edit
+
+    with pytest.raises(mutate.HarnessError, match="NEITHER the mutant"):
+        mutate.recover_inflight(note)
+    assert src.read_text(encoding="utf-8") == "VALUE = 3\nOTHER = 2\n"
+    assert note.is_file(), "the only copy of the original was deleted"
+    assert json.loads(note.read_text(encoding="utf-8"))["original"] == original
+
+
+def test_an_unreadable_note_is_an_abort_and_not_a_traceback(tree):
+    root, _ = tree
+    note = root / "note.json"
+    note.write_text("{ this is not json", encoding="utf-8")
+    with pytest.raises(mutate.HarnessError, match="cannot be read"):
+        mutate.recover_inflight(note)
+
+
+def test_recovery_happens_before_the_originals_are_read(tree):
+    """The one way this harness could make the damage permanent: read the
+    stale mutant as the "original", grade against it, and restore TO it."""
+    root, src = tree
+    note = root / "note.json"
+    original = src.read_text(encoding="utf-8")
+    mutant = "VALUE = 'MUTANT'\nOTHER = 2\n"
+    mutate.InFlight(note, src, "svc/thing.py", original).arm(mutant)
+    src.write_text(mutant, encoding="utf-8")  # exactly what a SIGKILL leaves
+
+    suite = FakeSuite(src)
+    mutate.run(mutate.parse_spec(SPEC), suite, root=root, inflight=note)
+    assert suite.seen[0] == original, "the baseline ran on the dead run's mutant"
+    assert src.read_text(encoding="utf-8") == original
+
+
+def test_the_restored_file_is_never_older_than_the_mutant_it_replaces(tree):
+    """Same reasoning as every other write here: the killed run may have
+    stamped its mutant into the future, and a restore that looked older would
+    leave a (mtime, size) cache serving the mutant's bytecode."""
+    import os
+
+    root, src = tree
+    note = root / "note.json"
+    original = src.read_text(encoding="utf-8")
+    mutant = "VALUE = 'MUTANT'\nOTHER = 2\n"
+    mutate.InFlight(note, src, "svc/thing.py", original).arm(mutant)
+    src.write_text(mutant, encoding="utf-8")
+    os.utime(src, (2_000_000_000, 2_000_000_000))
+
+    mutate.recover_inflight(note)
+    assert src.read_text(encoding="utf-8") == original
+    assert src.stat().st_mtime > 2_000_000_000
+
+
+def test_nothing_to_recover_is_the_ordinary_answer(tmp_path):
+    assert mutate.recover_inflight(tmp_path / "nope.json") is None
+
+
+# ---------------------------------------------------------------- the trap
+
+
+def test_the_trap_turns_a_signal_into_an_unwind_and_hands_the_handlers_back():
+    import signal as sig
+
+    before = sig.getsignal(sig.SIGTERM)
+    during: list[object] = []
+    with pytest.raises(mutate.Killed) as caught:
+        with mutate.restore_on_signal():
+            try:
+                sig.raise_signal(sig.SIGTERM)
+                for _ in range(1000):  # give the handler a bytecode boundary
+                    pass
+            except mutate.Killed:
+                during.append(sig.getsignal(sig.SIGTERM))
+                raise
+    assert caught.value.name == "SIGTERM"
+    # One-shot: a second Ctrl-C from an impatient hand cannot interrupt the
+    # restore the first one just asked for.
+    assert during == [sig.SIG_IGN]
+    assert sig.getsignal(sig.SIGTERM) is before
+
+
+def test_the_trap_hands_the_handlers_back_on_the_ordinary_path():
+    import signal as sig
+
+    before = {s: sig.getsignal(s) for s in mutate._TRAPPED}
+    with mutate.restore_on_signal():
+        assert all(sig.getsignal(s) is not before[s] for s in mutate._TRAPPED)
+    assert {s: sig.getsignal(s) for s in mutate._TRAPPED} == before
+
+
+# ------------------------------------------------------- where the note lives
+
+
+def test_the_note_lives_in_the_git_dir_so_it_can_never_be_committed(tmp_path):
+    """Not in the worktree: a file the harness leaves behind when it dies must
+    not be something a later `git add -A` can commit, and must not make
+    `git status` dirty for a tree nobody changed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for cmd in (["init", "-q"], ["config", "user.email", "a@b"], ["config", "user.name", "a"]):
+        subprocess.run(["git", "-C", str(repo), *cmd], check=True)
+    (repo / "f.txt").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "x"], check=True)
+
+    note = mutate.inflight_path(repo)
+    assert note.parent.name == ".git" and note.name == mutate.INFLIGHT
+    note.write_text("{}", encoding="utf-8")
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain"], capture_output=True, text=True, check=True
+    )
+    assert status.stdout == "", f"the note made the tree dirty: {status.stdout!r}"
+
+
+def test_two_worktrees_of_one_repo_do_not_read_each_others_note(tmp_path):
+    """Each worktree grades a different tree, so a note from one would name a
+    file the other has not mutated — which is the ambiguous abort, for no
+    reason. `--absolute-git-dir` is per-worktree and that is why it is used."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for cmd in (["init", "-q"], ["config", "user.email", "a@b"], ["config", "user.name", "a"]):
+        subprocess.run(["git", "-C", str(repo), *cmd], check=True)
+    (repo / "f.txt").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "x"], check=True)
+    other = tmp_path / "other"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "side", str(other)], check=True
+    )
+    assert mutate.inflight_path(repo) != mutate.inflight_path(other)
+
+
+def test_outside_a_repo_the_note_falls_back_to_the_root(tmp_path):
+    assert mutate.inflight_path(tmp_path) == tmp_path / mutate.INFLIGHT
