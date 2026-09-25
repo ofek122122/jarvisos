@@ -1288,22 +1288,26 @@ COLOUR_EXCEPTIONS = {
     "modules/grub-theme/background.svg": "boot path — human review (R9)",
     "modules/grub-theme/default.nix": "boot path — human review (R9)",
     "modules/plymouth-theme/default.nix": "boot path — human review (R9)",
-    # The wallpaper is the loop's to fix, but not blind: its colours are
-    # gradient stops and hairline strokes, and whether a two-stop vignette
-    # still reads as depth is a thing to LOOK at, not to reason about. PLAN D8.
-    "pkgs/jarvis-wallpaper/default.nix": "needs a rendered look first (D8)",
+    # The wallpaper WAS here ("needs a rendered look first"): its colours are
+    # gradient stops and hairline strokes, and whether a vignette still reads
+    # as depth once its darkest stop becomes a token is a thing to LOOK at.
+    # D8 looked — resvg renders the PNG in the sandbox — and the answer was
+    # that the old outer stop (#05080B) was darker than `ground_deep` itself,
+    # so HUD plates read as LIGHTER than the desktop behind them. The field is
+    # `ground` settling into `ground_deep` now, and the file carries no
+    # literal, so its exception is gone rather than reworded.
 }
 
 HEX = re.compile(r"#[0-9A-Fa-f]{6}\b")
 
 
-def colour_bearing_files() -> dict[str, list[str]]:
-    """{path: [the colour literals in it]} for everything under modules/ + pkgs/.
+def _bearing_files(pattern: re.Pattern[str]) -> dict[str, list[str]]:
+    """{path: [what matched in it]} for everything under modules/ + pkgs/.
 
     Discovered, not declared, so a new file painting a new surface is covered
-    the day it is written — which is the failure this gate exists for. Comment
-    lines are skipped: a comment naming the hex it replaced is documentation,
-    and modules/theme.nix's own header is the case in point.
+    the day it is written — which is the failure these gates exist for. Comment
+    lines are skipped: a comment naming the hex or the face it replaced is
+    documentation, and modules/theme.nix's own header is the case in point.
     """
     found: dict[str, list[str]] = {}
     for base in ("modules", "pkgs"):
@@ -1318,11 +1322,15 @@ def colour_bearing_files() -> dict[str, list[str]]:
                 hit
                 for line in lines
                 if not line.lstrip().startswith(("#", "//", "<!--", "*"))
-                for hit in HEX.findall(line)
+                for hit in pattern.findall(line)
             ]
             if hits:
                 found[str(path.relative_to(ROOT))] = hits
     return found
+
+
+def colour_bearing_files() -> dict[str, list[str]]:
+    return _bearing_files(HEX)
 
 
 def test_no_nix_surface_carries_a_literal_colour_of_its_own():
@@ -1346,25 +1354,68 @@ def test_every_recorded_colour_exception_still_has_a_colour_in_it():
     )
 
 
-def test_every_colour_the_desktop_spends_is_a_token_theme_toml_defines():
-    """modules/theme.nix reaches the palette ONLY through `token "<name>"`, so
-    this can be checked without evaluating nix — which matters, because the
-    tools suite is the one that runs in a bare checkout with no nix at all."""
-    nix = (ROOT / "modules" / "theme.nix").read_text("utf-8")
+# The surfaces that MUST still be reaching the palette, and the fewest tokens
+# each one has to be spending. The literal gate above cannot say this: it is
+# satisfied by a file with no colour in it at all, so a surface that stopped
+# asking theme.toml anything — because its shapes were deleted, or because
+# someone moved the palette back into a `let` under another name — passes it
+# silently. These two paint the whole desktop between them.
+PAINTERS = {
+    "modules/theme.nix": 8,
+    "pkgs/jarvis-wallpaper/default.nix": 6,
+}
+
+TOKEN_CALL = re.compile(r'\btoken\s+"([a-z0-9_]+)"')
+FACE_CALL = re.compile(r'\bface\s+"([a-z0-9_]+)"')
+
+
+def test_every_colour_a_nix_surface_spends_is_a_token_theme_toml_defines():
+    """Nix reaches the palette ONLY through `token "<name>"`, so this can be
+    checked without evaluating nix — which matters, because the tools suite is
+    the one that runs in a bare checkout with no nix at all. Discovered the
+    same way the literal gate is: any file that spends a colour is subject to
+    it, not just the two that do today."""
     palette = gen.load_tokens((ROOT / "personality" / "theme.toml").read_text("utf-8"))["palette"]
-    asked = sorted(set(re.findall(r'\btoken\s+"([a-z0-9_]+)"', nix)))
-    assert len(asked) >= 8, f"expected the desktop to spend the §06 palette, got {asked}"
-    missing = [name for name in asked if name not in palette]
-    assert not missing, f"modules/theme.nix asks for colours [palette] does not define: {missing}"
+    spending = {path: sorted(set(hits)) for path, hits in _bearing_files(TOKEN_CALL).items()}
+
+    missing = {
+        path: [name for name in names if name not in palette]
+        for path, names in spending.items()
+        if any(name not in palette for name in names)
+    }
+    assert not missing, "colours [palette] does not define:\n" + "\n".join(
+        f"{path}: {names}" for path, names in sorted(missing.items())
+    )
+
+    for path, least in PAINTERS.items():
+        asked = spending.get(path, [])
+        assert len(asked) >= least, (
+            f"{path} paints a surface of this desktop and should be spending at "
+            f"least {least} §06 tokens; it asks for {asked}"
+        )
 
 
-def test_the_desktop_takes_its_font_families_from_the_theme_too():
-    """The mirror of test_no_qml_file_names_a_font_family_of_its_own: a GTK
-    `gtk-font-name` or an alacritty `family =` with a face spelled into it is
-    the same drift one level out, and modules/fonts.nix only installs what
-    theme.toml names — so a hand-spelled family here is a name nothing
-    guarantees is installed."""
-    nix = (ROOT / "modules" / "theme.nix").read_text("utf-8")
+# Faces are identity exactly like colours (invariant 9), and a hand-spelled
+# family is the same drift one field over — modules/fonts.nix installs only
+# what theme.toml names, so a name written anywhere else is one nothing
+# guarantees is installed, and fontconfig answers a miss with a substitute
+# rather than an error. Same table shape as COLOUR_EXCEPTIONS, exhaustive in
+# both directions.
+FACE_EXCEPTIONS = {
+    # The two files whose JOB is to name a family: the binding from a name to
+    # a package, and the package that provides one and checks that the face
+    # inside it really reports that name.
+    "modules/fonts.nix": "providerOf — the one place a family is bound",
+    "pkgs/archivo/default.nix": "provides family_sans; must name it to check it",
+    # The boot path, for the same reason its colours are excepted: GUARDRAILS
+    # makes it human-review, and R9 is where it gets measured.
+    "modules/grub-theme/default.nix": "boot path — human review (R9)",
+    "modules/grub-theme/background.svg": "boot path — human review (R9)",
+    "modules/plymouth-theme/default.nix": "boot path — human review (R9)",
+}
+
+
+def face_bearing_files() -> dict[str, list[str]]:
     faces = {
         family
         for key, family in gen.load_tokens(
@@ -1372,20 +1423,48 @@ def test_the_desktop_takes_its_font_families_from_the_theme_too():
         )["type"].items()
         if key.startswith("family_")
     }
-    offenders = [
-        f"{n}: {line.strip()}"
-        for n, line in enumerate(nix.splitlines(), 1)
-        if not line.lstrip().startswith("#")
-        for family in faces
-        if family in line
-    ]
+    assert faces, "theme.toml names no face at all"
+    return _bearing_files(re.compile("|".join(re.escape(f) for f in sorted(faces))))
+
+
+def test_no_nix_surface_names_a_font_family_of_its_own():
+    """The mirror of test_no_qml_file_names_a_font_family_of_its_own, one level
+    out: a GTK `gtk-font-name`, an alacritty `family =`, or an SVG
+    `font-family=` with a face spelled into it."""
+    offenders = {
+        path: hits for path, hits in face_bearing_files().items() if path not in FACE_EXCEPTIONS
+    }
     assert not offenders, (
         "a font family belongs in personality/theme.toml, reached through "
-        f'`face "<role>"`:\n' + "\n".join(offenders)
+        f'`face "<role>"`:\n'
+        + "\n".join(f"{path}: {', '.join(sorted(set(hits)))}" for path, hits in sorted(offenders.items()))
     )
-    roles = sorted(set(re.findall(r'\bface\s+"([a-z0-9_]+)"', nix)))
-    assert roles, "modules/theme.nix sets fonts; it must ask theme.toml for the family"
-    for role in roles:
-        assert f"family_{role}" in gen.load_tokens(
-            (ROOT / "personality" / "theme.toml").read_text("utf-8")
-        )["type"], f'modules/theme.nix asks for face "{role}"; theme.toml names no family_{role}'
+
+
+def test_every_recorded_face_exception_still_names_a_face():
+    """A stale excuse hides the next family somebody spells into that file."""
+    bearing = face_bearing_files()
+    stale = sorted(path for path in FACE_EXCEPTIONS if path not in bearing)
+    assert not stale, (
+        "these files no longer name a font family, so drop them from "
+        "FACE_EXCEPTIONS:\n" + "\n".join(stale)
+    )
+
+
+def test_every_face_a_nix_surface_asks_for_is_a_role_theme_toml_names():
+    """`face "mono"` for a role [type] does not name throws at eval; this is
+    that check where it runs without nix. Both painters set type — the desktop
+    in GTK/Qt/terminal, the wallpaper in its wordmark — so both must be asking
+    theme.toml rather than spelling it."""
+    types = gen.load_tokens((ROOT / "personality" / "theme.toml").read_text("utf-8"))["type"]
+    asking = {path: sorted(set(hits)) for path, hits in _bearing_files(FACE_CALL).items()}
+    for path, roles in sorted(asking.items()):
+        for role in roles:
+            assert f"family_{role}" in types, (
+                f'{path} asks for the face "{role}"; theme.toml names no family_{role}'
+            )
+    for path in PAINTERS:
+        assert asking.get(path), (
+            f"{path} sets type; it must ask theme.toml for the family through "
+            f'`face "<role>"` rather than spelling one'
+        )

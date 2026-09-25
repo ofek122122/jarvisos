@@ -12,8 +12,19 @@ everything else is the redesigned, mostly-static shell around it. niri stays
 the compositor; we style the environment on top of it.
 
 ## Design language (anchor — blueprint §06, do not drift)
-- Ground `#090D12` / panels `#0C1116`; one **ember** accent `#F0714A`; teal
-  `#4FB8BF` secondary; text `#E6ECF0` / `#9BAAB4` / `#64747F`.
+- The palette is NOT restated here. `personality/theme.toml` is the one place
+  a colour exists, and every surface reaches it through a `token` helper that
+  throws on a name §06 does not define — the HUD through
+  `tools/gen_theme_qml.py`, the desktop and the wallpaper through
+  `builtins.fromTOML`. This line used to spell the greys out, and the copy it
+  spelled was ALREADY DRIFTED (`#E6ECF0` / `#9BAAB4` / `#64747F`, none of them
+  in the blueprint); the terminal, the launcher and the wallpaper were painted
+  from it, and D7/D8 had to take them back off it. A doc that restates a
+  palette drifts from it.
+- The shape of it, which is what a spec can safely hold: the desktop field is
+  `ground`, a panel lying on it is one step deeper in `ground_deep` so it
+  reads as nearer, one **ember** accent that means "Jarvis is doing
+  something", teal as the second and cooler voice, three text tiers.
 - UI font **Archivo**; mono **JetBrains Mono** (both already in the tree).
 - Earned emptiness; motion only when it encodes a signal; no parallax; honor
   `prefers-reduced-motion`. Everything reads as one instrument.
