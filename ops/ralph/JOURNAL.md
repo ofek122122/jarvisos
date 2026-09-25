@@ -8973,3 +8973,115 @@ leak is what the suite reports.
   **B43/B47/B54** are one question asked three times; **B62** is B61's two
   decisions; and **B10/A28** — one live recording of one spoken turn on ares —
   remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 90 — B68: the suites you did not think to run
+
+This iteration inherited a working tree, which has never happened before and
+is the whole reason it did what it did. A71 (d049a9c) committed 31 files and
+left four behind: two documentation lines, a leftover MUTATION of
+`ReplyState.qml` (`root.noteAsked();` blanked to `;`), and the one-line fix
+that made `runtests.sh tools` green — so `tools` was red at HEAD, and the
+journal entry that would have said an iteration ended mid-STEP-4 was never
+written either. Confirmed before touching anything: 269 passed, 1 failed at
+d049a9c; 270 passed with the inherited line. The mutation is reverted, the two
+fixes are committed as 5a3f1e9 with iteration 89's own PLAN bookkeeping, and
+that is the third time in three iterations this exact thing has happened.
+
+So the task is B68, which A71 raised about itself. B65 changed
+`jv_compat/prefix.py` and ran `runtests.sh jv-compat`: green, `tools` red. B66,
+the same. A71 found it and then did it again in a different way. Every author
+was right that they had run the relevant suite for the directory they were in,
+and every author was wrong — because **invariant 1 forbids one service
+importing another, so every claim this repo makes about a RELATION between two
+of its parts is made by a THIRD suite that reads them both as source text.**
+`tools` alone reads jv-compat's installer, jv-guard's heuristics, jv-brain's
+prompts, jv-act's tool table, the frozen schemas, `personality/theme.toml` and
+every QML file in the HUD. Nothing said so, and PLAN's option (c) — write the
+rule down in PROMPT.md — is precisely what had just failed twice.
+
+`tools/dependents.py` derives it instead, every run, so it cannot go stale.
+The rule, whole: **a suite reads what it names, if what it names exists.**
+Names are lifted from the syntax tree — `ROOT / "services" / "jv-compat"`, a
+path-shaped string literal, an import — and a changed path is read by a suite
+that names it or any directory above it. `runtests.sh` ends by printing the
+answer with the exact commands, excluding the suite it just ran.
+
+Two things it found, both about the repo rather than about itself, and both
+changed the design:
+
+  **jv-ears' suite names `jarvis_bus` nowhere** — not a path, not an import —
+  and a change to the bus codec runs inside it anyway, because the suite
+  imports `jv_ears` and `jv_ears/main.py` imports the client. The first draft
+  stopped at the first edge and called that suite safe. Imports are now
+  followed transitively (in-repo only, cycle-guarded); paths are NOT, because
+  a suite reading another service's source as TEXT depends on the characters
+  in the file, not on what that file imports.
+
+  **jv-brain's suite has `assert ("tools" in warm)`** — a key in a warm-up
+  set, and a word that happens to be a directory in this repo. Reading it as a
+  path made every edit under `tools/` name jv-brain's suite, which reads
+  nothing of the kind. A plain string now has to carry a slash to be a path;
+  an expression built with `/` is a path by construction and needs none.
+
+Generous where it cannot know better and says so: `(ROOT / "services").
+iterdir()` claims every service, because that test really does depend on what
+is in there. One suite too many costs five seconds; one missed costs a red
+commit that stands for two days. Narrow where a reading would swallow the
+repo: comments are not in the tree, so the paragraph of prose above a test
+names nothing, and `Path(".")`, `".."` and `/etc` are refused — a candidate
+resolving to the root or outside it answers "run every suite", which is the
+same as saying nothing. Only the longest `/` chain counts, so
+`ROOT / "services" / "jv-compat"` claims one service and not the sub-expression
+`ROOT / "services"`.
+
+It is advice, not a verdict — pytest's exit status is still the script's, and a
+clean tree prints nothing — and that is deliberate, not laziness: a change to
+`jarvis_bus` honestly names all ten suites and one of them spawns the real
+broker, so binding it is minutes per iteration against a mistake that has
+happened three times in ninety. The three shapes are B70. What it CANNOT see
+is QML, which is where the HUD's strongest gates live: a QML test names its
+subject by TYPE (`ReplyState {}`), so `qmltest.sh` and `hudshots.sh` are
+invisible to it and are printed as a standing caveat instead of being left out
+silently. Mapping type -> file is mechanical in this repo and is B69.
+
+The gate's own tail is tested by EXECUTING it, not by reading it: the lines
+from `rc=0` to `exit $rc` are lifted out of `runtests.sh` and run with a stub
+interpreter, once with a failing suite and once with a passing one. Under
+`set -e` a plain `rc=$?` after a red pytest never runs at all — the script is
+already gone — and the notice would have been missing from exactly the run
+that needed it most.
+
+- tests: `bash ops/ralph/runtests.sh tools` **302 (was 270)**, all green. The
+  five paths this iteration changed name no other Python suite, and the tool
+  said so itself.
+- graded with **12 mutations, 12 caught** — and the first pass had a survivor
+  that changed the test rather than the code: `/run/jarvis/bus.sock` resolves
+  to nothing under a repo whether or not the leading slash is honoured, so the
+  absolute-path rule was being "proved" by a premise that never reached it.
+  The test now names an absolute path that WOULD resolve if the slash were
+  ignored. Also caught: the bare-word rule reverted, the `..` refusal dropped,
+  the existence check dropped, the ancestor half of the match dropped, the
+  containment reversed, chain prefixes re-claimed, the import closure cut, the
+  Rust `tests/` directories admitted as Python suites, a changed directory not
+  expanded, the caller's own suite named back to it, and the clean-tree silence
+  removed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py (new), tools/tests/test_dependents.py (new),
+  ops/ralph/runtests.sh, ops/ralph/PROMPT.md, ops/ralph/README.md;
+  repair: shell/jv-hud/README.md, tools/tests/test_hudsheet.py
+- commits: 5a3f1e9 (the repair), 60ea576 (B68)
+- next: **B69** — teach the map QML types, which is the half of this that the
+  HUD track actually needs, since every Track A iteration changes `shell/
+  jv-hud` and the two gates over it are the two this cannot name. Then
+  **A73**, which is the same disease in documentation: `docs/hud/screens/`
+  says `300x560` while the surface has gone 688 -> 745 -> 807 and nothing
+  compares the number to `sheet.py`. Otherwise unchanged: **Track A is one
+  human look at `docs/hud/` away from unblocking** A47, A55, A62, A63's
+  picture half, A70/A72 (the corner is now 807 px tall and has grown twice
+  without a human seeing either measurement) and the A21/A22/A25 cluster;
+  **A56** asks whether the shot suites belong in the build gate; **B27/B28**
+  are one decision about a jv-ears state topic; **B43/B47/B54** are one
+  question asked three times; **B62** is B61's two decisions; **B67** is
+  B66's sibling-of-the-home half; and **B10/A28** — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this loop.

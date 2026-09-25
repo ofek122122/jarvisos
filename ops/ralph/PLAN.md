@@ -1622,8 +1622,8 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `recipes/README.md` now says. Cheap either way and still free —
       no recipe with a grant is committed. Discovered in B66.
 
-- [ ] B68. **A red suite stayed quiet for two iterations, and the reason
-      generalises.** `test_the_install_shots_photograph_events_jv_compat_
+- [x] B68. **A red suite stayed quiet for two iterations, and the reason
+      generalises.** — 60ea576 (with the repair in 5a3f1e9) `test_the_install_shots_photograph_events_jv_compat_
       publishes` has raised `NameError` since B65 (e36eee5): that commit
       added a fourth `_event("blocked", ...)` to jv-compat whose sentence
       is built from a recipe's grant problems, and the gate — which lifts
@@ -1651,6 +1651,51 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       PROMPT.md, which is what has just been shown not to work. (a) is
       nearly free and is the loop's to take; (b) is the one that would
       also catch the next reader nobody thought of. Discovered in A71.
+
+      **Done, and it was (b).** `tools/dependents.py` derives the map from the
+      suites themselves — a suite reads what it NAMES (a `ROOT / "services" /
+      "jv-compat"` expression, a path-shaped string literal, an import, plus
+      everything that import imports), if what it names exists — and
+      `runtests.sh` ends by printing it. Advice, not a verdict: the exit
+      status stays pytest's and a clean tree prints nothing. Two findings
+      about the repo, neither of them the tool: jv-ears' suite names
+      `jarvis_bus` nowhere and runs it anyway (through its own `main.py`), so
+      imports are followed transitively; and jv-brain's `assert ("tools" in
+      warm)` is a word, not a path, so a plain string must carry a slash while
+      a `/`-built expression need not. 302 tests (was 270), 12 mutations, 12
+      caught. (a) was not taken as well — `tools` is named automatically
+      whenever it reads what changed, which in practice is most service
+      changes, and naming it for the rest would be the guess this replaces.
+
+- [ ] B69. **The two gates `dependents.py` cannot see, and the reason is one
+      line of QML.** `ops/ralph/qmltest.sh` and `ops/ralph/hudshots.sh` are
+      the strongest assertions this repo makes about `shell/jv-hud`, and B68's
+      map is blind to both: a QML test names its subject by TYPE (`ReplyState
+      {}`, `import "../core"`), never by path, so there is no string for the
+      reader to find. Today the tool prints both scripts as a standing caveat
+      whenever it says anything, which is honest and is not an answer. It is
+      mechanical to fix and the loop's: in this repo a QML type IS the
+      basename of a `.qml` file on the import path, so `shell/jv-hud/core/
+      ReplyState.qml` -> `ReplyState` -> any `tests/tst_*.qml` naming that
+      type -> `qmltest.sh`; the plates resolve the same way through
+      `tools/hudshots/scene/`. Worth pinning the direction that matters most
+      first — a `core/` file changed by a plate author who then runs only
+      `hudshots.sh`, and the reverse. Discovered in B68.
+
+- [ ] B70. **The notice is advice, and whether it should be a verdict is a
+      cost question the loop should not answer alone.** `runtests.sh` now
+      names the other suites that read what you changed and keeps pytest's
+      exit status, so an iteration can still read the line and not run them.
+      Making it binding is one flag (`--with-dependents`, or a gate script
+      that runs every named suite and ANDs the statuses), and the reason it
+      was not taken is cost: `tools` is 5 s, but a change to
+      `services/pylib/jarvis_bus/` honestly names all ten — every service runs
+      on the bus — and one of them spawns the real broker. That is
+      minutes per iteration, every iteration, to catch a mistake that has
+      happened three times in ninety. Three shapes: (a) bind it always;
+      (b) bind it only when the named set is small (say <= 3 suites) and print
+      a loud warning otherwise; (c) leave it advisory and let the journal's
+      test line be the evidence, which is where it stands. Raised by B68.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
