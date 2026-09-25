@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The Ralph loop's mutation harness — PLAN B48, extended to three languages
-by B49 and to the HUD's plates by B51.
+by B49, to the HUD's plates by B51, and to all three QML shells by D11.
 
 Every iteration of this loop writes a sentence like "six mutations, six
 caught". The sentence is the loop's only evidence that the tests it just
@@ -73,6 +73,13 @@ Usage (spec on stdin is the ergonomic path — no scratch file to clean up):
     + readonly property bool active: mode !== "idle"
     EOF
 
+    bash ops/ralph/mutate.sh --runner qml bar <<'EOF'
+    @ the workspace the compositor called focused was ignored
+    shell/jv-bar/core/NiriModel.qml
+    - if (ws.is_focused) root._focused = ws.idx
+    + if (false) root._focused = ws.idx
+    EOF
+
     bash ops/ralph/mutate.sh --runner cargo jarvisd <<'EOF'
     @ the seq check dropped
     services/jarvisd/src/broker.rs
@@ -86,6 +93,26 @@ Usage (spec on stdin is the ergonomic path — no scratch file to clean up):
     - readonly property bool shown: root.voice.known && !root.voice.idle
     + readonly property bool shown: root.voice.known
     EOF
+
+D11 is the fourth runner's opposite: not a suite this harness could not
+reach, but a suite it reached for by accident. `--runner qml` was written
+when there was one QML shell and it hard-coded that shell's script, so when
+jv-bar and jv-notify arrived their `core/` was still handed to `qmltest.sh` —
+a runner pointed at `shell/jv-hud/tests` and at nothing else. Every canary
+planted in the bar therefore lived, the harness refused the file (which is
+the honest outcome), and the hint it printed sent the reader to `--runner
+shots`, which cannot see the bar either. The nine mutations that graded D1
+were driven by hand for that reason.
+
+So `--runner qml` is now three suites and the TARGET picks between them
+(`SHELLS`) — three scripts rather than one with an argument, because
+`tools/verify.py` derives which gate runs from a command string and one
+script pointed at three trees would be one gate. `Language.for_target` is
+where the choice becomes a suite, and until it has been made there is no
+script to run: the old default is exactly the bug. And because which shell a
+file is in is a fact about its path, a mutation in ANOTHER shell is refused
+before a single suite starts (`misrouted`) rather than after two runs and a
+hint about somebody else's plates.
 
 B51 added that fourth runner, and it is the only one that can grade a PLATE.
 `qmltest.sh` imports `"../core"` and never a top-level plate, so a canary on
@@ -631,6 +658,76 @@ def shots_baseline_hint(root: Path) -> str:
 
 
 @dataclasses.dataclass(frozen=True)
+class Shell:
+    """One QML shell, and the script that runs ITS headless tests.
+
+    `qmltest.sh`, `bartest.sh` and `notifytest.sh` are three scripts rather
+    than one with an argument, and their own headers say why: `tools/verify.py`
+    runs a gate by its COMMAND STRING and derives which gates to run from what
+    you touched, so one script pointed at three trees would be one gate, and
+    editing a toast would run the HUD's tests. That decision is what reaches
+    this harness (PLAN D11): a QML suite cannot be chosen by language alone,
+    only by which shell the mutation is in, which is the target the loop types.
+
+    `tree` is that shell's directory, and it is the whole of the refusal below
+    — `bartest.sh` is handed `shell/jv-bar/tests` and can no more execute a
+    file under `shell/jv-hud` than it can execute a photograph.
+    """
+
+    target: str
+    tree: str
+    script: str
+    canary_hint: str
+
+
+# Only `core/` is reachable in any of the three: every driver in every
+# `tests/` directory imports `"../core"` and nothing else, which is a fact
+# about those files and is asserted by `test_dependents.py` (it resolves the
+# same imports to decide which gate reads what). So each hint says what its
+# own suite can reach — and only the HUD's offers a second runner, because
+# only the HUD has one.
+SHELLS: tuple[Shell, ...] = (
+    Shell(
+        target="hud",
+        tree="shell/jv-hud",
+        script="qmltest.sh",
+        canary_hint=(
+            "qmltest.sh imports \"../core\" and never a plate, so a canary on a "
+            "top-level plate always lives (B49). Regrade it with --runner shots, "
+            "which stages the whole shell and drives the real plates."
+        ),
+    ),
+    Shell(
+        target="bar",
+        tree="shell/jv-bar",
+        script="bartest.sh",
+        canary_hint=(
+            "bartest.sh is handed shell/jv-bar/tests, whose drivers import "
+            "\"../core\" and nothing else, so only shell/jv-bar/core is gradeable "
+            "here and a canary anywhere else in the shell lives. There is no "
+            "staged-render runner for the bar to regrade it with — that is PLAN "
+            "D13, and until it exists Workspaces.qml, Clock.qml and shell.qml "
+            "are held by qmllint inside `nix build .#jv-bar` and by nothing else."
+        ),
+    ),
+    Shell(
+        target="notify",
+        tree="shell/jv-notify",
+        script="notifytest.sh",
+        canary_hint=(
+            "notifytest.sh is handed shell/jv-notify/tests, whose driver imports "
+            "\"../core\" and nothing else, so only shell/jv-notify/core is "
+            "gradeable here and a canary anywhere else in the shell lives. There "
+            "is no staged-render runner for the notifier to regrade it with — "
+            "that is PLAN D20, and it matters more there than anywhere: the "
+            "toast is the one surface whose CONTENT comes from programs this "
+            "repo did not write."
+        ),
+    ),
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class Language:
     """A suite this harness knows how to run, and what a canary means in it."""
 
@@ -664,8 +761,49 @@ class Language:
     # qmltestrunner import path or a cargo module tree would be the overclaim
     # this harness exists to prevent.
     origin: Callable[[Path, str, str], str | None] | None = None
+    # The QML shell this suite runs, when it runs one. It is what makes a
+    # mutation in ANOTHER shell refusable without running anything (`misrouted`),
+    # and `None` on the two runners that take a service or a crate: the tools
+    # suite really does match lines in three shells' QML, so a runner with no
+    # shell of its own has no shell to be wrong about (B55).
+    tree: str | None = None
+    # A runner with more than one suite: target -> the shell it grades. Only
+    # `--runner qml` has one, and while it is set this Language is a CHOICE and
+    # not a suite — `for_target` turns it into one, and `command` refuses until
+    # it has been. Defaulting to the HUD's runner instead is exactly the D11
+    # failure: a bar canary graded by a suite that cannot see the bar.
+    shells: tuple[Shell, ...] = ()
+
+    def for_target(self, target: str) -> "Language":
+        """The suite that will actually run, once the target is known.
+
+        Every runner but one is already it. `--runner qml` resolves here into
+        the one shell named, taking that shell's script, its tree, and its own
+        account of what a lived canary means — so nothing downstream (the
+        command, the abort, the hint) needs to know there was ever a choice.
+        """
+        if not self.shells:
+            return self
+        for shell in self.shells:
+            if shell.target == target:
+                return dataclasses.replace(
+                    self,
+                    script=shell.script,
+                    tree=shell.tree,
+                    canary_hint=shell.canary_hint,
+                    shells=(),
+                )
+        raise HarnessError(
+            f"--runner {self.runner} grades "
+            f"{' or '.join(s.target for s in self.shells)}, not {target!r}"
+        )
 
     def command(self, root: Path, target: str, scratch: Path) -> list[str]:
+        if not self.script:
+            raise HarnessError(
+                f"--runner {self.runner} has one suite per shell and does not "
+                f"know which shell yet: ask for_target({target!r}) first"
+            )
         cmd = ["bash", str(root / "ops" / "ralph" / self.script)]
         if self.pass_target:
             cmd.append(target)
@@ -687,19 +825,17 @@ PYTHON = Language(
 
 QML = Language(
     runner="qml",
-    script="qmltest.sh",
+    # No script and no hint of its own: there are three, one per shell, and
+    # which one runs is `for_target`'s answer. Each grades the whole of its
+    # own `tests/` directory and takes no target, so the name the loop types
+    # is not passed on — it picks the script.
+    script="",
     suffixes=(".qml",),
     canary=qml_canary,
     env=qml_env,
-    # qmltest.sh grades the whole of shell/jv-hud/tests and takes no target,
-    # so the name exists only to be typed and checked.
-    targets=("hud",),
+    targets=tuple(s.target for s in SHELLS),
     pass_target=False,
-    canary_hint=(
-        "qmltest.sh imports \"../core\" and never a plate, so a canary on a "
-        "top-level plate always lives (B49). Regrade it with --runner shots, "
-        "which stages the whole shell and drives the real plates."
-    ),
+    shells=SHELLS,
 )
 
 CARGO = Language(
@@ -724,6 +860,7 @@ SHOTS = Language(
     targets=("hud",),
     pass_target=False,
     scratch_out=True,
+    tree="shell/jv-hud",
     baseline_hint=shots_baseline_hint,
     canary_hint=(
         "hudshots.sh stages the shell but DROPS shell.qml and tests/, so a "
@@ -819,6 +956,37 @@ def controls_for(mut: Mutation, lang: Language) -> tuple[str, ...]:
     if Path(mut.path).suffix in lang.suffixes:
         return (EXECUTED, READ)
     return (READ,)
+
+
+def misrouted(mutations: Iterable[Mutation], lang: Language) -> str | None:
+    """The one wrong runner this harness can name before it runs anything.
+
+    A canary that lives is an honest refusal, but it is an expensive one (two
+    suite runs) and it explains the wrong thing: the hint it prints is about
+    what the suite REACHES inside its own shell, and a file in somebody else's
+    shell was never near it. PLAN D11 is that case, and it lasted two shells —
+    `--runner qml` meant the HUD's runner, so every canary planted in
+    `shell/jv-bar/core` lived and the abort sent the reader to the plates.
+
+    Which shell a file is in is a fact about its path, so this is asked first
+    and answered for free. It fires ONLY when the file is inside another
+    registered shell: a `.py` file the suite merely greps, a driver under
+    `tools/hudshots`, anything outside the three trees is none of its business.
+    """
+    if lang.tree is None:
+        return None
+    for mut in mutations:
+        for shell in SHELLS:
+            if shell.tree == lang.tree:
+                continue
+            if mut.path == shell.tree or mut.path.startswith(shell.tree + "/"):
+                return (
+                    f"{mut.path} is in {shell.tree}, and {lang.script} is not "
+                    f"pointed at it — it could only ever report that file "
+                    f"immune. Grade it with `--runner qml {shell.target}` "
+                    f"({shell.script})."
+                )
+    return None
 
 
 # ------------------------------------------------------------------- edits
@@ -1315,11 +1483,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--runner",
         choices=sorted(LANGUAGES),
         default="tests",
-        help="tests = a Python service (runtests.sh), qml = the HUD's core "
-        "(qmltest.sh), cargo = a Rust crate (cargotest.sh), shots = the HUD's "
-        "PLATES through the staged shell (hudshots.sh, ~53 s a run)",
+        help="tests = a Python service (runtests.sh), qml = one shell's core "
+        "(qmltest.sh / bartest.sh / notifytest.sh, picked by the target), "
+        "cargo = a Rust crate (cargotest.sh), shots = the HUD's PLATES through "
+        "the staged shell (hudshots.sh, ~53 s a run)",
     )
-    ap.add_argument("target", help="the service, `hud`, or the crate to grade")
+    ap.add_argument(
+        "target",
+        help="the service, the crate, or the shell (hud, bar, notify) to grade",
+    )
     ap.add_argument("spec", nargs="?", default="-", help="spec file, or - for stdin")
     args = ap.parse_args(argv)
 
@@ -1330,6 +1502,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    # From here on `lang` is a suite and not a choice of one (D11).
+    lang = lang.for_target(args.target)
 
     root = Path(
         subprocess.run(
@@ -1346,6 +1520,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         muts = parse_spec(text)
     except SpecError as exc:
         print(f"spec: {exc}", file=sys.stderr)
+        return 2
+
+    wrong_shell = misrouted(muts, lang)
+    if wrong_shell is not None:
+        print(wrong_shell, file=sys.stderr)
         return 2
 
     print(f"{len(muts)} mutation(s) against {args.target} ({lang.runner})", flush=True)

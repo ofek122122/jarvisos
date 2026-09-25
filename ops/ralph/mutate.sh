@@ -15,10 +15,12 @@
 #         + TURN_GAP_S = 0.9
 #         EOF
 #
-#   --runner tests  <service>  runtests.sh   · .py   (the default)
-#   --runner qml    hud        qmltest.sh    · .qml  · shell/jv-hud/core/ ONLY
-#   --runner cargo  <crate>    cargotest.sh  · .rs
-#   --runner shots  hud        hudshots.sh   · .qml  · the PLATES (~53 s a run)
+#   --runner tests  <service>  runtests.sh    · .py   (the default)
+#   --runner qml    hud        qmltest.sh     · .qml  · shell/jv-hud/core/ ONLY
+#   --runner qml    bar        bartest.sh     · .qml  · shell/jv-bar/core/ ONLY
+#   --runner qml    notify     notifytest.sh  · .qml  · shell/jv-notify/core/ ONLY
+#   --runner cargo  <crate>    cargotest.sh   · .rs
+#   --runner shots  hud        hudshots.sh    · .qml  · the PLATES (~53 s a run)
 #
 # THE FILE THE SUITE READS AND NEVER RUNS (B55). Invariant 1 forbids one
 # service importing another, so every claim this repo makes about a relation
@@ -35,6 +37,18 @@
 # file is graded (with the erasure canary only) rather than refused. Cost: one
 # extra suite run per file the suite merely reads, which is why the printed
 # count says "at least".
+#
+# WHICH SHELL (PLAN D11). There are three QML shells now and three scripts to
+# run them, one each — three rather than one with an argument because
+# `tools/verify.py` runs a gate by its command string and derives which gate
+# to run from what you touched, so one script pointed at three trees would
+# send a toast's change to the HUD's tests. `--runner qml` therefore names a
+# LANGUAGE and the target names the SUITE. Until this landed it named the
+# HUD's suite and nothing else, so a canary in `shell/jv-bar/core` lived, the
+# harness refused the file, and the hint blamed the plates: the bar's and the
+# notifier's mutations could only be driven by hand. A mutation in a shell the
+# chosen suite is not pointed at is now refused before any suite runs, naming
+# the one that would grade it.
 #
 # WHICH QML RUNNER (B49 measured it, B51 fixed it). `qmltest.sh` imports
 # "../core" and never a top-level plate, so a canary on StatePlate.qml LIVES

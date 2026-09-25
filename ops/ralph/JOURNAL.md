@@ -11896,3 +11896,98 @@ is not worth chasing.)
   and **D26** is new and cheap: three files now carry identical `token`/`face`
   helpers by hand, which is the failure those helpers exist to prevent one
   level down.
+
+## 2026-09-25 23:20 — the grading tool could only see one of the three shells
+- built: **PLAN D11** — `tools/mutate.py` can now grade the bar and the
+  notifier. Its QML entry was written when there was one QML shell and it
+  hard-coded that shell's runner (`script="qmltest.sh"`, `targets=("hud",)`),
+  so when jv-bar and jv-notify arrived their `core/` was still handed to a
+  runner pointed at `shell/jv-hud/tests` and at nothing else. `--runner qml`
+  is now a LANGUAGE and the target names the SUITE: `mutate.SHELLS` holds the
+  three (hud/bar/notify → qmltest.sh/bartest.sh/notifytest.sh) and
+  `Language.for_target` turns the choice into a suite before anything runs.
+- THE FAILURE WAS NOT A WRONG NUMBER, and that is worth being exact about,
+  because the PLAN item said "a silent 0%" and the harness is better than
+  that. The canary did its job: it planted an unloadable `NiriModel.qml`,
+  `qmltest.sh` stayed green, and the harness REFUSED to report rather than
+  printing a perfect score. What was wrong was everything after the refusal —
+  it cost two suite runs to reach, and the hint it printed was the HUD's
+  ("regrade it with `--runner shots`"), which cannot see the bar either. So
+  the loop was told, accurately, that it could not grade this file, and then
+  sent somewhere that could not grade it either. That is why D1's nine
+  mutations and D2's twelve were driven by hand.
+- THREE SCRIPTS AND NOT ONE WITH AN ARGUMENT is not this harness's decision to
+  revisit — `tools/verify.py` runs a gate by its COMMAND STRING and derives
+  which gates to run from what you touched, so one runner pointed at three
+  trees would be one gate and editing a toast would run the HUD's tests. That
+  decision, made for the gate, is the reason a QML suite cannot be chosen by
+  language alone. The un-resolved QML language therefore has no script at all
+  and `command()` refuses it: defaulting to the HUD's runner is precisely the
+  bug, and a default is how it survived two shells.
+- TWO THINGS BEYOND THE ROUTING, and each answers a question the routing
+  raised rather than a question I had first:
+  · **A mutation in another shell is refused before a suite runs**
+    (`misrouted`). Which shell a file is in is a fact about its path, so the
+    old answer — two suite runs and then an explanation of somebody else's
+    plates — was expensive AND wrong. It fires only when the file is inside
+    another registered shell: a `.py` file the tools suite merely greps, a
+    driver under `tools/hudshots`, anything outside the three trees is none
+    of its business, because B55's whole point is that a runner and a file
+    need not share a language.
+  · **Each shell's canary hint is its own, and the bar's and the notifier's
+    do not offer a `--runner shots` regrade**, because neither has one. Only
+    `core/` is reachable in any of the three (every driver in every `tests/`
+    imports `"../core"` and nothing else), and for the HUD a lived canary has
+    somewhere to go. For the other two it does not, and saying so is D13 and
+    D20 written where the reader is standing rather than in a backlog.
+- THE HALF THAT MAKES IT DURABLE, and the reason this is not a one-off patch:
+  `tools/dependents.py` ALREADY holds the table of QML gates — it is what
+  decides which suite `verify.sh` runs for a changed file — so a fourth shell
+  lands there first and this harness would quietly not know about it, which
+  is D11 happening again. A test holds the two equal: every gate whose entry
+  is `shell/<x>/tests` must be a shell this harness can grade, and the other
+  way round.
+- AND THE PAYOFF, on the first bar mutation ever graded: **the snapshot's
+  `is_urgent` was asserted by nothing.** Every fixture in `tst_nirimodel.qml`
+  sends `is_urgent: false`, so `"urgent": raw.is_urgent === true` could be the
+  literal `false` with all 31 tests green — urgency was only ever tested
+  arriving by DELTA (`WorkspaceUrgencyChanged`). The snapshot is what the bar
+  gets when it STARTS, and `WorkspacesChanged` arrives again whenever the set
+  of workspaces changes, so a window that went urgent before either moment was
+  drawn calm: a message missed, which is the one thing a bar must not do.
+  Closed here with the test that catches it. `is_active` and `is_focused` were
+  mutated the same way and both were caught, so it was one hole and not four —
+  which is the difference between a suite with a gap and a suite worth having.
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over 6 paths (pylib,
+  tools **524 pass**, bartest **32 pass**), 47.9 s. `hudscreens.sh` was not
+  named and nothing under `shell/jv-hud` or the flake was touched.
+  **14 mutations, 14 caught** — 11 through `--runner tests tools` (the
+  refusal disabled, the refusal fired on the shell being graded, the prefix
+  matched without a directory boundary, an unknown shell silently becoming the
+  HUD's, the CLI keeping the choice instead of resolving it, the CLI never
+  asking about the other shells, the shots runner forgetting its own shell,
+  the bar's hint offering a runner that cannot see it, the qml runner accepting
+  only `hud`, the bar's script pointed at `qmltest.sh`, an unresolved runner
+  falling through to a command it cannot run) and 3 through the new routes
+  themselves (`--runner qml bar` on `is_active` and `is_focused`,
+  `--runner qml notify` on the dwell clamp's refusal of "forever"). The
+  fifteenth is the one that matters and is counted separately because it
+  SURVIVED first: `--runner qml bar` on `is_urgent`, survived, test written,
+  re-graded, caught.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: tools/mutate.py, tools/tests/test_mutate.py, ops/ralph/mutate.sh,
+  ops/ralph/README.md, shell/jv-bar/tests/tst_nirimodel.qml, ops/ralph/PLAN.md
+- next: **D27** is the obvious one and it is cheap — five of perhaps forty
+  lines in the two models were graded this iteration and one of the five was a
+  real hole, so a full sweep of `NiriModel.qml` and `NotifyModel.qml` (~15
+  mutations, ~20 suite runs, under five minutes) is now possible for the first
+  time and has never been run. **D28** is the sharper version of the refusal
+  this added: `dependents.py` can already say that a file is read by NO gate,
+  which is what a lived canary discovers two suite runs later — but a derived
+  refusal that mis-resolves one import turns a working tool into a blocked
+  one, so it wants the import resolution measured first. **D18** is still the
+  highest-value small Track-D item (it closes D14 and D2's hand-rolled fade
+  with the mechanism that already keeps two Theme.qml files byte-identical),
+  and **D13**/**D20** just acquired a second reason to exist: the hints this
+  iteration wrote have to change the day either lands.

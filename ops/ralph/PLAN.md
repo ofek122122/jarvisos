@@ -186,13 +186,41 @@ human-reviewed step.
       one that is doable today and D4 is what unblocks the first. Found while
       doing D8: the render is 2560x1440 because the primary is, and nothing in
       the repo says what the other two get.
-- [ ] D11. **`tools/mutate.py` cannot grade the bar.** Its QML language entry
-      is `script="qmltest.sh"`, `targets=("hud",)`, so a canary planted in
-      `shell/jv-bar/core` is graded by the HUD's runner — which does not
-      import the bar at all, so every canary there "lives" and the grade is a
-      silent 0%. The 9 mutations D1 ran were driven by hand for that reason.
-      Small: a second `Language` (or a target on the existing one) pointing at
-      `bartest.sh`. Found while finishing D1.
+- [x] D11. **`tools/mutate.py` cannot grade the bar.** Its QML language entry
+      was `script="qmltest.sh"`, `targets=("hud",)`, so a canary planted in
+      `shell/jv-bar/core` was graded by the HUD's runner — which does not
+      import the bar at all, so every canary there lived, the harness refused
+      the file (which is honest) and the abort's hint sent the reader to
+      `--runner shots`, which cannot see the bar either. The 9 mutations D1
+      ran and the 12 D2 ran were driven by hand for that reason.
+      (Done: `--runner qml` is now a LANGUAGE and the target names the SUITE —
+      `mutate.SHELLS` holds the three (`hud`/`bar`/`notify` →
+      `qmltest.sh`/`bartest.sh`/`notifytest.sh`), and `Language.for_target`
+      turns the choice into a suite before anything runs. Three scripts rather
+      than one with an argument is not this harness's decision to revisit: the
+      gate runs a gate by its COMMAND STRING, so one runner pointed at three
+      trees would be one gate. The un-resolved QML language has no script at
+      all and `command()` refuses it, because defaulting to the HUD's runner
+      is precisely the bug. Two things beyond the routing:
+      · **A mutation in another shell is refused before a suite runs**
+        (`misrouted`) — which shell a file is in is a fact about its path, and
+        the old answer cost two suite runs and then explained somebody else's
+        plates. Each shell's canary hint is now its own, and the bar's and the
+        notifier's do NOT offer a `--runner shots` regrade, because neither
+        has one (D13, D20).
+      · **The shells this harness grades are the shells that have a gate** —
+        `tools/dependents.py` already holds that table (it is what decides
+        which suite `verify.sh` runs for a changed file), so a test holds the
+        two equal. A fourth shell lands there first; without this, D11 simply
+        happens again.
+      And the payoff, the first time a bar mutation was ever graded: **the
+      snapshot's `is_urgent` was asserted by nothing.** Every fixture in
+      `tst_nirimodel.qml` sends `is_urgent: false`, so `raw.is_urgent === true`
+      could be the literal `false` with the suite still green — urgency was
+      only ever tested arriving by DELTA. That is the one path a window that
+      went urgent before the bar started takes, and it was drawn calm. Closed
+      here with the test that catches it. `active` and `focused` were mutated
+      the same way and both were caught, so it was one hole and not four.)
 - [ ] D12. **Record the niri deltas, with a human at the keyboard.**
       `harness/fixtures/niri/ares-desk.jsonl` is the connect snapshot only —
       every event the bar ACTS on (`WorkspaceActivated`,
@@ -331,6 +359,25 @@ human-reviewed step.
       `{ token; face; num; }` from one `fromTOML` would be read by all three;
       the gate that discovers painters (`_bearing_files`) already works by
       finding `token "x"` calls, so it would keep working unchanged.
+- [ ] D27. **The bar's and the notifier's `core/` have never had a mutation
+      sweep, and now they can.** D11 graded four lines of `NiriModel.qml` and
+      one of `NotifyModel.qml` — five of perhaps forty — and one of the five
+      found a real hole on the first try. Everything either model does
+      (`workspacesOn`'s per-output sort, the activation-across-outputs rule,
+      the dwell clamp, the three-plate queue, the withdraw path) is graded by
+      nobody so far. ~15 mutations over the two is ~20 suite runs at ~14 s, so
+      under five minutes — the cheapest evidence in the repo, and the only
+      kind that says what these two suites are worth.
+- [ ] D28. **The refusal D11 added is about PATHS, and the question it stands
+      in for is about READS.** `tools/dependents.py` already walks the real
+      QML imports and can say that `shell/jv-bar/Workspaces.qml` is read by NO
+      gate at all — which is the thing a lived canary discovers after two
+      suite runs. Asking it first would turn every "this file is ungradeable"
+      into an instant answer rather than an expensive one. Not done with D11
+      on purpose: a derived refusal that mis-resolves one import turns a
+      working tool into a blocked one, and the canary is the honest backstop
+      either way. It wants the import resolution to be trusted first, which is
+      a measurement nobody has taken.
 - [ ] D9. **Boot path onto §06** — blocked on human review (**R9**). Four
       files: `modules/grub-theme/{theme.txt,background.svg,default.nix}` and
       `modules/plymouth-theme/default.nix`. The real design in it is

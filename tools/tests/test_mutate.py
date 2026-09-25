@@ -708,12 +708,17 @@ def test_an_off_language_file_is_never_handed_the_wrong_languages_canary(tmp_pat
 
 
 def test_every_language_names_a_runner_script_the_loop_actually_has():
+    """One runner has a script per shell rather than a script (PLAN D11), so
+    the claim is made of the RESOLVED suites — see
+    `test_every_script_any_runner_can_pick_is_a_file_in_ops_ralph` for the
+    version that walks every target."""
     for lang in mutate.LANGUAGES.values():
-        assert (ROOT / "ops" / "ralph" / lang.script).is_file(), lang.runner
+        for target in lang.targets or ("x",):
+            assert (ROOT / "ops" / "ralph" / lang.for_target(target).script).is_file()
 
 
 def test_the_two_hud_runners_take_no_target_and_the_other_two_do(tmp_path):
-    assert mutate.QML.command(ROOT, "hud", tmp_path)[-1].endswith("qmltest.sh")
+    assert mutate.QML.for_target("hud").command(ROOT, "hud", tmp_path)[-1].endswith("qmltest.sh")
     assert mutate.PYTHON.command(ROOT, "jv-ears", tmp_path)[-1] == "jv-ears"
     assert mutate.CARGO.command(ROOT, "jarvisd", tmp_path)[-1] == "jarvisd"
     assert "hud" not in mutate.SHOTS.command(ROOT, "hud", tmp_path)
@@ -745,7 +750,7 @@ def test_the_shots_runner_writes_into_the_runs_own_scratch_and_never_the_sheet(t
 
 def test_only_the_shots_runner_asks_for_a_scratch_output_dir(tmp_path):
     assert [l.runner for l in mutate.LANGUAGES.values() if l.scratch_out] == ["shots"]
-    for lang in (mutate.PYTHON, mutate.QML, mutate.CARGO):
+    for lang in (mutate.PYTHON, mutate.QML.for_target("hud"), mutate.CARGO):
         assert lang.command(ROOT, "x", tmp_path) == lang.command(ROOT, "x", tmp_path / "other")
 
 
@@ -786,7 +791,9 @@ def test_a_canary_that_lived_under_the_core_runner_names_the_one_that_would_run_
     (tmp_path / "shell" / "P.qml").write_text("import QtQuick\nQtObject { property int a: 1 }\n")
     spec = mutate.parse_spec("@ x\nshell/P.qml\n- a: 1\n+ a: 2\n")
     with pytest.raises(mutate.HarnessError, match="--runner shots"):
-        mutate.run(spec, lambda env, scratch: True, root=tmp_path, lang=mutate.QML)
+        mutate.run(
+            spec, lambda env, scratch: True, root=tmp_path, lang=mutate.QML.for_target("hud")
+        )
 
 
 def test_the_shots_abort_names_the_two_things_its_stage_drops(tmp_path):
@@ -800,6 +807,163 @@ def test_the_shots_abort_names_the_two_things_its_stage_drops(tmp_path):
     script = (ROOT / "ops" / "ralph" / "hudshots.sh").read_text()
     assert 'rm -f "$stage/shell.qml"' in script
     assert 'rm -rf "$stage/tests"' in script
+
+
+
+# ============================================ the three QML shells (PLAN D11)
+#
+# `--runner qml` was written when there was one QML shell, and it hard-coded
+# the HUD's: `script="qmltest.sh"`, `targets=("hud",)`. Two shells later
+# (jv-bar, jv-notify) a mutation in `shell/jv-bar/core` was still handed to
+# the HUD's runner, which is not pointed at the bar at all — so both canaries
+# lived, the harness refused the file, and the abort's hint sent the reader
+# to `--runner shots`, which cannot see the bar either. The nine mutations
+# D1 reported were driven by hand for exactly that reason.
+#
+# The fix is the shape the rest of the repo already uses: three scripts, one
+# per shell (`qmltest.sh`, `bartest.sh`, `notifytest.sh` — three rather than
+# one with an argument because `tools/verify.py` derives which gate runs from
+# a command string), and the target the loop types is what picks between
+# them. Two tests below are the ones that matter: the shells this harness
+# knows are the shells that have a gate, and a mutation in the wrong shell is
+# refused BEFORE a suite runs rather than mis-explained after two.
+
+
+def test_each_qml_shell_is_graded_by_its_own_script(tmp_path):
+    for target, script in (("hud", "qmltest.sh"), ("bar", "bartest.sh"), ("notify", "notifytest.sh")):
+        lang = mutate.QML.for_target(target)
+        assert lang.command(ROOT, target, tmp_path)[-1].endswith(script)
+
+
+def test_the_qml_runner_cannot_run_anything_before_it_knows_which_shell(tmp_path):
+    """The un-specialised QML language has no script, and asking it for a
+    command is a harness bug rather than a default: defaulting to the HUD's
+    runner is precisely the failure this closes."""
+    with pytest.raises(mutate.HarnessError, match="which shell"):
+        mutate.QML.command(ROOT, "bar", tmp_path)
+
+
+def test_the_shells_this_harness_grades_are_the_shells_that_have_a_gate():
+    """The durable half. `tools/dependents.py` already holds the table of QML
+    gates — it is what decides which suite `verify.sh` runs for a changed
+    file — so a fourth shell will land there first. If this harness cannot be
+    told about it in the same breath, D11 simply happens again."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import dependents  # noqa: PLC0415
+
+    gated = {
+        g.entry.rsplit("/", 1)[0]: g.script
+        for g in dependents.QML_GATES
+        if g.entry.startswith("shell/")
+    }
+    assert gated == {s.tree: f"ops/ralph/{s.script}" for s in mutate.SHELLS}
+
+
+def test_every_script_any_runner_can_pick_is_a_file_in_ops_ralph():
+    for lang in mutate.LANGUAGES.values():
+        targets = lang.targets or ("x",)
+        for target in targets:
+            script = lang.for_target(target).script
+            assert (ROOT / "ops" / "ralph" / script).is_file(), (lang.runner, target)
+
+
+# ------------------------------------- a mutation in somebody else's shell
+
+
+BAR_SPEC = "@ x\nshell/jv-bar/core/NiriModel.qml\n- a: 1\n+ a: 2\n"
+
+
+def test_a_mutation_in_another_shell_is_refused_before_a_single_suite_runs(tmp_path, monkeypatch):
+    """Two suite runs and a wrong answer, before: `qmltest.sh` is not pointed
+    at the bar, so the load canary lived, the erasure canary lived, and the
+    abort blamed the plates. The file is in another shell and that is
+    knowable without running anything."""
+    spec = tmp_path / "spec"
+    spec.write_text(BAR_SPEC, encoding="utf-8")
+    monkeypatch.setattr(mutate, "run", lambda *a, **k: pytest.fail("graded the wrong shell"))
+    assert mutate.main(["--runner", "qml", "hud", str(spec)]) == 2
+
+
+def test_the_refusal_names_the_runner_that_would_have_graded_it(capsys):
+    said = mutate.misrouted(mutate.parse_spec(BAR_SPEC), mutate.QML.for_target("hud"))
+    assert said is not None
+    assert "shell/jv-bar/core/NiriModel.qml" in said
+    assert "--runner qml bar" in said
+    assert "qmltest.sh" in said
+
+
+def test_the_shots_runner_is_the_huds_and_is_refused_the_other_two_shells():
+    assert mutate.SHOTS.tree == "shell/jv-hud"
+    said = mutate.misrouted(mutate.parse_spec(BAR_SPEC), mutate.SHOTS)
+    assert said is not None and "--runner qml bar" in said
+
+
+def test_a_file_in_the_shell_being_graded_is_never_refused():
+    """The refusal is about the wrong SHELL, not about the wrong file. A
+    canary on a top-level plate still has to run and still has to live — that
+    is B49's discovery and the hint below is how it is explained."""
+    plate = "@ x\nshell/jv-hud/StatePlate.qml\n- a: 1\n+ a: 2\n"
+    assert mutate.misrouted(mutate.parse_spec(plate), mutate.QML.for_target("hud")) is None
+    assert mutate.misrouted(mutate.parse_spec(plate), mutate.SHOTS) is None
+
+
+def test_a_shell_whose_name_merely_starts_the_same_is_a_different_directory():
+    """`shell/jv-barn` is not in `shell/jv-bar`, and a refusal that thought so
+    would block a file no runner here has any opinion about."""
+    spec = "@ x\nshell/jv-barn/core/X.qml\n- a: 1\n+ a: 2\n"
+    assert mutate.misrouted(mutate.parse_spec(spec), mutate.QML.for_target("hud")) is None
+
+
+def test_a_shell_this_harness_has_never_heard_of_is_refused_by_name():
+    """`main` checks the target against `targets` first, so this is the guard
+    on everything else that resolves a suite — and an unknown shell must be an
+    abort, never a silent fall back to the HUD's."""
+    with pytest.raises(mutate.HarnessError, match="hud or bar or notify"):
+        mutate.QML.for_target("greeter")
+
+
+def test_the_python_runner_may_still_read_a_line_out_of_any_shell(tree):
+    """B55's case, which this must not break: the `tools` suite really does
+    match a line in `shell/jv-hud/Bus.qml`, and the notifier's toast is read
+    by the same kind of test. A runner with no shell of its own has no shell
+    to be wrong about."""
+    assert mutate.PYTHON.tree is None and mutate.CARGO.tree is None
+    for spec in (BAR_SPEC, "@ x\nshell/jv-hud/Bus.qml\n- a: 1\n+ a: 2\n"):
+        assert mutate.misrouted(mutate.parse_spec(spec), mutate.PYTHON) is None
+
+
+# ---------------------------------------- what a lived canary means, per shell
+
+
+def test_each_shells_hint_names_its_own_suite_and_what_that_suite_reaches():
+    hints = {s.target: s.canary_hint for s in mutate.SHELLS}
+    assert "--runner shots" in hints["hud"]
+    for target, script in (("bar", "bartest.sh"), ("notify", "notifytest.sh")):
+        assert script in hints[target]
+        # The honest half: there is no staged-render runner for either shell,
+        # so the hint must not offer the HUD's way out (PLAN D13, D20).
+        assert "--runner shots" not in hints[target]
+        assert "core" in hints[target]
+
+
+def test_a_canary_that_lived_in_the_bar_is_explained_by_the_bars_own_suite(tmp_path):
+    (tmp_path / "shell" / "jv-bar").mkdir(parents=True)
+    (tmp_path / "shell" / "jv-bar" / "Workspaces.qml").write_text(
+        "import QtQuick\nQtObject { property int a: 1 }\n", encoding="utf-8"
+    )
+    spec = mutate.parse_spec("@ x\nshell/jv-bar/Workspaces.qml\n- a: 1\n+ a: 2\n")
+    with pytest.raises(mutate.HarnessError, match="bartest.sh"):
+        mutate.run(spec, lambda env, scratch: True, root=tmp_path, lang=mutate.QML.for_target("bar"))
+
+
+def test_the_cli_hands_the_run_the_shell_the_target_named(spec_file, monkeypatch):
+    seen: list[str] = []
+    monkeypatch.setattr(
+        mutate, "run", lambda *a, **k: seen.append(k["lang"].script) or _report("caught")
+    )
+    assert mutate.main(["--runner", "qml", "notify", spec_file]) == 0
+    assert mutate.main(["--runner", "qml", "bar", spec_file]) == 0
+    assert seen == ["notifytest.sh", "bartest.sh"]
 
 
 # ------------------------------------------ what a RED baseline means (B53)
