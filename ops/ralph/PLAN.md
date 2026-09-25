@@ -1849,7 +1849,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       while the other six jittered. Raised: **B75**, whether B72's decision
       survives losing half its argument.)
 
-- [ ] B75. B72 kept `hudscreens.sh` out of the verify gate for two reasons
+- [x] B75. B72 kept `hudscreens.sh` out of the verify gate for two reasons
       and B74 measured one of them away. The rewrite is no longer
       unconditional — a run that changed nothing now restores what it
       compared against and leaves a clean tree — so "it dirties the tree the
@@ -1863,7 +1863,45 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       screens are not, and nothing has measured what the probes cost without
       the seven `grim` captures and the comparison. (c) is the one that needs
       a measurement before anyone can choose, and the loop can take it.
-      Discovered in B74.
+      Discovered in B74. — 2bee285
+      (The measurement (c) asked for, and it RETIRES (c). Every phase of a run
+      is booked now — one file both halves of the harness append to, each
+      phase classified in `sheet.PHASES` as a cost a picture-less run would
+      still pay (`probe`) or one only the seven screens need (`sheet`) — and
+      the table is printed at the end of every run, so the answer is
+      re-measurable rather than quoted. **179.8 s total: probe 144.8 s
+      (80.5%), sheet 34.9 s (19.4%).** A verdict-only gate would save 19% and
+      still cost 2m25s, so (a) stands: named, not run. The pictures are not
+      what this gate costs — `grim` and the seven PNG encodes come to **0.9 s
+      between them**, and nearly all of the sheet half is B74's read-back
+      against HEAD (34.3 s). What it costs is the idle probe: **97.6 s, 54%
+      of everything**, and it is the least skippable verdict in the file. Two
+      things fell out of the measurement. The **2m25s** quoted in six files
+      was stale by exactly the price of B74's comparison (145 + 34 = 179) and
+      now says 3m00s everywhere. And the only real lever on this price is the
+      idle probe's staging, not the camera — raised as **B77**. Fourteen
+      mutations over two gradings, one survivor (a book that never closed a
+      phase, which would refuse every phase after the first) and the test
+      that now catches it.)
+
+- [ ] B77. The only lever on `hudscreens.sh`'s price is the idle probe, and
+      pulling it is a trade nobody has measured either. B75 put numbers on
+      the run: 97.6 s of 179.8 s is `probe_idle_frames`, and **74.8 s of that
+      is deliberate stillness** — ten `IDLE_SETTLE_S` (4 s) feeds, five
+      `IDLE_WINDOW_S` (6 s) windows, three `SETTLE_S` — with the remaining
+      ~23 s in four brokers and five shells starting up and in the loops that
+      wait for a plate to arrive. The windows are long for a reason and it is
+      the probe's whole subject: §06 asks for "0 fps when idle", the thing
+      that breaks it is a slow blink, and a 6 s window catches a
+      once-a-second pulse six times where a 2 s one catches it twice. So the
+      constants are the wrong thing to touch. What is NOT load-bearing is the
+      five separate stagings: each window brings up its own shell (and four
+      of the five their own broker) to reach a state the window before it had
+      already reached, which is startup paid five times for a claim about
+      stillness. One broker and one shell driven through all five states in
+      sequence would cut that without shortening a single window — a rewrite
+      of the probe, not a constant, and worth doing the day somebody wants
+      this gate bound. Nobody does today; B75 chose (a). Discovered in B75.
 
 - [ ] B76. B73's runner rule has no granularity, and it is the first place
       in this table where a COMMENT-only edit buys four minutes. Touching

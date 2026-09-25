@@ -9764,3 +9764,99 @@ declared-gate self-read (B72's own rule, never mutated until now): 2/2.
   `docs/hud/screens/02-heard-desk.png`; A21/A22/A25 are one answer to one
   question about time on screen. And **B10/A28** — one live recording of one
   spoken turn on ares — is still the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 99 — B75: the gate's price, in parts
+
+Track A is unchanged and still waiting on human sentences — every open A item
+is a decision (A13/A27/A38, A21/A22/A25, A47 and the five it blocks,
+A50/A60/A62/A65/A68/A70/A72), a signal that does not exist yet (A11 needs two
+frozen-schema fields, A18 waits for the topic that would break it, A33/A35/A36
+wait for a second moving element), or a seat at ares (A28/A59/A73's re-shoot).
+So the ladder's step 2, and the item the last two iterations both named as the
+loop's: **B75**, the measurement that lets somebody choose what to do about
+`hudscreens.sh`.
+
+**The question, and why nobody could answer it.** `verify.sh` runs every gate
+it plans and NAMES this one instead, on a reason B74 left standing: minutes,
+and seven photographs rather than a verdict. B75's follow-up was the obvious
+one — the probes (the corner, the exclusive zone, the click, the idle frames)
+ARE verdicts, so is there a cheaper half worth binding? The obstacle was that
+the price was a single number with no parts in it. `2m25s` appeared in six
+files and nothing under it.
+
+**So the run books its own seconds.** One file in the run's scratch stage,
+appended by both halves of the harness — bash owns `realize`, `compositor` and
+`compare`, the driver owns the seven inside it — and `sheet.PHASES` classifies
+each phase once, as a cost a picture-less run would still pay (`probe`) or one
+only the screens need (`sheet`). The table prints at the end of every run, so
+this is re-measurable and not quoted; `tools/tests/test_hudscreens.py` holds
+both ends of the classification, because a phase the harness books and nothing
+classifies would be charged to neither half and the shares would be fractions
+of a total the rows never covered.
+
+    probe     19.6 s  realize      probe     97.6 s  idle
+    probe      1.3 s  compositor   probe      7.2 s  click
+    probe      2.5 s  processes    sheet      0.6 s  encode
+    probe     15.1 s  settle       sheet     34.3 s  compare
+    probe      0.3 s  capture                 0.2 s  unaccounted
+    probe      1.2 s  checks       ------------------------------
+                                   probe    144.8 s  80.5%
+                                   sheet     34.9 s  19.4%   of 179.8 s
+
+**The answer is (a), and it is not close.** A verdict-only run saves 19% and
+still costs 2m25s. The PICTURES — the thing "seven photographs rather than a
+verdict" is about — are `grim` and seven PNG encodes: **0.9 s between them**,
+half a percent of the run. Almost the whole `sheet` half is B74's read-back
+against HEAD, and what the gate actually costs is the idle probe: 97.6 s, 54%
+of everything, five windows deliberately holding still. There is no cheap half
+to bind, so B75 closes on (a) — named, not run — with a number instead of a
+hunch, and B76's rule applies to itself here: this iteration bought a
+measurement, not a green.
+
+**Two things fell out of it.** The `2m25s` in six files was stale by exactly
+the price of the thing B74 added: 145 + 34 = 179, and nobody re-measured the
+total when the comparison landed. It says 3m00s now, and the table is beside
+it so the next drift is visible. And `ops/ralph/README.md` was still carrying
+B72's pre-B74 reasoning ("binding it would dirty the tree, every time"), which
+B74 had already made false; it now says what is true. The other finding is a
+lever nobody should pull yet — **B77** — the idle probe's five windows each
+bring up their own shell (four their own broker) to reach a state the window
+before it had already reached. That is startup paid five times; the six-second
+windows themselves are load-bearing and must not shrink, because the failure
+they exist for is a once-a-second blink.
+
+**The accounting is the part that can lie, so it is the part with the tests.**
+Nesting raises rather than sums — `capture()` is called by the shot loop and
+again inside both probes, so a `cost.phase` in the wrong place is a live
+hazard, and double counting would report a cheaper `sheet` half than the run
+has, which is a gate bound on a fiction. A book over the clock is refused the
+same way: phases that charge more than the run took mean some stretch was
+billed twice. Unbooked seconds are PRINTED (`unaccounted`, 0.2 s here) rather
+than dropped, so no reader divides a half by a total the rows never covered.
+Fourteen mutations over two gradings, thirteen caught first pass; the survivor
+was a book that never closed a phase — every phase after the first would raise
+— and it lived because every test around it opened exactly one. Two phases in
+a row is the test, and the re-grade took it 2/2.
+
+- tests: `bash ops/ralph/verify.sh` green — it planned `runtests.sh tools`
+  **434** (was 420) over the 10 changed paths, 34.9 s. And the gate itself,
+  which is the measurement: `bash ops/ralph/hudscreens.sh /tmp/hs-cost` green,
+  all 7 shots matching the sheet at HEAD (5 of them inside the noise floor),
+  179.8 s. Run against a scratch directory on purpose — a run pointed at
+  `docs/hud/screens` restores committed bytes over rounding, and the next
+  person measuring must not be measuring the restore. The HUD did not change,
+  so there are no new screens to commit.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  ops/ralph/hudscreens.sh, tools/tests/test_hudscreens.py, tools/verify.py,
+  tools/dependents.py, tools/tests/test_verify.py, ops/ralph/README.md,
+  ops/ralph/PROMPT.md
+- commit: 2bee285
+- next: **B62**, **B67** and **B76** are the loop-sized items left in the B
+  table (B77 is real but explicitly "not until somebody wants this gate
+  bound"). Track A remains blocked on human sentences: A47's OCR-or-IPC
+  decision blocks A55 and four growth checks; A13/A27/A38 are one two-minute
+  look at `docs/hud/screens/02-heard-desk.png`; A21/A22/A25 are one answer
+  about time on screen. And **B10/A28** — one live recording of one spoken
+  turn on ares — is still the biggest thing a human can hand this loop.
