@@ -39,8 +39,10 @@
 //     one-surface-per-monitor `Variants` are shell.qml's, and a human at ares
 //     is the only thing that can confirm them.
 //   · not niri. There is no compositor here: the lines go in through the
-//     stand-in next door, and where the desk is ares' own desk they are
-//     `harness/fixtures/niri/ares-desk.jsonl` byte for byte — the line niri
+//     stand-in next door, out of `Desk.qml` — which is where this directory
+//     keeps its one copy of the recording, since the settle driver needs the
+//     same desk to start from (PLAN D34). Where the desk is ares' own it is
+//     `harness/fixtures/niri/ares-desk.jsonl` byte for byte, the line niri
 //     really wrote. The two shots that need a desk ares does not have (named
 //     workspaces, a crowded row) are COMPOSED, in the recording's own shape,
 //     and docs/bar/README.md says which is which.
@@ -70,59 +72,17 @@ Item {
     height: root.height
   }
 
+  // The lines niri wrote, shared with the other driver in this directory
+  // (PLAN D34) so that the copy of the recording exists once.
+  Desk {
+    id: desk
+  }
+
   TestCase {
     id: suite
 
     name: "BarShots"
     when: windowShown
-
-    // --- what niri said ------------------------------------------------
-
-    // harness/fixtures/niri/ares-desk.jsonl line 1, verbatim: ares' three
-    // monitors as niri described them at connect. A QML engine cannot read a
-    // file out of the repository, so this is a copy — and
-    // tools/tests/test_barshots.py fails if it stops being the recording.
-    //
-    // Worth knowing what it happens to contain: HDMI-A-1's workspaces arrive
-    // in the order 2, 1, so a bar that trusted niri's order would draw this
-    // desk as "2 1". `01-primary.png` is the picture of that not happening.
-    readonly property string recorded: '{"WorkspacesChanged":{"workspaces":[{"id":2,"idx":1,"name":null,"output":"DP-1","is_urgent":false,"is_active":true,"is_focused":false,"active_window_id":null},{"id":3,"idx":1,"name":null,"output":"DP-2","is_urgent":false,"is_active":true,"is_focused":false,"active_window_id":null},{"id":4,"idx":2,"name":null,"output":"HDMI-A-1","is_urgent":false,"is_active":false,"is_focused":false,"active_window_id":null},{"id":1,"idx":1,"name":null,"output":"HDMI-A-1","is_urgent":false,"is_active":true,"is_focused":true,"active_window_id":2}]}}'
-
-    // A desk ares does not have, in the shape of the one it does. Every key
-    // here is a key of the recorded line above, which a tools test holds, so a
-    // composed shot cannot quietly be a picture of a message format niri does
-    // not use. `name` is niri's own field — `null` for the ordinary unnamed
-    // workspace, the string for one the user named in their config.
-    function snapshot(rows: var): string {
-      const out = [];
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        out.push({
-          "id": r.id,
-          "idx": r.idx,
-          "name": r.name === undefined ? null : r.name,
-          "output": r.output,
-          "is_urgent": r.urgent === true,
-          "is_active": r.active === true,
-          "is_focused": r.focused === true,
-          "active_window_id": null
-        });
-      }
-      return JSON.stringify({ "WorkspacesChanged": { "workspaces": out } });
-    }
-
-    // One workspace becoming the active one on its output, and one asking for
-    // you. niri's own two deltas, spelled as it spells them — neither is in
-    // the recording (it is a connect snapshot; recording a delta means
-    // rearranging a desk someone is sitting at, PLAN D12), so these are the
-    // one place the bar's moving parts are drawn rather than described.
-    function activated(id: int, focused: bool): string {
-      return JSON.stringify({ "WorkspaceActivated": { "id": id, "focused": focused } });
-    }
-
-    function urgency(id: int, urgent: bool): string {
-      return JSON.stringify({ "WorkspaceUrgencyChanged": { "id": id, "urgent": urgent } });
-    }
 
     // --- shots ----------------------------------------------------------
 
@@ -130,7 +90,7 @@ Item {
     // one your keyboard is in, in teal, and the one beside it in the quietest
     // grey the palette has. This is the bar as it is for most of a day.
     function shot_primary() {
-      Niri.ingest(suite.recorded);
+      Niri.ingest(desk.recorded);
     }
 
     // The same instant, one monitor over. DP-1's only workspace is ACTIVE —
@@ -140,7 +100,7 @@ Item {
     // instead of one: "on screen somewhere" and "not on screen" are different
     // facts about a workspace.
     function shot_side() {
-      Niri.ingest(suite.recorded);
+      Niri.ingest(desk.recorded);
     }
 
     // Your keyboard moving, which is the one thing this strip exists to say.
@@ -148,16 +108,16 @@ Item {
     // property on this surface that eases rather than snapping (§06: a value
     // moves toward its target), because the move IS the signal.
     function shot_focus_moved() {
-      Niri.ingest(suite.recorded);
-      Niri.ingest(suite.activated(4, true));
+      Niri.ingest(desk.recorded);
+      Niri.ingest(desk.activated(4, true));
     }
 
     // A window on the workspace you are not looking at wants you. `warn`, and
     // deliberately NOT the ember: ember means Jarvis is doing something, and
     // any window on the machine can raise this.
     function shot_urgent() {
-      Niri.ingest(suite.recorded);
-      Niri.ingest(suite.urgency(4, true));
+      Niri.ingest(desk.recorded);
+      Niri.ingest(desk.urgency(4, true));
     }
 
     // The first seconds of a session: the bar is mapped, niri has not
@@ -177,7 +137,7 @@ Item {
     // and the clock stays, which is what the bar still has a right to say and
     // the reason the strip earns its place before anything else is alive.
     function shot_lost() {
-      Niri.ingest(suite.recorded);
+      Niri.ingest(desk.recorded);
       Niri.drop("niri event stream stopped");
     }
 
@@ -187,7 +147,7 @@ Item {
     // photographing it is that the name is the first string on this surface
     // that a person chose the LENGTH of.
     function shot_named() {
-      Niri.ingest(suite.snapshot([
+      Niri.ingest(desk.snapshot([
         { "id": 1, "idx": 1, "output": "HDMI-A-1", "name": "web", "active": true, "focused": true },
         { "id": 4, "idx": 2, "output": "HDMI-A-1", "name": "code" },
         { "id": 7, "idx": 3, "output": "HDMI-A-1", "name": "chat" }
@@ -201,7 +161,7 @@ Item {
     // surface has for it or paints across the clock and into the HUD's corner.
     // The two numbers in the caption are the answer.
     function shot_crowded() {
-      Niri.ingest(suite.snapshot([
+      Niri.ingest(desk.snapshot([
         { "id": 1, "idx": 1, "output": "DP-1", "name": "documentation", "active": true, "focused": true },
         { "id": 2, "idx": 2, "output": "DP-1", "name": "compositor" },
         { "id": 3, "idx": 3, "output": "DP-1", "name": "video-editing" },
@@ -219,7 +179,7 @@ Item {
     // clipped: every name on screen is a name, and the ones that are not there
     // are counted rather than quietly missing.
     function shot_collapsed() {
-      Niri.ingest(suite.snapshot(suite.crowd(1)));
+      Niri.ingest(desk.snapshot(suite.crowd(1)));
     }
 
     // The same desk and the same monitor, with the keyboard on the LAST
@@ -231,9 +191,9 @@ Item {
     // for attention and said nothing would be doing the thing the marker
     // exists to prevent.
     function shot_collapsed_focus_last() {
-      const desk = suite.crowd(10);
-      desk[7].urgent = true;
-      Niri.ingest(suite.snapshot(desk));
+      const rows = suite.crowd(10);
+      rows[7].urgent = true;
+      Niri.ingest(desk.snapshot(rows));
     }
 
     // A monitor narrow enough that the centre of the screen falls inside the
@@ -244,7 +204,7 @@ Item {
     // and shell.qml says this "should fail visibly on the fourth" monitor.
     // This is what visibly looks like.
     function shot_narrow() {
-      Niri.ingest(suite.recorded);
+      Niri.ingest(desk.recorded);
     }
 
     // A desk of ten named workspaces on one output, with the keyboard on the

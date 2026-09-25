@@ -51,6 +51,16 @@ Rectangle {
   // shot cannot claim a focus the pixels do not have.
   readonly property var desk: row.drew
 
+  // The colour the workspace label at `index` is painted RIGHT NOW, which is
+  // the row's own read-back (`Workspaces.painted`). `desk` above says what the
+  // row meant to draw; this says what is on the glyph, and the two differ
+  // exactly while a colour is settling — which is the only thing on this
+  // surface that moves and the only way a driver can tell an ease from a snap
+  // (PLAN D34). The sheet never asks: it waits past the settle on purpose.
+  function painted(index: int): color {
+    return row.painted(index);
+  }
+
   // The clock as drawn, or "" when it is not on screen at all. The string and
   // not the numbers: an unknown time and a monitor too narrow to hold the
   // clock clear of the HUD's corner both end in nothing being drawn, and that
