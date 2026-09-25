@@ -15,10 +15,24 @@ the HUD. Do NOT touch the login greeter's session command untested (a broken
 greetd locks the user out) — style only, and leave the graphical greeter for a
 human-reviewed step.
 
-- [ ] D1. **Top bar** (Quickshell, own module `shell/jv-bar` + `pkgs/jv-bar` +
-      user service): slim bar — niri workspaces (left), clock (center),
-      net·audio·battery (mid-right). Leave the top-right corner for the HUD.
-      Consume the shared Theme. qmllint clean; render-verify.
+- [x] D1. **Top bar** (Quickshell, own module `shell/jv-bar` + `pkgs/jv-bar` +
+      user service): slim bar — niri workspaces (left), clock (center).
+      Leave the top-right corner for the HUD. Consume the shared Theme.
+      qmllint clean; render-verify. (Done: a layer-shell strip on every
+      monitor, `WlrLayer.Top`, `WlrKeyboardFocus.None`, `mask: Region {}` —
+      it cannot take the keyboard and cannot be clicked — reserving exactly
+      its own height so windows tile below it. Workspaces come from `niri
+      msg --json event-stream`, one read-only child process, parsed by
+      `shell/jv-bar/core/NiriModel.qml` against the REAL recorded stream in
+      `harness/fixtures/niri`; the clock is Quickshell's `SystemClock` at
+      Minutes precision. `tools/gen_theme_qml.py` now generates BOTH shells'
+      Theme.qml from one renderer, byte for byte, so the corner and the strip
+      cannot drift apart. New gate `ops/ralph/bartest.sh`, wired into
+      `dependents.QML_GATES`. 31 headless QML tests; 9 mutations, 9 caught.
+      NOT done, and deliberately: **net·audio·battery**, because none of the
+      three has a real source in this repo yet — a battery pip on a desktop
+      and a volume readout with nothing publishing volume are the fakery
+      invariant 10 forbids. See **D17**.)
 - [ ] D2. **Notifications**: a Quickshell notification daemon (or mako themed to
       §06 as a first step), quiet + ember, honoring reduced-motion.
 - [ ] D3. **Lock screen**: swaylock-effects themed to §06 (dark ground, ember
@@ -88,6 +102,67 @@ human-reviewed step.
       one that is doable today and D4 is what unblocks the first. Found while
       doing D8: the render is 2560x1440 because the primary is, and nothing in
       the repo says what the other two get.
+- [ ] D11. **`tools/mutate.py` cannot grade the bar.** Its QML language entry
+      is `script="qmltest.sh"`, `targets=("hud",)`, so a canary planted in
+      `shell/jv-bar/core` is graded by the HUD's runner — which does not
+      import the bar at all, so every canary there "lives" and the grade is a
+      silent 0%. The 9 mutations D1 ran were driven by hand for that reason.
+      Small: a second `Language` (or a target on the existing one) pointing at
+      `bartest.sh`. Found while finishing D1.
+- [ ] D12. **Record the niri deltas, with a human at the keyboard.**
+      `harness/fixtures/niri/ares-desk.jsonl` is the connect snapshot only —
+      every event the bar ACTS on (`WorkspaceActivated`,
+      `WorkspaceUrgencyChanged`, a second `WorkspacesChanged`) is absent,
+      because recording one means switching workspaces in a live session.
+      Their field names were read out of the shipped niri binary's serde
+      table rather than guessed (see the fixture README), but the model's
+      behaviour on them is still inference from a shape. Recording a real
+      switch + an urgent window would turn `tst_nirimodel.qml`'s delta cases
+      from inference into evidence. It also unblocks the **occupancy pip**:
+      `WorkspaceActiveWindowChanged` is the event that would say which
+      workspaces have windows on them, and nothing here has ever seen one
+      fire — a pip drawn from an event that might not arrive goes stale
+      silently, which is the one failure mode a bar must not have.
+      (`NiriModel.qml` names this item for that half.)
+- [ ] D13. **A render harness for the bar**, the way `hudshots.sh` is one for
+      the HUD: stage `shell/jv-bar` with `Niri.qml` stubbed, drive
+      `Workspaces`/`Clock` with the recorded desk, photograph the strip and
+      read the sheet back. Today `Workspaces.qml`, `Clock.qml` and the strip
+      itself are reached by NO QML gate — only qmllint inside `nix build
+      .#jv-bar` and the Python sweeps over `shell/**`, which is why
+      `test_dependents.py` writes that gap down instead of letting it be
+      invisible. `Workspaces.qml` names this item.
+- [ ] D14. **The bar does not move.** No `Ease`/`Motion` pair exists for it,
+      so a workspace's colour snaps. That is correct-and-still (0 fps when
+      idle, §06) rather than wrong, and the reason it is an item and not a
+      bug: the moment ONE element eases, the other three snapping becomes the
+      defect. If it lands it wants the HUD's shape — a gated `Behavior` whose
+      gate is `prefers-reduced-motion` — not a Behavior per binding.
+      `Workspaces.qml` names this item.
+- [ ] D15. **Clicking a workspace to switch to it** — `mask: Region {}` means
+      the bar receives no pointer input at all, and opening the mask is NOT
+      the way to add this: switching a workspace is changing the state of this
+      machine, which is `jv-act`'s alone (invariant 3). The path is a jv-act
+      tool the bar ASKS, not a `niri msg action` from the shell. Needs human
+      review of the tool, so it is a proposal, not a task. `shell.qml` names
+      this item.
+- [ ] D16. **The bar reserves the HUD's corner by a number, not by asking.**
+      `hudReservePx: 300 + Theme.insetPx` is a copy of the HUD's own
+      `implicitWidth` in a file that cannot see it — two processes on two
+      layers, and neither can detect the clash. A tools test now reads both
+      and fails if the HUD's box grows past the reserve, which is the honest
+      floor; the real fix is one place that declares "the HUD's corner is this
+      wide" and both shells reading it (a geometry token in theme.toml would
+      do it). Found while finishing D1.
+- [ ] D17. **net · audio · battery on the bar, when each has a real source.**
+      The original D1 sketch had all three mid-right and none shipped, on
+      purpose: nothing in this repo publishes link state or volume, and ares
+      has no battery. Each is its own small item with its own honest source —
+      audio wants a PipeWire/WirePlumber reading (jv-voice already knows the
+      default sink, so the bus may be the right road), net wants the link, and
+      battery should simply never appear on a desktop rather than showing
+      100%. Until then the strip's right half stays empty, which §06 calls
+      earned.
 - [ ] D9. **Boot path onto §06** — blocked on human review (**R9**). Four
       files: `modules/grub-theme/{theme.txt,background.svg,default.nix}` and
       `modules/plymouth-theme/default.nix`. The real design in it is

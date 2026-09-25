@@ -11508,3 +11508,122 @@ still matches HEAD.
   names, which is **D4**. **D9/R9** is still the boot path and a human's, and
   it now has one more thing waiting in it: those files spell the font family
   too. From the old corner: **A89**, **A88**, **B94** and **A62/A70**.
+
+## 2026-09-25 21:10 — the second surface, and the first one that keeps a strip
+- built: **D1** — `jv-bar`, the JarvisOS top bar. A Quickshell layer-shell
+  strip on every monitor: that monitor's niri workspaces on the left, the
+  clock in the middle, and a right end left deliberately empty because the
+  HUD floats there. `shell/jv-bar` (9 QML files), `pkgs/jv-bar`, a
+  `graphical-session.target` user unit in `modules/theme.nix`, a new gate
+  `ops/ralph/bartest.sh`, and the real recorded niri stream in
+  `harness/fixtures/niri`.
+- **an interrupted iteration left most of the QML staged and none of it
+  wired.** The tree at HEAD had `shell/jv-bar`, `pkgs/jv-bar` and
+  `bartest.sh` staged but never committed, never verified and unreachable:
+  the package's checkPhase called `gen_theme_qml.py --shell jv-bar`, an
+  option that did not exist; nothing in `flake.nix` built it; nothing started
+  it; no gate ran its tests. Its 31 headless tests passed on the first try,
+  so what was missing was every seam — which is the half an interrupted
+  iteration always leaves.
+- the SEAM WAS THE WORK, and the interesting one is the theme. Two shells
+  cannot share a `Theme.qml`: each is copied into the store on its own and
+  `import "."` resolves inside ONE directory, so the file has to exist twice.
+  A second hand-written copy of the palette is the exact failure D7 and D8
+  spent two iterations undoing on the desktop side. So `gen_theme_qml.py`
+  grew a `SHELLS` table instead — `Shell(name, owner, registry, singletons,
+  components, core)` — and renders both shells from one renderer, which made
+  the two `Theme.qml` **byte-identical** and gave a test something to say:
+  the bar's ember is the HUD's ember or the suite is red. Adding `jv-bar`
+  was adding a row; every registration claim that already existed for the
+  HUD (`--check` drift, qmldir-vs-disk in both directions, core/ imports
+  nothing but QtQuick) is now parameterized over the table and the bar
+  arrived already covered.
+- what the bar is allowed to do, pinned in a table of its own. Three values
+  are the HUD's: `WlrKeyboardFocus.None` + `focusable: false` (it cannot
+  take the keyboard), `WlrLayer.Top` (never over fullscreen or the lock),
+  `mask: Region {}` (an EMPTY input region — it cannot be clicked at all).
+  Two are deliberately not: it paints an opaque `groundDeep`, and it
+  reserves `exclusionMode: Normal` with `exclusiveZone: implicitHeight`, so
+  windows tile below it. Written out rather than derived from the HUD's
+  `SAFE_SURFACE`, because a shared table would have to say "or" and would
+  then pass on a bar that had quietly stopped reserving its strip. The
+  pointer sweep matters most here of any surface in the repo: a workspace
+  label is the most clickable-looking thing on a desktop, and a `TapHandler`
+  on one is how `mask` gets opened later "to make it work". Switching a
+  workspace is changing the state of this machine, which is `jv-act`'s alone
+  (invariant 3) — **D15**.
+- the corner neither process can see. The HUD sets `ExclusionMode.Ignore`,
+  so it is NOT pushed down by the bar: its plates are drawn OVER the top
+  right of this strip, from a different process on a different layer, and
+  nothing in either shell can detect the overlap. All that keeps them apart
+  is `hudReservePx: 300 + Theme.insetPx` — a copy of the HUD's own
+  `implicitWidth` in a file that cannot read it. A tools test now reads
+  BOTH: grow the HUD's box past the reserve and it fails, instead of a plate
+  landing on the clock. That is a floor, not a fix (**D16**).
+- the fixture is a recording, and it is the part no test written from memory
+  could have caught. `harness/fixtures/niri/ares-desk.jsonl` is the real
+  first six events of `niri msg --json event-stream` off this machine. The
+  shape is what kills a bar silently: an `idx` that is really `index`, a
+  `name` absent rather than `null` — every one parses, changes nothing, and
+  leaves a strip drawing no workspaces on a desk full of them. Note what the
+  recording happens to contain: niri lists the workspaces **2, 3, 4, 1**, so
+  HDMI-A-1's second comes before its first, and a model that trusted arrival
+  order would draw "2 1". `tst_nirimodel.qml` carries line 1 as a string (a
+  QML engine cannot read a file), and a tools test now fails if that copy and
+  the recording ever disagree — the claim the fixture README had already made
+  on a test's behalf. The five deltas the model acts on are NOT recorded,
+  because recording one means switching workspaces in a live session: their
+  field names came out of the shipped niri binary's serde table, the
+  behaviour on them is labelled as inference, and **D12** is a human at the
+  keyboard.
+- qmllint caught the one real defect in the inherited QML: `clock.hours` read
+  from inside the per-screen delegate is an `unqualified` access, and `-W 0`
+  means a warning is a failed build. Fixed with `pragma ComponentBehavior:
+  Bound` (lexical, checkable lookup) rather than the alternative — a
+  `SystemClock` per monitor, three timers waking three surfaces to draw the
+  same minute. At Minutes precision the one clock wakes 1,440 times a day
+  instead of 86,400, and every wakeup changes a glyph someone might read.
+- what I did NOT build, and it was in the D1 sketch: **net · audio ·
+  battery**. Nothing in this repo publishes link state or volume, and ares
+  has no battery. Three readouts with no source is three fake indicators on
+  an always-mapped surface, which is precisely invariant 10. The right half
+  stays empty — §06 calls that earned — and **D17** is the item, one honest
+  source at a time.
+- gates: `bartest.sh` is registered in `dependents.QML_GATES`, so touching a
+  bar element now runs the bar's tests and NOT the HUD's (two scripts rather
+  than one with an argument, which is what makes that distinction possible at
+  all). A sweep test writes the bar's coverage gap down instead of letting it
+  be invisible: `Workspaces.qml`, `Clock.qml` and the strip are reached by no
+  QML gate, only by qmllint inside `nix build .#jv-bar` and the Python
+  sweeps over `shell/**` — the bar has no `hudshots.sh` (**D13**).
+- 9 mutations, 9 caught: the zone becomes a literal, `mask` becomes null, a
+  workspace label grows a `TapHandler`, the HUD's box grows past the reserve,
+  the recorded snapshot is edited, an unread event is dropped, the bar's
+  ember drifts one step, a bar singleton stops being registered, and core/
+  reaches for Quickshell. Driven by hand, because `tools/mutate.py` grades
+  QML with the HUD's runner only — a canary in `shell/jv-bar/core` would
+  "live" and score a silent 0% (**D11**).
+- tests: `bash ops/ralph/verify.sh` GREEN — 8 gates over 27 paths (tools 483
+  pass, jv-compat, jv-ears, jv-hud-bridge, qmltest, **bartest 31**, hudshots,
+  nixtest). `ops/ralph/hudscreens.sh` was named (flake.nix + pkgs/jv-hud) and
+  run: 213.7 s, all 9 shots match the sheet at HEAD — the HUD's pixels did
+  not move, which is what a comment-and-flag change to its package should
+  mean. build: `nixos-rebuild build --flake .#ares` green, closure
+  cswgwsgx0qdzrkpfvg071lnfv7rpg6g1, with `unit-jv-bar.service` in it. No
+  schema change, no jv-act, no boot path, no pins. Never tested, never
+  switched.
+- files: shell/jv-bar/** (new), pkgs/jv-bar/default.nix (new),
+  ops/ralph/bartest.sh (new), harness/fixtures/niri/** (new), flake.nix,
+  modules/theme.nix, pkgs/jv-hud/default.nix, shell/jv-hud/{Theme.qml,
+  qmldir,core/qmldir}, tools/gen_theme_qml.py, tools/dependents.py,
+  tools/tests/{test_gen_theme_qml.py,test_dependents.py,test_verify.py},
+  ops/ralph/PLAN.md
+- next: **D11** is the smallest and it is a gate on this iteration's own
+  weakest spot — one `Language` row so `mutate.py` can grade the bar, after
+  which D1's mutation evidence stops being hand-driven. **D13** (a render
+  harness for the bar) is the biggest honest gap: three of the bar's files
+  are seen by qmllint and nothing else, and `hudshots.sh` is the pattern to
+  copy. **D4** (the niri config into the flake) now has a second customer —
+  the bar wants gaps/borders to agree with it, and D10 is still blocked on
+  the output names it would declare. From the old corner: **A89**, **A88**,
+  **B94**, **A62/A70**.
