@@ -12494,3 +12494,84 @@ is not worth chasing.)
   **D33** (the last two copies of the HUD's box, a half-decision) and **D17**
   (the strip's empty right half, the first Track D item needing a real SOURCE
   rather than a token).
+
+## 2026-09-26 — iteration 126 — the teal was never moving
+
+- **what**: D34. `shell/jv-bar/core/KeyedRows.qml` (a ListModel synced by key),
+  `Workspaces.qml` keyed on niri's workspace id, `tools/barshots/scene/
+  tst_settle.qml` (the gate that can see an ease), `tests/tst_keyedrows.qml`
+  (12 cases + a real Repeater), `tools/barshots/scene/Desk.qml` (one copy of
+  the recorded line for both drivers).
+- **why it is worth an iteration, and it is not the animation.** D34 was raised
+  as a suspicion — "the teal MAY be arriving snapped". The first thing built
+  was the thing that could answer it, and it answered red: on the real strip,
+  through the real `NiriModel`, every sample of the label colour was already at
+  the target in the frame the focus delta landed —
+  `#6e7e89/#4fb8bf` six times over. `Ease on color` has been attached to
+  nothing since D1. The Repeater's model is the array `NiriModel` replaces
+  wholesale (it must; that rule is written into the model in those words), a
+  Repeater handed a new array destroys its delegates, and a Behavior does not
+  animate an initial assignment. Every label was a new Text that had always
+  been teal.
+- **WHY NOTHING CAUGHT IT, which is the part worth keeping.** Every gate this
+  shell had was structurally incapable. `tests/` is pure arithmetic with no
+  engine under it; `nix build .#jv-bar` is a linter; and the sheet — which has
+  a shot NAMED for this animation — waits `fadeInMs + easeMs` before it grabs,
+  on purpose, so that what lands in the PNG is a finished colour. A settled
+  colour looks identical either way. Three gates, one of them a picture of the
+  exact phenomenon, and none of them could tell a 200 ms ease from an
+  assignment. The new driver does one thing they cannot: it samples DURING the
+  move and requires a value that is neither end.
+- **KEYED BY IDENTITY, NOT BY POSITION**, and the second sync is the one
+  everybody writes first. A ListModel synced positionally also keeps its
+  delegates — and hands each survivor its NEIGHBOUR's workspace when the desk
+  grows at the left, so the strip cross-fades between two unrelated
+  workspaces: a 200 ms lie about a change that is instantaneous. Workspaces do
+  not slide into existence; niri either has one or does not. `KeyedRows` takes
+  a `key` per row precisely so "the colour eases, the desk snaps" is one rule
+  instead of two, and `test_a_workspace_arriving_snaps_and_recolours_nothing`
+  is the half of the settle driver that fails if that is ever swapped back.
+- **THE FIX FOUND A SECOND FAULT, and it had been latent for two iterations.**
+  Keeping the list in step means reading `shown` the moment it changes — and
+  `shown` was the end of a chain of four properties (widths → weighed → plan →
+  compose). QML notifies the dependents of `workspaces` in whatever order it
+  likes, so an eagerly-read `shown` can compose the PREVIOUS desk's plan over
+  THIS desk's array. It threw a TypeError once per emptied desk. It could not
+  have shown before: a lazy property is evaluated when somebody asks, by which
+  time the chain has caught up. The whole derivation is now ONE binding over
+  ONE argument reaching only primitives — which is also the general lesson,
+  since a chain of derived properties is the default shape in this repo.
+- **AND THAT FAULT SHIPPED A GREEN RUN.** The TypeError sat in the middle of
+  `8 passed, 0 failed`, with eleven byte-correct PNGs beside it, because a
+  binding that throws keeps its last value and recovers on the next
+  evaluation. The only evidence was one line of runner output. None of the
+  three shot harnesses fails on a console warning — raised as **D36**, with
+  the reason it was not done blind.
+- **THE ELEVEN SHOTS ARE BYTE-IDENTICAL.** `hudsheet: all 11 shots match the
+  sheet committed at HEAD`, before and after. The rule changed nothing that
+  was already settled, which is exactly the claim that deserves pictures
+  behind it — and it is what says the row's arithmetic (D32's collapse, D13's
+  margins) came through the restructure untouched.
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over 10 paths (tools
+  **575 pass**, bartest **59** with the new KeyedRows suite, barshots **8**
+  with the new settle driver), 75 s. Two gates went red on the way and both
+  were right: `test_the_colour_of_a_reading_is_chosen_where_the_word_is`
+  (the delegate reads a role now, not `modelData`) and
+  `test_no_qml_file_carries_a_literal_colour` (the new suite needed two
+  colours; they are named ones, deliberately not §06 tokens).
+  build: `nixos-rebuild build --flake .#ares` green — and it caught the one
+  thing bartest cannot, a missing `pragma ComponentBehavior: Bound` in the new
+  suite, because `-W 0` in pkgs/jv-bar lints `tests/` too. No schema change,
+  no jv-act, no boot path, no pins. Never tested, never switched.
+- files: shell/jv-bar/{Workspaces.qml,core/KeyedRows.qml,core/qmldir,
+  tests/tst_keyedrows.qml}, tools/gen_theme_qml.py, tools/barshots/scene/
+  {Desk.qml,Strip.qml,tst_settle.qml,tst_shots.qml},
+  tools/tests/test_barshots.py, ops/ralph/PLAN.md
+- next: **D37** is the one this raised and it is the same shape in another
+  shell — `shell/jv-notify/shell.qml` repeats over an array the daemon
+  replaces wholesale, with the toast's fade-in Behavior inside the delegate,
+  so a second notification may be re-fading the first. Measure it before
+  fixing it; `KeyedRows` is already written and the key is the notification
+  id. Then **D36** (no harness fails on a console warning), then **D33** (the
+  last two copies of the HUD's box) and **D17** (the strip's empty right half,
+  the first Track D item wanting a real SOURCE rather than a token).

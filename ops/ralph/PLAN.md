@@ -576,21 +576,80 @@ human-reviewed step.
         on the last: "these, then some, then you", `+2` in warn). Both end
         clear of the clock — 63 px and 88 px — and 0 px into the HUD's corner.
 
-- [ ] D34. **The one animation in this shell may never run, and the shot that
-      is named for it would look the same either way.** `Workspaces.qml` puts
-      `Ease on color` on its labels and `03-focus-moved.png` waits
-      `fadeInMs + easeMs` for it — but the Repeater's model is a JS array that
-      `NiriModel` REPLACES wholesale on every delta (it must: a list mutated in
-      place is a list no binding hears about). A Repeater given a new array
-      rebuilds its delegates, and a Behavior does not animate an initial
-      assignment — so the teal may be arriving snapped, in a new Text, with the
-      ease attached to nothing. Not measured, which is the point: nothing in
-      this repo can tell the two apart, because the shot is taken after the
-      ease would have finished either way. What would answer it is a driver
-      that grabs DURING the settle (A31's shape — "the sheet cannot photograph
-      time"), or a model keyed by workspace id so the delegate survives its own
-      desk changing. Raised by D32, which measured the labels and had to think
-      about when they are built.
+- [x] D34. **The one animation in this shell never ran, and now a gate can
+      tell.** (56136a8) It was not "may": measured first, red, on the real
+      strip — every sample of the label colour was already at the target the
+      instant the focus delta landed. The Repeater's model was the JS array
+      `NiriModel` replaces wholesale on every delta (it must: a list mutated in
+      place is a list no binding hears about); a Repeater handed a new array
+      destroys its delegates; a Behavior does not animate an initial
+      assignment. So each label was a new Text that had always been teal, with
+      `Ease on color` attached to nothing, for as long as the row has existed.
+      · **`shell/jv-bar/core/KeyedRows.qml`** — a ListModel synced BY KEY, and
+        the row keys on niri's workspace id. A row whose key is still there
+        keeps its delegate (moved, roles reassigned, which is a binding
+        re-evaluation and therefore something an Ease can move THROUGH); a new
+        key gets a new delegate and snaps, which is the honest reading of a
+        workspace that has just come into existence. NOT by position: that
+        sync hands each surviving delegate its NEIGHBOUR's workspace when the
+        desk grows at the left, and cross-fades between two unrelated
+        workspaces — a 200 ms lie about a change that is instantaneous.
+      · **`tools/barshots/scene/tst_settle.qml`** — the gate. It samples the
+        colour on the glyph DURING the move and requires an observation that
+        is neither where it started nor where it is going, which is the only
+        thing that separates a 200 ms ease from an assignment. Plus the half
+        that fails if the row is keyed by position, plus the desk emptying and
+        coming back. 12 cases headless in `tests/tst_keyedrows.qml` for the
+        list itself, with a real Repeater and a real Behavior under them.
+      · **The second fault, found by the first fix.** Syncing the list in
+        `onShownChanged` reads `shown` EAGERLY, and `shown` was the end of a
+        chain of four properties. QML notifies the dependents of `workspaces`
+        in whatever order it likes, so `shown` could be composed from the
+        PREVIOUS desk's plan over THIS desk's array — a ten-label run over no
+        workspaces, once per emptied desk. It had been latent since D32 and
+        could not show while nothing read `shown` eagerly. The derivation is
+        now ONE binding over ONE argument, reaching only primitives.
+      · **All 11 shots are byte-identical.** The rule changed nothing that was
+        already settled, which is exactly the claim that deserves pictures.
+      · `tools/barshots/scene/Desk.qml` now holds the recorded line and the
+        composed-snapshot builder, once, for both drivers in that directory.
+
+- [ ] D36. **Nothing in any of the three shot harnesses fails on a console
+      warning, and a binding that threw is the failure that photographs
+      well.** D34's second fault — `shown` composed from the previous desk's
+      plan — announced itself exactly once, as
+      `TypeError: Value is undefined and could not be converted to an object`
+      in the middle of a run that ended `8 passed, 0 failed` and wrote eleven
+      correct PNGs. A QML binding that throws keeps its previous value and
+      recovers on the next evaluation, so the surface is plausible and the
+      gate is green; the only evidence is a `QWARN`/`qml:` line in output
+      nobody reads unless something else went wrong. `hudshots.sh`,
+      `notifyshots.sh` and `barshots.sh` all pipe the runner's output
+      straight through. Capturing it and ending nonzero on a warning is a few
+      lines in each — but it is deliberately NOT done blind: the other two
+      shells' harnesses have never been checked for warnings, so the first
+      run may be red for reasons that have nothing to do with the rule, and
+      hudshots is a 3-minute gate. Whoever takes it should run all three
+      first and read what is already there. (`console.warn` is a legitimate
+      voice in this repo — `NiriModel` uses it for a line it refuses — so the
+      rule wants to be about TypeErrors and unqualified-access errors, not
+      about every warning.) Raised by D34.
+
+- [ ] D37. **The notifier has the bar's exact shape, and nobody has looked.**
+      `shell/jv-notify/shell.qml` is `Repeater { model: Notifications.toasts }`
+      over a JS array the daemon replaces wholesale, and `Toast.qml` puts
+      `Ease on opacity { base: Theme.fadeInMs }` on the plate INSIDE that
+      delegate, gated on `arrived`. That fade is not D34's bug on its own — a
+      toast is created with `arrived` false and flips it afterwards, which is
+      a real change and animates. The question is what happens to the toasts
+      ALREADY on screen when a second one arrives: the array is replaced, so
+      every delegate is destroyed and rebuilt, and a rebuilt toast is one that
+      starts at `arrived` false and fades in AGAIN — and whatever else it
+      counts from its own creation restarts with it. `docs/notify`'s shots
+      wait past the settle exactly as the bar's did, so they would photograph
+      this perfectly. Measure it the way D34 was measured (a driver that
+      samples during the fade); if it is real, `core/KeyedRows.qml` is
+      already written and the key is the notification id. Raised by D34.
 
 - [ ] D35. **A monitor narrower than the corner the HUD reserves gets an
       unbounded row.** `roomPx` negative means "nobody has said" — the right
