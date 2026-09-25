@@ -12575,3 +12575,94 @@ is not worth chasing.)
   id. Then **D36** (no harness fails on a console warning), then **D33** (the
   last two copies of the HUD's box) and **D17** (the strip's empty right half,
   the first Track D item wanting a real SOURCE rather than a token).
+
+## 2026-09-26 — iteration 127
+
+- **what**: D37. The notification corner's fade was running on every plate,
+  every time anything happened. `tools/notifyshots/scene/tst_settle.qml` (the
+  driver that samples DURING the fade), `core/KeyedRows.qml` promoted to a
+  SHARED_CORE type generated into both shells that need it, and
+  `NotifyModel.onScreen` — the toasts as rows keyed by the notification's own
+  id, which is what the surface now repeats over.
+- **why**: `Toast.qml` fades its plate up from zero on the frame after it is
+  built, and says why in a paragraph: something appearing in a corner you were
+  not looking at should read as an ARRIVAL rather than as a repaint. That is a
+  claim about one plate. `Notifications.toasts` is a JS array `NotifyModel`
+  replaces wholesale — it must; a list mutated in place is a list no binding
+  hears about — and a `Repeater` handed a new array destroys every delegate
+  and builds new ones. A rebuilt `Toast` is one that starts at `arrived` false
+  and fades in again. So every plate in the corner was making the claim, and
+  the fade stopped meaning anything.
+- **IT WAS REAL IN ALL THREE DIRECTIONS, and measured before it was fixed.**
+  The plan asked for exactly one case (a second notification arriving). The
+  driver found three, each worse than the last: a second notification refades
+  the ones already up; a REPLACEMENT — the download-at-40%-then-80% case
+  `NotifyModel` deliberately keeps in place, because it is one story and not
+  two — refades both plates, so a progress bar makes the corner strobe; and a
+  WITHDRAWAL refades the survivors, so a notification LEAVING announces the
+  others as new. Every one went to opacity 0 and climbed back, not to some
+  intermediate value: this was not a subtle re-ease, it was a full rebuild.
+- **THE SAME FAULT AS D34, IN THE OPPOSITE DIRECTION**, which is why the fix
+  was already written. In the bar a rebuilt delegate meant an `Ease on color`
+  that never ran — the teal was simply painted already there. In the notifier
+  a rebuilt delegate means a fade that runs when nothing arrived. One cause,
+  two symptoms that look like nothing and like too much, and a still picture
+  can hold neither.
+- **NO PICTURE COULD HAVE CAUGHT IT, and the sheet says so by not moving.**
+  `docs/notify`'s shots wait past `fadeInMs` before they grab, on purpose, so
+  what lands in a PNG is a settled plate — which means a corner that blinked
+  on its way to that frame and a corner that never moved are byte-identical
+  files. Same for every other gate this shell has: `shell/jv-notify/tests` is
+  the model's arithmetic with no engine under it, `test_notifyshots.py` reads
+  QML as text, `nix build .#jv-notify` is a linter. All ten shots are
+  byte-identical after the fix, which is the claim that deserved pictures: the
+  rule changed nothing that was already settled.
+- **A THIRD CATEGORY IN THE GENERATOR, and the line it draws is a real one.**
+  `MotionPolicy` is in GENERATED_CORE and lands in every shell by the shell
+  existing, because §06's stillness rule is a RULE and applies to a surface
+  whether or not it asked. `KeyedRows` is MACHINERY: it means nothing to a
+  shell with no list something replaces wholesale, and generating it into the
+  HUD would have put a file there that no gate of the HUD's reads. So
+  `SHARED_CORE` is a body table the per-shell `*_CORE` registry opts into, and
+  `outputs()` writes the file for exactly the shells that name the type —
+  driven off the registry rather than a second list, so a qmldir line pointing
+  at nothing and a renderer nobody names are both impossible. Three tests pin
+  it, including that the two copies stay byte-identical (the motion trio's
+  reason: two answers to "are these rows the same rows" is how one shell gets
+  a meaningless fade back).
+- **`handle` AND `deadline` DO NOT GO IN THE ROWS.** A ListModel's roles are
+  values, so the sender-facing object the model calls `expire()` on would be
+  flattened into something nobody meant. The rows carry `key` and the four
+  fields a plate draws, and the delegate rebuilds the record from them — which
+  is also what keeps `Toast.qml` importing nothing but QtQuick and the
+  generated Theme.
+- **THE BUILD CAUGHT WHAT NINE GREEN GATES COULD NOT.** `verify.sh` was GREEN
+  over the working tree while `nixos-rebuild build` failed with `stale
+  generated files: core/KeyedRows.qml` — the new file was untracked, and a
+  flake's source filter excludes untracked files, so the sandbox got a
+  jv-notify whose qmldir named a file that was not there and `--check` said
+  so. Every suite here reads the worktree; only the build reads what git would
+  hand over. `git add` and it was green.
+- tests: `bash ops/ralph/verify.sh` GREEN — 9 gates over 15 paths (tools
+  **581 pass**, notifytest **27** with the three new keyed-row suites,
+  notifyshots **8** with the new settle driver, and the HUD's and bar's sheets
+  unmoved), 187 s; re-run as `--since HEAD~1` against what the commit actually
+  took, also green. `bash ops/ralph/hudscreens.sh` run by hand because
+  `shell/jv-hud/core/qmldir` changed (a comment): **all 9 screens match the
+  sheet at HEAD** — the generated prose moved no pixel.
+  build: `nixos-rebuild build --flake .#ares` green (second attempt; see
+  above). No schema change, no jv-act, no boot path, no pins. Never tested,
+  never switched.
+- files: shell/jv-notify/{shell.qml,Notifications.qml,Toast.qml,
+  core/NotifyModel.qml,core/KeyedRows.qml,core/qmldir,
+  tests/tst_notifymodel.qml}, shell/jv-bar/core/{KeyedRows.qml,qmldir},
+  shell/jv-hud/core/qmldir, tools/gen_theme_qml.py,
+  tools/notifyshots/{scene/Strip.qml,scene/tst_settle.qml,
+  stub/Notifications.qml}, tools/tests/test_gen_theme_qml.py, ops/ralph/PLAN.md
+- next: **D36** is now the one with the most behind it — three shot harnesses
+  that pipe the runner's output straight through, and D34's TypeError shipped
+  a green run because of it. Both settle drivers exist now, so whoever takes
+  it can run all three first and read what is already there (the notifier's
+  and the bar's are quiet; hudshots has never been checked). Then **D33** (the
+  last two copies of the HUD's box) and **D17** (the strip's empty right half,
+  the first Track D item wanting a real SOURCE rather than a token).

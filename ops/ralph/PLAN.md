@@ -635,21 +635,37 @@ human-reviewed step.
       rule wants to be about TypeErrors and unqualified-access errors, not
       about every warning.) Raised by D34.
 
-- [ ] D37. **The notifier has the bar's exact shape, and nobody has looked.**
-      `shell/jv-notify/shell.qml` is `Repeater { model: Notifications.toasts }`
-      over a JS array the daemon replaces wholesale, and `Toast.qml` puts
-      `Ease on opacity { base: Theme.fadeInMs }` on the plate INSIDE that
-      delegate, gated on `arrived`. That fade is not D34's bug on its own — a
-      toast is created with `arrived` false and flips it afterwards, which is
-      a real change and animates. The question is what happens to the toasts
-      ALREADY on screen when a second one arrives: the array is replaced, so
-      every delegate is destroyed and rebuilt, and a rebuilt toast is one that
-      starts at `arrived` false and fades in AGAIN — and whatever else it
-      counts from its own creation restarts with it. `docs/notify`'s shots
-      wait past the settle exactly as the bar's did, so they would photograph
-      this perfectly. Measure it the way D34 was measured (a driver that
-      samples during the fade); if it is real, `core/KeyedRows.qml` is
-      already written and the key is the notification id. Raised by D34.
+- [x] D37. **The notifier had the bar's exact shape, and it was worse there.**
+      (Done 653b2cd.) `shell/jv-notify/shell.qml` repeated over
+      `Notifications.toasts`, a JS array `NotifyModel` replaces wholesale, with
+      `Ease on opacity` on the plate INSIDE the delegate. Measured the way D34
+      was measured (`tools/notifyshots/scene/tst_settle.qml`, which samples
+      during the fade), and it was real in all three directions at once:
+      · a SECOND notification arriving refaded every plate already up,
+      · a REPLACEMENT — the download-at-40%-then-80% case `NotifyModel` keeps
+        in place on purpose — refaded both plates,
+      · a WITHDRAWAL refaded the survivors.
+      Every one of them went to opacity 0 and climbed back, so the corner
+      blinked and the fade stopped meaning "this one is new".
+      The fix: `core/KeyedRows.qml`'s body moved into `tools/gen_theme_qml.py`
+      as `SHARED_CORE` — a third category between GENERATED_CORE ("every shell
+      gets it", which is what §06's stillness rule is) and a shell's own table
+      — and a shell opts in by naming it in its `*_CORE` registry, so it is
+      generated into jv-bar and jv-notify and not into the HUD, which has no
+      such list. `NotifyModel.onScreen` is the keyed list, carrying only the
+      primitives a plate draws (`handle` and `deadline` stay in the model: a
+      ListModel holds values, not objects).
+      · **All ten shots are byte-identical**, before and after — which is the
+        point: the sheet waits past `fadeInMs` before it grabs, so a corner
+        that blinked on its way to the frame and one that never moved develop
+        into the same file. No still picture could ever have caught this.
+      · Three new headless assertions in `tst_notifymodel.qml` pin the thing
+        that makes it work — the key at each index, across a replacement, an
+        arrival, a withdrawal, and a counted notification scrolling into view
+        (which IS a new row, and correctly fades).
+      · `nixos-rebuild build` caught the one thing no suite could: the new
+        generated file was untracked, so the flake's source filter excluded it
+        and `--check` in pkgs/jv-notify called it stale.
 
 - [ ] D35. **A monitor narrower than the corner the HUD reserves gets an
       unbounded row.** `roomPx` negative means "nobody has said" — the right
