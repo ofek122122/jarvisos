@@ -528,6 +528,12 @@ BUDGET_MIRRORS = (
         re.compile(r"^\s*STALL_S = ([\d.]+)", re.M),
         re.compile(r"^\s*(?:readonly\s+)?property\s+real\s+(stall\w*S)\s*:\s*([\d.]+)\s*$", re.M),
     ),
+    (
+        "capture loss window",
+        Path("services/jv-ears/jv_ears/audio.py"),
+        re.compile(r"^\s*LOSS_S = ([\d.]+)", re.M),
+        re.compile(r"^\s*(?:readonly\s+)?property\s+real\s+(lossWindow\w*S)\s*:\s*([\d.]+)\s*$", re.M),
+    ),
 )
 
 
@@ -587,6 +593,7 @@ def test_the_plates_take_their_budgets_from_jv_ears_not_from_the_fallback():
     for plate, element, prop in (
         ("StatePlate.qml", "SpeechState", "wakeWindowS"),
         ("MicPlate.qml", "MicState", "stallS"),
+        ("MicPlate.qml", "MicState", "lossWindowS"),
     ):
         text = strip_qml_comments((hud / plate).read_text("utf-8"))
         assert f"{element} {{" in text, f"{plate} no longer builds a {element}"

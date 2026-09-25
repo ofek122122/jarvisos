@@ -7,7 +7,9 @@
 //                because ears publishes a window OPENING and nothing when
 //                it ends (see core/SpeechState.qml).
 //   MicState     stops calling a microphone live when the device has
-//                delivered nothing for longer than ears' own stall budget.
+//                delivered nothing for longer than ears' own stall budget,
+//                and calls it "losing" while a discarded chunk is still
+//                inside ears' own loss window (A84).
 //
 // Both numbers used to be typed into QML by hand, under comments asking a
 // future reader to keep them in step with `EarsConfig.wake_timeout_s` and
@@ -21,6 +23,8 @@
 //   wake_timeout_s    how long a wake keeps the utterance gate armed.
 //   capture_stall_s   how long an open device may deliver nothing before
 //                     jv-ears itself calls the heartbeat degraded.
+//   capture_loss_window_s  how long a discarded chunk keeps meaning the
+//                     microphone is losing audio.
 //
 // Why this does NOT expire, when MicState's gauges do. A gauge describes a
 // moment and stops describing it (a heartbeat speaks for two periods and
@@ -60,6 +64,10 @@ QtObject {
   readonly property real wakeWindowDefaultS: 8.0
   // CaptureMeter.STALL_S.
   readonly property real stallDefaultS: 1.0
+  // CaptureMeter.LOSS_S. The same second as the stall default today, and
+  // not the same number: they are separate constants in the Python for a
+  // reason, and collapsing them here would hide the day one of them moves.
+  readonly property real lossWindowDefaultS: 1.0
 
   // --- what the HUD should actually use -------------------------------
 
@@ -73,8 +81,15 @@ QtObject {
   // so a ten-second stall budget is over a hundred missed ones — past
   // that the HUD would be calling a deaf microphone live, which is the
   // failure the indicator exists to catch.
+  //
+  // The loss window shares the stall ceiling and the reasoning transfers
+  // exactly: past ten seconds a single discarded chunk would keep the
+  // plate saying LOSING AUDIO long after the queue recovered, which is a
+  // fault claim outliving the fault — the mirror image of calling a deaf
+  // microphone live, and noise in the same corner either way.
   readonly property real wakeWindowCeilingS: 60
   readonly property real stallCeilingS: 10
+  readonly property real lossWindowCeilingS: 10
 
   // How long a wake word keeps meaning "listening".
   readonly property real wakeWindowS: root.budget("wake_timeout_s", root.wakeWindowDefaultS, root.wakeWindowCeilingS)
@@ -82,12 +97,16 @@ QtObject {
   // How long an open device may deliver nothing and still read as live.
   readonly property real stallS: root.budget("capture_stall_s", root.stallDefaultS, root.stallCeilingS)
 
+  // How long a discarded chunk keeps meaning "losing audio".
+  readonly property real lossWindowS: root.budget("capture_loss_window_s", root.lossWindowDefaultS, root.lossWindowCeilingS)
+
   // Did that value come off a heartbeat, or are we standing on the
   // default? Nothing draws these — they are what the tests assert on, and
   // they answer honestly when a reported budget was refused: a value we
   // could not use leaves us on the fallback, same as silence.
   readonly property bool wakeWindowReported: root.usable("wake_timeout_s", root.wakeWindowCeilingS)
   readonly property bool stallReported: root.usable("capture_stall_s", root.stallCeilingS)
+  readonly property bool lossWindowReported: root.usable("capture_loss_window_s", root.lossWindowCeilingS)
 
   // --- reading it off the heartbeat -----------------------------------
 

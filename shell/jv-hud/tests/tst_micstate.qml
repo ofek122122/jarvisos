@@ -129,6 +129,19 @@ TestCase {
     }, body, env);
   }
 
+  // The same microphone, with a hole in the recording `lossAgeS` seconds
+  // ago. jv-ears publishes `capture_loss_age_s` only once something has
+  // been discarded, so its ABSENCE above is the "nothing has been lost"
+  // case and not a jv-ears that forgot to say.
+  function lossy(mic, lossAgeS, ageS) {
+    beat(mic, {
+      "mic_open": 1.0,
+      "captured_s": 12.5,
+      "capture_age_s": ageS === undefined ? 0.08 : ageS,
+      "capture_loss_age_s": lossAgeS
+    });
+  }
+
   // --- nothing known is never "off" -----------------------------------
 
   function test_without_a_bus_nothing_is_known() {
@@ -235,6 +248,93 @@ TestCase {
     compare(mic.state, "live");
     live(mic, 1.001);
     compare(mic.state, "stalled");
+  }
+
+  // --- open, delivering, and losing chunks anyway (A84) ----------------
+  //
+  // The fourth word. A device whose queue overflows delivers audio the
+  // whole time, so every gauge `live` is built on stays fresh while the
+  // room goes into a hole — which made `live` the indicator over-claiming
+  // in exactly the direction invariant 10 says it may not.
+
+  function test_a_microphone_losing_chunks_is_not_simply_live() {
+    const mic = makeMic();
+    lossy(mic, 0.2);
+    compare(mic.state, "losing");
+    verify(mic.losing);
+    verify(!mic.stalled, "it is delivering — that is a different fault");
+    verify(mic.capturing, "the room IS being recorded, holes and all");
+    verify(mic.known);
+  }
+
+  function test_an_ears_that_lost_nothing_is_live() {
+    // No discard has happened, so there is no age to publish. The absence
+    // is the answer, and it must not read as a loss we cannot date.
+    const mic = makeMic();
+    live(mic);
+    compare(mic.state, "live");
+    verify(!mic.losing);
+  }
+
+  function test_a_loss_older_than_the_window_stops_being_news() {
+    // The hole stays in jv-ears' totals forever. What ends is the claim
+    // that it is happening NOW, which is the only claim on screen.
+    const mic = makeMic();
+    lossy(mic, 4.0);
+    compare(mic.state, "live");
+  }
+
+  function test_the_loss_window_is_inclusive_at_its_edge() {
+    // `<=`, matching CaptureMeter.health() exactly. The service and the
+    // HUD drawing different sides of one boundary is how a plate comes to
+    // contradict the heartbeat it was drawn from.
+    const mic = makeMic();
+    mic.lossWindowS = 1.0;
+    lossy(mic, 1.0);
+    compare(mic.state, "losing");
+    lossy(mic, 1.001);
+    compare(mic.state, "live");
+  }
+
+  function test_a_loss_age_from_the_future_is_still_a_loss() {
+    // jv-ears stamps the discard on PortAudio's thread and subtracts on
+    // the asyncio loop; a negative age must not fall through the window
+    // check as "long ago". Its own health() has the same guard.
+    const mic = makeMic();
+    lossy(mic, -0.5);
+    compare(mic.state, "losing");
+  }
+
+  function test_an_age_we_cannot_read_is_a_loss_we_cannot_date() {
+    // The gauge is published only when something was discarded, so its
+    // presence is the evidence and its value only says how stale that is.
+    // An unreadable value therefore leaves a known loss we cannot call
+    // old — the same way an unreadable `capture_age_s` above leaves a
+    // device we cannot call live.
+    const mic = makeMic();
+    lossy(mic, "recently");
+    compare(mic.state, "losing");
+  }
+
+  function test_a_stalled_microphone_says_so_even_while_it_is_losing_audio() {
+    // Both are degraded and only one word fits on the plate. "No audio at
+    // all" is the bigger fact — the same order jv-ears puts them in.
+    const mic = makeMic();
+    lossy(mic, 0.1, 4.0);
+    compare(mic.state, "stalled");
+    verify(!mic.losing);
+  }
+
+  function test_a_closed_microphone_cannot_be_losing_audio() {
+    const mic = makeMic();
+    beat(mic, {
+      "mic_open": 0.0,
+      "captured_s": 3.0,
+      "capture_age_s": 0.01,
+      "capture_loss_age_s": 0.1
+    });
+    compare(mic.state, "off");
+    verify(!mic.losing);
   }
 
   // --- a heartbeat we cannot read is not an answer ---------------------

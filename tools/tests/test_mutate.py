@@ -1176,8 +1176,8 @@ def test_an_abort_before_the_first_suite_run_leaves_no_tree_at_all(tree, tmp_pat
 #
 # Invariant 1 forbids one service importing another, so every claim this repo
 # makes about a relation BETWEEN two services is made by reading the other's
-# source and matching a line in it. There are four such relations today
-# (BUDGET_MIRRORS x2 and RECONNECT_CADENCES x2 in test_gen_theme_qml.py, plus
+# source and matching a line in it. There are five such relations today
+# (BUDGET_MIRRORS x3 and RECONNECT_CADENCES x2 in test_gen_theme_qml.py, plus
 # jv-compat's copy of jv-guard's scan budget, B50) and the harness declined to
 # grade every one of them: the load canary makes the file impossible to
 # IMPORT, a suite that only greps it never notices, the canary lives and the

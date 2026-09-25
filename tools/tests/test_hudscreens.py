@@ -745,6 +745,18 @@ def test_the_two_heartbeats_light_exactly_the_plates_the_window_claims():
         "the second exposure's device is not stalled by jv-ears' own budget, "
         "so MicPlate still says MIC and the window is measuring one plate"
     )
+    # A84 gave MicPlate a third line — `MIC LOSING AUDIO`, for a device that
+    # is open and delivering and dropping chunks anyway. It is wider than
+    # `MIC` and it rides on a gauge that is ABSENT here, which is the only
+    # reason the first exposure draws the narrow line. An absence is not an
+    # assertion, so it is one now: a loss gauge added to either body would
+    # change what is on screen and leave the growth below measuring a plate
+    # that got wider rather than a plate that arrived.
+    for body, which in ((before, "first"), (after, "second")):
+        assert "capture_loss_age_s" not in body["metrics"], (
+            f"the {which} exposure now reports a discarded chunk, so MicPlate "
+            "is drawing a line this window was not measured against"
+        )
 
 
 def test_the_two_exposures_differ_only_in_the_device_going_silent():

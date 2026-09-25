@@ -1,9 +1,10 @@
 // EarsBudgets — "how is jv-ears tuned?", under test (PLAN A14).
 //
-// The HUD makes two claims that are only true for as long as jv-ears is
-// tuned to make them true: how long a wake word means "listening", and
-// how long an open microphone may go quiet and still read as live. Both
-// numbers were typed into QML by hand under comments asking a future
+// The HUD makes three claims that are only true for as long as jv-ears is
+// tuned to make them true: how long a wake word means "listening", how
+// long an open microphone may go quiet and still read as live, and how
+// long a discarded chunk keeps meaning it is losing audio (A84). The
+// first two were typed into QML by hand under comments asking a future
 // reader to keep them in step with the Python. This element reads them
 // off jv-ears' own heartbeat instead, and the tests are written around
 // the ways that can go wrong:
@@ -99,13 +100,17 @@ TestCase {
   }
 
   // The heartbeat jv-ears actually publishes: the mic gauges and, since
-  // A14, the budgets it enforces.
-  function tuned(ears, wakeS, stallS) {
+  // A14, the budgets it enforces. `lossS` is optional — JSON.stringify
+  // drops an undefined value, so leaving it out is a jv-ears that states
+  // the other two and not this one, which is what every caller written
+  // before A84 is testing.
+  function tuned(ears, wakeS, stallS, lossS) {
     beat(ears, {
       "mic_open": 1.0,
       "captured_s": 12.5,
       "capture_age_s": 0.08,
       "capture_stall_s": stallS,
+      "capture_loss_window_s": lossS,
       "wake_timeout_s": wakeS
     });
   }
@@ -145,8 +150,10 @@ TestCase {
     const ears = spawn(earsBudgets);
     compare(ears.wakeWindowS, ears.wakeWindowDefaultS);
     compare(ears.stallS, ears.stallDefaultS);
+    compare(ears.lossWindowS, ears.lossWindowDefaultS);
     verify(!ears.wakeWindowReported);
     verify(!ears.stallReported);
+    verify(!ears.lossWindowReported);
   }
 
   function test_a_link_that_is_down_reads_no_budgets() {
@@ -170,17 +177,40 @@ TestCase {
     const ears = spawn(earsBudgets);
     verify(ears.wakeWindowDefaultS > 0);
     verify(ears.stallDefaultS > 0);
+    verify(ears.lossWindowDefaultS > 0);
   }
 
   // --- reading what jv-ears says --------------------------------------
 
   function test_a_heartbeat_carrying_budgets_replaces_the_defaults() {
     const ears = makeBudgets();
-    tuned(ears, 12.0, 2.5);
+    tuned(ears, 12.0, 2.5, 3.5);
     compare(ears.wakeWindowS, 12.0);
     compare(ears.stallS, 2.5);
+    compare(ears.lossWindowS, 3.5);
     verify(ears.wakeWindowReported);
     verify(ears.stallReported);
+    verify(ears.lossWindowReported);
+  }
+
+  function test_a_jv_ears_that_states_no_loss_window_leaves_that_one_alone() {
+    // A84 added the third budget; a jv-ears from before it says the other
+    // two and nothing about this one, and must not be read as saying zero.
+    const ears = makeBudgets();
+    tuned(ears, 12.0, 2.5);
+    compare(ears.stallS, 2.5);
+    compare(ears.lossWindowS, ears.lossWindowDefaultS);
+    verify(!ears.lossWindowReported);
+  }
+
+  function test_the_loss_window_is_not_the_stall_budget() {
+    // They ship as the same second and they are not the same number. A HUD
+    // that derived one from the other would keep agreeing with jv-ears
+    // right up until the day someone retuned exactly one of them.
+    const ears = makeBudgets();
+    tuned(ears, 12.0, 2.5, 4.0);
+    compare(ears.stallS, 2.5);
+    compare(ears.lossWindowS, 4.0);
   }
 
   function test_newer_tuning_wins() {
@@ -279,35 +309,41 @@ TestCase {
     const ears = makeBudgets();
     beat(ears, {
       "wake_timeout_s": "eight",
-      "capture_stall_s": null
+      "capture_stall_s": null,
+      "capture_loss_window_s": "a second or so"
     });
     compare(ears.wakeWindowS, ears.wakeWindowDefaultS);
     compare(ears.stallS, ears.stallDefaultS);
+    compare(ears.lossWindowS, ears.lossWindowDefaultS);
   }
 
   function test_a_budget_of_zero_or_less_is_refused() {
     // Zero would close the window on the frame that opened it; negative
     // is nonsense. Either way the default is the honest thing to use.
     const ears = makeBudgets();
-    tuned(ears, 0, -1);
+    tuned(ears, 0, -1, 0);
     compare(ears.wakeWindowS, ears.wakeWindowDefaultS);
     compare(ears.stallS, ears.stallDefaultS);
+    compare(ears.lossWindowS, ears.lossWindowDefaultS);
   }
 
   function test_a_budget_past_its_ceiling_is_refused() {
     const ears = makeBudgets();
-    tuned(ears, ears.wakeWindowCeilingS + 0.001, ears.stallCeilingS + 0.001);
+    tuned(ears, ears.wakeWindowCeilingS + 0.001, ears.stallCeilingS + 0.001, ears.lossWindowCeilingS + 0.001);
     compare(ears.wakeWindowS, ears.wakeWindowDefaultS);
     compare(ears.stallS, ears.stallDefaultS);
+    compare(ears.lossWindowS, ears.lossWindowDefaultS);
     verify(!ears.wakeWindowReported);
     verify(!ears.stallReported);
+    verify(!ears.lossWindowReported);
   }
 
   function test_the_ceiling_itself_is_allowed() {
     const ears = makeBudgets();
-    tuned(ears, ears.wakeWindowCeilingS, ears.stallCeilingS);
+    tuned(ears, ears.wakeWindowCeilingS, ears.stallCeilingS, ears.lossWindowCeilingS);
     compare(ears.wakeWindowS, ears.wakeWindowCeilingS);
     compare(ears.stallS, ears.stallCeilingS);
+    compare(ears.lossWindowS, ears.lossWindowCeilingS);
   }
 
   function test_a_numeric_string_is_not_a_number() {

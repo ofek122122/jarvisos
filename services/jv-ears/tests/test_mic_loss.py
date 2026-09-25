@@ -308,15 +308,86 @@ def test_a_wav_run_is_never_degraded_by_a_loss_it_could_not_have_had():
     assert m.health() == ("ok", None)
 
 
-def test_the_loss_puts_no_new_gauge_on_the_bus_yet():
-    """B7: a gauge nobody consumes is noise on the bus and a second thing to
-    keep true. The HUD's MicState has no word for a device that is losing
-    audio (PLAN A84), so the fault ships on `state` and `notes` — which every
-    consumer already reads — and the numbers arrive the day something draws
-    them. This test is here so that day is a decision and not a diff."""
+# --- the two gauges something now does arithmetic with (A84) --------------
+#
+# B7 kept these off the bus for exactly one iteration: a gauge nobody
+# consumes is noise and a second thing to keep true, so the fault shipped on
+# `state` and `notes`, which every consumer already reads. The HUD's MicState
+# now has a word for a device that is open, delivering, and losing chunks,
+# and it cannot get there from the note — "microphone losing audio: ..." is
+# prose, and a HUD that parses prose is a HUD that will one day disagree with
+# the service about whether anything is wrong.
+#
+# Two, and not the three PLAN A84 guessed at. `mic_lost_s` — how MUCH was
+# lost — is drawn by nothing, and it could only ever be half an answer: a
+# device overrun has no length (see Loss), so a run losing audio only that
+# way would publish a zero total beside a degraded state, which is B13's "a
+# number stops meaning its label". The amounts stay in the note, where they
+# are named separately and where nothing computes with them.
+
+
+def test_the_loss_window_rides_from_the_very_first_heartbeat():
+    # A budget, not a measurement — the same rule capture_stall_s follows,
+    # and for a sharper reason: before the first loss the window is what
+    # tells a consumer what the ABSENCE of an age means.
+    m = meter(MuteSource())
+    assert m.metrics()["capture_loss_window_s"] == CaptureMeter.LOSS_S
+
+
+def test_a_microphone_that_never_lost_a_chunk_publishes_no_age_for_it():
+    # "Never" is not an age, and it must not be published as one. Exactly
+    # why capture_age_s is absent before the first chunk: a zero would make
+    # every fresh microphone look like one that just dropped audio, which is
+    # the reading a consumer draws LOSING from.
+    m = meter(LosingSource(Loss()))
+    assert "capture_loss_age_s" not in m.metrics()
+
+
+def test_the_loss_age_is_seconds_since_the_last_discard_and_it_moves():
+    clock = FakeClock(10.0)
+    m = meter(LosingSource(Loss(samples=1600, last_at=9.4)), clock=clock)
+    assert m.metrics()["capture_loss_age_s"] == pytest.approx(0.6)
+    clock.now = 12.0
+    assert m.metrics()["capture_loss_age_s"] == pytest.approx(2.6)
+
+
+def test_a_device_overrun_has_no_length_and_still_has_an_age():
+    # The half of the loss that can never be a duration is the half the
+    # gauge still has to cover: a hole nobody can measure is a hole.
+    clock = FakeClock(5.0)
+    m = meter(LosingSource(Loss(overruns=3, last_at=4.9)), clock=clock)
+    assert m.metrics()["capture_loss_age_s"] == pytest.approx(0.1)
+
+
+def test_a_wav_run_states_the_window_and_never_an_age():
+    # Nothing on a disk can lose audio, so there is no age to report — but
+    # the budget is how this meter is tuned whether or not a device is open,
+    # and capture_stall_s ships on a --wav run for the same reason.
+    m = meter(MuteSource(), mic=False)
+    assert m.metrics()["capture_loss_window_s"] == CaptureMeter.LOSS_S
+    assert "capture_loss_age_s" not in m.metrics()
+
+
+def test_every_gauge_is_a_plain_float():
+    # The HUD bridge json.dumps these. A numpy scalar or an int here is a
+    # line that either fails to serialize or arrives as a type the QML
+    # `typeof v === "number"` guards were not written against.
+    clock = FakeClock(3.0)
+    m = meter(LosingSource(Loss(samples=1600, last_at=2.0)), clock=clock)
+    for name, value in m.metrics().items():
+        assert type(value) is float, f"{name} is {type(value).__name__}, not a float"
+
+
+def test_the_gauges_are_exactly_these_and_the_set_is_a_decision():
     clock = FakeClock(1.0)
     m = meter(LosingSource(Loss(samples=1600, overruns=1, last_at=1.0)), clock=clock)
-    assert set(m.metrics()) == {"mic_open", "captured_s", "capture_stall_s"}
+    assert set(m.metrics()) == {
+        "mic_open",
+        "captured_s",
+        "capture_stall_s",
+        "capture_loss_window_s",
+        "capture_loss_age_s",
+    }
 
 
 # --- and it is actually wired to the bus ----------------------------------
@@ -371,3 +442,8 @@ def test_the_heartbeat_jv_ears_publishes_says_it_is_losing_audio(monkeypatch):
     assert "losing audio" in health[0]["notes"]
     assert "jv-ears dropped 0.2s" in health[0]["notes"]
     assert "1 device overrun" in health[0]["notes"]
+    # And the two gauges the HUD reads, on the same heartbeat: the note is
+    # for a human, these are what MicState does arithmetic with.
+    metrics = health[0]["metrics"]
+    assert metrics["capture_loss_window_s"] == CaptureMeter.LOSS_S
+    assert metrics["capture_loss_age_s"] >= 0

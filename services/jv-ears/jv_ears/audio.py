@@ -234,13 +234,13 @@ class CaptureMeter(AudioSource):
     # lost chunk is 80 ms of a room, and a second of honesty about it is
     # the smallest window in which a reader can see that it happened at all.
     #
-    # Unlike STALL_S this is NOT published on the heartbeat. `metrics` is
-    # free-form, so it could be, but B7 is the rule: a gauge nobody consumes
-    # is noise on the bus and a second thing to keep true. Nothing reads a
-    # loss window today — the HUD's MicState has no word for a device that
-    # is losing audio (PLAN A84) — so the fault ships on `state` and
-    # `notes`, which every consumer already reads, and the budget goes out
-    # the day something needs to do arithmetic with it.
+    # It rides on the heartbeat beside STALL_S, and it did not always: B7
+    # held it off the bus for one iteration, because a gauge nobody consumes
+    # is noise and a second thing to keep true. What reads it now is the
+    # HUD's MicState (PLAN A84), which draws a fourth word for a device that
+    # is open, delivering, and losing chunks — and which has to judge the
+    # same boundary this class judges, from the same number, or the plate
+    # will one day contradict the heartbeat it was drawn from.
     LOSS_S = 1.0
 
     def __init__(
@@ -290,15 +290,28 @@ class CaptureMeter(AudioSource):
         The HUD used to keep its own copy of STALL_S with a "keep this in
         step with jv-ears" comment; only the service that enforces a
         budget can state it (PLAN A14).
+
+        `capture_loss_age_s` and `capture_loss_window_s` are the same pair
+        one fault along: the measurement is absent until there is something
+        to measure, the budget ships from the first beat. What is NOT here
+        is how much audio was lost. It is in `notes`, named by culprit,
+        because half of it can never be a number — a device overrun has no
+        length (see Loss) — and a gauge that reads zero through a run that
+        lost audio only that way would be a number that stopped meaning its
+        label.
         """
         out = {
             "mic_open": 1.0 if self.mic else 0.0,
             "captured_s": float(self.captured_s),
             "capture_stall_s": float(self.STALL_S),
+            "capture_loss_window_s": float(self.LOSS_S),
         }
         age = self.age_s
         if age is not None:
             out["capture_age_s"] = float(age)
+        loss_age = self.loss_age_s()
+        if loss_age is not None:
+            out["capture_loss_age_s"] = float(loss_age)
         return out
 
     def loss(self) -> Loss:

@@ -365,8 +365,15 @@ talking. `core/MicState.qml` decides, and is where the tests are.
 |---|---|---|
 | `unknown` | no link, no heartbeat, a heartbeat too old, or gauges we cannot read — **draws nothing** | — |
 | `off` | jv-ears is here and has no microphone open (a `--wav` run) — **draws nothing** | — |
-| `live` | the device is open **and** delivering audio | teal dot · `MIC` |
+| `live` | the device is open, delivering, and losing nothing | teal dot · `MIC` |
+| `losing` | the device is open and delivering, and chunks are going missing anyway | warn dot · `MIC LOSING AUDIO` |
 | `stalled` | the device is open and has gone silent | warn dot · `MIC NO AUDIO` |
+
+`losing` and `stalled` are both degraded and only one word fits on the
+plate, so the order is jv-ears' own: a stall outranks a loss, because "no
+audio at all" is the bigger fact. `capturing` stays true through `losing` —
+a microphone dropping chunks is still recording the ones it keeps, and the
+privacy light is not a quality light.
 
 It is a different question from `listening` and is never derived from it:
 jv-ears runs its VAD continuously, so `listening` answers *is Jarvis
@@ -387,6 +394,15 @@ service-local — no schema change, nothing frozen touched:
 | `capture_age_s` | seconds since the device last delivered audio — **absent** until it ever has |
 | `captured_s` | total audio delivered since start |
 | `capture_stall_s` | the stall budget ears judges by — a budget, not a measurement, so it is there from the first heartbeat |
+| `capture_loss_age_s` | seconds since a chunk of the room was discarded — by ears' queue or by the device — **absent** until one ever was |
+| `capture_loss_window_s` | how long a discard keeps meaning "losing audio" — the other budget, there from the first heartbeat |
+
+How much was lost is deliberately **not** a gauge. Half of it can never be
+a number — the device reports an overrun without its length — so a total
+would read zero through a run that lost audio only that way. The amounts
+go out in `notes` instead, named by culprit, because jv-ears dropping
+chunks (this process is too slow) and the device dropping them (the
+machine or the driver) send you to different places.
 
 A live microphone that has delivered nothing for longer than
 `capture_stall_s` also turns the heartbeat itself `degraded`, so `jv
@@ -414,11 +430,12 @@ bash ops/ralph/runtests.sh jv-ears  # CaptureMeter + the heartbeat body
 
 ## How jv-ears is tuned (A14)
 
-Two of the claims above are only true for as long as jv-ears is tuned to
-make them true: how long a wake word means `listening`, and how long an open
-microphone may go quiet and still read as `live`. Both were typed into the
-QML by hand, under comments asking whoever retuned the service to remember
-the HUD. So jv-ears states the budgets it enforces on its own heartbeat —
+Three of the claims above are only true for as long as jv-ears is tuned to
+make them true: how long a wake word means `listening`, how long an open
+microphone may go quiet and still read as `live`, and how long a discarded
+chunk keeps it reading `losing`. The first two were typed into the QML by
+hand, under comments asking whoever retuned the service to remember the
+HUD. So jv-ears states the budgets it enforces on its own heartbeat —
 `metrics` again, still no schema change — and `core/EarsBudgets.qml` is the
 one place that reads them:
 
@@ -426,10 +443,11 @@ one place that reads them:
 |---|---|---|
 | `wake_timeout_s` | `EarsPipeline.budgets()`, off the sample-clock count the code compares against, not off `cfg` | `wakeWindowDefaultS` |
 | `capture_stall_s` | `CaptureMeter.STALL_S` | `stallDefaultS` |
+| `capture_loss_window_s` | `CaptureMeter.LOSS_S` | `lossWindowDefaultS` |
 
 The fallbacks cannot be deleted — the HUD has to say something before the
 first heartbeat lands — so they are pinned instead: `tools/tests` fails the
-build if either drifts from the Python that enforces it, and if a plate
+build if any of them drifts from the Python that enforces it, and if a plate
 stops binding the reported value and quietly runs on the fallback.
 
 A reported budget is refused unless it is a number, positive, and under a
