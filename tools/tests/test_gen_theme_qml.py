@@ -289,6 +289,122 @@ def test_every_plate_says_which_plate_it_is():
         seen[want] = qml.name
 
 
+# --- B89: a plate draws every word its element can say --------------------
+
+# The convention this gate is written against: an element that decides
+# between a CLOSED set of words calls the result `state`, and writes it as a
+# block. `core/MicState.qml` and `core/SpeechState.qml` both do; the
+# one-line string properties elsewhere in `core/` (`ActionState.tool`,
+# `HeardState.text`, `GuardState.verdict`) pass free text off the bus
+# through and have no word set to cover.
+STATE_BLOCK = re.compile(r"^  readonly property string state: \{$", re.M)
+
+# `typeof x === "number"` is a JavaScript type name, not something the HUD
+# ever puts on a screen. It is the one kind of literal that appears in these
+# blocks without being a word the element can return.
+TYPEOF_LITERAL = re.compile(r'typeof\s[^=!]*[=!]==\s*"([^"]*)"')
+
+# What counts as the plate NAMING a word: backticks or double quotes. Not a
+# bare occurrence — `live` is in the first line of MicPlate.qml as part of
+# "the live-microphone indicator", and a gate a passing sentence satisfies
+# is a gate that fires on nothing. The point is a decision written where
+# the next author will read it, and the repo already spells a word off the
+# wire that way.
+def names_word(text: str, word: str) -> bool:
+    return f"`{word}`" in text or f'"{word}"' in text
+
+
+def strip_qml_comments(text: str) -> str:
+    return re.sub(r"//[^\n]*", "", text)
+
+
+def state_words(element: str) -> set[str]:
+    """Every word `readonly property string state` can hand a plate."""
+    found = STATE_BLOCK.search(element)
+    if found is None:
+        return set()
+    body, depth = [], 0
+    for ch in element[found.end() - 1:]:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        body.append(ch)
+    code = strip_qml_comments("".join(body))
+    noise = set(TYPEOF_LITERAL.findall(code))
+    return {w for w in re.findall(r'"([^"]*)"', code) if w and w not in noise}
+
+
+def state_elements_of(plate: str) -> list[str]:
+    """The `core/*State.qml` types a plate declares as properties of its own."""
+    return re.findall(r"^  readonly property (\w+State) \w+:", plate, re.M)
+
+
+def test_every_plate_names_every_word_its_state_element_can_say():
+    """B89: the mapping from an element's word to what a plate draws lives in
+    one ternary in the plate, and nothing asserts it covers the set.
+
+    `MicState` decides between five words and `MicPlate` draws three of them,
+    two by deliberate silence. Add a sixth tomorrow and the plate draws `MIC`
+    over it: nothing goes red, because the QML suites test the ELEMENT — they
+    are headless, and a plate imports Quickshell singletons a headless run
+    cannot load (A56) — and the screenshot sheets only photograph the states
+    somebody remembered to stage. So it is a claim about two files, asserted
+    by a third thing that reads them both.
+
+    It asks for a NAME and not for a branch, because drawing a word as
+    nothing is a real decision — `off` and `unknown` are both silence on
+    MicPlate, for different reasons, and both of those reasons are worth more
+    on screen than a branch would be. What it will not allow is the word
+    going unmentioned, which is the shape the silent failure takes.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    checked: dict[str, str] = {}
+    for child in plate_stack_children(shell_text()):
+        plate = (hud / f"{child}.qml").read_text("utf-8")
+        for kind in state_elements_of(plate):
+            element = hud / "core" / f"{kind}.qml"
+            assert element.exists(), f"{child}.qml declares a {kind} with no {element}"
+            words = state_words(element.read_text("utf-8"))
+            if not words:
+                continue
+            checked[kind] = child
+            missing = sorted(w for w in words if not names_word(plate, w))
+            assert not missing, (
+                f"core/{kind}.qml can say {sorted(words)} and {child}.qml never "
+                f"names {missing}. Whatever it draws for those words, it draws "
+                f"by falling off the end of a ternary — and drawing one as "
+                f"NOTHING is a decision too, so name it in the comment beside "
+                f"the line and say why. A word no plate mentions is the one "
+                f"that reaches a screen as the wrong word with nothing red."
+            )
+
+    # Non-vacuity, both ways. This gate finds its work by a convention — a
+    # `state` block in an element a plate declares — and a convention is
+    # exactly the thing a rename makes silently untrue. So: it must have
+    # found some work, and every element that HAS a word set must be drawn
+    # by a plate that was checked.
+    assert checked, (
+        "no plate in the stack declares an element with a `state` block, so "
+        "this gate just passed without reading anything. Either the plates "
+        "stopped declaring their elements as `readonly property <Kind> <name>:` "
+        "or the elements stopped calling their word `state`"
+    )
+    deciders = {
+        f.stem
+        for f in sorted((hud / "core").glob("*State.qml"))
+        if state_words(f.read_text("utf-8"))
+    }
+    assert deciders == set(checked), (
+        f"{sorted(deciders - set(checked))} decide between words that no plate "
+        f"in the stack draws, so nothing here reads them. An element whose "
+        f"word set has no consumer is either dead or wired into something "
+        f"this gate cannot see"
+    )
+
+
 # --- A10: invariant 10, asserted rather than assumed ----------------------
 
 # Quickshell's window types. Each one puts a surface on the compositor, and

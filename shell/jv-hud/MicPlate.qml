@@ -58,9 +58,11 @@ Item {
   // arrived" — see `litNames` in core/PlateStack.qml.
   readonly property string plateName: "mic"
 
-  // On screen exactly while the microphone is open — capturing (whole or
-  // with holes in it) or stalled. `off` and `unknown` are both silence,
-  // for different reasons.
+  // On screen exactly while the microphone is open: `live` (capturing all
+  // of it), `losing` (capturing it with holes in it) and `stalled` (open
+  // and gone silent). `off` and `unknown` are both silence, for different
+  // reasons — a closed microphone has earned its dark indicator, and a HUD
+  // that cannot see the bus has nothing to claim about a device.
   readonly property bool shown: root.mic.capturing || root.mic.stalled
 
   // True while anything is still drawn, including the fade out, so
@@ -77,6 +79,14 @@ Item {
   // second word appears only when there is a second thing to say, and it
   // says what is wrong rather than dressing it up. Only one can be true
   // at a time — MicState ranks them, so the plate never has to.
+  //
+  // Every word MicState can say has a place here, which is the thing a
+  // ternary cannot state and a test therefore does (B89): `stalled` and
+  // `losing` each earn the second word, `live` is the bare MIC, and `off`
+  // and `unknown` never reach this line at all because `shown` is false
+  // for both. The last clause is the one to watch — it is a fall-through,
+  // so a sixth word would be drawn as a plain recording light with nothing
+  // anywhere going red.
   readonly property string label: root.mic.stalled ? "MIC NO AUDIO" : root.mic.losing ? "MIC LOSING AUDIO" : "MIC"
 
   implicitWidth: plate.implicitWidth
