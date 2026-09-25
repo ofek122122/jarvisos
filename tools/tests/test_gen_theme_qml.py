@@ -219,6 +219,132 @@ def test_one_environment_variable_stills_the_whole_desktop():
     assert gen.MOTION_ENV in (ROOT / "shell" / "jv-hud" / "README.md").read_text("utf-8")
 
 
+# --- D29: the shot harness's stand-in is the same file ---------------------
+
+STUB_MOTION = ROOT / "tools" / "hudshots" / "stub" / "Motion.qml"
+
+
+def qml_code(text: str) -> list[str]:
+    """The lines that run, stripped: the prose is where the two are ALLOWED
+    to differ (one of them has to say it is a stand-in), and the code is where
+    they are not."""
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("//")
+    ]
+
+
+def test_the_shots_stand_in_is_the_real_motion_with_three_lines_swapped():
+    """PLAN D29. `ops/ralph/hudshots.sh` stages a Motion of its own over the
+    HUD's, because the shots run under plain `qml` and Quickshell links its
+    QML plugin into its own binary. That stand-in was a HAND COPY — of a
+    generated file, which is the exact drift this generator exists to stop one
+    level down — and `test_hudshots.py` could only catch a MISSING member, not
+    a stand-in that answers the question differently.
+
+    So both are rendered from one body, and this is the claim that makes the
+    sheet worth looking at: the ONLY code that differs is the import, the root
+    type and where the session override comes from. Everything that decides
+    whether a plate moves is the same bytes, so a shot animates — or does not
+    — for the reason the running HUD would."""
+    tokens = gen.load_tokens(MINIMAL)
+    real = set(qml_code(gen.render_motion_qml(tokens)))
+    stub = set(qml_code(gen.render_motion_qml(tokens, gen.STUB_MOTION)))
+    assert real - stub == {
+        "import Quickshell",
+        "Singleton {",
+        f'envOverride: Quickshell.env("{gen.MOTION_ENV}") || ""',
+    }
+    assert stub - real == {"QtObject {", 'envOverride: ""'}
+
+
+def test_a_new_duration_token_reaches_the_shots_stand_in_too():
+    """The republished durations are derived from [motion], in BOTH renderings.
+    A duration that arrived in the HUD and not in the thing that photographs it
+    would make every shot a picture of a shell nobody runs."""
+    tokens = gen.load_tokens(MINIMAL.replace("ease_ms = 200", "ease_ms = 200\nslide_ms = 90"))
+    stub = gen.render_motion_qml(tokens, gen.STUB_MOTION)
+    assert "readonly property int slideMs: policy.ms(Theme.slideMs)" in stub
+
+
+def test_the_committed_stand_in_is_what_the_generator_renders():
+    """The same drift gate the shells get, for the file that is not a shell's.
+    `--check` (below) covers it too; this one names it, so a stale stand-in
+    fails as itself rather than as a line in a list."""
+    rendered = gen.stub_outputs(ROOT / "personality" / "theme.toml")
+    assert rendered[STUB_MOTION] == STUB_MOTION.read_text("utf-8")
+
+
+def test_the_stand_in_imports_no_quickshell_at_all():
+    """The whole reason it exists: ONE Quickshell import anywhere in the staged
+    tree makes the entire directory unimportable to every engine but
+    quickshell's own, and the shots do not have that engine."""
+    text = STUB_MOTION.read_text("utf-8")
+    # In the CODE. The comments name Quickshell freely, and have to: a reader
+    # who does not know why this file is here will delete it.
+    assert not [line for line in qml_code(text) if "Quickshell" in line]
+    assert "DO NOT EDIT" in text, "a stand-in nobody knows is generated gets edited"
+
+
+def test_a_build_sandbox_is_never_asked_for_the_stand_in(tmp_path):
+    """`pkgs/jv-hud` runs this generator with `--out-dir .` inside a sandbox
+    that holds ONE shell's tree and no tools/ at all. The stand-in's path is
+    absolute — `STUB_DIR` is derived from this script's own location — so a
+    sandbox run that emitted it would write outside the sandbox, or fail the
+    build outright when the script's directory is a read-only store path. A
+    `--out-dir` run emits the shell's six files and touches nothing else.
+
+    The theme here is deliberately NOT the repo's: with the committed tokens
+    the stand-in would render byte-identical and the write would be skipped as
+    a no-op, so this test would pass while the guard was gone. One changed
+    duration is what makes the difference observable."""
+    theme = tmp_path / "theme.toml"
+    theme.write_text(MINIMAL.replace("ease_ms = 200", "ease_ms = 201"), "utf-8")
+    out = tmp_path / "shell"
+    before = STUB_MOTION.read_bytes()
+    try:
+        rc = gen.main(["--shell", "jv-hud", "--theme", str(theme), "--out-dir", str(out)])
+        after = STUB_MOTION.read_bytes()
+    finally:
+        # Put the checkout back before asserting anything: a failing test that
+        # leaves a generated file rewritten is a failure that spreads.
+        STUB_MOTION.write_bytes(before)
+    assert rc == 0
+    assert after == before, "a --out-dir run wrote the stand-in, outside its sandbox"
+    written = sorted(str(q.relative_to(out)) for q in out.rglob("*") if q.is_file())
+    assert written == sorted(gen.outputs(theme, gen.SHELLS["jv-hud"]))
+
+
+def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeypatch):
+    """WHICH shell carries the stand-in is a coupling, and it was stated only in
+    a comment. A mutation sweep found it ungraded: pointing `STUB_SHELL` at
+    jv-bar survived every test above, because a repo-root `--check` names all
+    three shells and so kept rendering the stand-in either way. What it would
+    have broken is the run a person actually makes after touching the HUD —
+    `--shell jv-hud` — which would have rewritten the HUD's Motion and left the
+    sheet's behind, the exact drift D29 closed, reopened one level up.
+
+    Both halves are the claim. The HUD's run emits it, because that is the file
+    it stands in for; another shell's run does not, because a stand-in rewritten
+    by a run that has nothing to do with it is a surprise in someone else's diff.
+    Patching the two output roots keeps this out of the checkout entirely.
+    """
+    monkeypatch.setattr(gen, "SHELL_DIR", tmp_path / "shell")
+    monkeypatch.setattr(gen, "STUB_DIR", tmp_path / "stub")
+    theme = tmp_path / "theme.toml"
+    theme.write_text(MINIMAL, "utf-8")
+    stub = tmp_path / "stub" / "Motion.qml"
+
+    assert gen.main(["--shell", "jv-bar", "--theme", str(theme)]) == 0
+    assert not stub.exists(), "another shell's run wrote the HUD's stand-in"
+
+    assert gen.main(["--shell", "jv-hud", "--theme", str(theme)]) == 0
+    assert stub.read_text("utf-8") == gen.render_motion_qml(
+        gen.load_tokens(MINIMAL), gen.STUB_MOTION
+    )
+
+
 # Every QML animation type. If one of these appears in a shell's file, that
 # file is capable of moving the screen, and §06 says something has to be able
 # to stop it.

@@ -147,6 +147,12 @@ def test_the_stub_motion_offers_everything_the_real_one_does():
     """Same failure, quieter: a missing `Motion.animate` reads as false, every
     Behavior silently switches off, and the sheet becomes a picture of a HUD
     in permanent reduced-motion — which is a setting, not the default.
+
+    Membership is all this can see, and since D29 it is no longer the whole
+    claim: both files are rendered from one body by tools/gen_theme_qml.py,
+    and test_gen_theme_qml.py holds them to differing in exactly three lines.
+    This stays because it reads the files on disk rather than the renderer,
+    and it is the check that would survive the stub being hand-written again.
     """
     real = members(SHELL / "Motion.qml")
     stub = members(SHOTS / "stub" / "Motion.qml")
