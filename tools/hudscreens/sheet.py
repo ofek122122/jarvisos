@@ -322,13 +322,27 @@ def _beat(service, state="ok", metrics=None, notes=None, uptime_s=1847.0, period
 # decide the recording light. Without it the mic plate says nothing, which
 # is correct and also means the sheet would never photograph the one
 # indicator invariant 10 says must not be fakeable.
+#
+# Faithful to `CaptureMeter.metrics()` rather than merely legal (A87), and
+# it did not start that way: it used to carry a `capture_stall_s` of 2.0,
+# which is not a number jv-ears can send — that gauge is the CONSTANT
+# `CaptureMeter.STALL_S`, shipped verbatim from the first heartbeat — and
+# it was missing `capture_loss_window_s`, which ships the same way. Both
+# are gated below against the Python that enforces them.
+#
+# What is NOT here is `capture_loss_age_s`, and its absence is the whole
+# design of A43's idle window: a device that has never lost a chunk really
+# does omit it, and adding one would move MicPlate from `MIC` to
+# `MIC LOSING AUDIO` — a wider plate, in a window measured on plates
+# ARRIVING. The faithful body for this device is the one without it.
 MIC_OPEN = _beat(
     "jv-ears",
     metrics={
         "mic_open": 1,
         "capture_age_s": 0.02,
         "captured_s": 1846.4,
-        "capture_stall_s": 2.0,
+        "capture_stall_s": 1.0,
+        "capture_loss_window_s": 1.0,
     },
 )
 
@@ -347,6 +361,14 @@ MIC_OPEN = _beat(
 # `capture_age_s` would climb. That is deliberate: the window's question is
 # what a frame ARRIVING costs when nothing it says has changed, so the only
 # things that move are the ones the HUD cannot help — `seq` and `ts`.
+#
+# Faithful for the same reasons MIC_OPEN now is (A87), and it had one more
+# fault of its own: `notes` read "capture stalled", a summary nobody wrote
+# — `CaptureMeter.health()` sends the AGE, `microphone open but no audio
+# for 9.4s`, and the number is the reason a reader can tell a device that
+# just went quiet from one that has been deaf for a minute. Nothing draws
+# `notes` (HealthPlate draws the service and the word), so no picture was
+# ever wrong, which is exactly why it sat here since A43.
 MIC_DEAF = _beat(
     "jv-ears",
     state="degraded",
@@ -354,9 +376,10 @@ MIC_DEAF = _beat(
         "mic_open": 1,
         "capture_age_s": 9.4,
         "captured_s": 1846.4,
-        "capture_stall_s": 2.0,
+        "capture_stall_s": 1.0,
+        "capture_loss_window_s": 1.0,
     },
-    notes="capture stalled",
+    notes="microphone open but no audio for 9.4s",
 )
 
 
@@ -374,13 +397,14 @@ MIC_DEAF = _beat(
 # device IS degraded, by the same publisher, in the same beat — so the two
 # lines cannot be photographed apart and 06-lossy is a picture of both.
 #
-# Faithful to the service rather than merely legal, which the two fixtures
-# above are not and this one has a test for: the gauges are the whole set
-# `CaptureMeter.metrics()` writes for a device that is open, delivering and
-# losing, and `notes` is the sentence `loss_note()` composes — both
-# culprits named separately, both totals since start. MIC_OPEN and
-# MIC_DEAF carry a narrower gauge set that predates the loss pair, and
-# they have to keep it: A43's idle window is measured on the absence.
+# Faithful to the service rather than merely legal, and gated: the gauges
+# are the whole set `CaptureMeter.metrics()` writes for a device that is
+# open, delivering and losing, and `notes` is the sentence `loss_note()`
+# composes — both culprits named separately, both totals since start.
+# A87 brought the two fixtures above up to the same standard, so the only
+# gauge that still separates this body from theirs is `capture_loss_age_s`
+# — which is the difference the pictures are OF, and the absence A43's
+# idle window is measured on.
 MIC_LOSSY = _beat(
     "jv-ears",
     state="degraded",
@@ -389,7 +413,7 @@ MIC_LOSSY = _beat(
         # MIC_OPEN's reading, unmoved: this device is not slow, it is lossy.
         "capture_age_s": 0.02,
         "captured_s": 1846.4,
-        "capture_stall_s": 2.0,
+        "capture_stall_s": 1.0,
         # Inside the loss window, which is what makes the hole still news.
         # The window is `CaptureMeter.LOSS_S` itself.
         "capture_loss_age_s": 0.3,

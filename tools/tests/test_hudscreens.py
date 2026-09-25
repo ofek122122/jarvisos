@@ -1755,9 +1755,10 @@ def test_the_lossy_gauges_are_the_whole_set_jv_ears_would_publish():
     more once there is something to measure, and a device that is open,
     delivering AND losing has both of those.
 
-    MIC_OPEN and MIC_DEAF are deliberately NOT held to this: they carry the
-    narrower pre-A84 set, and A43's idle window is measured on the absence
-    of the loss pair (see the test above that pins it).
+    MIC_OPEN and MIC_DEAF are held to the same standard one fault back
+    (A87) — the whole set MINUS `capture_loss_age_s`, which a device that
+    has never lost a chunk really does omit, and which A43's idle window is
+    measured on the absence of.
     """
     src = capture_meter()
     body = re.search(r"\n    def metrics\(.*?\n    def ", src, re.S)
@@ -1801,6 +1802,152 @@ def test_the_lossy_note_is_the_sentence_jv_ears_composes():
     ), (
         f"the sheet publishes {note!r}, which is not the sentence "
         "CaptureMeter.loss_note() composes when both culprits lost audio"
+    )
+
+
+def ears_budget(name: str) -> float:
+    """A `CaptureMeter` class constant, read out of the Python that
+    enforces it.
+
+    These two are BUDGETS and not measurements: `metrics()` writes them
+    from the first heartbeat, before any audio has arrived, because a
+    consumer needs to know the rule before it can judge a number by it.
+    So a fixture may not choose its own — there is exactly one value
+    jv-ears can send, and it is this one.
+    """
+    src = capture_meter()
+    m = re.search(rf"^    {name} = ([\d.]+)$", src, re.M)
+    assert m, f"CaptureMeter no longer declares {name} — this gate is reading air"
+    return float(m.group(1))
+
+
+def mic_fixtures() -> dict:
+    return {
+        "MIC_OPEN": sheet.MIC_OPEN,
+        "MIC_DEAF": sheet.MIC_DEAF,
+        "MIC_LOSSY": sheet.MIC_LOSSY,
+    }
+
+
+def test_the_budget_gauges_are_the_constants_jv_ears_actually_ships():
+    """Every mic fixture here used to publish `capture_stall_s: 2.0`, and
+    there is no jv-ears that sends that: the gauge is `CaptureMeter.STALL_S`
+    itself, copied onto the heartbeat unchanged. It read as a harmless
+    choice because 0.02s is live and 9.4s is stalled against 2.0 exactly as
+    they are against 1.0 — which is the whole trouble with an invented
+    number, that it costs nothing until the day the real one moves past it
+    and the sheet keeps photographing the old rule.
+
+    Held over ALL the sheet's jv-ears beats rather than the three fixtures,
+    because the next hand-written heartbeat is the one that would drift.
+    """
+    stall = ears_budget("STALL_S")
+    loss_window = ears_budget("LOSS_S")
+    seen = 0
+    for shot in sheet.SHOTS:
+        for body in ears_beats(shot):
+            m = body.get("metrics", {})
+            if not m:
+                continue
+            seen += 1
+            assert m.get("capture_stall_s") == stall, (
+                f"{shot['file']} publishes capture_stall_s "
+                f"{m.get('capture_stall_s')!r} and jv-ears ships "
+                f"CaptureMeter.STALL_S, which is {stall}"
+            )
+            assert m.get("capture_loss_window_s") == loss_window, (
+                f"{shot['file']} publishes capture_loss_window_s "
+                f"{m.get('capture_loss_window_s')!r} and jv-ears ships "
+                f"CaptureMeter.LOSS_S, which is {loss_window}"
+            )
+    assert seen >= 3, (
+        f"only {seen} of this sheet's heartbeats carry gauges at all, so "
+        "this gate is passing by having nothing to read"
+    )
+
+
+def test_the_deaf_note_is_the_sentence_jv_ears_composes():
+    """`notes` said "capture stalled", which is a summary of the fault and
+    not a sentence any jv-ears writes: `CaptureMeter.health()` sends the
+    AGE, and the age is the half a reader cannot get anywhere else — the
+    plate says the device is deaf, the note says for how long.
+
+    Nothing draws it (HealthPlate draws the service and the word), which is
+    why it survived from A43 to A87 unread. Fidelity for its own sake, same
+    as the lossy note above: the sheet is where a reader meets the format.
+    """
+    body = sheet.MIC_DEAF["publish"]["body"]
+    literal = 'f"microphone open but no audio for {age:.1f}s"'
+    assert literal in capture_meter(), (
+        f"CaptureMeter.health() no longer composes {literal} — re-read it "
+        "and rewrite the note this sheet publishes"
+    )
+    age = body["metrics"]["capture_age_s"]
+    assert body["notes"] == f"microphone open but no audio for {age:.1f}s", (
+        f"the sheet publishes {body['notes']!r} over a device last heard "
+        f"from {age}s ago, which is not what jv-ears would have said"
+    )
+
+
+def test_the_healthy_and_deaf_gauges_are_the_whole_set_minus_the_one_loss_gauge():
+    """The other two thirds of A87. `CaptureMeter.metrics()` writes four
+    gauges unconditionally and two more once there is something to measure,
+    and a device that is open and delivering has exactly one of the two: the
+    age. The loss age is genuinely absent — a device that never lost a chunk
+    omits it — so "the whole set minus that one" is not a concession to
+    these fixtures, it IS the faithful body for the device they photograph.
+
+    Which is also why adding the loss age here would not be a fidelity
+    improvement but a different device: it moves MicPlate from `MIC` to
+    `MIC LOSING AUDIO`, and A43's idle window measures a plate ARRIVING
+    against a plate whose width does not move (see the window's own test).
+    """
+    src = capture_meter()
+    body = re.search(r"\n    def metrics\(.*?\n    def ", src, re.S)
+    assert body, "jv_ears/audio.py no longer has a CaptureMeter.metrics()"
+    body = body.group(0)
+    always = set(re.findall(r'^\s+"(\w+)":', body, re.M))
+    conditional = set(re.findall(r'out\["(\w+)"\]', body))
+    assert "capture_age_s" in conditional and "capture_loss_age_s" in conditional, (
+        f"CaptureMeter.metrics() now writes {sorted(conditional)} "
+        "conditionally, so the split this gate is built on has moved"
+    )
+    for name in ("MIC_OPEN", "MIC_DEAF"):
+        gauges = set(mic_fixtures()[name]["publish"]["body"]["metrics"])
+        assert gauges == always | {"capture_age_s"}, (
+            f"sheet.{name} publishes {sorted(gauges)} and jv-ears publishes "
+            f"{sorted(always | {'capture_age_s'})} for a device that is open, "
+            "delivering and keeping all of it"
+        )
+
+
+def test_reporting_the_loss_window_was_safe_because_no_plate_reads_it():
+    """The argument that let A87 add `capture_loss_window_s` to the two
+    older fixtures at all, written down so it stays checkable.
+
+    It moves `EarsBudgets.lossWindowS` from the pinned fallback to the
+    reported value — the SAME second, since the fallback mirrors
+    `CaptureMeter.LOSS_S` and a tools test fails the build if it drifts —
+    and the only other thing that changes is `lossWindowReported`, which
+    no plate reads. So a gauge arrived, one boolean flipped, and nothing
+    on screen moved. The day a plate starts drawing that boolean, this
+    goes red and the sheet's pictures need re-reading.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    budgets = (hud / "core" / "EarsBudgets.qml").read_text("utf-8")
+    assert "lossWindowReported" in budgets, (
+        "core/EarsBudgets.qml no longer answers whether the loss window came "
+        "off a heartbeat, so the claim below is about a property that is gone"
+    )
+    readers = sorted(
+        f.name
+        for f in hud.glob("*.qml")
+        if "lossWindowReported" in f.read_text("utf-8")
+    )
+    assert readers == [], (
+        f"{readers} now draw whether jv-ears REPORTED its loss window, so "
+        "adding capture_loss_window_s to MIC_OPEN and MIC_DEAF changed what "
+        "the sheet photographs — re-read the pictures before trusting them"
     )
 
 
