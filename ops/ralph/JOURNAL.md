@@ -9420,3 +9420,83 @@ rather than leaving the reader to assume the note covers everything.
   (a jv-ears state topic), **B43/B47/B54** (the same question asked three
   times), and **B10/A28** — one live recording of one spoken turn on ares,
   still the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 95 — B70: the notice stops being advice
+
+Track A is still one human look at `docs/hud/` away from everything it has
+left, so this is the B track, and it is the last of the three items B68 spun
+off. B68 derived which suites read a change; B69 taught the derivation QML;
+both stopped one step short of a verdict. `runtests.sh` PRINTS the readers and
+exits with pytest's status — which is the same shape as the rule it replaced,
+"run the relevant test suite(s)", with better information behind it. That rule
+was wrong three times in ninety iterations.
+
+`ops/ralph/verify.sh` (+ `tools/verify.py`) is the gate now: ask the worktree
+what changed, ask `dependents` who reads it, run all of them, exit non-zero if
+any is red. Nobody picks the suites.
+
+**The measurement the decision was missing.** B70 called this a cost question
+and left it for a human, and the honest way to answer a cost question is to
+measure it. One suite at a time, warm venvs, this machine:
+
+    pylib          1.6 s      jv-guard       3.9 s      jv-voice      23.0 s
+    jv-hud-bridge  1.6 s      jv-context    11.4 s      jv-brain      36.3 s
+    jv-compat      2.7 s      tools         12.2 s      jv-ears      145.8 s
+    harness        3.4 s                               ----------------------
+                                                        all ten      241.7 s
+
+Four minutes, ONCE, for the one change in the repo that names every suite
+(`services/pylib/`, which every service imports), and 60% of it is jv-ears
+alone. Everything else is seconds, or ~80 s for the HUD's three gates. So
+shape (a), bind always — and (b), bind only when the named set is small, was
+rejected on an argument and not on the price: it is not a cheaper (a), it is
+(a) with the `services/pylib/` case cut out, and that case is the only one
+where the author could not possibly have guessed the readers. A cutoff that
+drops coverage exactly where coverage is the point is not a compromise. That
+is why this did not need the human the PLAN reserved for it.
+
+Four decisions, each with a reason rather than a default. Every step runs even
+after one fails — fail-fast on a gate whose whole subject is the OTHER red
+suite hands back the partial picture this replaces, and costs a second full
+run. Output is NOT captured; a 146-second suite behind a pipe cannot be told
+from a hang. The Rust caveat became a step, because "a changed file under a
+directory with a `Cargo.toml` is that crate" is a rule and a rule can be run —
+read off the directory, so a third crate needs no edit here. And an empty plan
+exits **2**: the gate runs BEFORE the commit, so being asked about a clean
+tree means it was asked after, which is 5a3f1e9 exactly — the green iteration
+89 reported was in its working tree while its commit was red. `--since HEAD~1`
+asks the question about what a commit actually took, and the verdict prints the
+paths it covers because nothing here can see the index. This entry's own commit
+was checked that way after the fact, and it is green.
+
+`runtests.sh` keeps its notice to itself under `RALPH_GATE=1` — a ten-step run
+would otherwise urge the reader, once per step, to run the suites the gate is
+in the middle of running. PROMPT.md STEP 3 now names one command instead of a
+rule about obeying a line that was printed.
+
+**The gate found a bug in its first real run, which is the best argument for
+it.** The `RALPH_GATE` it exports reaches the suites it spawns, and B68's own
+test for the notice read it and went red. The test now states which half of
+the pair it is asserting instead of inheriting whatever ran it.
+
+- tests: `bash ops/ralph/verify.sh` green — `runtests.sh tools` **372** (was
+  347). 11 mutations, 10 caught on the first pass. The survivor is worth the
+  line: the test for "a gate that cannot be started" deleted the SCRIPT, and
+  bash starts fine and exits 127, so nothing had ever reached the
+  `except OSError` that stands between "one step could not run" and "no
+  verdict at all". A direct test of that branch, re-graded 1/1.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: ops/ralph/verify.sh (new), tools/verify.py (new),
+  tools/tests/test_verify.py (new), ops/ralph/runtests.sh, ops/ralph/PROMPT.md,
+  ops/ralph/README.md, tools/tests/test_dependents.py
+- commit: 855642a
+- next: **B72** is the honest hole this leaves — `nixtest.sh` and
+  `hudscreens.sh` are gates `verify.sh` cannot plan, and a change to
+  `modules/*.nix` today names only `tools`. Otherwise doable by the loop:
+  **A56** (whether the shot suites belong in the build gate), **B62** (B61's
+  two decisions), **B67** (B66's sibling-of-the-home half). Waiting on one
+  human sentence each: **B27/B28**, **B43/B47/B54**, and **B10/A28** — one
+  live recording of one spoken turn on ares, still the biggest thing a human
+  can hand this loop. Track A needs one look at `docs/hud/` to unblock A47,
+  A55, A62, A70/A72, the A21/A22/A25 cluster and A73's remaining half.
