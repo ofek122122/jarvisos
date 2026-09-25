@@ -11627,3 +11627,137 @@ still matches HEAD.
   the bar wants gaps/borders to agree with it, and D10 is still blocked on
   the output names it would declare. From the old corner: **A89**, **A88**,
   **B94**, **A62/A70**.
+
+## 2026-09-25 19:05 — the machine had no way to tell you anything
+(That stamp is `date` on ares and it reads EARLIER than the entry above it.
+Nothing is out of order — this entry is the later one; the previous
+iteration's clock and this one's disagree, which is worth one line here and
+is not worth chasing.)
+- built: **jv-notify** (PLAN **D2**) — this machine's
+  org.freedesktop.Notifications daemon, and the bottom-right corner it draws
+  in. `shell/jv-notify` (Quickshell/QML), `pkgs/jv-notify`, a
+  `graphical-session.target` user service, and a third QML gate.
+- WHY IT IS NOT A THEMING TASK, which is what D2's own sketch offered ("or
+  mako themed to §06 as a first step"). I went looking for the daemon to theme
+  and there was none: no mako, no dunst, nothing in `modules/` or
+  `hosts/ares/` claims that bus name. So for the whole life of this machine,
+  every app that asked the session bus to show its user something got an
+  error, and the user was never told — a `notify-send` on ares wrote to
+  nowhere. That is not a look problem, and the first honest version of D2 is
+  the daemon itself.
+- THE PART THAT IS ACTUALLY DIFFICULT, and it is not the pixels. Every other
+  surface on this machine draws something JarvisOS published: the HUD draws
+  bus frames, the bar draws niri's own event stream. This one draws strings
+  that arrived over D-Bus from any process with a session, none of which is
+  trusted. Three of those strings are attacks on the corner rather than
+  messages in it, and each one is a line in `core/NotifyModel.qml`:
+  · `expire_timeout = 0` means "never expire" in the freedesktop spec.
+    Honoured literally it is a one-line D-Bus call any process can make to
+    pin a plate over your work for the rest of the session — on a surface
+    with an empty input region, so there is nothing to click to make it stop.
+    A non-critical notification that asks for forever gets `maxDwellMs`
+    (20 s). `Critical` is the one thing allowed to stay, because there losing
+    it is the worse failure.
+  · a dwell of 5 ms, which flashes a plate nobody can read. Clamped to
+    [1.5 s, 20 s], and the floor is as deliberate as the ceiling.
+  · an unbounded number of them, which is a corner that grows until it covers
+    the screen. Three on screen, and the rest are COUNTED rather than dropped
+    — `+2 EARLIER` above the stack, because a cap nobody is told about is
+    indistinguishable from a daemon that lost your notification.
+  Plus the one that is not an attack but a lie: an urgency byte that is none
+  of the three values must not read as critical and must not blank the plate.
+- **`app_name` IS WHY THERE IS NO EMBER HERE**, and it is the invariant-10
+  decision of this iteration. theme.toml says ember means "Jarvis is doing
+  something". The sender of a notification chooses its own `app_name`, and
+  nothing in the protocol stops a process from choosing "Jarvis" — so a corner
+  that spent the accent on that name would hand every program on the machine
+  the ability to look like the assistant. The accent stays in the HUD, where
+  the only publisher is the bus (invariant 1). Urgency gets one channel
+  instead, the same 6 px dot every HUD plate uses: `risk` / `text_2` /
+  `text_3`.
+- **THE CAPABILITY SET IS AN HONESTY DECLARATION, not a config block** — the
+  nicest thing I found in this task. A sender asks the daemon what it
+  supports and decides what to send from the answer, so `actionsSupported:
+  true` would make apps offer buttons on a surface whose input region is
+  empty: the user watches an app hand them a choice that does nothing. Eight
+  capabilities are false because these pixels do not do them, `bodySupported`
+  is true because the plate draws it, and a tools gate reads BOTH halves —
+  the flags in `Notifications.qml` and the `textFormat: Text.PlainText` on
+  every Text in the shell — so a daemon that said it does not interpret
+  markup and then rendered a stranger's `<img>` over every window fails a
+  test. That is invariant 10 applied to the one surface here that has a
+  protocol to lie in.
+- what I did NOT build, deliberately: **actions** (D19 — a hover region that
+  does not eat the click meant for the window underneath, plus a D-Bus call
+  into another process, which is close enough to invariant 3 that a human
+  should draw the line), **a history/notification centre** (so
+  `persistenceSupported` is false, which is what stops an app deciding it need
+  not resend), **an app icon or image** (D2 draws type; a sender's pixmap is
+  the one thing on this surface JarvisOS did not draw), and **a fade OUT**.
+  The last one is a rule rather than a corner cut: the delegate dies the moment
+  the model lets go of the notification, and a plate that lingered through a
+  fade would be a plate showing a notification that no longer exists.
+- motion: one `Fade`, gated on `Theme.reducedMotion` — the versioned
+  preference straight out of personality/theme.toml. NOT a hand-copied
+  `MotionPolicy`: the HUD's trio cannot be imported across a store copy, and
+  a second copy of a decision with nothing holding the two equal is how the
+  desktop palette drifted in the first place (D7). **D18** is the generator
+  rendering the trio per shell the way it already renders Theme.qml, and it
+  closes **D14** (the bar does not move either) in the same change.
+- every monitor, like the HUD and unlike the bar, and the reason is a fact
+  rather than a preference: a workspace IS a property of a monitor, a
+  notification is not, and nothing in this repo publishes which output you are
+  looking at. One monitor could only be chosen by a guess, and a guess is how
+  a message is missed entirely (**D21** names the real source — niri's focused
+  output, which the bar's model already parses).
+- the surface's box is DERIVED (`stack.implicitHeight + 2 x insetPx`), not
+  declared. That is the one structural difference from the HUD, whose fixed
+  300x826 had to be measured after A63 found a crowded corner cut in half: a
+  panel sized by its own content cannot crop its own bottom plate, so there is
+  no fit test here because there is nothing for one to catch.
+- gates: `notifytest.sh` is the third QML gate, registered in
+  `dependents.QML_GATES`, so touching a toast runs the notifier's tests and
+  NOT the bar's or the HUD's — and a test now says so in both directions.
+  `test_verify.py`'s gate count went 7 -> 8 as a deliberate edit. Four new
+  tools tests: the surface-safety table (the HUD's, because it is the same
+  promise), the two sweeps for a keyboard grab and a dead pointer handler, the
+  capability/pixels pairing, and the reduced-motion gate. A fifth writes the
+  notifier's coverage gap down instead of letting it be invisible:
+  `shell.qml`, `Notifications.qml`, `Toast.qml` and `Fade.qml` are reached by
+  no QML gate, only qmllint inside `nix build .#jv-notify` and the Python
+  sweeps (**D20**).
+- 18 mutations, 18 caught. 12 through the model: "forever" honoured, the dwell
+  unclamped, the cap uncapped, an unknown urgency read as critical, critical
+  made to expire, a deadline invented with no clock, a replacement jumping the
+  stack, an already-closed notification closed twice, the timer armed for the
+  last deadline instead of the first, a sender's newlines reaching the plate,
+  an off-screen notification never expiring, and a keyless record accepted.
+  6 through the tools gates: `actionsSupported` flipped to true,
+  `persistenceSupported` flipped to true, a `textFormat` removed, the
+  exclusive zone turned on, the mask deleted, and the fade's stillness switch
+  bypassed. Driven by hand, for the same reason D1's were — `tools/mutate.py`
+  grades QML with the HUD's runner only (**D11**), and now there are two
+  shells it cannot see.
+- tests: `bash ops/ralph/verify.sh` GREEN — 5 gates over 18 paths (tools 496
+  pass, jv-compat, jv-hud-bridge, **notifytest 22**, nixtest).
+  `ops/ralph/hudscreens.sh` was named (flake.nix) and run: 218.2 s, all 9
+  shots match the sheet at HEAD — the HUD's pixels did not move, which is what
+  adding a package beside it should mean, so there are no new shots to commit.
+  build: `nixos-rebuild build --flake .#ares` green, closure
+  43vm66iv8b35rss7qpa10fdlirvfshbp, with `unit-jv-notify.service` in it and
+  its ExecStart pointing at the store copy. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: shell/jv-notify/** (new), pkgs/jv-notify/default.nix (new),
+  ops/ralph/notifytest.sh (new), flake.nix, modules/theme.nix,
+  tools/gen_theme_qml.py, tools/dependents.py,
+  tools/tests/{test_gen_theme_qml.py,test_dependents.py,test_verify.py},
+  ops/ralph/PLAN.md
+- next: **D3** is the steer's other half and it is the one still missing — the
+  lock screen, and it is the first surface on this machine where getting it
+  wrong locks the user out, so it wants `swaylock-effects` themed as a first
+  step and never a Quickshell lock straight away. After that **D18** is the
+  highest-value small one: it closes D14, replaces this iteration's `Fade`
+  with the real gate, and is an extension of a mechanism that already works
+  rather than a new one. **D11** has grown from "the bar cannot be graded" to
+  "two of three shells cannot be graded", which makes it cheaper per shell
+  than it was. **D22** (D-Bus activation for the daemon) is half an hour.

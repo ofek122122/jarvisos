@@ -39,8 +39,41 @@ human-reviewed step.
       three has a real source in this repo yet — a battery pip on a desktop
       and a volume readout with nothing publishing volume are the fakery
       invariant 10 forbids. See **D17**.)
-- [ ] D2. **Notifications**: a Quickshell notification daemon (or mako themed to
-      §06 as a first step), quiet + ember, honoring reduced-motion.
+- [x] D2. **Notifications** — a Quickshell notification daemon of our own
+      (`shell/jv-notify` + `pkgs/jv-notify` + a graphical-session user
+      service), not mako themed. Before it, ares had NO notification daemon at
+      all: every app that asked the session bus to show you something got an
+      error and you were never told. Now the bottom-right corner of every
+      monitor holds up to three plates in the HUD's own visual language, and
+      `core/NotifyModel.qml` owns the lifecycle — 22 headless tests, 12
+      mutations, 12 caught.
+      The decisions worth knowing, because each one is a decision:
+      · **NOT ember.** Any process with a session bus can send a notification
+        and can put any string in `app_name`, including "Jarvis" — so spending
+        the accent here would hand every program on this machine the ability
+        to dress up as the assistant. Urgency is one channel, the 6 px dot:
+        `risk` / `text_2` / `text_3`.
+      · **`expire_timeout = 0` is refused.** The spec's "never expire" is a
+        D-Bus call any process can make to pin a plate over your work for the
+        session; a non-critical notification that asks for forever gets
+        `maxDwellMs` (20 s) instead, and only `Critical` stays until its
+        sender withdraws it. A declared dwell is clamped to [1.5 s, 20 s].
+      · **The capability set is an honesty declaration.** `actionsSupported`,
+        `bodyMarkupSupported`, `imageSupported`, `persistenceSupported` and
+        four more are false because these pixels do not do them — the mask is
+        empty, so there is no click to invoke an action with, and every Text
+        is `Text.PlainText`. A tools gate reads both halves and fails if a
+        capability outruns the pixels.
+      · **Every monitor**, like the HUD and unlike the bar: nothing here
+        publishes which screen you are looking at, and a toast you never saw
+        is worse than three copies of one (**D21**).
+      · **The box is derived**, not declared, so the A63 crop cannot happen
+        here. Reduced motion is honoured through `Theme.reducedMotion` in one
+        `Fade` component rather than a hand-copied MotionPolicy (**D18**).
+      New gate `ops/ralph/notifytest.sh`, wired into `dependents.QML_GATES`.
+      Tests: `bash ops/ralph/verify.sh` GREEN; `nixos-rebuild build` green
+      with `unit-jv-notify.service` in the closure. Never tested, never
+      switched.
 - [ ] D3. **Lock screen**: swaylock-effects themed to §06 (dark ground, ember
       accent, wordmark) as a first step; a Quickshell lock later.
 - [ ] D4. **Migrate the niri config into the flake** (`environment.etc."niri/config.kdl"`
@@ -169,6 +202,55 @@ human-reviewed step.
       battery should simply never appear on a desktop rather than showing
       100%. Until then the strip's right half stays empty, which §06 calls
       earned.
+- [ ] D18. **The motion trio is the HUD's alone, and now three shells want
+      it.** `Ease.qml` + `Motion.qml` + `core/MotionPolicy.qml` is the one
+      place §06's stillness rule is decidable (declared preference, session
+      override, battery, fullscreen) — and it exists only in `shell/jv-hud`,
+      because `import "."` resolves inside ONE store copy. The bar therefore
+      does not move at all (**D14**) and jv-notify gates its one fade on
+      `Theme.reducedMotion` directly, which honours the versioned preference
+      and nothing else. Hand-copying the trio into two more shells is two more
+      copies of a decision with nothing holding them equal, so the fix is the
+      mechanism that already solved exactly this for Theme.qml:
+      `tools/gen_theme_qml.py` renders the three files per shell from one
+      renderer, and the byte-for-byte test it already has covers them. That
+      closes D14 and D2's fade in one change. `Fade.qml` names this item.
+- [ ] D19. **A notification's actions cannot be offered, and are not
+      claimed.** freedesktop lets a sender attach buttons; `mask: Region {}`
+      means this surface receives no pointer input at all, so `jv-notify`
+      declares `actionsSupported: false` rather than drawing a button nothing
+      can press. Opening the mask is not the whole of it — invoking an action
+      is a D-Bus call into another process, which is close enough to
+      invariant 3's line that a human should draw it — and it needs a hover
+      region that does not eat clicks meant for the window underneath. Same
+      shape as **D15** (clicking a workspace): a proposal, not a task.
+- [ ] D20. **A render harness for the notification corner**, the way
+      `hudshots.sh` is one for the HUD and **D13** wants one for the bar. It
+      matters more here than for either: this is the only surface on the
+      machine whose CONTENT comes from programs this repo did not write, so
+      "what does a toast do with a 4000-character summary, a name that is all
+      combining characters, or three criticals at once" is a question only
+      pixels can answer. `Toast.qml`, `Fade.qml` and the strip are reached by
+      no QML gate today — only qmllint inside `nix build .#jv-notify` and the
+      Python sweeps over `shell/**`, which `test_dependents.py` writes down.
+- [ ] D21. **A toast appears on all three monitors at once.** Correct today
+      and not free: nothing in this repo publishes which output has focus, so
+      one monitor could only be chosen by a guess, and a guess is how a
+      message is missed entirely. The honest fix has a real source —
+      `niri msg --json event-stream` carries the focused output, and
+      `shell/jv-bar/core/NiriModel.qml` already parses that stream — so this
+      is really "the notifier needs the bar's view of the compositor", which
+      is an argument for the niri model being shared rather than copied.
+      Blocked on the same thing **D12** is: the deltas have never been
+      recorded. `shell.qml` names this item.
+- [ ] D22. **Nothing D-Bus-activates the notification daemon.** `jv-notify` is
+      a `graphical-session.target` unit, so an app that sends a notification
+      before the session is up (or after the unit has failed past its
+      restarts) gets an error its user never sees. The freedesktop way is a
+      `org.freedesktop.Notifications.service` activation file pointing at the
+      unit, so the bus starts the daemon on demand. Small, and it wants a
+      thought about what "the daemon was not running" should look like —
+      today it looks like nothing at all. Found while finishing D2.
 - [ ] D9. **Boot path onto §06** — blocked on human review (**R9**). Four
       files: `modules/grub-theme/{theme.txt,background.svg,default.nix}` and
       `modules/plymouth-theme/default.nix`. The real design in it is
