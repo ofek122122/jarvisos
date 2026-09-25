@@ -12241,3 +12241,102 @@ is not worth chasing.)
   the only shell left with no picture of itself, and D30 is down to its half.
   Worth noting for whoever takes D13 — `Strip.qml` is the shape to copy, and
   the `STANDINS` table means the bar's `Motion` stand-in is a table row.
+
+## 2026-09-25 — iteration 123: the bar, photographed at the width of a monitor
+
+- **built D13**: `ops/ralph/barshots.sh`, `tools/barshots/` and `docs/bar/` —
+  the third render harness, and the last shell to get one. It stages
+  `shell/jv-bar` with the two Quickshell singletons replaced (`Niri`, which
+  runs `niri msg --json event-stream` as a child process, and `Motion`),
+  rebuilds shell.qml's surface as `tools/barshots/scene/Strip.qml`, takes nine
+  shots, and reads the sheet back against HEAD the way the other two do.
+- **WHY THIS SHELL, and it is not the same reason as the other two.** The HUD
+  earned a sheet by being the thing that speaks; the notification corner earned
+  one by holding strings this repo did not write. The bar is the surface that
+  is ALWAYS THERE — up from login to logout, on every monitor, 31 px tall —
+  which means every decision in it is a decision about a glance, and a glance
+  is exactly what no headless test takes. Until today `shell.qml`,
+  `Workspaces.qml` and `Clock.qml` were reached by **no QML gate at all**;
+  `test_dependents.py` had the gap written down (D13 was named in three files)
+  precisely so it would not become invisible. The bar's ungated set is now
+  exactly the other two shells': `shell.qml` and the two singletons no other
+  engine can resolve.
+- **THE SHOT IS A WHOLE MONITOR**, and that is the structural difference from
+  both earlier sheets. The HUD's box is a fixed 300x826 that had to be measured
+  after a crowded corner turned out to be cut in half (A63); the notifier's is
+  derived from its own stack. This surface spans its output, so **width is the
+  one thing a harness cannot pick for itself** — and both questions only this
+  sheet can answer are questions about a particular monitor. So the sheet is
+  taken at 2560 (ares' HP 27xq), at 1920 (either side monitor), and once at
+  640 px, which ares does not have.
+- **TWO NUMBERS ARE ASSERTED, not merely photographed.** `hudOverflowPx` is 0
+  on every shot: `shell.qml` reserves `300 + inset` px at the right end and
+  promises *in prose* that "nothing may be laid out inside it" — to the HUD,
+  which is a different process on a different layer, sets
+  `ExclusionMode.Ignore`, draws its plates over that corner, and cannot be
+  asked. Nothing else in this repository has ever checked that promise, and a
+  label sitting under a HUD plate looks perfectly fine in a PNG of the bar
+  alone. `clockOverlapPx` is the same claim against the clock, which is centred
+  on the SCREEN and therefore cannot move out of the way either.
+- **THE 640 px SHOT IS THE ONE THAT COULD ONLY BE A PICTURE.** `Clock.fits` has
+  existed since D1 and had never once been false anywhere: on both of ares'
+  monitor sizes the centre of the screen clears the HUD's corner by over a
+  thousand pixels. `09-narrow.png` is the first time that binding has ever been
+  exercised — the clock hides itself rather than be drawn under another
+  process's plates, which is what shell.qml means by "should fail visibly on
+  the fourth" monitor.
+- **SIX SHOTS ARE ARES' OWN DESK** — `harness/fixtures/niri/ares-desk.jsonl`
+  line 1, byte for byte, through the real `core/NiriModel.qml`, so the
+  per-output filter, the `idx` sort (that recording lists HDMI-A-1's workspaces
+  as 2, 1 — a bar trusting niri's order would draw "2 1") and the refusal to
+  invent a workspace are all the running bar's. Two are **composed**, because
+  this machine has no named workspaces, and a tools gate checks every field the
+  composer writes against the recording: a shot built out of a key niri does
+  not send would parse, draw nothing, and photograph a plausible empty bar.
+- **THE CAPTION AND THE COLOUR ARE ONE DECISION.** `Workspaces.reading()` names
+  what a workspace is doing in a word (`focused`/`active`/`idle`/`urgent`) and
+  `tint()` turns that word into a §06 token, so the sheet cannot report
+  `focused` over a label painted `text_3`. That is `Toast.urgencyName`'s
+  argument one shell over, and it mattered more here: the entire vocabulary of
+  this surface is a few characters in one of four greys, so two shots of
+  different desks look almost identical and a harness that sent a snapshot the
+  model refused would assert nothing at all.
+- **THE STAND-IN WAS A TABLE ROW**, which is D29 paying for itself twice.
+  `tools/barshots/stub/Motion.qml` is generated from the same body as the
+  running shell's, with the three lines that cannot be shared swapped. The
+  generator test that used jv-bar as its example of "a shell carrying no
+  stand-in" had to be rewritten, because there is no such shell any more — it
+  now pins the count instead: three harnesses, three shells.
+- **AND THE ONE THING THE SHEET FOUND, which is a margin rather than a bug.**
+  `08-crowded.png` — six long-named workspaces on a 1920 px monitor — is clear,
+  by **274 px**, about three more names. The row is a `Row`: it takes its width
+  from its children and has no width of its own, exactly like the app-name row
+  that painted 656 px past its plate the first time the notification sheet was
+  taken. Nothing stops the seventh workspace. That is **D32**, and it is
+  deliberately not fixed here: dropping labels silently is the failure the
+  notifier's `+N EARLIER` line exists to prevent, eliding every label makes the
+  one you are ON unreadable, and inventing that rule at the end of an iteration
+  is how a design language dies. What this harness changed is that the margin
+  is now PRINTED on every run — arithmetic over glyph widths, so asserting it
+  would fail on a font bump with nothing wrong, and never measuring it is how
+  it runs out.
+- tests: `bash ops/ralph/verify.sh --since HEAD~1` GREEN — 5 gates over 26
+  paths (jv-compat, jv-hud-bridge, pylib, tools **573 pass**, barshots), 73 s.
+  The first run was RED on the new sheet alone — nine PNGs the committed sheet
+  had never seen, which is the read-back's designed bootstrap and is what
+  committing them fixes.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: ops/ralph/barshots.sh, tools/barshots/{scene/{Strip,tst_shots}.qml,
+  stub/{Niri,Motion}.qml}, docs/bar/ (9 PNGs + README), shell/jv-bar/
+  Workspaces.qml, tools/{gen_theme_qml,dependents,mutate}.py,
+  tools/tests/{test_barshots,test_notifyshots,test_dependents,
+  test_gen_theme_qml,test_verify}.py, ops/ralph/README.md, ops/ralph/PLAN.md
+- next: **D31** is now worth twice what it was — `--runner shots` is still the
+  HUD's alone, and there are two staged-render harnesses it could be pointed
+  at, both of which `tools/mutate.py` apologises for in a hint. It is still
+  `Language.shells` gaining rows rather than new machinery, and doing it is
+  what makes **D27** (the bar's and the notifier's `core/` have never had a
+  mutation sweep) worth running. **D32** is the first real design question the
+  loop has raised from a picture rather than from reading code, and
+  `barshots.sh` can photograph whichever answer a human picks.
