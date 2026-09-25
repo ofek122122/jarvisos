@@ -1,9 +1,13 @@
 # JarvisOS system theming — the desktop's look, declaratively (blueprint §06).
 # Fonts live in modules/fonts.nix; this module owns everything else that makes
 # ordinary apps and the session read as JarvisOS: GTK + Qt dark/ember, cursor
-# and icon themes, and the terminal + launcher palettes. Two graphical-session
-# surfaces have their units here: the wallpaper (colours in
-# pkgs/jarvis-wallpaper) and the top bar (QML in shell/jv-bar).
+# and icon themes, and the terminal + launcher palettes. Three
+# graphical-session surfaces have their units here: the wallpaper (colours in
+# pkgs/jarvis-wallpaper), the top bar (QML in shell/jv-bar) and the
+# notification corner (QML in shell/jv-notify). A fourth surface has no unit
+# on purpose — the lock screen (pkgs/jv-lock) is asked for by a human, never
+# started for them, and what it needs from this module is a place on PATH and
+# a PAM stack; see the bottom of the file.
 #
 # The PALETTE IS NOT WRITTEN HERE. It is read out of `personality/theme.toml`
 # with `builtins.fromTOML`, the way modules/fonts.nix reads the font families
@@ -24,6 +28,8 @@
 let
   wallpaper = self.packages.x86_64-linux.jarvis-wallpaper;
   jv-bar = self.packages.x86_64-linux.jv-bar;
+  jv-notify = self.packages.x86_64-linux.jv-notify;
+  jv-lock = self.packages.x86_64-linux.jv-lock;
 
   theme = builtins.fromTOML (builtins.readFile ../personality/theme.toml);
 
@@ -86,6 +92,12 @@ in
 {
   environment.systemPackages = [
     jv-bar # the top bar, so it can also be started by hand while working on it
+    jv-notify # the notification corner, for the same reason
+    # The lock screen, and for this one being on PATH is the whole delivery
+    # mechanism rather than a convenience: nothing in this flake can press a
+    # key, so `jv-lock` is bound in the user's own niri config (PLAN D4 is
+    # what moves that file in here) and spawned by name.
+    jv-lock
   ]
   ++ (with pkgs; [
     swaybg # wallpaper
@@ -151,6 +163,35 @@ in
     after = [ "graphical-session.target" ];
     serviceConfig = {
       ExecStart = "${jv-bar}/bin/jv-bar";
+      Restart = "on-failure";
+      RestartSec = 2;
+    };
+  };
+
+  # jv-notify — the notification corner (blueprint §06, PLAN D2), and this
+  # machine's org.freedesktop.Notifications daemon. Before it there was NO
+  # notification daemon on ares at all: every app that asked the session bus
+  # to show you something got an error, and you were never told.
+  #
+  # Here beside the bar rather than in modules/jarvis-services.nix, for the
+  # same reason: it is DESKTOP, not perception. It never opens the bus, never
+  # reads a sensor and never needs commonEnv — its one input is the session
+  # bus, and what it draws is other programs' news. What Jarvis has to say
+  # goes to jv-hud over the real bus (invariant 1), which is also why this
+  # surface never spends the ember accent.
+  #
+  # Wanted by default, like the bar and unlike the HUD: a notification daemon
+  # that was not running when an app went looking for one is a notification
+  # nobody ever sees. The surface itself is still unmapped until something has
+  # actually been sent.
+  systemd.user.services.jv-notify = {
+    description = "JarvisOS notification corner (org.freedesktop.Notifications)";
+    unitConfig.ConditionUser = "ofek";
+    wantedBy = [ "graphical-session.target" ];
+    partOf = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    serviceConfig = {
+      ExecStart = "${jv-notify}/bin/jv-notify";
       Restart = "on-failure";
       RestartSec = 2;
     };
@@ -222,4 +263,28 @@ in
     width=1
     radius=10
   '';
+
+  # THE LOCK SCREEN'S WAY BACK IN (blueprint §06, PLAN D3). pkgs/jv-lock is
+  # what it LOOKS like; this is what makes it able to let you back in, and the
+  # two live beside each other on purpose — a themed lock screen that cannot
+  # authenticate is the one way this surface can hurt somebody, and splitting
+  # its look from its PAM stack across two modules is how that ships.
+  #
+  # swaylock is not setuid and cannot read /etc/shadow itself: it asks PAM
+  # under its own service name, and PAM answers through the setuid
+  # `unix_chkpwd` helper. With no /etc/pam.d/swaylock there is no stack to
+  # ask, and swaylock refuses to start at all (it fails BEFORE it locks
+  # anything, which is the merciful half of that failure).
+  #
+  # It is declared here even though `programs.niri.enable` already brings it
+  # in — nixpkgs' programs/wayland/wayland-session.nix, which the niri module
+  # imports, sets `security.pam.services.swaylock = { }` for exactly this
+  # reason. Two definitions of one submodule of defaults merge without
+  # conflict, and the duplication buys something real: the lock screen's
+  # ability to unlock stops being an inherited side effect of another
+  # module's default, which a nixpkgs bump could drop without telling us.
+  # `ops/ralph/nixtest.sh` asserts the generated stack still has a pam_unix
+  # `auth` line in it, so that bump would be a red gate rather than a locked
+  # screen that never opens.
+  security.pam.services.swaylock = { };
 }

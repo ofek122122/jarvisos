@@ -70,6 +70,25 @@
         # into the wrapper rather than found on PATH, the same rule the HUD's
         # bridge follows. modules/desktop.nix runs that same `pkgs.niri`.
         jv-bar = pkgs.callPackage ./pkgs/jv-bar { };
+        # jv-notify — the notification corner (blueprint §06, PLAN D2), and
+        # this machine's org.freedesktop.Notifications daemon. Same shape as
+        # the other two shells: the QML in the store plus a wrapped
+        # quickshell, with qmllint and the headless notifier tests as its
+        # check phase. It takes no extra argument at all — the daemon runs no
+        # child process and reads no file, only the session bus.
+        jv-notify = pkgs.callPackage ./pkgs/jv-notify { };
+        # jv-lock — the lock screen (blueprint §06, PLAN D3), and the one
+        # surface here that is NOT a Quickshell shell: it is
+        # swaylock-effects with its whole argv fixed at build time, because
+        # swaylock's own config search path ends in the user's home or in
+        # the sysconfdir of its own store path — neither of which this flake
+        # can declare. The wallpaper comes in as an ordinary argument, the
+        # same way the bar takes `niri` and the HUD takes its bridge: the
+        # image the lock screen shows is the one the desktop already shows,
+        # pinned, rather than a file looked up at runtime.
+        jv-lock = pkgs.callPackage ./pkgs/jv-lock {
+          inherit (self.packages.${system}) jarvis-wallpaper;
+        };
         # The face personality/theme.toml names as family_sans. nixpkgs has
         # no `archivo`; see pkgs/archivo for why it is pinned upstream rather
         # than carved out of google-fonts. modules/fonts.nix installs it —

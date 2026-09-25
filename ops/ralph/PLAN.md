@@ -39,10 +39,88 @@ human-reviewed step.
       three has a real source in this repo yet — a battery pip on a desktop
       and a volume readout with nothing publishing volume are the fakery
       invariant 10 forbids. See **D17**.)
-- [ ] D2. **Notifications**: a Quickshell notification daemon (or mako themed to
-      §06 as a first step), quiet + ember, honoring reduced-motion.
-- [ ] D3. **Lock screen**: swaylock-effects themed to §06 (dark ground, ember
-      accent, wordmark) as a first step; a Quickshell lock later.
+- [x] D2. **Notifications** — a Quickshell notification daemon of our own
+      (`shell/jv-notify` + `pkgs/jv-notify` + a graphical-session user
+      service), not mako themed. Before it, ares had NO notification daemon at
+      all: every app that asked the session bus to show you something got an
+      error and you were never told. Now the bottom-right corner of every
+      monitor holds up to three plates in the HUD's own visual language, and
+      `core/NotifyModel.qml` owns the lifecycle — 22 headless tests, 12
+      mutations, 12 caught.
+      The decisions worth knowing, because each one is a decision:
+      · **NOT ember.** Any process with a session bus can send a notification
+        and can put any string in `app_name`, including "Jarvis" — so spending
+        the accent here would hand every program on this machine the ability
+        to dress up as the assistant. Urgency is one channel, the 6 px dot:
+        `risk` / `text_2` / `text_3`.
+      · **`expire_timeout = 0` is refused.** The spec's "never expire" is a
+        D-Bus call any process can make to pin a plate over your work for the
+        session; a non-critical notification that asks for forever gets
+        `maxDwellMs` (20 s) instead, and only `Critical` stays until its
+        sender withdraws it. A declared dwell is clamped to [1.5 s, 20 s].
+      · **The capability set is an honesty declaration.** `actionsSupported`,
+        `bodyMarkupSupported`, `imageSupported`, `persistenceSupported` and
+        four more are false because these pixels do not do them — the mask is
+        empty, so there is no click to invoke an action with, and every Text
+        is `Text.PlainText`. A tools gate reads both halves and fails if a
+        capability outruns the pixels.
+      · **Every monitor**, like the HUD and unlike the bar: nothing here
+        publishes which screen you are looking at, and a toast you never saw
+        is worse than three copies of one (**D21**).
+      · **The box is derived**, not declared, so the A63 crop cannot happen
+        here. Reduced motion is honoured through `Theme.reducedMotion` in one
+        `Fade` component rather than a hand-copied MotionPolicy (**D18**).
+      New gate `ops/ralph/notifytest.sh`, wired into `dependents.QML_GATES`.
+      Tests: `bash ops/ralph/verify.sh` GREEN; `nixos-rebuild build` green
+      with `unit-jv-notify.service` in the closure. Never tested, never
+      switched.
+- [x] D3. **Lock screen** — `pkgs/jv-lock`, swaylock-effects with its whole
+      argv fixed at build time, installed on PATH and asked for BY HAND. It
+      shows the JarvisOS wallpaper (the same store PNG the wallpaper unit
+      hands swaybg — `nixtest.sh` holds the two equal), a `ground_deep` disc
+      with a `line` ring, and the clock in `face "mono"` at twice the type
+      scale's readout.
+      The decisions worth knowing:
+      · **It never photographs your desktop.** `--screenshots` and the whole
+        `--effect-*` family are refused: a blurred photograph of your desktop
+        is still your desktop — window shapes, the outline of a document, the
+        fact that you had eleven windows open — held on screen for as long as
+        you are away. Blur is not redaction (invariant 7).
+      · **No `--grace`.** A grace period is a stretch where the lock screen is
+        up and any keypress dismisses it without a password: a machine that
+        looks locked and is not, which is worse than one that is not locked,
+        because you walk away from it.
+      · **Teal is you, ember is the machine.** §06 assigns the two voices and
+        the states follow it exactly: a keypress highlights `teal`, and the
+        ONLY ember on this screen is the ring while your password is being
+        checked — the one moment something is actually being computed.
+        `risk` for a refusal, `warn` for Caps Lock (the thing that is about
+        to make you wrong), `text_3` for a backspace.
+      · **All fifteen state colours are declared**, because a channel this
+        file does not paint keeps swaylock's own default, which is
+        off-palette by construction — the identity would fail exactly in the
+        moments that matter (being checked, being refused).
+      · **`--timestr %H:%M`, not the default `%T`.** A seconds counter
+        repaints every output once a second for as long as the machine is
+        locked; §06 says 0 fps when idle, and that is a cost paid all night.
+      · **`--color` is set** because swaylock's default background is WHITE:
+        a full-brightness screen in a dark room the first time an image
+        cannot be read.
+      · **The geometry was LOOKED at**, not reasoned about — five
+        combinations rendered on a nested headless sway at 2560x1440 and
+        compared (see the journal). The ring is four hairlines because one
+        disappears at this radius, and an invisible ring is an invisible
+        "checking" and an invisible "wrong".
+      · **Nothing auto-locks.** No idle timer, no `loginctl lock-session`
+        handler, no before-sleep unit — see **D23**: arming an automatic lock
+        before a human has proven the unlock path on this machine is the one
+        way this surface can hurt somebody.
+      New tools gate `tools/tests/test_jv_lock.py` (14 cases, in a checkout
+      with no nix) plus 7 new `nixtest.sh` cases over the BUILT script and
+      the generated PAM stack. 14 mutations, 14 caught. Tests:
+      `bash ops/ralph/verify.sh` GREEN; `nixos-rebuild build` green with
+      `sw/bin/jv-lock` and `/etc/pam.d/swaylock` in the closure. Never
+      tested, never switched.
 - [ ] D4. **Migrate the niri config into the flake** (`environment.etc."niri/config.kdl"`
       or a module), preserving the user's keybinds/outputs, so the whole look is
       declarative — the one core piece currently living in the user's home file.
@@ -169,6 +247,90 @@ human-reviewed step.
       battery should simply never appear on a desktop rather than showing
       100%. Until then the strip's right half stays empty, which §06 calls
       earned.
+- [ ] D18. **The motion trio is the HUD's alone, and now three shells want
+      it.** `Ease.qml` + `Motion.qml` + `core/MotionPolicy.qml` is the one
+      place §06's stillness rule is decidable (declared preference, session
+      override, battery, fullscreen) — and it exists only in `shell/jv-hud`,
+      because `import "."` resolves inside ONE store copy. The bar therefore
+      does not move at all (**D14**) and jv-notify gates its one fade on
+      `Theme.reducedMotion` directly, which honours the versioned preference
+      and nothing else. Hand-copying the trio into two more shells is two more
+      copies of a decision with nothing holding them equal, so the fix is the
+      mechanism that already solved exactly this for Theme.qml:
+      `tools/gen_theme_qml.py` renders the three files per shell from one
+      renderer, and the byte-for-byte test it already has covers them. That
+      closes D14 and D2's fade in one change. `Fade.qml` names this item.
+- [ ] D19. **A notification's actions cannot be offered, and are not
+      claimed.** freedesktop lets a sender attach buttons; `mask: Region {}`
+      means this surface receives no pointer input at all, so `jv-notify`
+      declares `actionsSupported: false` rather than drawing a button nothing
+      can press. Opening the mask is not the whole of it — invoking an action
+      is a D-Bus call into another process, which is close enough to
+      invariant 3's line that a human should draw it — and it needs a hover
+      region that does not eat clicks meant for the window underneath. Same
+      shape as **D15** (clicking a workspace): a proposal, not a task.
+- [ ] D20. **A render harness for the notification corner**, the way
+      `hudshots.sh` is one for the HUD and **D13** wants one for the bar. It
+      matters more here than for either: this is the only surface on the
+      machine whose CONTENT comes from programs this repo did not write, so
+      "what does a toast do with a 4000-character summary, a name that is all
+      combining characters, or three criticals at once" is a question only
+      pixels can answer. `Toast.qml`, `Fade.qml` and the strip are reached by
+      no QML gate today — only qmllint inside `nix build .#jv-notify` and the
+      Python sweeps over `shell/**`, which `test_dependents.py` writes down.
+- [ ] D21. **A toast appears on all three monitors at once.** Correct today
+      and not free: nothing in this repo publishes which output has focus, so
+      one monitor could only be chosen by a guess, and a guess is how a
+      message is missed entirely. The honest fix has a real source —
+      `niri msg --json event-stream` carries the focused output, and
+      `shell/jv-bar/core/NiriModel.qml` already parses that stream — so this
+      is really "the notifier needs the bar's view of the compositor", which
+      is an argument for the niri model being shared rather than copied.
+      Blocked on the same thing **D12** is: the deltas have never been
+      recorded. `shell.qml` names this item.
+- [ ] D22. **Nothing D-Bus-activates the notification daemon.** `jv-notify` is
+      a `graphical-session.target` unit, so an app that sends a notification
+      before the session is up (or after the unit has failed past its
+      restarts) gets an error its user never sees. The freedesktop way is a
+      `org.freedesktop.Notifications.service` activation file pointing at the
+      unit, so the bus starts the daemon on demand. Small, and it wants a
+      thought about what "the daemon was not running" should look like —
+      today it looks like nothing at all. Found while finishing D2.
+- [ ] D23. **Nothing on this machine can lock the screen for you, and that is
+      deliberate until a human has unlocked it once.** `jv-lock` exists and is
+      on PATH; nothing calls it. Three things want wiring and all three are
+      blocked on the same one-line verification (`jv-lock`, type the password,
+      get the desktop back): a niri keybind (which lands with **D4**, since
+      the niri config is still the user's own file), a `loginctl lock-session`
+      handler so other programs can ask, and a before-sleep unit. The order
+      matters: an automatic lock armed before the unlock path has ever been
+      proven on ares is the one way this surface can hurt somebody — the
+      failure mode is a screen that never opens, and the only way out of it is
+      a VT switch. The PAM stack is asserted (nixtest.sh) and swaylock fails
+      BEFORE locking when PAM is missing, so the risk is small; it is not
+      zero, and it is not the loop's to take.
+- [ ] D24. **The lock screen has no gate that LOOKS at it.** Its argv is read
+      as text (tools) and as built bytes (nixtest), and its pixels are read by
+      nobody: the five renders that chose its geometry were a one-off in
+      /tmp. `ops/ralph/hudscreens.sh` is the shape this wants — nested
+      headless sway at ares' geometry, `grim`, a sheet read back against HEAD
+      — and it is cheaper here than for the HUD (one client, no bus, no idle
+      probe; the whole render took about 30 s). What it CANNOT photograph
+      without a virtual-keyboard client is the four states that only exist
+      while somebody is typing (clear / verifying / wrong / Caps Lock), which
+      is exactly where the colour decisions live.
+- [ ] D25. **The lock screen inherits D10 whole.** It shows the same single
+      2560x1440 PNG, `--scaling fill`, on three differently-shaped outputs.
+      The fix is the same fix, and `-i <output>:<path>` per monitor is the
+      same blocked-on-**D4** option.
+- [ ] D26. **Three files now carry their own `token`/`face` helpers**
+      (modules/theme.nix, pkgs/jarvis-wallpaper, pkgs/jv-lock), and jv-lock
+      added a third helper shape (`num`, for the type scale and the motion
+      policy). They are identical by hand, which is the exact failure mode the
+      helpers exist to prevent one level down. A `nix/theme.nix` returning
+      `{ token; face; num; }` from one `fromTOML` would be read by all three;
+      the gate that discovers painters (`_bearing_files`) already works by
+      finding `token "x"` calls, so it would keep working unchanged.
 - [ ] D9. **Boot path onto §06** — blocked on human review (**R9**). Four
       files: `modules/grub-theme/{theme.txt,background.svg,default.nix}` and
       `modules/plymouth-theme/default.nix`. The real design in it is
