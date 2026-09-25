@@ -10,7 +10,7 @@
 
 use clap::{Parser, Subcommand};
 use jarvisd::broker::BusAddr;
-use jarvisd::cli::{self, Confirmations, HopStats, Outcome, TurnStats, Utterances};
+use jarvisd::cli::{self, Confirmations, HopStats, Lives, Outcome, TurnStats, Utterances};
 use jarvisd::client::BusClient;
 use jarvisd::proto::ServerMsg;
 use jarvisd::time::mono_now;
@@ -80,6 +80,12 @@ enum Cmd {
     /// asked about, what was decided, by which route, and how long you took.
     /// The two frames that say all that are minutes apart on the wire and
     /// share only a request_id.
+    ///
+    /// A service whose heartbeat says it has been up LESS long than it said
+    /// last time is a service that died and was replaced, and gets a line
+    /// saying so and how long the process that ended had lasted. Nothing on
+    /// the bus publishes that, and only a reader holding state across frames
+    /// can see it.
     Tap {
         #[arg(long)]
         latency: bool,
@@ -226,6 +232,11 @@ async fn main() -> anyhow::Result<()> {
             // names no utterance, so a destructive tool nobody spoke for is
             // still an exchange worth a line (cli::Confirmations).
             let mut confirms = Confirmations::default();
+            // The process behind each service's heartbeat. Nothing on the bus
+            // announces a restart, and only a reader that holds state across
+            // frames can see one — which is why `jv health`, a snapshot, never
+            // will, however long it runs (cli::Lives).
+            let mut lives = Lives::default();
             // jv-ears' endpoint hold, once it has said what it is. No
             // fallback: a turn measured before the first heartbeat lands
             // reports `?` for the spans that need it (cli::Turn).
@@ -253,6 +264,14 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", cli::to_json(&frame));
                 }
                 if topic == "sys.health" {
+                    // A service that died and came back, which `uptime_s`
+                    // going BACKWARDS is the only evidence of. Every refusal
+                    // about what a restart IS lives in `Lives`, which keeps
+                    // the rules `core/HealthState.qml` argues, so there is
+                    // nothing to decide here (PLAN B78).
+                    if let Some(line) = lives.observe(&frame) {
+                        println!(">>> {line}");
+                    }
                     if let Some(h) = cli::ears_endpoint_hold_s(&frame) {
                         hold_s = Some(h);
                     }

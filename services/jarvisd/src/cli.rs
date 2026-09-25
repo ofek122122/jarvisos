@@ -1371,6 +1371,163 @@ fn confirm_exchange_line(asked: &Asked, granted: Option<bool>, answered_by: Opti
     format!("confirm {}: {tool} -> {verdict} ({route}{waited})", short_id(&asked.request_id))
 }
 
+// ---------------------------------------------------------------- restarts
+
+/// How many services one tap keeps a process history for.
+///
+/// Bounded for the reason every memory in this file is: `jv tap` is meant to
+/// be left running for hours and `src` is a string off the wire. Past the cap
+/// a new name is simply NOT ADMITTED, which is the opposite of what
+/// `Confirmations` does with its oldest — and the difference is the argument.
+/// There the newest question is the one somebody is still waiting on; here the
+/// oldest service is the one whose history is worth the most, and evicting it
+/// would silently restart its tally at zero. A count that quietly begins again
+/// is worse than one that never begins.
+///
+/// 64 is far past the nine services `modules/jarvis-services.nix` declares.
+pub const LIVES_ROSTER: usize = 64;
+
+/// The widest a service name prints inside a restart line — the same 22
+/// columns `CONFIRM_TOOL_COLUMNS` gives a tool name, so the two identifiers
+/// this tap clips are clipped alike in the one stream a human reads them in.
+pub const RESTART_SERVICE_COLUMNS: usize = 22;
+
+/// What one tap has seen of one service's process history.
+struct Life {
+    /// The last `uptime_s` read from it. Only ever rises while one process
+    /// lives, which is the whole of the evidence below.
+    uptime: f64,
+    /// How many times that number has been seen to go BACKWARDS since this
+    /// tap connected.
+    restarts: u32,
+}
+
+/// The processes behind the heartbeats — `jv tap`'s answer to "did that
+/// service die and come back while I was watching?" (PLAN B78).
+///
+/// Nothing on the bus publishes "I was restarted", and a service that could
+/// would be the one least able to, having just lost the memory. `uptime_s`
+/// gives it away instead: it counts from one process's own start, so it only
+/// rises while that process lives, and a heartbeat carrying LESS of it than
+/// the last one from the same service was written by a different process.
+///
+/// `jv health` cannot do this. Without `--check` it prints one line per frame
+/// and remembers nothing, so the beat that would prove a restart is gone by
+/// the time the next one lands — however long it runs. A tap already holds
+/// state across frames, and "jv-ears restarted, twice" is the line that
+/// explains a turn which lost its ASR mid-sentence.
+///
+/// **It decides nothing.** What a restart IS is argued in
+/// `shell/jv-hud/core/HealthState.qml` (`observe` / `restartsOf`) and this
+/// reader may not disagree with it, so it keeps the same rules:
+///
+///   * only off a heartbeat this binary is entitled to read. The gate is
+///     literally `trust_health`, the one `jv health --check` uses, so the two
+///     commands cannot come to believe different frames. It is STRICTER than
+///     the HUD's in one place — a `state` word outside the frozen enum refuses
+///     the whole frame here and only the word there. Refusing can lose a death
+///     and can never invent one: a smaller `uptime_s` is the only evidence
+///     there is, and a frame never read cannot make a number go backwards.
+///   * a first sighting claims nothing. With nothing remembered there is no
+///     direction for the number to have moved in, and a small `uptime_s` on
+///     the first beat is what every service looks like on a machine that just
+///     booted. The boot crash loop is therefore the one case this cannot see
+///     (PLAN A82), in the terminal exactly as on screen.
+///   * an unreadable `uptime_s` is SKIPPED, not forgotten, so the next good
+///     frame is compared against the last good one — the comparison that means
+///     something.
+///
+/// What it does not keep is the HUD's freshness window. `restartsOf` draws its
+/// row only while the replacement process is still young, because a plate
+/// asserts its claim continuously and a standing `RESTARTED 3x` over a service
+/// that has been up for a week is a stale sentence. A tap prints once, at the
+/// moment of observation, into a stream whose position is itself the
+/// timestamp; there is no duration for a window to bound. That is a difference
+/// about how long a claim is DISPLAYED, not about what a restart is.
+///
+/// Nothing here forgets on a link drop, because `jv tap` has no link to come
+/// back from: the broker closing ends the process. A tap that ever learns to
+/// reconnect must empty this on the way, exactly as `HealthState.onKnownChanged`
+/// does — a tally that silently spans a gap of unknown length is a number that
+/// means something other than what it says.
+pub struct Lives {
+    seen: HashMap<String, Life>,
+    cap: usize,
+}
+
+impl Default for Lives {
+    fn default() -> Self {
+        Self::with_capacity(LIVES_ROSTER)
+    }
+}
+
+impl Lives {
+    /// A reader keeping at most `cap` service histories. A cap of zero would
+    /// be a reader that can never report anything, so one is the floor.
+    pub fn with_capacity(cap: usize) -> Self {
+        Lives { seen: HashMap::new(), cap: cap.max(1) }
+    }
+
+    /// How many services are remembered — the memory this holds, for a test
+    /// that wants to prove it is bounded.
+    pub fn watching(&self) -> usize {
+        self.seen.len()
+    }
+
+    /// One `sys.health` frame, and the line it is worth when it is the first
+    /// heartbeat of a process that replaced one this tap was watching.
+    ///
+    /// Keyed by the envelope's `src`, because that is who the broker saw
+    /// publish it; the body's own `service` is a claim, and a claim that
+    /// disagrees is what `trust_health` refuses.
+    pub fn observe(&mut self, frame: &rmpv::Value) -> Option<String> {
+        let src = get_str(frame, "src").filter(|s| !s.is_empty())?;
+        let up = trust_health(frame, &src)?.uptime_s?;
+        match self.seen.get_mut(&src) {
+            Some(life) => {
+                let was = std::mem::replace(&mut life.uptime, up);
+                // `<` and not `<=`: two beats a coarse clock stamped with the
+                // same number are one process, not two.
+                if !(up < was) {
+                    return None;
+                }
+                life.restarts += 1;
+                Some(restart_line(&src, life.restarts, was))
+            }
+            None => {
+                if self.seen.len() < self.cap {
+                    self.seen.insert(src, Life { uptime: up, restarts: 0 });
+                }
+                None
+            }
+        }
+    }
+}
+
+/// One observed restart as `jv tap` prints it:
+///
+/// ```text
+/// >>> restart jv-ears: 3x (was up >=8.2s)
+/// ```
+///
+/// `3x` is the notation `HealthPlate` already draws this same fact in
+/// (`jv-ears RESTARTED 3x`), so the corner and the terminal do not spell one
+/// number two ways. It counts since this tap connected and no further back,
+/// which is why the line says nothing about when the first of the three was.
+///
+/// `>=` is the point of the second number. What died is only known to have
+/// REACHED the last uptime it heartbeated — it may have lived up to a period
+/// longer before it went — and this is the same distinction `SayGauge` draws
+/// between a reading and a bound, for the same reason: 8.2 s is a crash loop
+/// and 418.7 s is one bad afternoon, and a reader deciding which must not be
+/// handed a number that rounds one into the other.
+fn restart_line(service: &str, restarts: u32, was_up: f64) -> String {
+    format!(
+        "restart {}: {restarts}x (was up >={was_up:.1}s)",
+        clip(service, RESTART_SERVICE_COLUMNS)
+    )
+}
+
 // ---------------------------------------------------------------- line formats
 
 /// One `sys.health` body as a line. Missing fields print as `?` / `-` rather
@@ -1494,6 +1651,58 @@ struct Trusted {
     state: Wellness,
     notes: String,
     metrics: Option<rmpv::Value>,
+    /// Seconds since the publishing process started, or None when the field
+    /// is not one that may be COMPARED — absent, a string, a NaN, an
+    /// infinity, or below the schema's own minimum of 0.
+    ///
+    /// Read here because it belongs to the frame, and refused separately
+    /// from the frame because the two refusals are different sizes: a body
+    /// this reader may not interpret at all is `unknown` and a finding, while
+    /// a broken `uptime_s` leaves the service's own state word perfectly
+    /// readable, and turning a jv-voice that is shouting `error` into
+    /// `unknown` over a field about its age would lose the louder fact. The
+    /// same split `core/HealthState.qml` makes between `trust` and
+    /// `uptimeOf`. Only `Lives` reads it (PLAN B78); `jv health` prints the
+    /// number straight off the body, which needs no comparison.
+    uptime_s: Option<f64>,
+}
+
+/// One `sys.health` frame, or None if it is not one this binary may read.
+///
+/// The gate BOTH readers of this topic pass through — `jv health --check`'s
+/// report and `jv tap`'s restart watch (`Lives`) — so the two commands cannot
+/// come to believe different frames about the same service. Rejected: a body
+/// from a schema version this file was not written against (invariant 2), a
+/// heartbeat hedging its confidence (state topics publish conf 1.0 — anything
+/// less disagrees with itself), no orderable `ts`, a body naming a DIFFERENT
+/// service than the broker saw publish it, no usable `period_s`, and a state
+/// word outside the frozen enum, which is not passed through as itself: a word
+/// this binary does not know is not a diagnosis.
+fn trust_health(frame: &rmpv::Value, src: &str) -> Option<Trusted> {
+    if get(frame, "v").and_then(|v| v.as_u64()) != Some(1) {
+        return None;
+    }
+    if get_f64(frame, "conf") != Some(1.0) {
+        return None;
+    }
+    let ts = get_f64(frame, "ts")?;
+    let body = get(frame, "body").filter(|b| b.is_map())?;
+    if get_str(body, "service").as_deref() != Some(src) {
+        return None;
+    }
+    let period_s = get_f64(body, "period_s").filter(|p| *p > 0.0)?;
+    let state = Wellness::from_word(&get_str(body, "state")?)?;
+    Some(Trusted {
+        ts,
+        period_s,
+        state,
+        notes: get_str(body, "notes").unwrap_or_default(),
+        metrics: get(body, "metrics").filter(|m| m.is_map()).cloned(),
+        // The schema's minimum is 0, and a reading below it is refused by the
+        // same test that refuses a NaN: one comparison rather than two that
+        // could come to disagree about whether -5 is a reading.
+        uptime_s: get_f64(body, "uptime_s").filter(|u| u.is_finite() && *u >= 0.0),
+    })
 }
 
 /// jv-brain's `llm_first_say_ms` as a `--check` window saw it — the number
@@ -1622,7 +1831,7 @@ impl HealthCheck {
             // must not be attributed to a service we invent a name for.
             return;
         };
-        let trusted = Self::trust(frame, &src);
+        let trusted = trust_health(frame, &src);
         if let Some(t) = &trusted {
             match first_say(frame, &src) {
                 Some((count, ms)) => {
@@ -1642,30 +1851,6 @@ impl HealthCheck {
             }
         }
         self.latest.insert(src, trusted);
-    }
-
-    /// The frame, or None if it is not one this binary may read.
-    fn trust(frame: &rmpv::Value, src: &str) -> Option<Trusted> {
-        if get(frame, "v").and_then(|v| v.as_u64()) != Some(1) {
-            return None;
-        }
-        if get_f64(frame, "conf") != Some(1.0) {
-            return None;
-        }
-        let ts = get_f64(frame, "ts")?;
-        let body = get(frame, "body").filter(|b| b.is_map())?;
-        if get_str(body, "service").as_deref() != Some(src) {
-            return None;
-        }
-        let period_s = get_f64(body, "period_s").filter(|p| *p > 0.0)?;
-        let state = Wellness::from_word(&get_str(body, "state")?)?;
-        Some(Trusted {
-            ts,
-            period_s,
-            state,
-            notes: get_str(body, "notes").unwrap_or_default(),
-            metrics: get(body, "metrics").filter(|m| m.is_map()).cloned(),
-        })
     }
 
     /// Has this heartbeat outlived the two periods the schema grants it?
@@ -4657,4 +4842,233 @@ mod tests {
         assert!(short.contains(" fs.delete ->"), "{short}");
     }
 
+
+    // ------------------------------------------------------------ restarts
+
+    /// A heartbeat carrying whatever the caller wants to call an uptime, in
+    /// the shape a real service publishes one.
+    fn beat_up(src: &str, uptime: rmpv::Value) -> rmpv::Value {
+        beat_body(
+            src,
+            100.0,
+            1.0,
+            1,
+            map(&[
+                ("service", rmpv::Value::from(src)),
+                ("state", rmpv::Value::from("ok")),
+                ("uptime_s", uptime),
+                ("period_s", rmpv::Value::from(5.0)),
+            ]),
+        )
+    }
+
+    fn up(src: &str, uptime: f64) -> rmpv::Value {
+        beat_up(src, rmpv::Value::from(uptime))
+    }
+
+    #[test]
+    fn a_process_that_died_and_came_back_is_one_line() {
+        // Nothing on the bus publishes "I was restarted" — `uptime_s` counts
+        // from one process's own start, so a heartbeat carrying LESS of it
+        // than the last one from the same service was written by a different
+        // process. The rule is `core/HealthState.qml`'s and this reader keeps
+        // it rather than arguing it again.
+        let mut l = Lives::default();
+        assert_eq!(l.observe(&up("jv-ears", 418.7)), None, "a first sighting claims nothing");
+        assert_eq!(l.observe(&up("jv-ears", 423.7)), None, "a rising uptime is one process");
+        let line = l.observe(&up("jv-ears", 2.1)).expect("a line");
+        assert_eq!(line, "restart jv-ears: 1x (was up >=423.7s)");
+        // And it is reported once: the beats of the new process are a rising
+        // uptime like any other.
+        assert_eq!(l.observe(&up("jv-ears", 7.1)), None);
+    }
+
+    #[test]
+    fn the_first_heartbeat_a_tap_ever_hears_is_not_a_death() {
+        // A small `uptime_s` on a first sighting is what EVERY service looks
+        // like on a machine that just booted, and with nothing remembered
+        // there is no direction for the number to have moved in. The boot
+        // crash loop is therefore the one case this cannot see (PLAN A82),
+        // in the terminal exactly as on screen.
+        let mut l = Lives::default();
+        assert_eq!(l.observe(&up("jv-ears", 0.4)), None);
+        assert_eq!(l.watching(), 1, "it is remembered, it is simply not news");
+    }
+
+    #[test]
+    fn the_tally_rises_with_every_death_and_names_the_life_that_ended() {
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 30.0));
+        for n in 1..=4u32 {
+            let line = l.observe(&up("jv-ears", 0.5)).expect("a line");
+            assert!(line.contains(&format!(" {n}x ")), "death {n} counted as: {line}");
+            // Eight seconds of life, over and over, is what a crash loop is.
+            assert!(l.observe(&up("jv-ears", 8.2)).is_none(), "a rising uptime is not a death");
+        }
+        let line = l.observe(&up("jv-ears", 0.5)).expect("a line");
+        assert!(line.contains("was up >=8.2s"), "the life that ended is the one reported: {line}");
+    }
+
+    #[test]
+    fn one_services_uptime_is_never_compared_against_anothers() {
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 400.0));
+        assert_eq!(l.observe(&up("jv-voice", 3.0)), None, "a lower number from a stranger");
+        assert_eq!(l.observe(&up("jv-voice", 4.0)), None);
+        let line = l.observe(&up("jv-ears", 5.0)).expect("a line");
+        assert!(line.starts_with("restart jv-ears: 1x"), "{line}");
+        assert!(line.contains(">=400.0s"), "jv-voice's history reached jv-ears' line: {line}");
+    }
+
+    #[test]
+    fn an_uptime_that_did_not_move_is_one_process_and_not_two() {
+        // `<` and not `<=`, the comparison `HealthState.observe` makes: two
+        // beats a coarse clock stamped identically are not a death.
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 12.0));
+        assert_eq!(l.observe(&up("jv-ears", 12.0)), None);
+    }
+
+    #[test]
+    fn an_uptime_this_reader_may_not_compare_is_skipped_and_not_forgotten() {
+        // The HUD's rule: an unreadable `uptime_s` refuses the restart claim
+        // only, and being SKIPPED rather than forgotten is what makes the
+        // next good frame compare against the last good one — the comparison
+        // that means something. `"5" < 400` is true in JavaScript and a
+        // string would have manufactured a death there; here `get_f64`
+        // refuses it, and this is the test that says so out loud.
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 400.0));
+        for bad in [
+            rmpv::Value::from("5"),
+            rmpv::Value::from(f64::NAN),
+            rmpv::Value::from(f64::INFINITY),
+            rmpv::Value::from(-1.0),
+            rmpv::Value::Nil,
+        ] {
+            assert_eq!(l.observe(&beat_up("jv-ears", bad.clone())), None, "{bad:?}");
+        }
+        let line = l.observe(&up("jv-ears", 2.0)).expect("a line");
+        assert!(line.contains("1x (was up >=400.0s)"), "the last GOOD frame is the one compared: {line}");
+    }
+
+    #[test]
+    fn a_heartbeat_this_binary_may_not_read_moves_nothing() {
+        // The gate is `trust_health`, the one `jv health --check` uses, so
+        // the two commands cannot come to believe different frames. Every
+        // refusal here can only LOSE a death and can never invent one: a
+        // smaller `uptime_s` is the only evidence there is, and a frame
+        // never read cannot make a number go backwards.
+        let good = map(&[
+            ("service", rmpv::Value::from("jv-ears")),
+            ("state", rmpv::Value::from("ok")),
+            ("uptime_s", rmpv::Value::from(1.0)),
+            ("period_s", rmpv::Value::from(5.0)),
+        ]);
+        let named = |service: &str, state: &str, period: rmpv::Value| {
+            map(&[
+                ("service", rmpv::Value::from(service)),
+                ("state", rmpv::Value::from(state)),
+                ("uptime_s", rmpv::Value::from(1.0)),
+                ("period_s", period),
+            ])
+        };
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 400.0));
+        for junk in [
+            beat_body("jv-ears", 100.0, 0.9, 1, good.clone()),                   // a hedged heartbeat
+            beat_body("jv-ears", 100.0, 1.0, 2, good.clone()),                   // a schema we were not written against
+            beat_body("jv-ears", 100.0, 1.0, 1, named("jv-voice", "ok", 5.0.into())), // a body naming someone else
+            beat_body("jv-ears", 100.0, 1.0, 1, named("jv-ears", "ok", "5".into())),  // a period that is not a number
+            beat_body("jv-ears", 100.0, 1.0, 1, named("jv-ears", "restarted", 5.0.into())), // a word off the frozen enum
+            beat_body("jv-ears", 100.0, 1.0, 1, rmpv::Value::Nil),               // no body at all
+        ] {
+            assert_eq!(l.observe(&junk), None, "{junk:?}");
+        }
+        let line = l.observe(&up("jv-ears", 3.0)).expect("a line");
+        assert!(line.contains(">=400.0s"), "a refused frame became the remembered life: {line}");
+    }
+
+    #[test]
+    fn a_frame_the_broker_could_not_attribute_belongs_to_no_service() {
+        let mut l = Lives::default();
+        let body = map(&[
+            ("service", rmpv::Value::from("jv-ears")),
+            ("state", rmpv::Value::from("ok")),
+            ("uptime_s", rmpv::Value::from(1.0)),
+            ("period_s", rmpv::Value::from(5.0)),
+        ]);
+        assert_eq!(l.observe(&beat_body("", 100.0, 1.0, 1, body)), None);
+        assert_eq!(l.observe(&rmpv::Value::Nil), None);
+        // And a frame that agrees with itself that it came from nobody, which
+        // `trust_health` would otherwise let straight through: the broker
+        // refuses an envelope with no `src`, so this is unreachable from a
+        // real bus — and a frame that cannot be attributed must not be
+        // attributed to a service whose name this reader made up.
+        let anonymous = map(&[
+            ("service", rmpv::Value::from("")),
+            ("state", rmpv::Value::from("ok")),
+            ("uptime_s", rmpv::Value::from(1.0)),
+            ("period_s", rmpv::Value::from(5.0)),
+        ]);
+        assert_eq!(l.observe(&beat_body("", 100.0, 1.0, 1, anonymous)), None);
+        assert_eq!(l.watching(), 0, "a service name was invented for an unattributable frame");
+    }
+
+    #[test]
+    fn the_roster_is_bounded_so_a_tap_left_running_cannot_grow() {
+        // Bounded because `src` is a string off the wire and `jv tap` is
+        // meant to be left running for hours. Past the cap a new name is not
+        // ADMITTED — the opposite of what `Confirmations` does with its
+        // oldest, and for a reason: there the newest question is the one
+        // somebody is waiting on, here the oldest service is the one whose
+        // history is worth the most, and evicting it would silently restart
+        // its tally at zero.
+        let mut l = Lives::with_capacity(4);
+        for n in 0..64 {
+            assert_eq!(l.observe(&up(&format!("svc-{n}"), 100.0)), None);
+        }
+        assert_eq!(l.watching(), 4);
+        for n in 0..4 {
+            let line = l.observe(&up(&format!("svc-{n}"), 1.0)).expect("the admitted still report");
+            assert!(line.contains(&format!("svc-{n}")), "{line}");
+        }
+        assert_eq!(l.observe(&up("svc-9", 1.0)), None, "a name never admitted says nothing");
+        assert_eq!(l.watching(), 4, "and still does not get in");
+        // A cap of nothing is a working reader, not a spin.
+        let mut l = Lives::with_capacity(0);
+        l.observe(&up("jv-ears", 9.0));
+        assert!(l.observe(&up("jv-ears", 1.0)).is_some());
+    }
+
+    /// The restart line at the widest every part of it can be.
+    ///
+    /// What is enforced: the service name is capped by
+    /// `RESTART_SERVICE_COLUMNS`. What is ASSUMED, said out loud: six digits
+    /// of tally and eight of uptime. A service crashing every 8 s reaches six
+    /// figures after nine days of one tap running, and 99999999.9 s is three
+    /// years of uptime — both are past absurd, and this test is what notices
+    /// if the line ever stops fitting.
+    #[test]
+    fn the_restart_line_fits_eighty_columns() {
+        let line = restart_line(&"s".repeat(120), 999_999, 99_999_999.9);
+        let w = line.chars().count() + ">>> ".len();
+        assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+        assert!(w >= 50, "{w} columns is not a worst case: {line}");
+        assert!(line.contains(&("s".repeat(RESTART_SERVICE_COLUMNS - 3) + "...")), "the name is not clipped: {line}");
+        // A name that already fits is never made longer by being clipped.
+        assert!(restart_line("jv-ears", 1, 8.2).contains("restart jv-ears: 1x"));
+    }
+
+    #[test]
+    fn the_tally_is_spelled_the_way_the_hud_spells_the_same_fact() {
+        // `HealthPlate` draws `jv-ears RESTARTED 3x`. One fact, one notation,
+        // whichever of the two a human is looking at.
+        assert!(restart_line("jv-ears", 3, 8.2).contains("3x"));
+        // And `>=`, because what died is only known to have REACHED the last
+        // uptime it heartbeated — it may have lived up to a period longer
+        // before it went. The same distinction `SayGauge` draws between a
+        // reading and a bound.
+        assert!(restart_line("jv-ears", 3, 8.2).contains(">=8.2s"));
+    }
 }

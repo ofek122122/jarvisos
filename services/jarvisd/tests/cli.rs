@@ -1510,6 +1510,103 @@ async fn a_filter_does_not_hide_a_torn_line() {
     assert!(out.stderr.contains("could not be read"), "{}", out.stderr);
 }
 
+
+// ------------------------------------------------------------ restarts (B78)
+
+/// jv-ears as a service that keeps crashing: its uptime climbs for two beats
+/// and then starts over, which is what a heartbeat looks like when the process
+/// behind it was replaced. `pump_as` cannot serve — the frames differ from one
+/// another, and that difference is the whole of the evidence.
+fn pump_crash_loop(bus: &TestBus, lives: &'static [f64]) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut c = BusClient::connect(&addr, "jv-ears").await.expect("pump connect");
+        loop {
+            for uptime in lives {
+                let beat = body(&[
+                    ("service", "jv-ears".into()),
+                    ("state", "ok".into()),
+                    ("uptime_s", (*uptime).into()),
+                    ("period_s", 5.0.into()),
+                ]);
+                if c.publish("sys.health", 1.0, 1, beat).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_service_that_died_and_came_back_is_a_line_the_frames_do_not_carry() {
+    let bus = start(silent_broker()).await;
+    // Two beats of one life, then a process that starts over. Nothing on the
+    // wire says "restarted" — only the number going backwards does.
+    let p = pump_crash_loop(&bus, &[4.1, 8.2, 0.3]);
+
+    // No `--latency`: the plain tap prints every frame as JSON, so this also
+    // proves the line is not merely the frames restated.
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--for", "1.0"]), 8.0).await;
+    p.abort();
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    let lines: Vec<&str> = out.stdout.lines().filter(|l| l.starts_with(">>> restart ")).collect();
+    assert!(!lines.is_empty(), "no restart was reported:\n{}", out.stdout);
+    // The service, the tally, and the life that ended — the last of which is a
+    // LOWER bound, because the dead process is only known to have reached the
+    // uptime it last heartbeated.
+    assert!(lines[0].starts_with(">>> restart jv-ears: 1x (was up >=8.2s)"), "{:?}", lines[0]);
+    // The word is on no frame. If it were, the JSON lines would carry it too.
+    assert!(
+        !out.stdout.lines().any(|l| l.starts_with('{') && l.contains("restart")),
+        "the bus said it, so the tap did not have to:\n{}",
+        out.stdout
+    );
+    // It keeps counting: the fixture crashes three times a second, and the
+    // second death is 2x rather than 1x again.
+    assert!(lines.len() >= 2, "only one death in a second of crash looping:\n{}", out.stdout);
+    assert!(lines[1].contains(" 2x "), "the tally did not rise: {:?}", lines[1]);
+    every_reported_line_fits(&out);
+}
+
+/// jv-ears as a service that simply keeps running: an uptime that only ever
+/// rises, and that repeats each value once — the same number twice is what a
+/// coarse clock produces, and it is not a death.
+fn pump_living_service(bus: &TestBus) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut c = BusClient::connect(&addr, "jv-ears").await.expect("pump connect");
+        for n in 0.. {
+            let beat = body(&[
+                ("service", "jv-ears".into()),
+                ("state", "ok".into()),
+                ("uptime_s", (400.0 + (n / 2) as f64).into()),
+                ("period_s", 5.0.into()),
+            ]);
+            if c.publish("sys.health", 1.0, 1, beat).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_service_that_merely_keeps_running_is_reported_as_nothing() {
+    let bus = start(silent_broker()).await;
+    // The control for the test above.
+    let p = pump_living_service(&bus);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--for", "1.0"]), 8.0).await;
+    p.abort();
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    assert!(out.stdout.contains("sys.health"), "the tap heard nothing at all:\n{}", out.stdout);
+    let lines: Vec<&str> = out.stdout.lines().filter(|l| l.starts_with(">>> restart ")).collect();
+    assert!(lines.is_empty(), "a living process was reported dead: {lines:?}");
+}
+
 // ---------------------------------------------------------------- confirm
 //
 // `jv confirm` is the one CLI path that can cause a real action to happen —
