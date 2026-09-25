@@ -75,6 +75,72 @@ def test_every_committed_session_is_anchored_to_the_sample_clock(name):
     assert all(f["ts"] >= 0.0 for f in sess.frames)
 
 
+@pytest.mark.parametrize("name", [n for n in NAMES if n != "speech-no-wake"])
+def test_the_words_arrive_after_the_turn_ends_and_not_with_it(name):
+    """The ASR is not free, and a recording that says it is teaches every
+    suite built on it to believe that (PLAN A58).
+
+    jv-ears publishes the final from inside `_on_speech_end`, right after
+    `asr.transcribe()` returns — so on the bus it lands however long the
+    transcribe took after the `speech_end` beside it. The sample clock
+    cannot see that (it counts samples, and none are consumed while
+    whisper runs), so the recorded gap used to be exactly zero: the one
+    number that distinguishes "the turn ended" from "the words arrived".
+    A HUD bug about precisely that gap (A57) survived five suites built on
+    these files for that reason, and this is the assertion that keeps the
+    hole closed. `generate_sessions.ASR_LATENCY_S` is the declared model,
+    measured on ares (PHASE1-STATUS.md).
+    """
+    import generate_sessions
+
+    sess = load(name)
+    ends = [f for f in sess.frames
+            if f["topic"] == "audio.vad" and f["body"]["event"] == "speech_end"]
+    finals = [f for f in sess.frames
+              if f["topic"] == "audio.transcript" and f["body"]["kind"] == "final"]
+    assert len(ends) == 1 and len(finals) == 1
+    gap = finals[0]["ts"] - ends[0]["ts"]
+    assert gap == pytest.approx(generate_sessions.ASR_LATENCY_S), (
+        f"{name}: the recorded ASR takes {gap:.3f} s, not the declared "
+        f"{generate_sessions.ASR_LATENCY_S} s")
+    assert gap > 0, "an instantaneous ASR is the thing this file is about"
+
+
+@pytest.mark.parametrize("name", [n for n in NAMES if n != "speech-no-wake"])
+def test_a_provisional_sentence_is_stamped_while_the_utterance_is_still_open(name):
+    """The other half of A58's rule, and the half nothing else can check
+    without the weights.
+
+    A partial is published from inside `feed()` while `_in_speech` is
+    still true — the pipeline is one thread and the transcribe is inline,
+    so a partial reaches the bus before the chunk that ends the utterance
+    is finished with. Every partial therefore precedes the `speech_end`,
+    and a delay applied to the wrong frames (partials as well as finals)
+    shows up right here instead of only on a machine with ~1 GB of ONNX
+    installed.
+    """
+    sess = load(name)
+    (end,) = [f for f in sess.frames
+              if f["topic"] == "audio.vad" and f["body"]["event"] == "speech_end"]
+    partials = [f for f in sess.frames
+                if f["topic"] == "audio.transcript" and f["body"]["kind"] == "partial"]
+    assert partials, f"{name} has no partials, so this proves nothing"
+    for f in partials:
+        assert f["ts"] < end["ts"], (
+            f"{name}: a provisional sentence is stamped at {f['ts']}, after the "
+            f"utterance closed at {end['ts']}")
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_a_recording_is_in_the_order_a_replay_will_read_it(name):
+    """`replay.py` sleeps the delta between consecutive LINES, clamped at
+    zero, so a frame written out of time order would replay with its gap
+    silently lost. Cheap to state, and only stayed true by accident until
+    the finals moved."""
+    times = [f["ts"] for f in load(name).frames]
+    assert times == sorted(times), f"{name}: file order is not time order"
+
+
 def test_every_source_wav_has_a_session_and_the_reverse():
     """A WAV added without re-recording, or a session left behind after its
     WAV went away, is a hole in the coverage nobody would notice."""

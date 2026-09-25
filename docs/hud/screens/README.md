@@ -8,7 +8,7 @@ and commit the diff.
 
 This is the companion to [`../README.md`](../README.md), and the two
 answer opposite questions. That sheet renders the plates with a plain QML
-engine into the 300x560 rectangle the surface declares: the HUD's
+engine into the 300x826 rectangle the surface declares: the HUD's
 **content**, at a size you can read, and it has to disclaim everything a
 compositor owns. These are **screens** — the whole desktop, all three of
 them, with the HUD where it actually lands on it.
@@ -28,6 +28,20 @@ and `DP-1`/`DP-2`. Nothing here can tell you whether an 11 px label is
 comfortable from where you actually sit — only how much of the screen it
 takes and where.
 
+One thing that used to be not real here is **age**. The surface these
+plates are drawn into grew five times over five plates while the PNGs sat
+still, and for most of a hundred iterations a paragraph in this spot
+existed to say so, with both numbers derived rather than typed so that it
+could not itself go stale. It is gone because what it described is gone:
+every screen below is the HUD the harness photographs today, and the
+notice was written to be **retired** by that rather than updated.
+
+What keeps it that way is not a promise. Every run re-takes all of these
+and compares each one against the bytes committed here, under the measured
+floor described below; a picture that had stopped being the HUD would end
+the run nonzero and name itself, rather than sitting in this directory
+looking as finished as the others (B74).
+
 The desktop behind the HUD is flat `#31353B`, deliberately **not** a
 `personality/theme.toml` colour, so the paper can never be mistaken for
 Jarvis's own palette. Without something behind it the plates' `0.86`
@@ -45,7 +59,7 @@ the run — no PNGs — unless all of the following hold, none of which any
 QML engine can answer:
 
 - **The HUD is on every monitor, in the corner it claims.** Everything
-  drawn on each output falls inside the 300x560 box `shell.qml` anchors to
+  drawn on each output falls inside the 300x826 box `shell.qml` anchors to
   the top-right, and the gap to the right edge is `inset_px`. *Verified it
   bites: anchoring the surface `left` instead of `right` fails; making one
   surface instead of one per screen fails.*
@@ -65,7 +79,7 @@ QML engine can answer:
   monitor to hold the keyboard, and three points are clicked: one clear of
   the HUD (the control — without it a harness whose clicks went nowhere
   would report a perfect pass-through), one on a pixel the HUD actually
-  painted, and one inside the 300x560 surface box that it painted nothing
+  painted, and one inside the 300x826 surface box that it painted nothing
   on. All three must end with the keyboard on the window under the HUD.
   *Verified: deleting `mask: Region {}` fails on the painted pixel; a mask
   covering only the lower, unpainted half of the box passes that one and
@@ -333,12 +347,27 @@ are worth stating because a journal entry has already read a clean
 `git status` here as evidence that nothing moved (A45). Re-running this
 harness against an untouched `shell/jv-hud` changes `02-heard` and
 `03-confirm` by a **handful of pixels per monitor** — single values, one
-channel, on antialiased glyph edges inside the plate. Over three runs,
-`01-quiet` (which draws nothing) and `04-unheard` (two short monospace
-labels) came back byte for byte every time, and the two shots carrying a
-long wrapped sentence never did. So a dirty `git status` after a
-re-run is not a regression and a clean one is not a pass. Look at the
-picture; the measurements above are what the run actually asserts.
+channel, on antialiased glyph edges inside the plate and on the plate's
+own rounded corner. Over four renders compared six ways, `01-quiet`
+(which draws nothing) and `04-unheard` (two short monospace labels) came
+back byte for byte every time, and the two shots carrying a long wrapped
+sentence never did: 3 to 111 pixels, never more than 3 per channel, and
+never more than 1 between two renders taken back to back.
+
+**These screens are compared anyway** (B74). The run reads every picture
+it just took against the one committed in git, through the same
+`tools/hudsheet.py` the contact sheet uses — with a floor under it, of
+**256 px** per screen and **3 per channel**, which is the measurement
+above with a little room and nowhere near what a plate can say. §06's
+quietest ink sits more than a hundred values from the glass it is drawn
+on, so every word, colour and box the HUD can change is two orders of
+magnitude above this floor; what the floor cannot see is a glyph landing
+a fraction of a pixel over, which is the thing it is made of. A screen
+that only moved by that much is **restored to its committed bytes**, so
+a run that changed nothing leaves a clean tree — and a dirty `git status`
+here now means the HUD really did draw something else. Look at it, and
+commit it. A run that finds a real change ends nonzero and names the
+screens that moved.
 
 ---
 
@@ -428,3 +457,62 @@ confident statement about the wrong mixer.
 The mic plate is absent, and that is the honest picture: nothing on this
 bus published `jv-ears`' counters, and invariant 10's recording light is
 not drawn on a guess.
+
+### 05-preempted-primary.png
+
+![PREEMPTED, alone in the corner of the 1440p monitor](05-preempted-primary.png)
+
+**Composed** — nothing committed has recorded jv-voice preempting its own
+sentence. One frame, one plate, one word, on the primary: `speech.state`
+with `state: interrupted` and `reason: preempted`, which is the body
+`services/jv-voice` publishes when an **urgent** utterance arrives while an
+interruptible one is being spoken. The rest of that turn is dropped, not
+resumed.
+
+The word is the whole picture. Until B91 every stopped sentence reached
+this plate as **INTERRUPTED**, which is true of both of the ways a sentence
+can stop and tells you nothing about which one happened — you talking over
+Jarvis, or Jarvis talking over itself. **PREEMPTED** is the second one, and
+it is the one you did not do: the only evidence that something you never
+asked for took the floor. Everything else in the corner is dark, because
+nothing else in this HUD reads a `reason`.
+
+**And you would never catch it.** jv-voice publishes `idle` in the
+statement straight after this one, with nothing awaited in between, and
+`idle` draws nothing at all — so what is photographed here is on screen for
+as long as it takes one frame to follow another over a Unix socket. That is
+true of INTERRUPTED too, and has been since the plate was built; this is
+the first place in the repo that says so. Whether a word nobody can read is
+worth drawing is a question for a human (PLAN B94), and it is a better
+question with a picture attached.
+
+### 06-lossy-primary.png
+
+![MIC LOSING AUDIO, with jv-ears DEGRADED under it, on the 1440p monitor](06-lossy-primary.png)
+
+**Composed** — nothing committed has recorded a microphone dropping
+chunks. The first photograph in this repo of the recording light saying
+anything but a bare **MIC**. The device is open and audio is arriving on
+time; what is wrong is that some of it never got here — `jv-ears`' hand-off
+queue overflowed, or the device discarded input before `jv-ears` ran — and
+every gauge the confident reading is built on stays perfectly fresh through
+that. Without a word of its own, this recording would look exactly like the
+one in [`03-confirm-primary`](#03-confirm-primarypng), which really is
+keeping all of it: the same plate, the same **teal** dot, the same three
+letters. (An anchor rather than the file name, because every PNG in this
+directory is shown in exactly one section and a gate says so.) Here the dot is `warn` and the line is **MIC LOSING AUDIO** (A84).
+
+**Both lines come from one heartbeat**, and that is the other half of what
+this picture is for. `jv-ears DEGRADED` is not a second service agreeing —
+it is the same `sys.health` frame read by a second element, because
+`CaptureMeter.health()` calls a losing device degraded in the beat that
+reports the loss. Every other two-plate picture in this sheet needs two
+publishers; these two cannot be photographed apart, and the corner shows
+the fault and who owns it in one arrival.
+
+What the picture cannot show is how much was lost or by whom. That is in
+the heartbeat's `notes` — *"microphone losing audio: jv-ears dropped 0.4s
+and 1 device overrun (length unknown) since start"*, both culprits named
+separately because they send you to different places — and `HealthPlate`
+draws the service and the word and nothing else. The HUD tells you the
+recording has holes in it; `journalctl -u jv-ears` tells you whose.

@@ -24,10 +24,23 @@ from typing import Optional, Protocol
 from jarvis_bus import BusClient
 
 from .fingerprint import fingerprint, silent_args
-from .prefix import bwrap_args, create_prefix_layout
+from .prefix import (
+    bwrap_args,
+    create_prefix_layout,
+    grant_problems,
+    sandbox_installer_path,
+)
 from .recipes import Recipe, find_recipe, load_recipes
 
-VERDICT_TIMEOUT_S = 60.0
+# How long we wait for jv-guard's verdict before failing closed. It must
+# OUTLAST jv-guard's own worst case, because the screening we give up on is
+# still running: ClamAVScanner gives clamscan 120 s, and a verdict published
+# after we stopped listening is a clean binary refused with "screening
+# unavailable" while the engine that cleared it was working the whole time.
+# The slack on top covers the re-hash of a large installer and jv-guard's
+# 0.1 s poll of `compat.install`. Pinned against that number by
+# `test_the_wait_for_a_verdict_outlasts_the_scan_it_is_waiting_for`.
+VERDICT_TIMEOUT_S = 180.0
 
 
 def sha256_file(path: Path) -> str:
@@ -149,14 +162,37 @@ class Installer:
         recipe = find_recipe(self.recipes, sha, fp.installer) or Recipe(
             app=app, match_sha256=[], match_installer=fp.installer
         )
+
+        # Can this machine honour what the recipe grants? A grant naming a
+        # folder the user does not have aborts bwrap (it resolves bind sources
+        # on the host), and a malformed one raised out of `bwrap_args` with no
+        # terminal frame published at all. Both are known now, before a prefix
+        # exists, so both are a REFUSAL: `blocked` is already the word for
+        # "jv-compat will not install this" — fail-closed uses it for its own
+        # reason and not the guard's — and `failed` would claim an installer
+        # ran. PLAN B65.
+        if problems := grant_problems(recipe):
+            await self._event(
+                "blocked", app, sha, recipe=recipe.app,
+                error="recipe cannot be honoured on this machine: "
+                + "; ".join(problems),
+            )
+            return "blocked"
+
         prefix = create_prefix_layout(recipe.app or app)
         await self._event("prefix_created", app, sha, recipe=recipe.app)
 
+        # The inner command names the installer where the SANDBOX sees it,
+        # not where this machine keeps it: the confinement binds the file in
+        # read-only and nothing else of the directory it came from. Handing
+        # wine the host path was handing it a path to a file that is not
+        # there (PLAN B63).
+        inside = str(sandbox_installer_path(path))
         if fp.installer == "msi":
-            inner = ["msiexec", "/i", str(path), *silent_args("msi"), *recipe.extra_args]
+            inner = ["msiexec", "/i", inside, *silent_args("msi"), *recipe.extra_args]
         else:
-            inner = ["wine", str(path), *silent_args(fp.installer), *recipe.extra_args]
-        argv = bwrap_args(recipe, prefix, inner)
+            inner = ["wine", inside, *silent_args(fp.installer), *recipe.extra_args]
+        argv = bwrap_args(recipe, prefix, inner, installer=path)
         ok, detail = await self.runner.install(argv)
         if ok:
             await self._event("installed", app, sha, recipe=recipe.app)

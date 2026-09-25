@@ -56,6 +56,11 @@ Item {
   // ConfirmPlate, because it is the same box.
   property int maxTextPx: 240
 
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "action"
+
   // On screen exactly while the last action is a failure nobody has
   // explained yet.
   readonly property bool shown: root.action.failed

@@ -51,6 +51,11 @@ Item {
   // Two lines of explanation. Past that it is a log entry, not a glance.
   property int maxLines: 2
 
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "link"
+
   // On screen exactly while the HUD cannot vouch for anything below it.
   readonly property bool shown: root.link.blind
 

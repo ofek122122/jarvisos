@@ -18,6 +18,11 @@
 //     brain is actually going to answer is outstanding, it must yield to
 //     whatever jv-voice says is audible right now, and it must end — on
 //     the reply, on the first spoken word, or on its own.
+//   · "preempted" (B91) is the one thing the frame's `reason` is read
+//     for: Jarvis cutting its own sentence short for something urgent,
+//     which is not the user interrupting it. Every other reason — and
+//     every reason we cannot read — stays "interrupted", which is true
+//     of all of them.
 //
 // Everything runs headless (see tst_busmodel.qml): SpeechState is pure
 // QtQuick and reads the bus through core/BusModel, which the test drives
@@ -97,10 +102,17 @@ TestCase {
 
   property int seq: 1
 
-  function speech(voice, state, over) {
-    send(voice, "speech.state", {
+  // `body` for the rest of the frame — `reason`, which the element reads
+  // now (B91) — and `over` for the envelope, same shape as the helpers
+  // below. It used to take `over` in the third slot, which quietly put a
+  // `reason` where nothing reads one.
+  function speech(voice, state, body, over) {
+    let b = {
       "state": state
-    }, over);
+    };
+    for (const k in body || {})
+      b[k] = body[k];
+    send(voice, "speech.state", b, over);
   }
 
   function wake(voice, body, over) {
@@ -230,6 +242,155 @@ TestCase {
     const voice = makeVoice();
     speech(voice, "thinking");
     compare(voice.state, "unknown");
+  }
+
+  // --- which of the two of you stopped the sentence (B91) -------------
+
+  // `speech.state` carries a `reason` on the way out of `speaking`, and
+  // until now this element read the `state` word and threw the rest away:
+  // "you stopped me" and "I stopped myself to say something more urgent"
+  // both reached the screen as INTERRUPTED. `jv tap` already tells them
+  // apart, which made the HUD the less legible of two readers of one
+  // topic. Only `preempted` earns the extra word; everything else is
+  // INTERRUPTED, which stays true of all of them.
+
+  function test_jarvis_stopping_itself_for_something_urgent_is_preempted() {
+    // jv-voice preempts an interruptible utterance when an `urgent`
+    // speech.say arrives: the rest of that turn is dropped and the urgent
+    // one is spoken instead. Nobody in the room interrupted anything.
+    const voice = makeVoice();
+    speech(voice, "speaking");
+    suite.fakeNow += 0.4;
+    speech(voice, "interrupted", {
+      "reason": "preempted"
+    });
+    compare(voice.state, "preempted");
+    verify(voice.known);
+    verify(!voice.active, "Jarvis stopping itself is not an accent-worthy state");
+    verify(!voice.idle);
+  }
+
+  function test_the_user_stopping_jarvis_is_still_interrupted() {
+    const voice = makeVoice();
+    speech(voice, "speaking");
+    suite.fakeNow += 0.4;
+    speech(voice, "interrupted", {
+      "reason": "wake"
+    });
+    compare(voice.state, "interrupted");
+  }
+
+  function test_an_interruption_we_cannot_attribute_reads_as_interrupted_data() {
+    // Every one of these is an utterance that stopped, so the word for all
+    // of them is the one that says only that. Guessing which of you did it
+    // would be an invention, and the interesting direction is the one this
+    // element always errs in: claim less, not more.
+    return [
+      {
+        tag: "no reason at all",
+        extra: {}
+      },
+      {
+        tag: "an empty reason",
+        extra: {
+          "reason": ""
+        }
+      },
+      {
+        tag: "a reason that is not a string",
+        extra: {
+          "reason": 3
+        }
+      },
+      {
+        tag: "a reason a later schema added",
+        extra: {
+          "reason": "timeout"
+        }
+      },
+      {
+        tag: "a reason that contradicts the state",
+        extra: {
+          "reason": "completed"
+        }
+      }
+    ];
+  }
+
+  function test_an_interruption_we_cannot_attribute_reads_as_interrupted(data) {
+    const voice = makeVoice();
+    speech(voice, "speaking");
+    suite.fakeNow += 0.4;
+    speech(voice, "interrupted", data.extra);
+    compare(voice.state, "interrupted");
+  }
+
+  function test_a_reason_on_any_other_state_changes_nothing_data() {
+    // The reason describes the utterance that ENDED, so jv-voice stamps it
+    // on the idle that follows an error too. `idle` draws nothing, and it
+    // must keep drawing nothing: a failed reply is HealthPlate's sentence,
+    // not a fifth word on this plate.
+    return [
+      {
+        tag: "an error on the way to idle",
+        state: "idle",
+        reason: "error",
+        want: "idle"
+      },
+      {
+        tag: "a turn that finished",
+        state: "idle",
+        reason: "completed",
+        want: "idle"
+      },
+      {
+        tag: "a reason riding a speaking frame",
+        state: "speaking",
+        reason: "preempted",
+        want: "speaking"
+      }
+    ];
+  }
+
+  function test_a_reason_on_any_other_state_changes_nothing(data) {
+    const voice = makeVoice();
+    speech(voice, data.state, {
+      "reason": data.reason
+    });
+    compare(voice.state, data.want);
+  }
+
+  function test_preempted_still_gives_way_to_the_open_microphone() {
+    // The microphone claim outranks every word in this file, and a wake
+    // that is still open means the user is talking right now — whatever
+    // jv-voice stopped saying and whichever of them stopped it.
+    const voice = makeVoice();
+    speech(voice, "speaking");
+    suite.fakeNow += 1;
+    wake(voice);
+    suite.fakeNow += 0.2;
+    speech(voice, "interrupted", {
+      "reason": "preempted"
+    });
+    compare(voice.state, "listening");
+  }
+
+  function test_preempted_is_a_moment_and_the_urgent_words_follow_it() {
+    // jv-voice publishes interrupted, then idle, then the urgent utterance.
+    // The plate must let go of the word the same way it does for a barge-in.
+    const voice = makeVoice();
+    speech(voice, "speaking");
+    suite.fakeNow += 0.4;
+    speech(voice, "interrupted", {
+      "reason": "preempted"
+    });
+    compare(voice.state, "preempted");
+    suite.fakeNow += 0.1;
+    speech(voice, "idle");
+    compare(voice.state, "idle");
+    suite.fakeNow += 0.1;
+    speech(voice, "speaking");
+    compare(voice.state, "speaking");
   }
 
   function test_active_is_only_true_while_jarvis_is_doing_something_data() {
@@ -414,7 +575,7 @@ TestCase {
     const voice = makeVoice();
     speech(voice, "idle");
     compare(voice.state, "idle");
-    speech(voice, "speaking", {
+    speech(voice, "speaking", {}, {
       "ts": "soon"
     });
     compare(voice.state, "unknown", "a frame we cannot order is a frame we cannot use");
@@ -992,7 +1153,7 @@ TestCase {
     const voice = makeVoice();
     speech(voice, "idle");
     if (data.topic === "speech.state") {
-      speech(voice, "speaking", {
+      speech(voice, "speaking", {}, {
         "v": 2
       });
       compare(voice.state, "unknown", "v2 bodies are not v1 bodies");
@@ -1008,7 +1169,7 @@ TestCase {
     // speech.state is a state topic: the envelope schema fixes its conf at
     // 1.0. Something less than certain is not something to render.
     const voice = makeVoice();
-    speech(voice, "speaking", {
+    speech(voice, "speaking", {}, {
       "conf": 0.5
     });
     compare(voice.state, "unknown");

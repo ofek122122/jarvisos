@@ -62,6 +62,11 @@ Item {
   // better copy anyway.
   property int maxLines: 3
 
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "heard"
+
   // On screen exactly while the words are still the live question.
   readonly property bool shown: root.heard.heard
 

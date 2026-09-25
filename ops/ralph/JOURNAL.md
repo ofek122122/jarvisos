@@ -4384,3 +4384,6794 @@ for `detail` on the result.
   `modules/jarvis-services.nix`) is still the smallest untouched item on
   the board. B20 and B17 are still both waiting on the same two minutes
   of a human's attention at a terminal.
+
+## 2026-09-24 — iteration 44 — A51: the machine gets a face for the one
+## time it says no to you
+
+Two things in this entry, and the second one is bookkeeping the previous
+iteration owed and did not pay.
+
+**A46 was built, verified and committed in iteration 43 (61f26a4) and
+never journalled, never marked done in PLAN.md, and never pushed.** The
+loop's own memory is this repository, so an undocumented commit is a
+thing that happened to a machine nobody can ask about later. The work
+itself is sound and its verification is recorded in the commit message:
+`jarvis.voice.outputDevice` is the repo's first NixOS option, the module
+grew an `options`/`config` split to hold it, the empty string is refused
+by an assertion because jv-voice reads an empty variable as "no device",
+and `ops/ralph/nixtest.sh` is new machinery — seven cases, each one a
+`nix eval` of an `extendModules`-overridden ares that greps the GENERATED
+UNIT TEXT, so no case can pass because of how an option happens to be
+expressed. Four mutations were run through it. The toplevel derivation
+path was unchanged from its parent commit, which is the strongest thing
+that can be said about a knob with a null default: it adds an option to
+ares and not a byte to what ares would boot. PLAN.md marks it done below;
+nothing about it was re-litigated here beyond re-running the build.
+
+**A51 is the iteration's own work: the HUD can now say that this machine
+refused to run a program.** Invariant 8 — Windows binaries are untrusted
+by default, jv-guard screens every one before jv-compat builds a prefix —
+makes that screening the only moment in JarvisOS where the machine says
+NO to something its user asked for. It was the one moment with no pixels:
+a `guard.verdict` on the bus, jv-compat failing closed in a terminal, and
+a HUD showing the same empty corner it shows for a machine nobody has
+asked to install anything. jv-guard is a real system unit on ares
+(`modules/jarvis-services.nix`), so this plate is reachable today by
+running `jv-compat install` on something a scanner objects to — it is not
+a picture of a future phase.
+
+`core/GuardState.qml` decides and `GuardPlate.qml` draws BINARY BLOCKED
+in `risk` — that verdict is final — or BINARY SUSPICIOUS in `warn`,
+because the confirmation flow may still override that one, over the
+file's own name. What is NOT on it took as much deciding as what is:
+
+**No reasons.** "matched ClamAV signature Win.Trojan.Agent" is in every
+frame this element reads and on none of its pixels, because
+`schemas/guard.verdict.json` says in as many words that the reasons are
+"spoken on request". They are also the only text on this topic written by
+a scanner rather than fixed by a schema, which is exactly the line
+ActionPlate draws when it renders `execution_failed` and never jv-act's
+free-text `detail`. A glance says a file was refused and which one;
+asking why is what your voice is for.
+
+**The name is sanitised, and that is the part of this element that is not
+a copy of ActionState.** Every other string this HUD draws was chosen by
+a service (a tool name, a state word) or by the user's own mouth (the
+transcript). A file name was chosen by whoever built the installer, which
+invariant 8 says outright is untrusted — and a Linux file name may carry
+newlines (a plate three lines tall on a surface that floats over every
+window), a bidirectional override (`setup<U+202E>exe.bat` renders as
+`setup.bat` and is not), or four kilobytes of nothing. `plainName()`
+collapses whitespace FIRST — a newline is a word boundary as well as a
+control character, and stripping first would join two words its author
+separated — then removes C0/C1, the zero-width marks and the bidi
+overrides, then caps the length. A name with nothing left of it is
+reported as NO name, which falls back to the first 12 hex of the sha256,
+labelled as a hash: the identity jv-guard's own log uses and the only
+thing about a file that may ever leave this machine (invariant 7).
+
+**No spoken exit, on purpose.** ActionState lets go of a failure when
+Jarvis starts explaining it, and copying that here would have been wrong:
+a verdict is not part of a voice turn — the trigger is `jv-compat
+install` at a terminal — so a `speaking` frame landing after one is
+almost certainly about something else, and an unrelated sentence would
+take the refusal off the screen. The 30 s hold is therefore the ORDINARY
+exit here rather than a backstop, which is the one place this element
+leans on a timer where its siblings lean on a signal, and it is written
+down as such. The other two exits are the family's: a newer verdict
+(including a clean one — the element reports the LAST binary screened, so
+holding a refusal under a later screening would describe a machine that
+is not the one in front of you), and the link dropping.
+
+That last one produced the only mutation that survived the first pass.
+`refused` is gated on `linked`, so an element that merely stopped
+REPORTING on a dropped link looks identical to one that FORGETS — until
+the bridge reconnects, BusModel comes back with an empty cache, and a
+latch nobody let go of puts a verdict back on screen that nothing on the
+bus is saying any more. A test for the reconnect was written and the
+mutation dies.
+
+The surface box grew 560 → 624. Unlike LinkPlate's growth (which can
+never share the surface with anything) this one is about genuine
+co-occurrence: a refused install says nothing about whether a service is
+unwell or the microphone is open, so all of it can be on screen at once.
+Three other files carry that number — both shot harnesses and the
+sheet's README — and `tools/tests/test_hudscreens.py` pins the measuring
+one to shell.qml's binding. Also corrected while in there: shell.qml's
+"what it shows today" list had been missing `ActionPlate` since A37.
+
+- tests: `bash ops/ralph/qmltest.sh` — 476 (was 435; 41 new), with TEN
+  mutations run through them: a clean verdict reported like any other
+  (3 fail), the name drawn as its author typed it (6), the length cap
+  gone (1), a word outside the enum read as a verdict (1), a dropped link
+  that keeps the refusal (1, after the reconnect test was added — 0
+  before it, which is why it was), the hash shortened whatever it is (2),
+  the hash left in whatever case it arrived in (1), the backstop never
+  firing (4), a late frame treated as fresh (1), the envelope floor
+  dropping the schema version (3). All ten reverted.
+  `bash ops/ralph/runtests.sh tools` — 125, `... jv-hud-bridge` — 25.
+  `bash ops/ralph/hudshots.sh` — 10 shots (all rewritten at the new box
+  height; `10-guard.png` is new). `bash ops/ralph/hudscreens.sh` — 7
+  screens, every window and probe green against the REAL `.#jv-hud` that
+  now carries this plate. The six screens that moved are A45's documented
+  2-5 px glyph drift, committed because the shell genuinely changed.
+  One process note worth keeping: the first hudscreens run reported
+  nothing wrong while its `nix build .#jv-hud` had FAILED, because the
+  new files were untracked and nix builds the git tree — the failure was
+  hidden by piping the script into `tail`, which ate its exit status. Run
+  the gates unpiped, or `git add -N` first.
+- build: `nix build .#jv-hud` ok (qmllint `-W 0` and the QML suite both
+  run in its checkPhase), `nixos-rebuild build --flake .#ares` ok — twice,
+  once on the parent commit as a baseline and once on this work. Never
+  test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin.
+- files: shell/jv-hud/core/GuardState.qml (new),
+  shell/jv-hud/GuardPlate.qml (new),
+  shell/jv-hud/tests/tst_guardstate.qml (new), shell/jv-hud/shell.qml,
+  shell/jv-hud/qmldir, shell/jv-hud/core/qmldir, tools/gen_theme_qml.py,
+  tools/hudshots/scene/tst_shots.qml, tools/hudscreens/sheet.py,
+  tools/hudscreens/shoot.py, ops/ralph/hudscreens.sh,
+  services/jv-hud-bridge/jv_hud_bridge/bridge.py, docs/hud/README.md,
+  docs/hud/*.png (10), docs/hud/screens/*.png (6)
+- next: **A52** is what this element could not answer inside its own
+  scope: GuardPlate says a binary was refused and jv-compat's whole
+  lifecycle (`compat.install`) is on the bus unread, so the HUD cannot
+  say a prefix build FAILED, or that an install it showed a refusal for
+  was abandoned — and `compat.install.app` is the slug a reader would
+  recognise where the HUD currently shows a file name. One topic, one
+  element, and the same join discipline ActionState uses (`sha256` threads
+  the lifecycle to its verdict). **A53** is the mirror of A47 for this
+  plate: nothing but a human eye can tell `10-guard.png` apart from a
+  picture of `ActionPlate`, and the growth checks in the screens harness
+  would say the same thing about both.
+  A50 (a destructive tool in jv-act's registry, human review) and A47
+  (four windows that prove a plate ARRIVED and cannot say which) are
+  unchanged. B20 and B17 are still waiting on the same two minutes of a
+  human's attention at a terminal.
+
+## 2026-09-24 — iteration 45 — B19: `think` stops being one number
+
+UI was the last three iterations (A51, A49, A48), so the ladder sent this
+one to a feature. Track B is mostly drained by human-shaped blockers —
+B20/B17/B15 all want the same two minutes of a person at a terminal, B12
+wants `sys.roster`, B10 wants a live recording, B7 says explicitly not to
+publish a gauge nobody reads — and B8's premise turned out to be FALSE
+(see below). B19 was the one item whose data was already on the bus.
+
+What it is. `jv tap --latency` splits a voice turn into spoke / hold /
+hear / think, and `think` — the final transcript to the first spoken word
+— was the only span with no decomposition at all. It is also the longest
+one a user can actually hit, because a confirmation window is 15 s by
+design and sits entirely inside it. Worth being precise about why that
+matters: jv-act publishes the confirm question to `action.confirm`, which
+goes to the HUD's ConfirmPlate and is NEVER SPOKEN, and jv-brain holds its
+sentences back while a tool call is open. So the whole window lands before
+the first `speech.say` and is today indistinguishable from a slow LLM.
+
+The seam was free. jv-brain publishes `intent.action`, jv-act answers
+`action.result`, `request_id` threads the two, and the request carries the
+input `utterance_id` — no new publisher, no schema change, exactly the
+shape `hear`/`think` already had. `Utterances` grew `acted()`/`act_done()`
+and a `request_id -> utterance_id` map, which is the one structure here
+not keyed by utterance and is therefore swept when a turn is evicted.
+
+The measurement is the UNION of the round trips. Not the sum: two requests
+outstanding at once are one moment of jv-act's time, and summing could
+produce a `tool` larger than the `think` containing it. Not the bracket
+from first request to last result either: jv-brain runs a completion
+between serial calls and charging jv-act for it would be the "a number
+stops meaning its label" failure B13 was written against.
+
+Five refusals, each with a test. An unanswered request (ran for a length
+nobody can state; reporting only the answered ones would look complete
+while being short). A round trip that runs backwards, starts before the
+ASR seam, or ends after the first word — the same "two numbers that
+disagree produce no third number" rule as `spoke_ms` and `brain_split`. A
+turn whose seam is unknown, because a share of an unmeasured whole is not
+a share and the table indents `tool` under `think`. A turn past
+`ACTS_PER_TURN = 32`, which exists because the runaway tool loop is a
+filed, real failure mode (optimization backlog #5) and `jv tap` is meant
+to be left running for hours — past the cap it keeps the COUNT and loses
+the measurement, since a number we stopped taking is not a short number.
+And a frame that named nobody: `utterance_id` is optional on the schema
+(a CLI-driven action has no voice turn behind it), and an empty one is
+refused inside `acted` rather than only in the caller that unwraps the
+Option. `tool_calls` rides beside `tool_ms` throughout, because "no tool
+ran" and "a tool ran and could not be timed" both print `tool=?` and are
+not the same fact.
+
+Two things deliberately NOT done. It does not go on the `>>> turn` line,
+which is already six numbers wide and is B17's open complaint — it prints
+its own line, the same shape jv-brain's `wait`/`model` split already
+prints, so the existing line keeps its width. And there is no complementary
+"everything else" row: the remainder of a tool turn's `think` is two
+completions plus the queue plus four bus hops, and naming that one thing
+would be a label a number does not mean. Worth recording that `wait`/`model`
+and `tool` can never describe the same turn — jv-brain states the first-say
+gauge only for a first word that came straight out of the first completion.
+
+One thing found while building and fixed here: the first `tool` row label
+was 38 characters in a 31-character column, which silently shoved that
+row's three numbers out of line — a broken-looking number, not a long
+label, and exactly B17's family of complaint. The label was shortened (the
+confirm-window explanation moved to the footnote, where it has room) and
+`every_summary_row_stays_inside_the_columns_it_is_printed_in` now asserts
+every row is the header's width, which is a guard the table never had.
+
+**B8 is closed as WRONG, not done.** Its premise is that "jv-guard and
+jv-compat write their own records". They do not: nothing under
+`services/jv-guard/` or `services/jv-compat/` opens a file for writing, and
+neither has a state dir (`JARVIS_STATE_DIR` is set for one unit only).
+Both services publish and are read off the bus. There is no second caller
+for a shared record reader because there is no second record.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 106 unit + 8 bus + 38
+  integration (was 89 + 8 + 36). THIRTEEN mutations run through them, all
+  thirteen caught: the union becoming a sum, an unanswered request skipped
+  instead of refusing, the fit check dropping its bounds, the cap no longer
+  bounding the measurement, evicted turns keeping their requests (the
+  unbounded-map one), an action conjuring an utterance, `tool` computed
+  with no seam, a re-delivered request counted as a second call, the row
+  label outgrowing its column, `tool=` added to the `>>> turn` line, a
+  result joined to whatever turn is open, and the empty-id guard removed.
+  A thirteenth candidate — defaulting jv.rs's `utterance_id` Option to `""`
+  — survives and is EQUIVALENT by construction now that `acted` refuses an
+  empty id itself; that is why the guard was moved down a layer rather than
+  left in the caller.
+- build: `nix build .#jarvisd` ok (its checkPhase runs the same suite),
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin — the
+  two new topics are READ, and jv-act's own code is untouched.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs
+- next: **B21** is what this cannot do from outside jv-act: `tool` is one
+  number over a window that is mostly the human deciding, and
+  `action.confirm{kind=request}` names its own `window_s` while
+  `action.result` carries `duration_ms` — so "how much of this was waiting
+  for YOU" is another free seam, on frames already on the bus, and it is
+  the half of `tool` a faster machine could never shorten. It is `spoke`
+  one level down. **B22**: B17's complaint now has a machine-checked half.
+  `every_summary_row_stays_inside_the_columns_it_is_printed_in` proves the
+  TABLE is aligned; nothing proves the `>>> turn` line fits a terminal, and
+  it is six numbers plus an id whose length nothing bounds. A width
+  assertion against 80 columns is cheap and would turn one of B17's two
+  questions into a test.
+  B17/B20 are unchanged and still want a human at a terminal; B15 and B13
+  still want the one conversation about which span the 2.5 s budget names.
+  A52/A53/A47 and A50 are unchanged.
+
+## 2026-09-24 — iteration 46 — the HUD stops being something only a human can check
+
+Two commits, one theme: the corner of the screen had two claims about it
+that nothing but a person's eye could verify.
+
+**`GuardPlate.qml` was in the tree as a binary blob** (`88878de`). It landed
+in ecc89c5 as `Bin 0 -> 8407 bytes` — 226 lines of a surface that floats
+above every window, the one element whose job is to say this machine refused
+to run something, committed with no diff for anybody to object to. Cause:
+two bytes. The plate joins three fields into a change key and two of them
+are attacker-influenced (a file name jv-guard was handed, a hash), so it
+needs a joiner neither can contain; `\0` typed as the BYTE works perfectly
+at runtime, and git decides text-or-binary by looking for a NUL in the first
+8 kB. Written as the escape it is the same string and the file is text.
+`test_no_qml_file_is_a_file_git_calls_binary` now holds that for every
+`.qml` under shell/, tools/, pkgs/ and harness/ — the claim is that a source
+file is REVIEWABLE, which is a property of a text file and not of QML, so
+the harness stages are covered on the same terms as the shipped shell. That
+commit is itself still `Binary files differ`, because git compares both
+sides and one of them is the old blob; every diff after it is text, which
+the second commit demonstrates.
+
+Worth naming the general shape: a gate that reads a file's CONTENT (and
+almost every gate in tools/tests does) cannot tell you the file is one a
+human could have read. Nothing here was watching that, and the thing it
+missed was not subtle.
+
+**A53 — the sheet asserts its caption** (`754a49b`). `anyLit` answers the
+only question the surface needs — is anything on screen — so every external
+check could prove that SOMETHING was drawn and never what. The contact
+sheet's one per-shot assertion was that bit, and nine of ten shots answer it
+identically; three plates in this stack draw the same two lines in the same
+severity colour in the same corner (`health` lost a service, `action` failed
+a tool, `guard` refused a binary), so a harness that fed a plate something
+it refused and photographed a different plate would have gone green with a
+README that misnames its own pictures.
+
+Each plate now declares `plateName`, pinned to its own file name by a tools
+gate so it cannot drift into a confident lie, and `PlateStack` collects
+`litNames`: the plates on screen, in reading order, as the plates themselves
+report it. `anyLit` is untouched — it is what maps the surface and the only
+safety-critical answer here — and a test holds the two to agreeing in every
+case, because two implementations of one fact drift. An unaskable child
+contributes `"?"` rather than being skipped, the same fail-safe direction
+`anyLit` takes: the surface counts it as drawing, so the list must admit
+something is there.
+
+Three things that fell out of it and are worth more than the mechanism:
+
+  · `07-no-bus.png` is now checked for the argument it exists to make. It
+    expects `link` ALONE — every plate under it gates on the bus whose loss
+    it reports, so the open microphone from a second ago is gone rather than
+    left up as a stale claim about the room. That is A23's whole point and
+    it had only ever been looked at.
+  · a plate the sheet RENDERS but never LIGHTS now fails a test. The older
+    gate proved each plate is in the scene's stack, which only says it was
+    built — every plate draws nothing until a real frame gives it something,
+    so one could sit in all ten shots and appear in none. That is exactly
+    how an element gets added, rendered, committed and never looked at.
+  · `docs/hud/README.md` carries a machine-checked `**On screen:**` line per
+    shot. A reader believes the README, and prose can drift into naming the
+    wrong element.
+
+All ten expected plate lists were right on the first run, which is a weaker
+result than it sounds — so each was mutation-checked rather than accepted:
+10-guard.png expecting `action` instead of `guard` FAILS now, and passed
+before with only the picture to tell them apart.
+
+**A53 is done; A47 is narrowed, not closed.** This closes one of its five
+instances. The other four are in tools/hudscreens, which photographs the
+REAL `.#jv-hud` under a real compositor — nothing there can read a QML
+property, so `grows_from`, A42's live-lit window, A48's three idle windows
+and A49's shrink check still prove only that something arrived or left. The
+honest options there remain OCR (at 11 px, unreliable) or an IPC seam in the
+shipped shell (which stages something in production code for a test's
+benefit, and this harness's whole value is that it stages nothing). Left
+open deliberately.
+
+- tests: `bash ops/ralph/qmltest.sh` — 487 (was 476); eleven new PlateStack
+  tests, FIVE mutations run through them, all five caught: a quiet plate
+  staying in the list, reading order reversed, the unaskable child skipped
+  instead of admitted, an unnamed plate reported as `""`, a fading plate
+  dropping out. `bash ops/ralph/runtests.sh tools` — 130 (was 125); SIX more
+  mutations, all caught: the NUL byte put back, a name drifting from its
+  file, a plate declaring none, the README naming the wrong plate, a shot
+  falling back to the one-bit flag, a plate no shot lights.
+  `bash ops/ralph/hudshots.sh` — 10 shots, byte-identical to the committed
+  ones, so nothing about the look moved.
+- build: `nix build .#jv-hud` ok (qmllint + the QML suite in its checkPhase),
+  `nixos-rebuild build --flake .#ares` ok, run against BOTH commits
+  separately. Never test/switch. No schema change, no jv-act change, no boot
+  path, no NVIDIA/kernel/flake pin. The HUD is still a read-only consumer.
+- files: shell/jv-hud/GuardPlate.qml and the other eight *Plate.qml,
+  shell/jv-hud/core/PlateStack.qml, shell/jv-hud/tests/tst_platestack.qml,
+  tools/hudshots/scene/tst_shots.qml, tools/tests/test_gen_theme_qml.py,
+  tools/tests/test_hudshots.py, docs/hud/README.md
+- next: **A54** is the cheap thing `litNames` just made possible and this
+  iteration did not take: `tst_sessionreplay.qml` walks recorded sessions
+  through the whole stack and can now assert WHICH plates the HUD puts up at
+  each moment of a real turn, which is a stronger claim than any shot —
+  a shot is one settled instant, a replay is the sequence, and the sequence
+  is where a plate that arrives one frame too late or leaves one frame too
+  early would show. **A55**: the same property is what a `jv hud` subcommand
+  would print — "what is the HUD showing right now" is currently answerable
+  only by looking at the screen, and B-track has wanted a terminal view of
+  the HUD's state since B15 asked which span the 2.5 s budget names. Both
+  are additive and neither needs a human.
+  A47 is narrowed as above and still wants one decision from a human: OCR,
+  an IPC seam, or leave the four hudscreens checks saying what they say.
+  A52 is unchanged and still wants the progress-indicator decision first.
+  A50/A13/A27/A21/A22/A25/A31/A38/A39 are unchanged and still want a human
+  at ares. B21/B22/B17/B20/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 47 — A54: the corner gets watched through a whole turn
+
+Everything that has ever checked the HUD's corner checked ONE SETTLED
+INSTANT. The contact sheet takes ten of them and, since A53, asserts which
+plates each picture is of; the headless suites in `shell/jv-hud/tests` drive
+one state element at a time and assert what it decided. Between those two
+sits exactly the class of bug the corner stack can actually have: a plate
+that arrives one frame late, leaves one frame early, blinks in the middle of
+an utterance, or comes up in the wrong ORDER relative to the plate it is
+supposed to qualify. None of those is a state. Every one of them is a
+sequence, and a still picture of the settled end of a turn cannot see any of
+them.
+
+`tools/hudshots/scene/tst_sequence.qml` replays the committed recordings (B3)
+through the REAL plates and asserts the corner's whole trajectory — every
+change to `litNames` with the `ts` of the frame that caused it, which is what
+`trajectory()` in `tst_sessionreplay.qml` does for one state machine's word:
+
+    hey-jarvis-clean  (dark) -> state@1.44 -> state heard@3.76
+    hey-jarvis-music  (dark) -> state@1.44 -> state heard@4.16
+    hey-jarvis-pause  (dark) -> state@1.36 -> state heard@6.64
+    speech-no-wake    (dark)
+
+Three things that were arguments in a comment until now are facts about a
+recording in these four lines:
+
+  · the VAD opening at 0.80 s puts NOTHING on screen. Speech in the room is
+    not speech to Jarvis, and the corner is dark for the whole 0.64 s before
+    the wake word lands.
+  · `hey-jarvis-pause` holds 1.2 s of real silence inside one sentence and
+    rewrites itself seven times across it. Every one of those provisional
+    sentences was on the bus and causes ZERO extra entries. A flicker is two
+    more entries, in both directions, and there is nowhere for it to hide in
+    a string.
+  · `speech-no-wake` is a real utterance nobody addressed to Jarvis. The
+    corner is dark for every frame of it — invariant 10 as a sequence rather
+    than as a photograph.
+
+Past the strings, four claims that only a sequence can make: no recording
+may light a plate that no service in it reported (a `MicPlate` that took
+`audio.vad` for a capture counter would be a recording light lit by the room
+rather than by the device); the words are never up without the state plate
+above them, which is an ordering claim about meaning and not about layout;
+an unanswered turn empties the corner on its own; and losing the bus mid-turn
+takes every plate down BEFORE the link plate arrives — the five seconds of
+grace `07-no-bus.png` can never hold, because it settles past them.
+
+**Why motion is off in that file**, since it is the one thing that makes any
+of this measurable. A plate's `lit` is `opacity > 0`, eased over 140 ms, so
+with fades running "when did this plate arrive" is a question about how long
+the test process happened to block. The file switches on the REAL
+reduced-motion path (`Motion.policy.envOverride = "1"`, parsed in
+`core/MotionPolicy.qml`, the same thing `JV_HUD_REDUCED_MOTION=1` does on
+ares), under which `Ease` is disabled outright and every opacity is
+ASSIGNED: a plate is on screen in the same frame the bus gave it something to
+say. One test asserts that property directly, because if it ever stopped
+holding every trajectory here would silently become a measurement of this
+process's scheduling. The fades themselves are watched standing still by the
+shots (A43/A48/A49), where a duration can be looked at rather than raced.
+The restore in `cleanupTestCase` is proven by the ten shots coming out
+byte-identical: `HudSequence` runs before `HudShots`, and a sheet rendered
+with motion left off would not be the same file.
+
+**One copy of the corner, not one per driver.** The sequence replay needs the
+same nine plates in the same order the sheet does, and the sheet already held
+a copy of `shell.qml`'s stack. Two copies would have been two things to keep
+matching the shell, so the stack moved to
+`tools/hudshots/scene/Corner.qml`; both drivers build it, and the tools gate
+pins it to `shell.qml` — membership AND order, because the order IS the
+reading order both drivers assert against. A second gate fails any driver
+that declares a plate of its own again.
+
+**What this iteration deliberately did not do.** The suite runs in
+`ops/ralph/hudshots.sh` and not in `nix build .#jv-hud`. Making it a build
+gate means a second implementation of the stage (the derivation cannot run a
+script that shells out to nix), and a staging assembly that exists twice is
+one that drifts — the sheet and the gate would eventually be photographing
+and asserting different HUDs. Left as a stated choice rather than an
+oversight; A56 records it for whoever disagrees.
+
+Also found and NOT fixed here, because fixing it is a behaviour change to a
+shipped element and belongs in its own reviewed commit (A57): the two windows
+that hold this pair of plates up are pinned equal at 30 s, but they keep time
+differently. `SpeechState` expires on a frame's AGE; `HeardState` arms a
+one-shot Timer when the line arrives. The transcript arrives after the VAD
+boundary it followed, by however long the ASR took, so on ares the state
+plate lets go first and the words sit alone for that gap. Small, real, and
+invisible to every test that existed before this one.
+
+- tests: `bash ops/ralph/hudshots.sh` — 15 (was 3): twelve new sequence
+  cases, plus the 10 shots byte-identical to the committed ones. EIGHT
+  mutations run through the new suite, all caught: `HeardPlate` and
+  `StatePlate` swapped in the stack, a plate dropped from the corner,
+  `MicPlate` lit by `audio.vad`, `HeardState` accepting partials, the held
+  line not forgotten when the link drops, the motion guard switched off, the
+  state plate arriving only at `thinking`, and the thinking window never
+  closing. One mutation was NOT caught, and it is worth stating rather than
+  hiding: dropping `root.linked` from `HeardState.heard` changes nothing,
+  because `onLinkedChanged` already clears the line — that term is
+  belt-and-braces, not a second mechanism, and the suite proves the
+  mechanism that does the work.
+  `bash ops/ralph/runtests.sh tools` — 131 (was 130); TWO mutations, both
+  caught: the corner drifting from `shell.qml`, and a driver keeping its own
+  plate. `bash ops/ralph/qmltest.sh` — 487, unchanged, since nothing in
+  `shell/jv-hud` was touched.
+- build: `nix build .#jv-hud` ok (qmllint + the QML suite in its checkPhase;
+  the new files are linted by `hudshots.sh` over the stage, as the stubs
+  always have been), `nixos-rebuild build --flake .#ares` ok. Never
+  test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin, and not one line of `shell/jv-hud` changed — the
+  HUD itself is untouched and still a read-only consumer.
+- files: tools/hudshots/scene/tst_sequence.qml (new),
+  tools/hudshots/scene/Corner.qml (new), tools/hudshots/scene/tst_shots.qml,
+  tools/tests/test_hudshots.py, ops/ralph/hudshots.sh, docs/hud/README.md
+- next: **A57** is the cheapest real finding above — make `HeardState` time
+  its hold the way `SpeechState` does (a frame age, not a wall clock) so the
+  two windows that describe one turn close together, or have a human decide
+  the gap does not matter. It is a one-line change to a shipped element with
+  an existing headless suite around it, and the sequence file above is where
+  the result would show. **A28/B10** got more valuable again: every
+  trajectory here stops at `thinking` because no recording has ever contained
+  jv-voice, so the second half of a turn — the answer starting, the words
+  leaving, the ember lighting — has no recorded sequence at all. One real
+  utterance at the machine would give it one. **A55** is now half-built in
+  the sense that matters (the corner's state is a string something can
+  print), but it still wants A47's decision about an IPC seam first.
+  A47/A52/A50/A13/A27/A21/A22/A25/A31/A38/A39 unchanged and still want a
+  human at ares. B21/B22/B17/B20/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 48 — A57: the words and the word above them stop keeping different time
+
+A turn puts two plates on screen. `StatePlate` says THINKING, `HeardPlate`
+says what you said. They are the same claim about the same turn — a question
+is in flight — and a tools gate has failed the build since A26 if their two
+windows ever stopped being the same LENGTH. They were still not one window,
+because nothing checked that they started at the same INSTANT, and they did
+not: `SpeechState` times its window from the utterance's `audio.vad
+speech_end` (the frame that says a question is in flight), while `HeardState`
+armed its hold when the TRANSCRIPT reached it, which is however long
+faster-whisper took after that boundary. Two 30 s windows, one starting later
+than the other, so on ares the state plate lets go first and the transcript
+sits there alone for the length of the ASR — words with nothing above them
+saying why they are still up. Found in A54 and deliberately left for its own
+commit, because it is a behaviour change to a shipped element.
+
+`HeardState` now has an `anchor`: the `speech_end` of the utterance those
+words belong to when it saw one, and the transcript itself otherwise. The two
+frames are matchable because `utterance_id` is minted at speech_start and
+threaded through both topics, which is the only reason this was cheap. Four
+rules keep the new reading from ever costing the reader anything — it decides
+WHEN the line goes, never WHETHER it is shown, so every refusal falls back to
+exactly what shipped before: only `speech_end` (a speech_start is where the
+utterance began, and timing from it would subtract the length of the sentence
+as well as the ASR), only a frame whose `conf` agrees with its own state
+topic, only an id that matches, and never a boundary stamped AFTER the final
+it supposedly preceded — that pair cannot be ordered, and using the later of
+the two would LENGTHEN the hold, which is the one direction this window may
+not err in. The boundary is latched (ears' VAD runs continuously, so the next
+sound in the room replaces it on `bus.latest`) and dropped with everything
+else when the link goes down.
+
+**What this iteration could not do, and it is the finding worth keeping.** No
+recording can show this bug. `harness/fixtures/sessions/generate_sessions.py`
+stamps each final at the SAME `ts` as the speech_end before it, so in all
+four replays the ASR is instantaneous, both anchors are the same number, and
+every suite built on those recordings — tst_sessionreplay, the shot sheet,
+A54's sequence suite — is structurally blind to the one number this is about.
+That is why it survived five suites, and it is why the proof here is a paired
+headless test (two real elements, one BusModel, real timers) rather than a
+picture: the 10 shots came out byte-identical, as expected. A58 records the
+fix — an ASR delay in the generator — and why it is its own commit: it means
+regenerating the four recordings that the contact sheet asserts byte-for-byte
+and that tst_sessionreplay pins real numbers out of.
+
+Also removed one guard rather than shipping it untested: an `utterance_id`
+type/length check in the frame reader that no mutation could distinguish from
+the id comparison next to it, because a boundary carrying no id already fails
+that comparison. One rule, one mechanism. And corrected the plate table in
+`shell/jv-hud/README.md`, which still said eight plates and had never listed
+`GuardPlate` (A51).
+
+- tests: `bash ops/ralph/qmltest.sh` — 495 (was 487): eight new cases, the
+  last of which puts a real `SpeechState` and a real `HeardState` on one bus
+  with 0.5 s windows and 400 ms of ASR, and fails if the words outlive the
+  word above them. NINE mutations run through the suite, all caught: the hold
+  timed from the transcript again (the bug itself, caught by three tests),
+  any boundary accepted regardless of utterance, a speech_start read as an
+  end, every vad event read as an end, a boundary newer than the words
+  accepted, a boundary that doubts its own `conf` accepted, the boundary
+  surviving a dropped link, and nothing re-arming when the anchor changes.
+  `bash ops/ralph/runtests.sh tools` — 131, unchanged (the equality gate
+  still holds; its docstring now says which half of the rule it checks and
+  where the other half is proved). `bash ops/ralph/hudshots.sh` — 15, and the
+  10 shots byte-identical.
+- build: `nix build .#jv-hud` ok (qmllint + the QML suite in its checkPhase),
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin. The HUD
+  is still a read-only consumer and the new topic is never rendered.
+- files: shell/jv-hud/core/HeardState.qml, shell/jv-hud/tests/tst_heardstate.qml,
+  shell/jv-hud/README.md, tools/tests/test_gen_theme_qml.py
+- next: **A58** is the cheapest thing that makes the replay suites able to
+  catch this whole class of bug — give the fixture generator a realistic ASR
+  delay and regenerate, with the shot diff reviewed. It pairs naturally with
+  **A28/B10** (a live recording of one real utterance at the machine), which
+  would do the same job better and would finally give the second half of a
+  turn — the answer starting, the ember lighting — a recorded sequence at
+  all; every trajectory still stops at `thinking`. **A56** (the sequence
+  suite is not in the build gate) is unchanged and wants a human's pick
+  between its three options. **A55** still waits on **A47**'s decision about
+  an IPC seam. A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and still
+  want a human at ares. B21/B22/B17/B20/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 49 — A58: the recordings stop saying that hearing is free
+
+Last iteration fixed a HUD bug (A57: the transcript and the "THINKING"
+above it kept different time) and reported, as the finding worth keeping,
+that no committed recording could have shown it. This closes that.
+
+`harness/fixtures/sessions/generate_sessions.py` stamped every frame at
+`EarsPipeline.clock()`, the sample clock — samples consumed over rate.
+No samples are consumed while faster-whisper runs, and jv-ears publishes
+the final transcript from inside `_on_speech_end`, immediately after
+`asr.transcribe()` returns. So on a real bus jarvisd stamps that frame
+however long the transcribe took AFTER the `speech_end` beside it, and in
+the recordings the two were the same number. The ASR was instantaneous in
+all four files; the gap between "the turn ended" and "the words arrived"
+was exactly zero everywhere in this repo, which is why five suites built
+on these recordings were structurally unable to see A57.
+
+The generator now adds `ASR_LATENCY_S` to a final's `ts`. 2.2 s, and the
+number is not invented: PHASE1-STATUS.md records "ASR is ~2.2 s fixed
+(faster-whisper distil-small, CPU, runs after speech_end)" as a live
+measurement on ares, and it is the same span `jv tap --latency` already
+calls `hear`. It is a DECLARED constant rather than a measurement taken
+while generating, on purpose — a recording whose numbers depended on how
+busy the generating machine was would stop being reproducible to the
+sample, which is the property everything else in that file protects.
+
+Partials are deliberately left alone, and the README says so rather than
+leaving the asymmetry to be discovered. Each partial costs a transcribe
+too, but nothing has measured one, and modelling it honestly means
+modelling the sample clock falling BEHIND the room and catching up — the
+transcribe runs inline on the one thread that feeds wake and VAD
+(optimization-backlog §6) — which would move every other frame in these
+files instead of one, and would be inventing a timeline rather than
+recording one. A59 records that.
+
+**How the files were changed, stated plainly because it matters.** The
+loop's machine has no model weights, so the pipeline could not be re-run.
+The three finals were restamped in place by the same `asr_delay()` the
+generator now applies — one number per recording, headers untouched, so
+`wall_time_utc` still dates the real recording rather than the edit. The
+diff is three lines. What proves a regeneration lands in the same place is
+`test_the_committed_session_is_what_the_pipeline_still_does`, which
+compares `ts` frame by frame and needs the weights: the first jv-ears run
+on a machine that has them is the check, and it is in the build's path,
+not in this loop's.
+
+What the gap immediately bought. `tst_sessionreplay` now reads A57's
+anchor off a real recording rather than off frames whose author also
+wrote the expectation, and pairs a real `SpeechState` with a real
+`HeardState` on one bus with real timers; the numbers there are
+load-bearing and the comment does the arithmetic (both windows 3 s, both
+starting at the boundary, the words 2.2 s in, so the anchored hold has
+0.8 s left and a hold timed from the transcript would have 3 s — 1.6 s is
+the budget that separates the two readings rather than racing them). The
+sequence suite's three trajectories move to the second the words really
+arrive (`state heard@5.96` for the clean recording, was `@3.76`), and its
+unanswered-turn test had to grow its shortened window from 200 ms to 3 s:
+a budget under the ASR expires the line before it is ever shown, so that
+test would have gone green over a corner the reader never saw. 200 ms was
+only ever legal while the recordings said hearing was free.
+
+One unrelated brittleness fixed on the way, because it cost real
+debugging time here: that test shortened two windows and restored them on
+its last line, so the `compare` in the middle of it meant four later
+tests ran against a HUD with a 200 ms memory and failed for a reason that
+was not theirs. The restore is now a `cleanup()`.
+
+- tests: `bash ops/ralph/runtests.sh harness` — 88 (was 78): three new
+  cases, one per recording that contains a final, plus per-recording
+  checks that every partial is stamped while its utterance is still open
+  and that file order is time order (replay.py sleeps the delta between
+  consecutive lines and clamps at zero, so a frame written out of order
+  would replay with its gap silently lost). `bash ops/ralph/qmltest.sh` —
+  498 (was 495). `bash ops/ralph/hudshots.sh` — 15, and the 10 shots
+  byte-identical, which is the expected answer: no plate draws a `ts`.
+  `bash ops/ralph/runtests.sh tools` — 131, unchanged. `bash
+  ops/ralph/runtests.sh jv-ears` — 37, with the staleness check skipping
+  for want of weights. FOUR mutations run through the suites, all caught:
+  the hold anchored back on the transcript (caught by the new paired
+  replay test with a message, not a race), the declared latency back to
+  zero, the delay applied to partials as well as finals, and a frame
+  written out of time order.
+- build: `nix build .#jv-hud` ok (qmllint + the QML suite + the two
+  generators with `--check` in its checkPhase), `nixos-rebuild build
+  --flake .#ares` ok. Never test/switch. No schema change, no jv-act
+  change, no boot path, no NVIDIA/kernel/flake pin. The HUD is still a
+  read-only consumer.
+- files: harness/fixtures/sessions/generate_sessions.py,
+  harness/fixtures/sessions/{hey-jarvis-clean,hey-jarvis-music,hey-jarvis-pause}.jsonl,
+  harness/fixtures/sessions/README.md, harness/tests/test_sessions.py,
+  shell/jv-hud/core/HeardState.qml, shell/jv-hud/tests/Sessions.qml,
+  shell/jv-hud/tests/tst_sessionreplay.qml, shell/jv-hud/README.md,
+  tools/hudshots/scene/tst_sequence.qml
+- next: **A28/B10** is now the clearly biggest thing a human can unlock —
+  one real utterance recorded at the machine would give the second half of
+  a turn (the answer starting, the ember lighting) a recording at all, and
+  would carry a REAL ASR instead of a declared one; every trajectory in
+  the repo still stops at `thinking`. **A59** is the honest follow-up to
+  this commit: the partial latency, which wants either a measurement or a
+  decision to leave it. **A56** (the sequence suite is not in the build
+  gate) is unchanged and wants a human's pick between its three options.
+  **A55** still waits on **A47**'s decision about an IPC seam.
+  A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and still want a
+  human at ares. B21/B22/B17/B20/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 50 — B21: `tool` stops charging the machine for your
+## own hesitation
+
+UI was the last three iterations (A54, A57, A58), so the ladder says take a
+feature. B21 was the direct follow-up to B19, which shipped `tool` — the
+`intent.action` -> `action.result` union inside a turn's `think` — and named
+its own flaw in the footnote it printed: that span includes the whole 15 s
+confirmation window jv-act holds open for a destructive tool, "never spoken,
+and otherwise indistinguishable from a slow LLM." One number over a window
+that is mostly a human deciding cannot be argued about against a budget, and
+the half a faster machine could shorten is precisely the half it cannot name.
+
+**What it buys.** `jv tap --latency` now prints, under the `tool` line, which
+is under `>>> turn`:
+
+    >>> turn utt-c: think=26000ms includes tool=16000ms over 1 call (jv-act)
+    >>> turn utt-c: tool=16000ms is you=15000ms + ran=1000ms over 1 confirmation
+
+and two summary rows indented one level under `  tool`:
+
+        you    of tool: you, deciding             1   15000ms ...
+        ran    of tool: jv-act's own work         1    1000ms ...
+
+**The seam was free, like hear/think and like tool.** `action.confirm`
+kind=request is jv-act asking; kind=answer is the question closing, by an
+answer or by the window expiring. Both frames carry the `request_id` that
+`intent.action` already named, so the join is the same one `action.result`
+goes through (`act_mut`, now shared by all three). No new publisher, no gauge,
+no schema change. jv-act's `duration_ms` was NOT usable for this and it is
+worth writing down why: it is measured from `t0`, before the confirmation, so
+it is the whole request including the wait — the same number, not its
+complement.
+
+**Five refusals, because a number that mixes two things is what this commit
+exists to stop.** No question asked at all is not a 0 ms window. A question
+still open when the reply landed was open for a length nobody can state.
+A window that does not NEST inside its own call's round trip means two frames
+disagree about the order the pipeline ran in — and that nesting is also the
+thing that makes `ran = tool - you` a plain subtraction that cannot go
+negative, so `ran_ms` needs no fit check of its own and does not pretend to
+have one. A `tool` nobody could measure leaves its share unreported: a share
+of an unmeasured whole is not a share. A question for a request this tap never
+saw belongs to no turn it can name. `confirm_waits` rides beside `confirm_ms`
+for the same reason `tool_calls` rides beside `tool_ms`: "you were never
+asked" and "you were asked and it could not be timed" are different facts.
+
+**One live-order detail the integration test pumps rather than assumes.**
+jv-act ECHOES the answer it acted on (`kind=answer`, answered_by=voice/cli/
+timeout) onto the same topic the `jv confirm` CLI publishes its answer on, so
+one decision produces two frames. The user stopped deciding at the first.
+`keep_earliest`, and a test that publishes both in the real order.
+
+**An unrelated hole closed on the way, because these rows fall straight into
+it.** B19's `every_summary_row_stays_inside_the_columns_it_is_printed_in`
+filtered out every line starting with four spaces, to skip footnote
+continuations — which would have exempted the two new rows, the deepest and
+the most likely to overflow their column, from the check written for exactly
+that failure. It now takes the header and the rows under it and stops at the
+first footnote, and a deliberately over-wide `ran` label is one of the seven
+mutations below.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 119 unit + 8 bus + 39
+  integration (was 106+8+38). SEVEN mutations run through them, all seven
+  caught: the nesting check dropped, an open question timed to its own
+  result, `confirm` no longer gated on `tool`, the union turned into a sum
+  (which needed a new overlapping-windows test to bite — the first union test
+  used disjoint windows, where union and sum agree), jv-act's echo taken as
+  the answer, an over-wide label in a deep row, and a join that fell back to
+  whatever turn was open. An eighth — bypassing the `reqs` index and scanning
+  every turn's acts — turned out to be an EQUIVALENT mutant, not a survivor:
+  `reqs` and `u.acts` are written and evicted together, so the index is a
+  shortcut and never a filter. Noted rather than papered over with a test that
+  would pass either way.
+- build: `nix build .#jarvisd` ok (its checkPhase runs the suite again),
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change (it was read, not touched), no boot path, no
+  NVIDIA/kernel/flake pin.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs
+- next: **B22** is now slightly more urgent than it was and is still the
+  cheapest B item: nothing bounds a `>>> turn` line's width, and this commit
+  added a third such line whose id is the same unbounded utterance id. With a
+  UUID in it the new line is ~107 columns. B22 asks for exactly that assertion
+  and names the id length that breaks it. **B20/B17** still want two minutes
+  of a human reading real output at a terminal, and **B10/A28** — one live
+  recording of one spoken turn on ares — remains the single biggest thing a
+  human can unlock; it would also be the first recording containing an
+  `action.confirm` at all, which is to say the first real number this commit
+  could ever print. **A59** wants either a measurement at ares or a decision
+  to leave the partials' latency alone. **A56** and **A55/A47** unchanged and
+  want a human's pick. A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and
+  still want a human at ares. B7/B12/B15/B13 unchanged.
+
+## 2026-09-24 — iteration 51 — B22: the turn report stops being wider than the
+## terminal it prints to
+- built: **`jv tap`'s per-turn report is a ladder of lines, and every one of
+  them fits 80 columns.** B22 asked for a width assertion against 80 with "the
+  id length that would break it" named. The assertion was written first and it
+  failed at 133 columns — and not because of the id. The live utterance id is
+  a `uuid.uuid4()` (`jv_ears/pipeline.py:148`), 36 characters, but the line was
+  already 96 columns with the five-character id every test used. Six numbers
+  plus a label each cannot fit a terminal at all, so B22 could not be closed by
+  adding a test. The format had to move.
+
+**What it is now.** Each rung divides a span the rung above it gave a value
+for, and nothing else:
+
+```
+>>> turn 00000002...: total=262ms spoke=? hold=20ms
+>>> turn 00000002...: respond=262ms is hear=0ms + think=262ms
+>>> turn 00000002...: think=262ms includes tool=262ms (1 jv-act call)
+>>> turn 00000002...: tool is you=202ms + ran=61ms (1 confirmation)
+```
+
+One grammar throughout — `X is A + B` for an exact partition, `X includes Y`
+for a share — which is the grammar `brain_split` already spoke and which the
+summary table's indentation already draws. `Turn::lines` owns which rungs
+exist and in what order, which is what makes "the line above it" a fact
+rather than a hope at the call site; `jv tap` prints what it hands back and
+decides nothing. And because the bottom rung says `tool` without restating
+its value, `confirm_line` gained a `think_ms?` guard it does not otherwise
+need, so "no rung names a span no printed line valued" is true of the TYPE
+and not merely of the one caller that builds these today.
+
+**The id.** `short_id` caps it at `ID_COLUMNS` = 11: eight characters and
+`...` to say out loud that it is a prefix. An id that already fits is never
+touched, so abbreviating can never make one longer — `echo_raw`'s shape. Two
+ids that start alike print alike; that is the price, and it is a test
+(`two_ids_that_start_alike_print_alike_and_that_is_the_price`) rather than a
+silence. It is also not hypothetical: the first version of the confirm pump
+varied only the last two hex digits of its uuid, every turn printed the same
+abbreviated id, and the new ladder-grouping helper collapsed four turns into
+one — the harness found the collision before a human could.
+
+**The bound, stated.** `every_line_a_turn_prints_fits_eighty_columns` runs at
+the widest input that can reach these lines and names each bound as what it
+is: the id is capped BY CONSTRUCTION, both counts are two digits because
+`ACTS_PER_TURN` stops the recording at 32, and every span is six digits —
+999999 ms is 16.7 minutes, longer than any turn that ends with somebody still
+listening, and THAT is the one bound assumed rather than enforced. A seventh
+digit adds a column to four of the five lines and this test is what would
+notice. It carries a control, in A34's spirit: a line that comes out far
+UNDER the budget fails too, because then the test stopped building a worst
+case and stopped proving anything. The summary and hop tables are held to the
+same 80 — a table that wraps loses the column alignment that is all of its
+value.
+
+**A pre-existing flake, found on the way and fixed.** The confirm test
+asserted `tool - (you + ran) < 1.0`. `ran` IS `tool - you` to the float, but
+all three are rounded to whole milliseconds INDEPENDENTLY for printing, so a
+262.4 ms tool prints as 202 + 61 and the difference is exactly 1. It failed
+about one full-suite run in three under load and had nothing to do with this
+change; the tolerance is now `<=` with the arithmetic written down.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 124 unit + 8 bus + 39
+  integration (was 119+8+39), and the integration suite run six times over
+  for the flake. TWELVE mutations run through them, all twelve caught:
+  `short_id` never truncating, its cap raised to 20, truncating without the
+  `...`, counting bytes rather than columns, the `think` guard dropped from
+  `confirm_line`, `lines()` losing the respond rung, the old six-number line
+  coming back, an over-wide label on the tool rung, the rungs printed out of
+  order, a summary row pushed past its column, `brain_split` printing the raw
+  id, and `jv` printing only the first rung. The confirm pump now stamps the
+  live id shape, so the richest ladder is proven on a uuid end to end rather
+  than only on a constructed `Turn`.
+- build: `nix build .#jarvisd` ok (its checkPhase runs the suite again),
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs, PHASE1-STATUS.md
+- commit: dd0857b
+- next: **B17 is now half-closed and the remaining half is sharper.** The
+  width question is a test; what is left for a human is whether the ladder
+  READS — four lines per tool turn is more output than one, and `turn_age>=`
+  (B20) is still unjudged. Both want the same two minutes at a terminal, and
+  both are unlocked by **B10/A28**, the one live recording of one spoken turn
+  on ares, which remains the biggest thing a human can hand this loop. New
+  item **B23**: the per-frame `jv tap --latency` hop line is formatted in
+  `jv.rs` and is the one report line the new width test cannot reach — it is
+  61 columns today and a topic longer than its `{:<20}` field widens it.
+  **A59** still wants a measurement at ares or a decision to leave the
+  partials alone. **A56** and **A55/A47** unchanged and want a human's pick.
+  A50/A52/A13/A21/A22/A25/A27/A31/A38/A39 unchanged and still want a human at
+  ares. B7/B12/B15 unchanged.
+
+## 2026-09-24 — iteration 52 — A52: the install you walked away from gets to
+## tell you it failed
+
+- built: **`core/InstallState.qml` + `InstallPlate.qml` — the Windows app
+  jv-compat could not finish installing.** A51 gave the HUD half of
+  invariant 8: jv-guard's refusal, the one moment JarvisOS says NO to
+  something its user asked for. This is the other half — what happens to the
+  binaries it lets THROUGH. `jv-compat install ~/Downloads/thing.exe` builds
+  a bubblewrapped prefix and runs the installer inside it silently, for
+  minutes, and it is the only fire-and-forget command on this machine: by
+  the time it fails the terminal that started it is behind three windows and
+  the user is somewhere else. The report was an exit code nobody was looking
+  at. The HUD, which is on top of every window, now says `INSTALL FAILED`
+  and names the app.
+
+**FAILURES ONLY, and that is how the open question stayed open.** The topic
+carries the whole lifecycle — fingerprinted, screened, prefix_created,
+installed, failed, blocked — and A52 said outright that the interesting
+decision came first: an install takes MINUTES, every plate in this stack is
+about a moment, and "what is jv-compat doing right now" would be a progress
+indicator, which is a shape §06 does not have. So nothing here anticipates
+one. The happy path draws NOTHING, the way an action that worked (A37) and a
+service that is well (A6) draw nothing, and the question is written down as
+**A60** for a human with three ways out rather than answered by a loop that
+felt like building something. The sheet asserts that silence: `11-install.png`
+publishes a `prefix_created` AND a `failed`, and its caption is `install mic`
+— one plate out of two frames.
+
+**NOT `blocked`.** That event is how the SCREENING ended, and GuardPlate
+already draws that refusal from jv-guard's own `guard.verdict`, joined to
+this lifecycle by the same sha256. Two plates for one refusal would be the
+HUD saying the same thing twice in two vocabularies, and the witness that
+reads the screener directly is the better one. Passed over as NO NEWS —
+ActionState's rule for the confirmation outcomes it declines — so a refusal
+landing after a real failure cannot silently take it off the screen.
+
+**NOT the error text.** On a `failed` frame, `compat.install.error` is
+`detail[-500:]` of the confined installer's own stdout: free text written by
+the one thing invariant 8 calls untrusted outright, and likely carrying
+paths out of this filesystem. Same call as the scanner's `reasons` (A51) and
+jv-act's `detail` (A37), drawn harder — the element does not expose the
+field at all, so no plate can render what it never received, and a test
+asserts the absence rather than trusting the QML.
+
+**THE SLUG MUST LOOK LIKE ONE, and this is where the element parts company
+with GuardState.** `app` is the prefix DIRECTORY name, built by jv-compat
+out of a file name its author chose. GuardState sanitises a file name and
+draws it, which is right: a name is a thing to LOOK at, so stripping the
+invisible characters out of one still leaves the name its author typed. A
+slug is an IDENTIFIER — the directory, the thing you would type to try
+again — and a repaired identifier is another app's name. So it is sieved,
+not scrubbed: drawn only if it still has the shape of a directory name (one
+line, no separators, no spaces, 40 characters), REFUSED outright otherwise,
+and the sha256 prefix shown instead. A failure whose slug and whose hash are
+both unusable is still reported, nameless, because an install that failed is
+news whether or not the HUD can say which.
+
+**A gate came out, and the mutation harness is why.** The first version had
+the family's "is that a word I know" check on the frozen enum, copied from
+GuardState. The mutation that deletes it changed NOTHING: `apply()` acts on
+two allow-lists (the exact string `failed`, and four clearing events), so a
+word jv-compat invents tomorrow already does nothing at all. GuardState
+needs its check because its clearing branch is "everything that is not a
+refusal"; this one does not, and a guard no test can tell the presence of is
+a guard nothing is holding up. It was removed and the reasoning written
+where the next reader will be — and the one remaining belt-and-braces check
+(`event` is a string) is labelled as such IN the test that covers its
+outcome, so nobody mistakes a passing test for proof of a line.
+
+The HUD is ten plates and a 688 px box now (624 -> 688, four other files
+carry the number and `test_the_surface_box_is_the_one_shell_qml_declares`
+pins the measuring one). The growth is real co-occurrence, not margin: a
+refused binary and a failed install are the pair jv-compat itself produces
+when somebody fetches a second build of the thing that was blocked.
+
+- tests: `bash ops/ralph/qmltest.sh` — 536 (was 498; 36 new), with FOURTEEN
+  mutations run through them and thirteen caught: `blocked` added to the
+  clearing list (1 fail), `blocked` latched like a failure (2), everything
+  that is not a failure clearing the plate (2), the slug drawn as the
+  publisher sent it (4), a long slug truncated instead of refused (1), a
+  newer install not clearing the old failure (3), the envelope floor
+  dropping the schema version (2), the hash shortened whatever it is (1),
+  the hash left in whatever case it arrived in (1), the backstop never
+  firing (4), a dropped link that keeps the failure (1 — and only a
+  RECONNECT can show that one, since `failed` is already false while the
+  link is down), and the installer's stdout exposed as a property (1). The
+  fourteenth is the one that escaped and took the redundant gate with it.
+  `bash ops/ralph/runtests.sh tools` — 131 (was 128 + the three that failed
+  until the sheet and its README caught up). `... jv-hud-bridge` — 25.
+  `bash ops/ralph/hudshots.sh` — 11 shots, all rewritten at the new box
+  height, `11-install.png` new, and the sequence suite (A54) green at ten
+  plates. `bash ops/ralph/hudscreens.sh` — 7 screens, every window and probe
+  green against the REAL `.#jv-hud` that now carries this plate; the five
+  screens that moved are A45's documented 2-5 px glyph drift.
+- build: `nix build .#jv-hud` ok (qmllint -W 0 + the QML suite in its
+  checkPhase), `nixos-rebuild build --flake .#ares` ok. Never test/switch.
+  No schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin.
+- files: shell/jv-hud/core/InstallState.qml (new),
+  shell/jv-hud/InstallPlate.qml (new),
+  shell/jv-hud/tests/tst_installstate.qml (new), shell/jv-hud/shell.qml,
+  shell/jv-hud/qmldir, shell/jv-hud/core/qmldir, tools/gen_theme_qml.py,
+  tools/hudshots/scene/{Corner,tst_shots,tst_sequence}.qml,
+  tools/hudscreens/{sheet,shoot}.py, ops/ralph/hudscreens.sh,
+  services/jv-hud-bridge/jv_hud_bridge/bridge.py, docs/hud/README.md,
+  docs/hud/*.png, docs/hud/screens/*.png
+- commit: caa7c75
+- next: **A60 is the interesting one and it is a human's**: the progress
+  question this iteration deliberately did not answer, with three options
+  written out. **A61** is cheap and concrete — no shot has ever shown
+  GuardPlate and InstallPlate together, which is the pair the box grew for.
+  The A13/A27 "every plate on every monitor" question now has a fifth
+  instance and is no closer to an answer. A50/A55/A47/A56/A59 unchanged and
+  still want a human's decision; A21/A22/A25/A27/A31/A38/A39 still want a
+  human at ares. **B10/A28 — one live recording of one spoken turn on ares
+  — remains the biggest thing a human can hand this loop.** B7/B12/B15/B17/
+  B20/B23 unchanged.
+
+## 2026-09-24 — iteration 53 — A61: the two halves of invariant 8 get
+## photographed together
+
+- built: **`12-guard-install.png` — a refused binary and a failed install in
+  one corner, which is the picture the surface box was grown for and the one
+  nothing had ever taken.** `shell.qml` went 624 -> 688 px twice, once for
+  GuardPlate (A51) and once for InstallPlate (A52), and both times the
+  justification written into the binding was co-occurrence: these two plates
+  can genuinely be up together, so the box has to hold them. Eleven shots
+  later, no picture showed it. An argument nobody can check is an argument,
+  and the box is the one number in this HUD that gets cropped by a
+  compositor rather than caught by a test.
+
+**A61's own story turned out to be impossible, and that is most of what this
+bought.** The item described a refusal and a RETRY: jv-guard blocks an
+installer, the user fetches a different build, that one fails inside its
+prefix. Writing the frames out is what showed it cannot happen — jv-guard
+screens the second build too, `core/GuardState.qml` reports *the last binary
+screened*, and a `clean` verdict is newer news from the same screener, so
+the refusal is off the corner before the retry gets as far as failing. For
+both plates to be lit the refusal has to be the NEWER screening and the
+failure has to belong to a DIFFERENT binary.
+
+Which is not a contrivance — it is the ordinary shape of two overlapping
+installs, and an install is the one thing on this bus that takes minutes:
+t=0 a long installer is fingerprinted, screened clean and given a prefix;
+t=200 the user, still waiting, grabs something else off a download site and
+jv-guard matches a signature in it; t=214 the first install, still going,
+dies inside its prefix. Every frame is one `install.py` and `jv-guard`
+really publish, in the order they publish them, with real timestamps — the
+heartbeat goes in LAST so the open mic is as fresh as the failure above it
+rather than 214 s stale.
+
+The `blocked` on `compat.install` at t=200 is the frame worth having a
+picture of. It lands in the middle of ANOTHER app's lifecycle, and
+`InstallState` reads it as no news at all: a clearing event there would have
+wiped the failure that arrives fourteen seconds later, and a failure there
+would have put `codec-pack` on the plate instead of `fl-studio`. A52's tests
+assert that rule; this is the first time the situation that makes it matter
+has been on a screen.
+
+**The sheet also stopped taking the fit on faith.** Every shot now asserts
+that `insetPx + stack.height <= surface height` — the real constraint, not a
+stricter one. A stack taller than the box is not a smaller sheet; it is a
+plate the compositor cuts in half on a panel floating over every window, and
+until now the only thing that had ever checked it was a person looking at a
+PNG and seeing nothing obviously wrong. Mutation: a 170 px surface fails on
+`03-heard.png` at 161 px tall and passed before.
+
+**What the picture shows that nothing asked for (A62).** The corner is
+describing two unrelated binaries and says so nowhere: `codec_pack_setup.exe`
+was refused, `fl-studio` failed, and they are stacked 8 px apart in the same
+severity colour. A reader who assumes one story reads "the thing that was
+blocked then failed" — the one sentence these frames do not support. Every
+plate here is true alone and the corner has no grammar for relating two of
+them. That is now written down rather than argued about.
+
+Two more things this iteration found and did not build. The fit check passes
+with 507 px of slack: the new shot is now the tallest committed one at 165 px
+of corner inside a 688 px box, and no shot lights more than three plates — so
+the case the box is actually sized for is still unphotographed and
+unasserted (A63). And `jv-guard`'s `decide()` returns only `clean` or
+`blocked` — no heuristic engine exists — so the `suspicious` verdict the
+policy sanctions, the override path `install.py` prints instructions for,
+and `GuardPlate`'s entire `warn` branch are unreachable on this machine
+today (A64). The `warn` colour was very nearly photographed this iteration
+before that came to light; a composed frame no code path can produce is a
+picture of an intention, which is the one thing this sheet must not quietly
+become.
+
+- tests: `bash ops/ralph/hudshots.sh` — 12 shots (was 11) and 15 cases, with
+  the other ELEVEN PNGs byte-identical, which is the check that the new
+  entry changed nothing else. One mutation run through the new fit check
+  (a 170 px surface box: FAILS now, passed before).
+  `bash ops/ralph/runtests.sh tools` — 131, and the two README gates failed
+  exactly as designed until the twelfth section was written (`shows
+  12-guard-install.png in 0 sections`).
+  `bash ops/ralph/qmltest.sh` — 536, unchanged: no file under
+  `shell/jv-hud` was touched.
+- build: `nix build .#jv-hud` ok, `nixos-rebuild build --flake .#ares` ok.
+  Never test/switch. No schema change, no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin.
+- files: tools/hudshots/scene/tst_shots.qml, docs/hud/README.md,
+  docs/hud/12-guard-install.png (new)
+- commit: 542797a
+- next: **A64 is the sharpest of the new three** and it is small: either
+  jv-guard grows the heuristic engine its own policy describes, or the HUD's
+  `warn` branch and `install.py`'s override message are documented as
+  waiting on one — right now three files describe a verdict nothing can
+  publish. A62 is a design question (does the corner need a grammar for
+  "these two are unrelated", or is that a thing §06 refuses?) and belongs to
+  a human. A63 wants one composed shot of a crowded corner, which is cheap
+  but wants A62 answered first or it is a picture of the exact confusion A62
+  names. **A60 is still the interesting one and still a human's.** A50/A55/
+  A47/A56/A59 unchanged and still want a decision; A21/A22/A25/A27/A31/A38/
+  A39 still want a human at ares. **B10/A28 — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this
+  loop.** B7/B12/B15/B17/B20/B23 unchanged.
+
+## 2026-09-24 — iteration 54 — A64: the verdict three files describe gets
+## something that can actually say it
+
+- built: **jv-guard's shape engine — the `suspicious` rung now has a
+  producer.** `decide()` could return `clean` or `blocked` and nothing
+  else, so the approved policy's middle rung lived in three files and no
+  code path: the schema's policy note, jv-compat's "override requires
+  explicit confirmation — not wired in v0" message, and `GuardPlate`'s
+  `warn` colour. A61 came within one composed frame of photographing that
+  colour, which is what made it worth fixing rather than noting: a picture
+  of a verdict nothing can publish would have put an intention into the one
+  sheet whose whole value is that it isn't one.
+
+`jv_guard/pe.py` reads a Windows binary's section table and nothing else —
+no imports resolved, no relocations walked, no network, ~90 lines of
+`struct.unpack_from` with a bounds check before every read. Anything it
+cannot parse confidently it refuses to parse at all, because a half-read
+header is a worse input to a security decision than no input.
+`jv_guard/heuristics.py` turns sections into concerns: an **executable**
+section that measures ≥ 7.2 bits of entropy (packed or encrypted), one
+that is also **writable** (W+X — it can rewrite the code it runs), one
+with **no bytes in the file** but hundreds of KiB of virtual space (the
+UPX0 shape, which entropy cannot see because there is nothing to measure).
+It reads a 64 KiB header window and then only the executable sections'
+bytes, capped at 8 MiB each — an installer is gigabytes and none of it
+belongs in memory.
+
+**The word "executable" is the entire difference between a rung and a
+nuisance.** Every Inno/NSIS/7z installer on earth carries a compressed
+payload at entropy ~8, and it lives in a data section or an overlay. Had
+the check been "any high-entropy section", `suspicious` would have meant
+"is an installer" by the end of the first week. A test states that case as
+its own argument, and flipping the executable guard off makes it fail.
+
+**The regression this nearly introduced is the part worth reading.** Before
+today, "no engine ran" and "ClamAV is down" were the same sentence, and
+that sentence is what fail-closed is made of: no verdict published, compat
+times out, the install refuses. Add a second engine that always runs and
+that equivalence silently dies — ClamAV goes down, the shape engine reports
+an ordinary-looking binary, `decide()` sees an engine that ran and says
+**clean**. Fail-closed deleted by a feature, with no test failing anywhere.
+So engines now declare a KIND: `SIGNATURE` is authoritative (its silence is
+what `clean` is made of) and `HEURISTIC` is advisory (may raise suspicion,
+may never grant trust). `decide()` returns None unless an authoritative
+engine ran — and does so even when the advisory engine is shouting, because
+the approved policy's outage clause says an outage must neither grant trust
+nor invite an override, and publishing `suspicious` during one invites
+exactly that. The degraded health note stopped saying "no scan engine
+available" when one demonstrably ran; it now names the outage precisely and
+says which advisory engine looked anyway.
+
+**Missing Authenticode was the other candidate in A64 and is deliberately
+not here.** It fails twice. Nearly every binary this machine will ever
+screen — indie games, mod tools, decade-old installers — is unsigned, so
+the rung would fire on almost everything and come to mean "is a Windows
+program". And the cheap half is worthless regardless: the PRESENCE of a
+signature blob is not trust, only a verified chain is, and verifying one
+needs a certificate store and a policy about who is trusted. That is a
+different and much bigger piece of work, and it is written into the module
+docstring so the next reader doesn't re-derive it.
+
+**What this costs, deliberately.** A UPX-packed freeware tool and a
+Themida/VMProtect-wrapped game installer both read as packed, because they
+are — and in v0 `suspicious` refuses, with a message describing an override
+that isn't wired. So a class of installs that used to succeed now stops and
+asks for a confirmation nobody can give yet. That is invariant 8 behaving
+as written (untrusted by default, fail closed), and it is also the moment
+the confirm-surface override stopped being a nice-to-have: it is now the
+only door out of a verdict this machine can produce (A65).
+
+- tests: `bash ops/ralph/runtests.sh jv-guard` — 33 (was 6), written
+  first and red before the modules existed. Five mutations run through
+  them: authority rule removed (any engine counts) → the two fail-closed
+  tests FAIL; entropy measured on all sections → the data-section test
+  FAILS; no minimum measurable size → the 256-byte-section test FAILS;
+  heuristic promoted over a signature hit → six FAIL; threshold dropped to
+  5.0 → the calibration test FAILS. That last one is the one to keep: it
+  measures /bin/sh (6.13 over 1.2 MB of real compiled code) and asserts it
+  sits under the threshold, so the constant cannot quietly drift down into
+  ordinary binaries. Two of the new tests are end-to-end against a real
+  jarvisd: a packed PE publishes `suspicious` on the bus with both engines
+  in `scanned_by`, and the same PE with ClamAV broken publishes nothing at
+  all. `... runtests.sh jv-compat` — 9, `... runtests.sh pylib` — 4, both
+  unchanged (nothing outside jv-guard imports these types).
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change (`suspicious` was already in the frozen enum — this is the
+  first thing that can put it there), no jv-act change, no boot path, no
+  NVIDIA/kernel/flake pin.
+- files: services/jv-guard/jv_guard/pe.py (new),
+  services/jv-guard/jv_guard/heuristics.py (new),
+  services/jv-guard/jv_guard/scan.py, services/jv-guard/jv_guard/service.py,
+  services/jv-guard/jv_guard/main.py,
+  services/jv-guard/tests/test_pe_heuristics.py (new),
+  services/jv-guard/tests/test_guard.py
+- next: **A66 is now honest and cheap** — `GuardPlate`'s `warn` branch has
+  a real producer, so the thirteenth contact-sheet shot A61 stopped itself
+  from taking can be taken from frames `jv-guard` really publishes. **A65
+  is the one a human should see first**: the override path is no longer
+  theoretical, it is the only exit from a verdict this machine now
+  produces. A62 (does the corner need a grammar for "these two plates are
+  unrelated") and A63 (a crowded-corner shot, which wants A62 answered)
+  unchanged. A60/A50/A55/A47/A56/A59 still want a decision; A21/A22/A25/
+  A27/A31/A38/A39 still want a human at ares. **B10/A28 — one live
+  recording of one spoken turn on ares — remains the biggest thing a human
+  can hand this loop.** B7/B12/B15/B17/B20/B23 unchanged.
+
+## 2026-09-24 — iteration 55 — A66: the colour that had no producer gets
+## its photograph
+
+- built: **`docs/hud/13-suspicious.png` — the sheet's first picture of the
+  approved policy's middle rung, plus the gate that keeps it a picture of
+  something real.** A61 stopped itself from taking this shot for a good
+  reason: `decide()` could return `clean` or `blocked` and nothing else,
+  so `GuardPlate`'s `warn` branch was a colour no frame on this machine
+  could light, and photographing it would have put an intention into the
+  one sheet whose entire value is that it is not one. A64 gave it a
+  producer. This is the picture.
+
+It is the same element as `10-guard.png`, one word and one colour apart —
+`SUSPICIOUS` in `warn` where that one says `BLOCKED` in `risk` — and the
+file in it is deliberately not malware. A decade-old widescreen patch for
+a game, which its author ran UPX over to make it one small download,
+`nfs2se-widescreen-patch.exe`. ClamAV recognises nothing in it. It is also,
+byte for byte, shaped exactly like something hiding: an executable section
+with no bytes in the file and 512 KiB of virtual space to unpack into, a
+second one that is both writable and executable, and that one's payload at
+7.98 bits of entropy. `blocked` would be a lie about this file and `clean`
+would be a promise nothing here can make, which is the whole argument for
+a middle rung, on a screen for the first time.
+
+**A66's premise was half wrong and the shot is better for it.** The item
+said the long reasons would be "a real test of the plate's wrapping".
+They are not tested by this picture at all, because they reach no pixel:
+`core/GuardState.qml` never reads `reasons` — `schemas/guard.verdict.json`
+says they are spoken on request, and they are the one string on this topic
+written by a scanner rather than fixed by a schema. What the picture
+actually tests is the thing A66 was really after: that the warn branch
+renders, and that the name of a real-world file fits the plate (27
+characters, ~211 px of a 240 px cap — not elided, and close enough to the
+cap that the next shot of a long name will be the one that finds it).
+The three sentences are quoted in `docs/hud/README.md` instead, where a
+reader can see what the machine has to say when asked.
+
+**The frame is composed and its words are not, and that is the part worth
+keeping.** Every other composed frame in this sheet is a shape somebody
+reasoned out; this one is a quotation from another service, which is a
+kind of claim a hand-typed literal has no business making. So
+`tools/tests/test_hudshots.py` builds a PE of exactly the UPX shape — with
+jv-guard's own fixture builder, not a copy of it — runs the real
+`PEHeuristicScanner` and the real `decide()` over it, and compares the
+verdict, all three reasons and `scanned_by` to the literal in the scene.
+The payload is a fixed sha256 chain rather than `os.urandom`, because the
+reason string carries the entropy to two decimals and the gate needs the
+same bytes every run; the 8 KiB zero tail is there because a real packed
+section is payload plus unpacker stub plus alignment slack, and a fixture
+measuring a flat 8.00 would have put a number in the sheet that no real
+binary produces.
+
+Note what `scanned_by` in that frame says: `clamav` **and** `pe-shape`,
+always both. The shape engine is advisory — it may raise suspicion and may
+never grant trust — so `decide()` returns nothing at all unless an
+authoritative engine ran, and a `suspicious` verdict is by construction two
+engines' work. A composed frame naming one engine would have been a frame
+describing a policy this machine does not have.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 132 (was 129). Five mutations
+  run through the new gate, in both directions: the entropy digits changed
+  in the scene (7.98 → 7.96) FAIL; `scanned_by` reduced to the advisory
+  engine alone FAIL; the verdict word changed to `blocked` FAIL; "at run
+  time" → "at runtime" in the scene FAIL; and — the one that matters most —
+  a comma added to the wording inside `jv_guard/heuristics.py` itself FAILS
+  the tools suite, which is the proof that the gate points at the real
+  producer and not at its own copy of it. `bash ops/ralph/hudshots.sh` — 13
+  shots, the other twelve byte-identical, plus tst_sequence's 11 unchanged.
+  `... runtests.sh jv-guard` — 33, untouched. `... qmltest.sh` — 536,
+  untouched.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin. jv-guard's source was not modified — the tools test imports it read
+  only, the way the other sheet gates read `shell.qml`.
+- files: docs/hud/13-suspicious.png (new), docs/hud/README.md,
+  tools/hudshots/scene/tst_shots.qml, tools/tests/test_hudshots.py
+- next: **A65 is now the item with a picture attached** — the sheet shows an
+  install stopped in front of a door with no handle, and a human choosing
+  (a) wire the override through `ConfirmPlate`, (b) leave it refusing, or
+  (c) tune which concerns reach `suspicious` is the only thing that opens
+  it. A62 (does the corner need a grammar for "these two plates are
+  unrelated") still gates A63 (the six-or-eight-plate fit shot), and A63 is
+  now slightly more interesting than it was: shot 13's plate is 230 px wide
+  on a 300 px surface, so the crowded corner is a width question as well as
+  a height one. A60/A50/A55/A47/A56/A59 still want a decision;
+  A21/A22/A25/A27/A31/A38/A39 still want a human at ares. **B10/A28 — one
+  live recording of one spoken turn on ares — remains the biggest thing a
+  human can hand this loop.** B7/B12/B15/B17/B20/B23 unchanged.
+
+## 2026-09-24 — iteration 56 — A67: the sheet stops quoting services that could not have said it
+
+A66 closed the gap for one frame: a composed picture of a `suspicious`
+verdict, held to what jv-guard really produces for a binary of that shape.
+A67 was the observation that it is not the only frame in the sheet that
+puts words in another service's mouth — `05-confirm.png` carries a question
+jv-act asks, `08-action.png` a tool call and one of jv-act's error words,
+`06-health.png` jv-brain's rung, `11-install.png` and `12-guard-install.png`
+jv-compat's lifecycle — and that nothing checked any of them. The README
+labels each shot `recorded` or `composed`, and that label is a claim about
+PROVENANCE, not about plausibility: it says nobody recorded this, and says
+nothing at all about whether the named service could ever have said it.
+
+**Four gates, all reading producers rather than running them.**
+`jv_brain.config.LADDER` and `jv_compat.fingerprint` are imported;
+`jv_compat/install.py` is parsed for its event vocabulary and for the extra
+fields each call site attaches; jv-act's registry is TOML and its Rust is
+read for the tool names, argument names, capabilities, error words, the
+confirmation window, the `kind` literal and the question's format string.
+Nothing here is a service talking to a service (invariant 1) and nothing
+was written into `services/jv-act` — it is read, the way the older gates in
+this file read `shell.qml`.
+
+**The refusal in shot 12 is the gate worth copying.** The first version
+compared jv-compat's `blocked` error to `"; ".join(reasons)` computed in the
+test, and a mutation that made `install.py` prefix the sentence with
+`clamav: ` went straight through green — a copy of a rule is a rule that
+drifts, which is the exact failure this file exists to catch. It now lifts
+every `error=` expression out of the three `blocked` call sites with `ast`
+and evaluates jv-compat's own code over the verdict jv-guard is shown
+giving in the same picture. Both directions fail now.
+
+**Three frames were wrong, and all three in `08-action.png`.** The intent
+passed `args.name` where the registry declares `app` — the real jv-act
+answers `invalid_args` and never reaches an executor. It omitted the
+`needs_confirmation` jv-brain always derives from the capability. And the
+detail quoted `exec: "obsidian": executable file not found in $PATH`, which
+is a Go runtime's sentence about execing a binary directly; jv-act is Rust
+and `app.launch` plans `gtk-launch -- <app>`, so it never execs the
+application at all. Not one of the three reaches a pixel, which is exactly
+why they survived thirteen shots and five iterations of looking at this
+sheet: the picture was right and the machine behind it was fiction.
+
+**The one that changed on screen is `05-confirm.png`, and it got worse,
+which is the point.** It read *move 14 files in ~/Downloads to the trash*.
+jv-act does not compose a sentence about the invocation — `service.rs`
+sends `format!("{} — yes or no?", spec.description)`, which is the tool's
+REGISTRY description plus a fixed tail: the same question for every
+invocation of that tool, forever. The old frame was a picture of a machine
+that tells you what it is about to touch, and this one does not have that
+machine. A21's human is now judging the question that will really be on
+screen. It also makes a genuinely new thing visible, which is logged as
+A68: a confirmation that cannot name its object may be one a user cannot
+answer, and whether that is jv-act's summary to widen (its own commit,
+human-reviewed) or the HUD's `args` to draw (privacy: `args` is content,
+not vocabulary, and no core element may name it today) is a decision.
+
+The scene and the README now also say, for this sheet, what
+`tools/hudscreens/sheet.py` has said since A49: `fs.trash` is not in
+jv-act's registry. v0 is observe+benign only and the confirmation rule is
+structural, so no tool on this machine could produce an `action.confirm` at
+all; asked for `fs.trash` the real jv-act answers `unknown_tool`. The
+machinery is built and reviewed and the tool it is holding is not granted.
+A test fails if the disclaimer leaves, and fails with "good news, delete
+this branch" if the registry ever gains the tool.
+
+**What is deliberately still only plausible**, said per shot in the README
+rather than pinned: free text. An installer's stderr (11), a service's
+`notes` (06), the composed registry description (05) and gtk-launch's
+not-found message (08). Those are shaped like the real thing and are not
+the real thing, and no reviewed source in this repo fixes them.
+
+- tests: `bash ops/ralph/runtests.sh tools` — 136 (was 132). Fifteen
+  mutations run through the new gates, in both directions. From the scene:
+  an event jv-compat does not publish, a `prefix_created` carrying an
+  `error`, an arch the fingerprinter cannot report, a refusal reworded, a
+  CPU rung claiming the GPU, a rung off the ladder, an arg the registry
+  does not declare, a `needs_confirmation` the capability denies, a detail
+  naming a program jv-act never runs, a window jv-act does not open, a
+  question jv-act cannot compose, the disclaimer leaving — twelve, each
+  failing exactly one test. From the producers: jv-compat renaming a
+  lifecycle event, rewording a refusal, shortening its stderr tail, the
+  fingerprinter renaming an arch, and the ladder's floor moving onto the
+  GPU — five, each failing the tools suite, which is the proof these point
+  at the real producers and not at copies of them. All producer files were
+  restored from backups and `git diff -- services/` is empty. jv-act was
+  mutation-tested by READING only (guardrails: never modify it); what the
+  gate parses out of it was printed and checked by hand instead — registry
+  11 tools, error words {capability_mismatch, confirm_timeout, denied,
+  execution_failed, invalid_args, timeout, unknown_tool}, window 15.0,
+  kind `request`, format `{} — yes or no?` from `spec.description`,
+  `app.launch` → `gtk-launch`.
+- `bash ops/ralph/hudshots.sh` — 13 shots + 11 sequence assertions; only
+  `05-confirm.png` changed, the other twelve byte-identical.
+  `bash ops/ralph/qmltest.sh` — 536, untouched.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin.
+- files: docs/hud/05-confirm.png, docs/hud/README.md,
+  tools/hudshots/scene/tst_shots.qml, tools/tests/test_hudshots.py
+- next: **A68 is the new one and it is a human's** — the confirmation
+  question is generic by construction, and a picture of it now exists to
+  argue over. A62 (does the corner need a grammar for "these two plates
+  are unrelated") still gates A63. A65/A60/A50/A55/A47/A56/A59 still want a
+  decision; A21/A22/A25/A27/A31/A38/A39 still want a human at ares.
+  **B10/A28 — one live recording of one spoken turn on ares — remains the
+  biggest thing a human can hand this loop**, and it would retire the
+  composed half of four shots at once. B7/B12/B15/B17/B20/B23 unchanged.
+
+## 2026-09-24 — iteration 57 — B23: the one report line whose width a publisher got to choose
+
+B22 (iteration 51) made "every line `jv tap` writes as a REPORT fits 80
+columns" a test, and B23 wrote down the line it could not reach: the
+per-frame hop line, formatted in `bin/jv.rs` while the test walks what
+`cli.rs` renders. Closed it, and the hole under it turned out to be real
+rather than cosmetic. `{topic:<20} {src:<12}` PADS and does not truncate,
+and `validate_envelope` bounds a topic's alphabet and a src's emptiness
+and NEITHER one's length — so the width of that line was chosen by a
+remote process. Not hypothetically either: `jv-hud-bridge` is 13
+characters and was already one past its column.
+
+The line is `cli::hop_line` now, beside the `HopStats` that accumulates
+it, and both strings are CLIPPED at named columns rather than assumed.
+The marker is `short_id`'s own `...`, which is why `short_id` collapsed
+into the `clip(s, columns)` it always was — one tested behaviour instead
+of two.
+
+`TOPIC_COLUMNS` = 22 serves BOTH views of a topic, the per-frame stream
+and the summary table under it, and that is the decision worth recording:
+the value of either view is that its columns line up, and a label wider
+than its column breaks the table's alignment in exactly the way it breaks
+the stream's budget, so one cap answers both. The stream grew from 20 to
+22 to meet the table, so the two agree for the first time. The cost is
+`short_id`'s cost, stated in the same place: two topics sharing their
+first 19 characters print alike, and the whole topic is one `jv sub '*'`
+away — that view prints frames, which are raw data and are as wide as
+they are. `SRC_COLUMNS` = 13 is `jv-hud-bridge`.
+
+**What is assumed rather than enforced**, said out loud the way
+`every_line_a_turn_prints_fits_eighty_columns` says its own: `seq` is
+eight digits and the hop is eight columns, which leaves this line 16 of
+the 80 spare. A ten-digit seq (4.2e9 frames) and a 99-second hop both
+still fit. A hop wide enough to break it is a publisher stamping
+wall-clock `ts` on a monotonic bus, and printing that number WHOLE is the
+report — clamping it or hiding it behind a `?` would suppress the one
+signal it carries.
+
+- tests: `cargo test` — 125 lib (was 124) and 39 e2e, green. **Nine
+  mutations, all caught, and deliberately split across the two files**,
+  because the two halves of this claim are not provable in the same
+  place. Against the new unit gate: dropping the topic clip, dropping the
+  src clip, the table ROW keeping its own 20-wide column, the table
+  HEADER keeping its own, `clip` taking `columns` characters without
+  saying it cut anything, and `hop_line` reverting to 20/12 — six, each
+  failing it. Against the e2e: `bin/jv.rs` keeping its own `format!`,
+  deleting the streamed line entirely, and swapping topic and src into
+  each other's columns — three, each failing
+  `a_turn_is_reported_split_at_the_boundaries_jv_ears_published`.
+  **The honest finding from doing it this way**: a width assertion ALONE
+  does not catch the call-site revert, because every topic a real bus
+  carries fits either column, so the old `format!` passes at 61 columns.
+  That is why the e2e pins WHERE the columns fall and not just how many
+  there are — and it is the same reason the first version of the
+  alignment assertion survived M3: the table's next field is right
+  aligned, so a narrower column and a wider pad are the same string, and
+  only the character past them tells the two apart.
+- verified on the BUILT binary against a real broker, not only in tests:
+  `sys.health             jarvisd       seq=1        hop=    0.19ms` at
+  64 columns, over a 61-column table, the topic flush in the same column
+  in both.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs
+- next: "every report line fits" is now closed for every line the tap
+  writes, so **B17/B20 are what is left of the B-track width work and
+  both are a human at a terminal** — does four lines per tool turn read
+  as a decomposition or as noise. They share their trigger with B10/A28,
+  **one live recording of one spoken turn on ares, still the biggest
+  thing a human can hand this loop**. B15 wants the decision B13 left
+  open; B7/B12 wait on a consumer and on `sys.roster`. On the A track
+  A62 still gates A63; A65/A60/A50/A55/A47/A56/A59 want a decision and
+  A21/A22/A25/A27/A31/A38/A39/A68 want a human at ares.
+
+## 2026-09-24 — iteration 58 — B24: the measurement table stops being able to print one name twice
+
+B23 gave the topic ONE cap — `TOPIC_COLUMNS` = 22 — serving both views of
+a topic, the per-frame stream and the summary table under it, because the
+value of either is that its columns line up. B24 was written the same
+iteration as the consequence of that: a clip is a promise that what it
+hid is one `jv sub '*'` away, and two topics sharing their first 19
+characters print alike.
+
+That promise is good enough for the STREAM. Every line there is about one
+frame that named itself, and the frame is one `jv sub '*'` away whole.
+It is not good enough for the TABLE, where a row is about a topic and the
+label is the only thing that says which — so two topics collapse into two
+rows of numbers under one name, and there is nothing in the output that
+says it happened. The plan item made the ranking the fix had to encode:
+a measurement table whose rows cannot be told apart is worse than a wide
+one. **Identity outranks alignment here, and only here.**
+
+`table_topic_columns(&[&str])` is the whole change: the smallest width
+from `TOPIC_COLUMNS` up at which every PRINTED label is distinct. Three
+properties worth stating rather than reading out of the loop:
+
+- **It grows by the smallest amount that works**, so the 80-column budget
+  is spent only as far as identity needs. The pair in the test separates
+  at 27 and not at 26, and 27+39 = 66 still fits.
+- **The search always finds a width**, so the `expect` is not a hidden
+  panic: the topics are the keys of a map, and at the longest one's own
+  length nothing is clipped, so every label is its whole distinct topic.
+- **Printed labels are compared, never the topics.** Comparing topics is
+  tautological — map keys are distinct, so the column would never grow —
+  which is mutation M6 and it was caught. The other half of that argument
+  I had to correct mid-iteration: I first wrote that a clipped label can
+  collide with a WHOLE one "since this bus's alphabet allows `...`". It
+  does not. `validate_envelope` refuses an empty topic SEGMENT, so no
+  topic the broker accepts ends in two dots and that collision cannot
+  reach a live tap. The test for it is kept and now says so: nothing else
+  in this width code assumes the topic alphabet, and this should not be
+  the one place that does.
+
+**The trade is pinned where it costs something.** Every other report line
+this CLI writes fits `TAP_COLUMNS` at its worst input (B22/B23); this one
+deliberately does not, when a distinguishing character sits past column
+41. A test builds that case and asserts the rows are OVER the budget — so
+the day someone tightens the width gate, they are told which rule they
+are about to reverse instead of discovering it as a collapsed table.
+
+- tests: `bash ops/ralph/cargotest.sh jarvisd` — 128 lib (was 125) and 39
+  e2e, green. **Seven mutations, all caught**: rows reverting to the fixed
+  cap while the header moves, the header keeping its own column while the
+  rows move, the column never growing, it always growing by one (caught by
+  the real-bus case, which must stay at exactly 22), it jumping straight
+  to the widest topic instead of searching, it comparing topics instead of
+  printed labels, and growth capped at the 80-column budget (which turns
+  the `expect` into the panic that proves the cap is load-bearing).
+- verified on the BUILT binary against a real broker, not only in tests:
+  four frames on `context.window.changed.alpha` / `.beta`, published with
+  `jv pub`, tapped with `jv tap --latency`. The table printed
+  `context.window.changed.a...` over `context.window.changed.beta` at 27
+  columns; before this commit both rows read `context.window.chan...`.
+- **the honest finding from looking at that output**: the four STREAM
+  lines above the table are still four identical labels, and the table's
+  column no longer starts the run of columns the stream's does — the two
+  views diverge in exactly the case where the table had to widen. That is
+  the documented trade and it is also new information, because the stream
+  cannot do what the table did: a line printed as a frame arrives cannot
+  know which topics will show up later. Written up as B25.
+- build: `nix build .#jarvisd` ok (it runs the tests too);
+  `nixos-rebuild build --flake .#ares` ok. Never test/switch. No schema
+  change, no jv-act change, no boot path, no NVIDIA/kernel/flake pin.
+- files: services/jarvisd/src/cli.rs
+- next: **B25 is the stream half of what B24 just closed for the table**,
+  and unlike B24 it has no cheap answer, so it is written down rather than
+  built. The B track's remaining items are otherwise unchanged: B17/B20
+  are a human at a terminal and share their trigger with B10/A28 — **one
+  live recording of one spoken turn on ares, still the biggest thing a
+  human can hand this loop**. B15 wants the decision B13 left open; B7/B12
+  wait on a consumer and on `sys.roster`. The A track is where the value
+  is and it is almost entirely blocked on people: A62 gates A63;
+  A65/A60/A50/A55/A47/A56/A59 want a decision and
+  A21/A22/A25/A27/A31/A38/A39/A68 want a human at ares.
+
+## 2026-09-24 21:05 — the approved no-wake window finally opens (B26)
+
+**Nothing consumed `dialog.listen`.** jv-act publishes it on every
+confirmation (`service.rs:332`, alongside the `action.confirm` request),
+jv-brain publishes it for every onboarding and follow-up question
+(`service.py:602`), the schema has been frozen since Phase 2 stretch 0,
+`DECISIONS-approved.md` records the design decision that created it — and
+`grep -rn dialog services/jv-ears/` returned nothing at all. jv-ears
+subscribed to `speech.state` and to nothing else. So every answer to
+"delete this file — yes or no?" has needed "hey jarvis" in front of it,
+and the one approved exception to wake-every-time existed as a topic two
+services shouted into an empty room.
+
+It is the kind of gap that is invisible from either end: jv-act's tests
+assert it PUBLISHES the frame and pass; jv-ears' tests assert the wake
+gate HOLDS and pass; the feature is missing in the space between two
+green suites. I went looking for it because `schemas/dialog.listen.json`
+says of its `reason` field "the HUD will show it (sensor truthfulness,
+invariant 10)" — a HUD obligation nothing had built — and found the
+consumer underneath it missing too.
+
+**What it does.** `jv_ears/dialog.py` holds the window on the sample
+clock, like every other decision in this service, so a replayed fixture
+produces the same events every time. The pipeline advances it once per
+chunk and an utterance that STARTS inside the window is gated without a
+wake.
+
+Three rules, each of which had a plausible alternative I rejected:
+
+- **Only time closes the window.** Not the first utterance in it. The
+  approved decision is that the REQUESTER interprets transcripts and ears
+  never learns what "yes" means; a window that shut itself after one
+  utterance would be ears deciding the answer had arrived — the same
+  interpretation, moved into the perception service, and wrong exactly
+  when the user's first sound is "um". The cap is what keeps it safe, and
+  the cap is the schema's own 60 s, read from the frozen file by a test.
+- **It governs where you may START speaking.** A window expiring
+  mid-sentence does not throw the sentence away (the VAD already bounds
+  the recording), and a window opening mid-sentence does NOT reach back.
+  The wake path gates retroactively because "hey jarvis" lives inside the
+  utterance it belongs to; a no-wake window has no such excuse — those
+  words were spoken before any service asked for them.
+- **Half-duplex still outranks it.** Not an edge case: jv-act publishes
+  the request while jv-voice is still speaking the question, so the
+  window is open for seconds during which the only voice in the room is
+  Jarvis's own.
+
+**Every refusal points the same way** — an unreadable frame leaves the
+microphone exactly as wake-gated as it found it. Unknown body version
+(a v2 body means whatever v2 says), hedged `conf` on a command topic
+(the schema says 1.0; a producer that is not sure does not get a mic),
+unaudited `reason`, non-object body, empty `listen_id`, and a
+`window_s` that is not a bounded positive number — `True` included,
+because it is an `int` in Python and `True * 16_000` looks like a fine
+window. The required-field test is parametrised over the SCHEMA's own
+`required` list, so the day `dialog.listen` gains a fourth field this
+fails until ears validates it.
+
+The bus→pipeline hand-off is a deque, not a slot: `append`/`popleft` are
+atomic under the GIL and a read-then-clear attribute is not, and a
+request lost in that race is a microphone that stayed shut while a
+service waited on it.
+
+- tests: `bash ops/ralph/runtests.sh jv-ears` — **104 (was 37)**, green.
+  58 of them need no models (the window's decisions, and the wire through
+  `main.amain` over a fake bus); 9 are the same fixture WAV with and
+  without the frame. **13 mutations, all 13 caught**: the window never
+  gating, never expiring, reaching back into speech already in flight,
+  its deadline cutting off a sentence under way, a later request
+  shortening it, the schema cap unenforced, the hand-off as a slot, the
+  four validation clauses deleted one at a time, ears dropping the topic,
+  main forwarding only the body (which would make the `conf`/`v`
+  refusals unreachable from the bus), and ears never subscribing.
+  Also: `harness` 88, `tools` 136, `pylib` 4 — unchanged and green.
+- **verified on the built closure against a real broker**, not only in
+  tests. `speech-no-wake.wav` — a real utterance nobody addressed to
+  Jarvis — through the SHIPPED `jv-ears` from
+  `nixos-system-ares…/etc/systemd/user`, on a real `jarvisd`: with no
+  frame, `jv sub audio.transcript` printed nothing, exactly as it always
+  has. With `jv pub dialog.listen --src jv-act
+  --body '{"listen_id":"ralph-e2e","window_s":30,"reason":"confirm"}'`,
+  the same audio produced four partials and a final —
+  "The quick brown fox jumps over the lazy dog." — at conf 0.90.
+- **one process note worth keeping.** The first `nixos-rebuild build`
+  passed while building the OLD jv-ears: `dialog.py` was untracked, and a
+  flake's source is git's. The build gate is only a gate on files git can
+  see — `git add` BEFORE the build, or it verifies the previous commit.
+  Confirmed by listing `jv_ears/` inside the built env both times.
+- build: `nixos-rebuild build --flake .#ares` ok. Never test/switch. No
+  schema change, no jv-act change, no boot path, no NVIDIA/kernel/flake
+  pin.
+- files: services/jv-ears/jv_ears/dialog.py (new),
+  services/jv-ears/jv_ears/pipeline.py, services/jv-ears/jv_ears/main.py,
+  services/jv-ears/tests/test_dialog_listen.py (new),
+  services/jv-ears/tests/test_no_wake_window.py (new)
+- commit: 4c4d350
+- next: **B27 is the HUD half and it is now the loop's own to take** —
+  the schema says the HUD will show the reason, and the microphone is
+  open without a wake word, which is precisely what invariant 10 exists
+  for. The obstacle is real and is written into the plan: `dialog.listen`
+  is a REQUEST, and a HUD that drew it would be showing what a service
+  asked for rather than what the microphone is doing — the fakeable
+  indicator invariant 10 forbids. Only jv-ears can say the window
+  actually opened, and its heartbeat is 5 s against a 15 s window. B28
+  is the smaller companion: the window is invisible to `jv health` and to
+  the audit for the same reason. Everything else is where it was — the A
+  track is still almost entirely blocked on people (A62 gates A63;
+  A65/A60/A50/A55/A47/A56/A59 want a decision; A21/A22/A25/A27/A31/A38/
+  A39/A68 want a human at ares), and B10/A28 — one live recording of one
+  spoken turn — is still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 60 — B29: the window list niri sends first,
+and nothing ever read
+
+The A track is still almost entirely blocked on people, and so is most
+of B: B27/B28 share one human decision (an `ears.listen` topic or not),
+B7/B12/B25 are each explicitly "not until something reads it", and
+B10/B17/B20/A28 want two minutes of a human at ares. So I went looking
+in the code instead of the plan, and the first thing I read — the niri
+backend, the one part of jv-context that only ever runs on the machine
+— had **no tests at all** and handled three of the four window events
+its own docstring listed.
+
+The missing one is `WindowsChanged`, and it is not a corner case: it is
+niri's complete window list, and **I verified on ares today that it is
+the third line of a live event stream**, before any event at all. It
+listed the 3 windows that were open, exactly one of them focused. The
+old parser threw all of that away, so on any desktop where anything was
+open before jv-context started:
+
+  * the FIRST event about every pre-existing window said `opened`. You
+    have Firefox up all day, you switch tabs, and jv-brain is told
+    Firefox just opened.
+  * a `WindowClosed` or `WindowFocusChanged` for one of them carried
+    `app_id: ""`. `schemas/context.window.json` says focus_changed
+    frames are what jv-act resolves "this"/"the active window" against
+    — so "close this" resolved to a window with no name.
+  * nothing said which window had focus until the user switched one.
+
+**The rule, and it is the whole design: events are forwarded; a RESYNC
+publishes only what it CHANGES.** A state dump has no timestamps in it,
+so it may not emit `opened` for a window that predates this process (it
+cannot date it) and may not emit `closed` for the difference between
+two lists (it cannot say when they went, and niri sends `WindowClosed`
+for the ones it saw go). What it may do is seed the cache — which is
+what lets every later frame NAME a window that predates the service —
+and, when it names a focused window nothing has reported yet, publish
+the one `focus_changed` that makes "this window" resolvable at all.
+Deduped against the last focus reported, so a second resync that agrees
+is silent.
+
+Two decisions worth writing down because both had a defensible
+opposite. `WindowFocusChanged {id: null}` — niri's "nothing has focus
+now" — publishes NOTHING: `window_id` is required and `minimum: 0` in
+the frozen schema, and there is no way to say it without a schema
+change I am not allowed to make. But it must still be FORGOTTEN
+internally, or the next resync dedups against an answer that expired;
+a mutation proves it. And the resync's `focus_changed` is the one frame
+here that could be argued as invented — focus did not change at that
+instant, jv-context merely learned it. I took it because the schema's
+own description makes focus_changed the frame that DEFINES the active
+window, and the alternative is jv-act having no answer to "this" until
+the user happens to switch. It is cheap to revert and it is in the plan
+as B30 for a human to veto.
+
+Privacy: the resync is the first thing that ever put real window titles
+in this process, so the cache holds them raw and `redact_title` runs at
+publish exactly as before. Two tests say a password manager that was
+already open is redacted the same as one opened later, and a private
+browsing title learned from a resync never reaches a body — asserted
+here because seeding the cache is what made that path reachable at all.
+
+- tests: `bash ops/ralph/runtests.sh jv-context` — **41 (was 13)**. The
+  niri parser had ZERO coverage before this. `events()` itself — the
+  `"EventStream"` handshake, the JSON-lines framing, one parser state
+  carried across lines, a malformed line skipped — is now driven over a
+  real unix socket by a fake niri. **Eight mutations, all eight
+  caught**: the resync not handled at all, the resync reporting every
+  listed window as `opened`, merging instead of replacing the list,
+  publishing focus unconditionally, `id: null` not forgotten, a closed
+  focused window still remembered as focused, `is_focused` on
+  `WindowOpenedOrChanged` not tracked, and a resync never clearing a
+  stale focus.
+- **field-verified against the live niri-26.04 on ares**, read-only
+  (connect, request, read, disconnect — no `niri msg action`). The wire
+  answered: the reply is `{"Ok": ...}`, then `WorkspacesChanged`, then
+  `WindowsChanged`; `struct Window` carries `app_id, focus_timestamp,
+  id, is_floating, is_focused, is_urgent, layout, pid, title,
+  workspace_id`, `id` an int, `app_id`/`title` on every entry; and
+  `Ok`, `WorkspacesChanged`, `KeyboardLayoutsChanged`,
+  `OverviewOpenedOrClosed`, `ConfigLoaded`, `CastsChanged` all arrive
+  within three seconds on a desktop nobody is touching — every one of
+  them now a fixture in the passed-over list, because a parser that
+  tripped on any of them would take jv-context down at startup. Only
+  structure was read out of the live session; no window title was
+  printed, kept or committed. The half a quiet capture cannot show —
+  the per-window events, and whether niri ever resyncs mid-session —
+  stays a TODO(machine) in the docstring, now stated precisely.
+- **the live session also found a bug in my own test.** `NiriBackend("")`
+  falls back to `$NIRI_SOCKET`, and this loop runs inside the user's
+  niri session, so the "no socket is an error" test connected to the
+  REAL compositor and blocked until it was killed. `monkeypatch.delenv`,
+  and the reason is in the docstring: a test that reaches the machine it
+  runs on is not a test. Worth remembering for every other service whose
+  seam reads an env var.
+- build: `nixos-rebuild build --flake .#ares` ok, with `git add` BEFORE
+  it (iteration 59's lesson) — and the SHIPPED closure was then asked to
+  translate a resync, so "the new parser is in the built system" is a
+  reading and not an inference. Never test/switch. No schema change, no
+  jv-act, no boot path, no NVIDIA/kernel/flake pin.
+- files: services/jv-context/jv_context/compositor.py,
+  services/jv-context/tests/test_niri_events.py (new)
+- commit: f00273f
+- next: **B30 is the one thing here a human should look at** — the
+  resync's `focus_changed`, which is the only frame in this service that
+  reports a state rather than a transition. B31 is the bigger find and
+  it is not mine to take: `context.window` has a `workspace` field and a
+  `monitor` field and the niri backend has never populated either, while
+  niri's `Window` carries `workspace_id` (an id, not the name the schema
+  wants) — resolving it needs `WorkspacesChanged`, which is the next
+  event down this same socket. Everything else is where it was: A is
+  blocked on A62/A65/A68/A47/A56/A50/A60 (decisions) and A13/A21/A22/
+  A25/A27/A31/A38/A39 (a human at ares), B27/B28 share one decision, and
+  B10/A28 — one live recording of one spoken turn — is still the biggest
+  thing a human can hand this loop. Though today's session is a reminder
+  that the loop IS on ares now: read-only field verification against the
+  live machine is available and was worth more than any test I wrote.
+
+## 2026-09-24 — iteration 61 — B31: the two fields that said where a
+window is, empty since the schema was frozen
+
+B29 (last iteration) ended by pointing at this and calling it the bigger
+find. It is: `schemas/context.window.json` has carried a `workspace`
+field and a `monitor` field since v1, frozen, documented — and **no
+publisher has ever put a value in either**. Two things fall out of that
+emptiness. jv-act's registry has a `window.move_workspace` tool whose
+`workspace` argument is a REQUIRED string, and nothing on the bus could
+supply one. And the A track has asked three times (A13/A27/A38) what a
+HUD with three monitors should do, always concluding there is no bus
+data behind the question — there wasn't.
+
+Not a schema change: both fields are already frozen in, and the generated
+binding already had them. The obstacle was a real mismatch. niri's
+`struct Window` carries a `workspace_id` — an integer — and the schema
+wants a NAME. The name lives in `Event::WorkspacesChanged`, which is
+B29's shape one level out: a list, authoritative, unread.
+
+**Field-verified on ares first, read-only** (connect, request, read,
+disconnect — no `niri msg action`, nothing printed but structure). What
+the live compositor answered decided the design:
+
+  * `WorkspacesChanged` is line TWO — `Ok`, then it, then
+    `WindowsChanged`. So the workspace table is populated BEFORE the
+    first window is ever listed, and the very first frame jv-context
+    publishes can already say where that window is. No deferral, no
+    second pass, no frame that has to be corrected later.
+  * `struct Workspace` carries `active_window_id, id, idx, is_active,
+    is_focused, is_urgent, name, output`. Four workspaces were up.
+  * **`output` was a connector string on every one** (`DP-1`, `DP-2`,
+    `HDMI-A-1` twice — the three monitors in CLAUDE.md).
+  * **`name` was null on every one.** Ofek has never named a workspace.
+  * **`idx` is per-OUTPUT.** Three of the four were `idx: 1`.
+
+That last pair is the whole design decision. The tempting move —
+"unnamed? publish the index" — would name three different workspaces
+"1" at the same instant, and that string is exactly what
+`window.move_workspace` would act on. So: the name is published when
+niri reports one and the field is ABSENT when it does not, and the
+monitor is published either way. An unnamed workspace still says which
+screen it is on, which is the half this machine can actually answer.
+A test says the index is never used, and it says why.
+
+The rest follows B29's rules deliberately. The workspace table is
+authoritative and replaced wholesale (unplugging a monitor moves
+workspaces between outputs and niri restates the list; a merge would
+keep publishing a window on a screen that is no longer there). It
+publishes NO frame of its own — no window did anything, and
+`context.window` has no vocabulary for "a workspace moved". And every
+frame is placed at PUBLISH time through one door (`_frame`), against the
+table as it stands now, so a close and a focus — events that carry an id
+and nothing else — say where the window was just as accurately as a
+resync does. The window cache became a record with a `workspace_id` on
+it, which is what makes that possible.
+
+- tests: `bash ops/ralph/runtests.sh jv-context` — **59 (was 41)**.
+  **Twelve mutations, all twelve caught**: `WorkspacesChanged` not
+  handled at all, the table merged instead of replaced, `idx` used as a
+  name, an absent name suppressing the monitor too, an unknown id
+  resolving to empty strings instead of absence, a close built without
+  its record, the window record dropping its workspace, a moved window
+  keeping its old one, an empty name published as a name, the table
+  keyed by `idx`, `monitor` never published, and `monitor` published
+  under niri's own field name (`output`) instead of the schema's. One
+  test reads the two field names off the GENERATED binding rather than
+  spelling them, and asserts both are optional there — absence has to be
+  legal for any of this to be honest.
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change, no jv-act, no boot path, no
+  NVIDIA/kernel/flake pin.
+- **verified through the BUILT closure against the live compositor**:
+  the shipped `jv_context` (from
+  `/nix/store/...python3-3.14.7-env/.../jv_context/compositor.py`, not
+  the worktree) was run against the real niri socket, and the workspace
+  table came back `{2: (None,'DP-1'), 3: (None,'DP-2'),
+  4: (None,'HDMI-A-1'), 1: (None,'HDMI-A-1')}` with the first published
+  frame reading `focus_changed / monitor: HDMI-A-1` and **no
+  `workspace`** — which is the truth about this desktop and not a
+  shortcut. Only structure and connector names were read; no window
+  title or app_id was printed, kept or committed.
+- files: services/jv-context/jv_context/compositor.py,
+  services/jv-context/jv_context/service.py,
+  services/jv-context/tests/test_niri_events.py
+- commit: 752a834
+- next: **B32 is the one to read first and it is a human's**: `workspace`
+  will be absent on every frame this machine produces until a workspace
+  is NAMED, and `window.move_workspace` needs that string — one line in
+  a niri config fixes it, or the schema grows an id (frozen, so review).
+  B33 is small and shares B30's question exactly (a frame that reports a
+  state rather than a transition — here, restating where the focused
+  window is after a monitor is unplugged); decide the two together.
+  B34 is the interesting one: A13/A27/A38 now have SOME data behind them,
+  though "the screen the focused window is on" is not "the screen you are
+  looking at" and the senses that could say the latter are unwired.
+  Otherwise unchanged: A blocked on A62/A65/A68/A47/A56/A50/A60
+  (decisions) and A13/A21/A22/A25/A27/A31/A38/A39 (a human at ares),
+  B27/B28 share one decision, and B10/A28 — one live recording of one
+  spoken turn — is still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 62 — B35: the mixer reading nobody took, and the pump that died saying `ok`
+
+The A track is blocked end to end (A62/A65/A68/A47/A56/A50/A60 want
+decisions, A13/A21/A22/A25/A27/A31/A38/A39 want a human at ares) and so
+is the front of the B track (B27/B28/B30/B32/B33/B34 are all somebody
+else's call), so I went looking in the one publisher the HUD depends on
+that nothing had audited: jv-context's 1 Hz system snapshot. Two defects,
+both reproduced before a line was written.
+
+**It could invent a reading.** `WpctlProbe.volume()` ended in
+`float(parts[1]) if len(parts) >= 2 else 0.0`, so an unreadable sink —
+wpctl missing from the closure, wpctl exiting non-zero, wpctl printing
+its own error text on stdout, which it does — published
+`audio_volume: 0.0, audio_muted: false`. That is not a harmless
+placeholder anywhere, and on this machine it is specifically a lie the
+HUD repeats: `core/OutputState.qml` reads `audio_volume <= 0` during an
+utterance as YOU CANNOT HEAR THIS and lights a plate. A40 built that
+plate for the worst-evidenced failure this assistant has, and A41 went to
+real trouble making sure it never speaks about a sink jv-voice does not
+use — and underneath both, the number itself could be something nobody
+measured. Invariant 10 forbids exactly that.
+
+**And it could stop, silently, forever.** `"no such id 42"` is two tokens,
+so it passed the length check and `float("such")` raised `ValueError`
+straight out of `_pump_system`. That task was never awaited: it died, the
+process lived on pumping window events, `Restart=on-failure` never fired,
+and `_pump_health` kept publishing `state: "ok"` about a jv-context that
+had not published `context.system` since. A service that has stopped
+doing half its job and says it is well is the failure mode `jv health`
+exists to end.
+
+The three rules, each with a test that dies without it:
+
+- **A probe raises, it does not substitute.** `ProbeUnavailable` for a
+  missing binary, a timeout, a non-zero exit, output that is not
+  `Volume: <n>`, and a number that is not one — `nan` and `inf` parse as
+  floats and are not measurements, and a negative is below the schema's
+  own minimum. A real 0.0 still reads as zero; that distinction is the
+  whole point.
+- **A failed tick publishes NOTHING.** Every field a probe feeds is
+  required by `schemas/context.system.json`, so there is no legal partial
+  frame — and the two ways of filling the gap both say more than was
+  measured: a substituted number is a reading nobody took, and restating
+  the last good snapshot dates it NOW. The bus's last word simply ages
+  out, which consumers already handle (the HUD stops believing a snapshot
+  after three periods, and that clock was written for exactly this).
+- **The failure moves to the heartbeat.** `degraded` with a note naming
+  the exception, and IMMEDIATELY on the transition — which
+  `schemas/sys.health.json` asks every service for ("every fixed period,
+  and immediately on state change") and which jv-context had never done;
+  on a 5 s beat a service that had just gone blind was up to 5 s of
+  silence about itself. Only on the transition, though: a probe failing
+  the same way sixteen times running is not news, and a beat per failed
+  tick would put jv-context's 1 Hz onto a topic that is meant to be quiet
+  (invariant 5). A test pins that the 0.8 s blind window produces exactly
+  two beats, `ok` then `degraded`.
+
+The `except Exception` in the pump is deliberate and is the substance of
+the fix rather than a shortcut: the property being bought is that no
+probe, present or future, can end that loop. What makes a broad catch bad
+is silence, and this one is the opposite — every failure ends up on the
+bus named by its exception type.
+
+One line of Nix went with it. The unit had no `path` at all, so `wpctl`
+was reaching it only by inheritance from the session; it now names
+`wireplumber` the way `jv-act` already names the things it shells out to.
+
+- tests: `bash ops/ralph/runtests.sh jv-context` — **82 (was 59)**.
+  **Thirteen mutations, all thirteen caught**: an unreadable mixer
+  reading as `(0.0, False)`, the `Volume:` word check dropped, the
+  nan/negative guard dropped, `OSError` and the timeout uncaught, the
+  exit code ignored, `snapshot()` substituting, the pump re-raising (the
+  old behaviour), the heartbeat always `ok`, `degraded` with no note, no
+  immediate beat on change, a beat per failed tick, the fault never
+  cleared when the probe recovers, and a fabricated frame published
+  anyway.
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change, no jv-act, no boot path, no
+  NVIDIA/kernel/flake pin.
+- **verified through the BUILT closure on ares**: the shipped
+  `jv_context` (from `/nix/store/...python3-3.14.7-env/.../jv_context/
+  system.py`, not the worktree) read the live sink through the built
+  unit's own `PATH=`, and the same binary with wpctl gone answered
+  `ProbeUnavailable: wpctl did not run` instead of zero. A run under
+  `env -i` with the unit PATH also produced `wpctl exited 2` — an
+  artifact of stripping `XDG_RUNTIME_DIR`, which a systemd *user* unit
+  has, and an accidental live demonstration of the new failure path. Only
+  a volume float and a mute bool were read; no device name, nothing kept.
+- files: services/jv-context/jv_context/system.py,
+  services/jv-context/jv_context/service.py,
+  services/jv-context/tests/test_context.py,
+  modules/jarvis-services.nix, docs/optimization-backlog.md
+- commit: dc04e77
+- next: **B37 is the one I would take next and it is the loop's own.**
+  `gpu_vram_free_mb` has never once been on the bus on ares — measured
+  under the built unit's own PATH, where the snapshot came back without
+  the field, because `nvidia-smi` is not in the closure either. Nothing
+  is lying (the schema makes it optional and the probe already degrades
+  to absent), but invariant 6 — "6 GB VRAM is a scheduling problem" —
+  has no number behind it, and the fix is the same one line I wrote for
+  wireplumber, reading `config.hardware.nvidia.package.bin` from
+  `modules/jarvis-services.nix` without touching `gpu-nvidia.nix` or its
+  pin. Pair it with backlog item 14, because the day it starts working is
+  the day that fork-per-second starts being paid. **B38** is the same
+  shape spread over three services: jv-ears, jv-guard and jv-brain still
+  beat on a timer alone, so jv-ears' `microphone open but no audio` is up
+  to a full period late and `jv health --check`'s 6 s window can miss it;
+  `_set_fault` + an Event is the shape to copy. **B36 is a human's** —
+  `net_online` is documented as one measurement and published as a much
+  weaker one, and fixing it starts by rewording a frozen schema
+  (proposal **R8**). Otherwise unchanged: A is blocked on A62/A65/A68/
+  A47/A56/A50/A60 (decisions) and A13/A21/A22/A25/A27/A31/A38/A39 (a
+  human at ares), B27/B28 share one decision, B30/B33 share another, and
+  B10/A28 — one live recording of one spoken turn — is still the biggest
+  thing a human can hand this loop.
+
+## 2026-09-24 — iteration 63 — B37: the number invariant 6 is named after
+
+CLAUDE.md invariant 6 is titled "6 GB VRAM is a scheduling problem". The
+schema field that carries the number, `context.system.gpu_vram_free_mb`,
+describes itself as feeding "the brain's own situational awareness". It
+has been absent from every frame ares has ever published.
+
+Nothing was lying, which is why nobody caught it: the field is optional,
+the probe degraded to absent, and every consumer that would have read it
+was correct to see a machine with no reading. `nvidia-smi` ships in the
+NVIDIA driver's `bin` output rather than in jv-context's closure, nothing
+named it on the unit path, and so the 1 Hz snapshot raised
+FileNotFoundError about 86,000 times a day to learn the same thing. B35
+found this by measuring under the BUILT unit's own PATH, which is the
+only place the difference between "inherited from my shell" and "what the
+service actually gets" is visible — and it is the second time that exact
+measurement has found a missing binary in three iterations.
+
+One line of Nix, named the way `jv-llm` already names it: the unit path
+gains `config.hardware.nvidia.package.bin`. That READS `hardware.nvidia`;
+`modules/gpu-nvidia.nix` and the driver pin are untouched. I first wrote
+it with an `lib.elem "nvidia" videoDrivers` guard, then dropped the guard
+— jv-llm pulls the same package unconditionally two units down, so the
+guard bought nothing and cost the file's coherence. The rebuilt closure
+came out at the identical store path either way, which is the cheapest
+possible proof that the simplification changed nothing.
+
+The larger half was the probe. `gpu_vram_free_mb` is optional, and I
+think the lesson here is that an optional field's ABSENCE is a claim like
+any other: the schema says "free VRAM if a GPU is present", so absent has
+to mean *there is no GPU*, not *the reading did not work out*. The old
+probe returned `None` for both, which is the B35 pathology one level
+down — a machine that has a card and lost sight of it looked exactly like
+a machine that never had one, and invariant 6's ladder would be flying
+blind with nothing anywhere saying so.
+
+So `GpuProbe` answers three ways instead of two: `None` (no card, not a
+fault), a float, or `ProbeUnavailable` (there IS a driver and it went
+quiet). The third reaches `sys.health` as `degraded` with a note naming
+the field — while `context.system` keeps flowing, because the mirror
+image of B35 is the point: the mixer feeds a REQUIRED field, so its
+failure costs the whole frame; the GPU feeds an optional one, so its
+failure must cost exactly that field and never the other four. That
+asymmetry is now two tests that would each fail if the other's rule were
+applied.
+
+`parse_nvidia_smi_vram` rejects what `float()` would have taken happily:
+`[N/A]` and `[Not Supported]` (what nvidia-smi prints when a device
+cannot answer), NVML init errors, which arrive on stdout the way wpctl's
+do, `nan` and `inf`, negatives, and — the case my first test missed — a
+real number printed alongside a NON-ZERO exit, which is what a multi-GPU
+box does when one card answers and another does not. That mutation
+survived the first round precisely because my fake had also returned
+empty stdout; the check I thought I was testing was being made by the
+parser. Fixed the fake, not the code.
+
+A missing binary LATCHES the probe off. The PATH is a store path fixed
+when the unit started, so "there is no driver here" cannot stop being
+true while the process lives, and re-forking once a second to re-learn it
+is the pure-waste half of backlog item 14 — gone without touching the
+cadence question (how fast should the ladder see a game-launch spike?)
+or the pynvml question (a flake dependency), both of which remain the
+human's. Backlog 14 is updated to say so, and to say that its cost is no
+longer theoretical: as of today the fork returns a number.
+
+- tests: `bash ops/ralph/runtests.sh jv-context` — **105 (was 82)**.
+  **Eleven mutations, all eleven caught**: the latch removed (forks
+  again), a missing binary raised as a fault, the gpu note dropped, the
+  gpu failure allowed to take the whole frame, the finite/negative guard
+  dropped, the exit code ignored, empty output read as `0.0`, the service
+  ignoring the note, a GPU-less machine reported as degraded, and
+  OSError/timeout left uncaught. `pylib` (4) and `tools` (136) green too,
+  since `snapshot()` changed shape.
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change, no jv-act, no boot path, no
+  NVIDIA/kernel/flake pin — `gpu-nvidia.nix` is read, not written.
+- **verified through the BUILT closure on ares**: the shipped
+  `jv_context` (from `/nix/store/...python3-3.14.7-env/.../jv_context/
+  system.py`) read **943 MiB free of 6144** off the GTX 1660 SUPER under
+  the built unit's own `PATH=`, cross-checked against nvidia-smi's own
+  `name,memory.total,memory.free`. The same binary with nvidia-smi gone
+  answered `None` and latched, publishing a whole frame with no note. The
+  generated unit file now carries `nvidia-x11-595.91.07-bin/bin` on its
+  PATH. Only a free-VRAM integer was read; no process list, no device
+  serial, nothing kept.
+- files: services/jv-context/jv_context/system.py,
+  services/jv-context/jv_context/service.py,
+  services/jv-context/jv_context/main.py,
+  services/jv-context/tests/test_context.py,
+  modules/jarvis-services.nix, docs/optimization-backlog.md
+- commit: befd1da
+- next: **B39, and it is the sharper half of what B37 uncovered.**
+  `jv_brain/launcher.py:probe_free_vram_bytes` runs the same nvidia-smi
+  query with none of these fixes and, unlike jv-context's, its answer
+  DECIDES something: `None` on any failure — OSError, timeout, non-zero
+  exit, `int()` choking on `[N/A]` — goes straight into `pick_rung`,
+  which reads it as "no usable GPU" and drops Jarvis to the CPU rung for
+  the life of that llama-server. A driver hiccup at launch is
+  indistinguishable from a machine with no card, and the only trace is a
+  journal line: nothing on the bus, no heartbeat note, and the rung file
+  writes `free_vram_mb=-1` for both. Its unit already has the driver on
+  its path, so this is not B37's bug — it is B37's second half, and the
+  shape to copy now exists. **B40** is the consumer question: the field
+  is finally on the bus and nothing reads it. 943 MiB free is itself the
+  interesting case — the 8B Q4 brain would not fit right now — and a HUD
+  plate showing it is the loop's to build, while a brain that REACTS to
+  it is a scheduling change that pairs with backlog 14. **B38** is
+  unchanged and still small: jv-ears, jv-guard and jv-brain beat on a
+  timer alone, and `_set_fault` + an Event is the shape to copy. **B36
+  is a human's** (proposal R8). Otherwise unchanged: A is blocked on
+  A62/A65/A68/A47/A56/A50/A60 (decisions) and A13/A21/A22/A25/A27/A31/
+  A38/A39 (a human at ares), B27/B28 share one decision, B30/B33 share
+  another, and B10/A28 — one live recording of one spoken turn — is
+  still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 64 — B39: the blind rung
+
+**What.** `jv_brain/launcher.py:probe_free_vram_bytes` returned `None` on
+every way it could fail: OSError, a timeout, a non-zero exit, and `int()`
+choking on `[N/A]`. `None` goes straight into `pick_rung`, which reads it
+as "no usable GPU" and pins Jarvis to the CPU rung for the life of that
+llama-server. So a driver hiccup at launch was indistinguishable from a
+machine that never had a card — and unlike B37's jv-context probe, this
+one DECIDES something. The only trace was a line on stderr: nothing on
+the bus, no heartbeat note, `free_vram_mb=-1` written for both.
+
+Three answers now, the shape B37 built:
+
+- **measured** — a number, strictly parsed. `[N/A]`, `[Not Supported]`,
+  NVML init errors arriving on stdout, `nan`/`inf`, negatives, and a
+  number printed alongside a non-zero exit are all rejected. `nan` was
+  the nastiest: `float()` takes it, and it then walks the whole ladder
+  comparing false to every rung budget — indistinguishable from a card
+  with nothing free, which at least lands on the same floor, but by
+  accident.
+- **absent** — no nvidia-smi at all. A fact about the machine, not a
+  fault, and the only silent `None` left.
+- **unreadable** — there IS a driver and it would not answer.
+
+The CPU floor holds for all three; you cannot allocate VRAM you could not
+count, so which rung gets picked does not change. What changes is what
+anyone is allowed to CONCLUDE. The launcher execs into llama-server and
+can never reach the bus, so the rung file is the whole of what it gets to
+say: it now carries `vram=` and, when unreadable, nvidia-smi's own words
+in `vram_note=`. Writer and reader moved in together (`write_rung_file` /
+`read_rung_file`, tested as one pair), jv-brain's `_rung()` became a thin
+call on that, and a blind launch turns its heartbeat **degraded** with the
+reason attached — without erasing a worse note it already carried. A
+GPU-less machine stays `ok`: on a dev box "degraded forever" is noise, and
+"there is no card here" is not an impairment. An old rung file with no
+`vram=` line infers from `free_vram_mb` and can never invent a fault
+nobody observed.
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` — **85 (was 57)**.
+  **Seventeen mutations, all seventeen caught**: any OSError folded back
+  into "no GPU" (the original bug), the exit code ignored, the
+  finite/negative guard dropped, empty output read as `0.0`, a timeout
+  left uncaught, unreadable collapsed into absent, the source word or the
+  reason left out of the rung file, a missing field read as a fault, the
+  note left unflattened, the heartbeat not escalating, the blind note
+  overwriting a real one, the reason never reaching the bus, a GPU-less
+  machine reported degraded, the rung file not written on the blind path,
+  and unreadable allowed to keep a GPU rung.
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change, no jv-act, no boot path, no
+  NVIDIA/kernel/flake pin — `jarvis-services.nix` is read, not written
+  (it already puts the driver on jv-llm's path, which is why this was
+  B37's second half and not B37's bug).
+- **verified through the BUILT closure on ares**, under the jv-llm unit's
+  own `Environment="PATH="`: the shipped `jv-llm-launch` read **943 MiB
+  free of 6144** off the GTX 1660 SUPER, cross-checked against
+  nvidia-smi's own `name,memory.total,memory.free`, and wrote
+  `vram=measured`, rung 4. **That is the case this commit exists for** —
+  ares launches its brain onto the CPU rung right now with a perfectly
+  healthy card, because the desktop and a browser own the VRAM, and until
+  today that outcome was byte-for-byte identical to a probe that failed.
+  The same binary with the driver off PATH wrote `vram=absent`; with a
+  stub answering `[N/A]`, and another printing `5432` then exiting 9, it
+  wrote `vram=unreadable` plus the reason. No exec of llama-server was
+  performed — every run went through the `exec_fn` seam into a tmp dir.
+- files: services/jv-brain/jv_brain/launcher.py,
+  services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_vram_guard.py (new)
+- commit: 05117db
+- next: **B41 or B40 — and B39 just made them the same question.** The
+  bus can now say the brain picked its rung blind, but it still cannot
+  say in WORDS which rung it is on: `llm_rung=4.0` and `llm_gpu=0.0` need
+  the ladder memorised to become "CPU fallback, replies will be slow",
+  and the launcher's own `label=` — the one human-readable string it
+  writes — is read by nobody, though `RungRecord` now has it in reach for
+  free (**B41**, small). **B40** is the same consumer question one step
+  out: `context.system.gpu_vram_free_mb` has been on the bus since B37
+  and nothing reads it, and today's 943 MiB is the argument for a HUD
+  plate — but a plate showing "943 MiB free" without saying the desktop
+  owns the rest reads as a fault when it is the machine working as
+  designed, so that plate needs a sentence, not just a number. **B42** is
+  the small hygiene B39 turned up: the rung file is written
+  non-atomically and jv-brain is only `after=` jv-llm, so the window is
+  real — it fails safe today (a torn read is `index=None`, `vram=absent`,
+  degrading nothing), which is why it is a nicety and not a bug. **B38**
+  is unchanged and still small: jv-ears, jv-guard and jv-brain beat on a
+  timer alone, and `_set_fault` + an Event is the shape to copy. **B36 is
+  a human's** (proposal R8). Otherwise unchanged: A is blocked on
+  A62/A65/A68/A47/A56/A50/A60 (decisions) and A13/A21/A22/A25/A27/A31/
+  A38/A39 (a human at ares), B27/B28 share one decision, B30/B33 share
+  another, and B10/A28 — one live recording of one spoken turn — is still
+  the biggest thing a human can hand this loop.
+
+---
+
+## 2026-09-24 — iteration 65 — B41: the rung in words, and the fall called a fall
+
+**What.** Since the VRAM guard was written, the only thing the bus has
+ever said about which rung the brain launched on is `llm_rung=4.0` and
+`llm_gpu=0.0` — two numbers in a free-form gauge map. Turning `4.0` into
+"CPU fallback, replies will be slow" requires having Ofek's ladder
+memorised, and `jv health` doesn't even print metrics, so in the readout
+a human actually looks at, the rung said nothing at all. Meanwhile the
+launcher writes `label=` to the rung file on every launch — the one
+human-readable string in the whole mechanism — and nobody had ever read
+it. B39 put it in `RungRecord`'s reach at zero cost.
+
+`describe_rung` reads it: `rung 4 (CPU fallback)`. It falls back to the
+backend word when the file carried no label (never guesses the label
+back from the index — that would be quoting THIS process's ladder about
+a choice a different process made), and it says nothing whatsoever about
+a rung it never read. An empty string, not `rung ?`: a caller cannot
+splice a placeholder into a sentence and have it read as a fact. `-1` is
+one of those — it is the parser's sentinel for a file with no `rung=`
+line, never a number the launcher wrote.
+
+**The half that matters.** Words are only worth adding where somebody
+should read them, and chasing that question turned up the real finding:
+jv-brain published **`ok`** while running on the CPU rung with a
+perfectly healthy card. `schemas/sys.health.json` names that exact case
+as its worked example of `degraded` — *"'degraded' = alive but impaired
+(e.g. brain fell back to CPU, ears lost the mic)"* — and it is not a
+hypothetical: ares measured 943 MiB free of 6144 again today, because
+the desktop and a browser own the card, so the 8B Q4 brain is on the CPU
+right now and the heartbeat called that fine.
+
+So `rung_finding` answers the whole health question in one place:
+
+- **the CPU rung on a machine that HAS a card** (measured or unreadable)
+  is a finding — invariant 6 exists to keep the 8B Q4 resident, and an
+  8B on this i5 answers in the time a GPU rung takes to finish;
+- **a rung chosen blind** is a finding, unchanged from B39;
+- **everything else is quiet.** A machine with no card is still simply a
+  machine with no card (B39's call, kept). Rungs 1-3 gave something up
+  deliberately and are still on the GPU — a note every 5 s for a ladder
+  working as designed teaches a reader to skip the field the real fault
+  will one day appear in, which is why this does NOT narrate the happy
+  path. A worse note keeps its place at the front of `notes` and keeps
+  its state; the finding only ever appends.
+
+**What a human will notice.** `jv health --check` exits 1 while the
+brain is on CPU, so ares will read `1 not well` on an ordinary day until
+VRAM is free when jv-llm starts. That is the truth and it is actionable
+(free VRAM, restart jv-llm) and it clears itself — but it IS a verdict
+change made by the loop, so **B43** is logged for a human who would
+rather have `ok` back: disagreeing means disagreeing with the schema's
+own example, not with a heuristic.
+
+Hardening that came along: rung-file values are stripped on the way in,
+because `backend` now decides a STATE and `backend = cpu` from a
+hand-edited file equals neither `"cpu"` nor `"gpu"` and would quietly
+answer "no" to both questions. (Line endings needed no such care —
+`read_text()` translates CRLF. I wrote the opposite in a comment first;
+the mutation battery is what caught it, by refusing to die.) The label
+is flattened the way `vram_note` already is: `jv health` renders notes
+as one line of a table.
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` — **98 (was 85)**.
+  **Sixteen mutations, all sixteen caught**: a negative index read as a
+  rung, the label never parsed, the label not flattened, values not
+  stripped, the backend fallback dropped, the fall not counted as a
+  finding (the bug itself), a card-less machine counted as one, blind no
+  longer a finding, a GPU rung counted as a fall, the finding
+  overwriting a worse note, the state not escalating, a worse state
+  overwritten by degraded, the blind branch quoting `-1 MiB` as a
+  reading, the reason left out, the consequence left out, and `rung ?`
+  spliced in for an unread rung. (Fifteen on the first run — the escapee
+  is the one that corrected the comment above, and its test now pins the
+  real reason the strip is there.)
+- build: `nixos-rebuild build --flake .#ares` ok, `git add` first. Never
+  test/switch. No schema change — `notes` is already "human-readable
+  detail for degraded/error states", and this is the first thing to fill
+  it that a human can act on. No jv-act, no boot path, no pins.
+- **verified through the BUILT closure**, under the jv-llm unit's own
+  `Environment="PATH="`: the shipped launcher read **943 MiB free of
+  6144** off the real GTX 1660 SUPER, wrote `rung=4 / label=CPU
+  fallback / vram=measured`, and the shipped `rung_finding` turned that
+  file into `llm on rung 4 (CPU fallback) — no GPU layers, replies will
+  be slow; 943 MiB VRAM free at launch`. No llama-server was exec'd; the
+  rung file went to a tmp dir.
+- files: services/jv-brain/jv_brain/launcher.py,
+  services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_vram_guard.py
+- commit: 6f6119b
+- next: **B43 first if a human is reading** — it is the only item this
+  iteration created that somebody might want to reverse, and it is one
+  sentence of judgement, not work. Otherwise **B40 is now much riper**:
+  the note says "943 MiB VRAM free at launch" but `at launch` is the
+  whole limit of it — nothing still reads the live
+  `context.system.gpu_vram_free_mb`, so nothing can see the number move
+  when a game starts, which is the moment invariant 6 exists for. The
+  HUD plate B40 describes now has a sentence to borrow for why 943 MiB
+  is not a fault. **B42** (atomic rung-file write) is one rename and
+  matters slightly more than it did this morning: that file now decides
+  a published STATE, not just a gauge — a torn read still fails safe
+  (`index=None`, `vram=absent`, quiet) but "fails safe" now means
+  "silently reports ok while the brain crawls". **B38** is unchanged and
+  still small: jv-ears, jv-guard and jv-brain beat on a timer alone, and
+  B35 wrote the `_set_fault` + `asyncio.Event` shape to copy — and this
+  iteration sharpened it too, since jv-brain's new degraded state waits
+  up to a full period to be heard. **B36 is a human's** (proposal R8).
+  Otherwise unchanged: A is blocked on A62/A65/A68/A47/A56/A50/A60
+  (decisions) and A13/A21/A22/A25/A27/A31/A38/A39 (a human at ares),
+  B27/B28 share one decision, B30/B33 share another, and B10/A28 — one
+  live recording of one spoken turn — is still the biggest thing a human
+  can hand this loop.
+
+## 2026-09-24 — iteration 66 — B40: the free-VRAM number, on a screen at last
+
+**What.** `schemas/context.system.json` has carried `gpu_vram_free_mb`
+since v1 and nothing has ever read it. B37 made jv-context measure it;
+B39 and B41 spent two iterations on the consequence of the number
+without ever being able to show it. What ares measures is the whole
+argument: **943 MiB free of 6144**, twice in one week, on a GTX 1660
+SUPER that works perfectly — the desktop, the compositor and a browser
+own the rest — which is why jv-brain launches onto the CPU rung.
+
+The HUD has been saying the first half of that sentence since A6:
+`llm CPU RUNG 4`, off jv-brain's own heartbeat. It could never say the
+second half, so the line read as a fault — a broken driver, a card that
+fell out, a thing to go and fix. It is none of those; it is the ladder in
+invariant 6 doing exactly its job on a card that is already spent. This
+iteration is the missing line: `vram 943 MiB FREE`, dimmer, directly
+under the one it explains.
+
+**Why it is a line and not a readout.** Four decisions, each of which is
+a test:
+
+- **Not a gauge.** A VRAM figure on screen all day is one nobody reads on
+  the day it matters (§06). It speaks only while something is being paid
+  for the shortage — a brain on the CPU floor. The gate `brainOnCpu` is
+  an INPUT, fed from `HealthState.llmOnCpu`: jv-brain's rung already has
+  a reader that owns the heartbeat's trust rules and expiry, and two
+  files deciding the same fact off the same topic is how they come to
+  disagree. Unfed, it is silent — and since the wiring lives in a plate,
+  and plates import the Quickshell singletons and so cannot be tested
+  headless, a python test pins the binding and the guard around the row.
+  A forgotten binding is the exact edit that would turn this into the
+  all-day gauge, silently and while looking correct.
+- **Absent is not zero.** The field is optional because a machine with no
+  GPU has no such number — and that machine reports `llm_gpu = 0` too
+  (B39). Defaulting the absence to 0 would draw "0 MiB FREE" under the
+  rung line on a card-less machine and explain a CPU brain with a
+  shortage that never existed. So `known` is a separate boolean and
+  `freeMb` is -1 for unknown, which leaves a genuine 0 MiB — the reading
+  that explains the most — able to reach the screen.
+- **A live reading, never a memory.** The value of the number is that it
+  MOVES: a game starts, a browser closes. Three 1 Hz periods and it is
+  gone, on its own timer, because no binding re-evaluates just because a
+  clock moved.
+- **Quoted, never judged.** "Enough VRAM for the 8B Q4" is a fact about
+  the ladder in jv-brain's launcher, and the ladder is not on the bus.
+  A HUD that said "the card is free now, restart the brain" would be
+  guessing at another service's configuration through the wall invariant
+  1 put there. It says the number; the reader knows their own card.
+  Publishing the rung's requirement so the HUD *could* say the rest is
+  B45, and it is jv-brain's to publish.
+
+**Two things the work itself found.** The row's width is bounded by
+construction — whole MiB below five digits, then GiB, then GiB with no
+decimal past 100 — so every branch is thirteen characters at its widest
+and no card can push it past `jv-compat DEGRADED`, the line the 300 px
+surface was measured against. And `detail` turned out not to be
+available as a property name anywhere in `core/`: a test has held that
+name to `action.result.detail` (free log text no element may render,
+invariant 7) since A37, and it fired on the first run. The figure is
+`line`.
+
+- tests: `shell/jv-hud` headless suite **569, was 536** (31 new), plus
+  one in tools (**137, was 136**). **Twenty mutations, twenty caught** —
+  the gate deleted, the gate defaulting open, unknown leaking the last
+  figure, unknown reading as an empty card, a negative figure, a
+  non-finite one, a string, a v2 body, a hedged frame, a timeless frame,
+  a frame off a dropped link, freshness ignored, the expiry never
+  cleared, a timer armed with nothing to expire, the unit seam moved a
+  decade, the decimal kept forever, a gibibyte turned into a gigabyte,
+  fractions of a MiB on screen, and the wrong topic read. Three of those
+  needed a test written for them first, and one needed the test
+  rewritten: a frame cannot be "born stale" against `core/BusModel`,
+  which pins its clock offset off the frames themselves, so the first
+  frame a HUD ever sees is age 0 by construction. The honest version is
+  a second frame that spent nine seconds in flight.
+- **photographed**: `docs/hud/06-health.png` re-shot through the real
+  plates, carrying the 943 MiB ares actually measured, so the sheet shows
+  the rung line explained rather than accused.
+- build: `nix build .#jv-hud` (qmllint -W 0 over every QML file + the
+  headless suite) and `nixos-rebuild build --flake .#ares` both green.
+  Never test/switch. No schema change — the field has been frozen in
+  `context.system` v1 since before anything wrote it. No jv-act, no boot
+  path, no pins.
+- files: shell/jv-hud/core/VramState.qml (new),
+  shell/jv-hud/tests/tst_vramstate.qml (new),
+  shell/jv-hud/HealthPlate.qml, shell/jv-hud/shell.qml,
+  shell/jv-hud/README.md, shell/jv-hud/core/qmldir,
+  tools/gen_theme_qml.py, tools/tests/test_gen_theme_qml.py,
+  tools/hudshots/scene/tst_shots.qml, docs/hud/README.md,
+  docs/hud/06-health.png
+- commit: 86cffcb
+- next: **B43 is still a human's** and still one sentence of judgement —
+  and it is now cheaper to answer, because the thing B41 made `jv health`
+  go red about is the thing the HUD can now show you the reason for. The
+  loop's own pick would be **B42** (one rename: the rung file decides a
+  published state and is written non-atomically) or **B38** (jv-ears,
+  jv-guard and jv-brain still beat on a timer alone, and B35 wrote the
+  shape to copy). **B44** — the brain reacting to the live VRAM number,
+  rather than the HUD reporting it — is explicitly NOT the loop's until a
+  human answers it: an automatic unload at the wrong moment is worse than
+  a slow brain. **B45** is the small, honest half of it and belongs to
+  jv-brain: publish what the chosen rung needed, and `VramState` gains
+  the one sentence it currently refuses to guess. A is unchanged: blocked
+  on A62/A65/A68/A47/A56/A50/A60 (decisions) and A13/A21/A22/A25/A27/
+  A31/A38/A39 (a human at ares), and B10/A28 — one live recording of one
+  spoken turn — is still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 67 — B45: what the card would have to give back
+
+**What.** jv-brain now publishes the VRAM its ladder would require to put
+Jarvis back on the GPU — `sys.health.metrics.llm_gpu_floor_mb`, and the
+same figure in words in `notes`. On ares that number is **5424 MiB of a
+6144 MiB card**.
+
+**Why it had to be jv-brain's to say.** B40 put the free-VRAM figure on
+a screen — `vram 943 MiB FREE`, under the rung line it explains. What
+the HUD could not do, and must not do, is judge it: the ladder's
+requirements live in `jv_brain/config.py`, they are not on the bus, and
+invariant 1 exists precisely so that a consumer does not reach through
+the wall for another service's configuration. So `VramState` quotes the
+number and refuses the sentence — and the refused sentence is the useful
+one. Worse, the sentence a reader supplies unaided is usually wrong on
+this machine: "5 GB free and STILL on the CPU?" sounds like a fault, and
+on a ladder whose cheapest GPU rung wants 5424 MiB it is the ladder doing
+exactly its job. The fix is not a smarter HUD. It is the service that
+owns the ladder publishing the one number it alone knows.
+
+**The floor is a threshold, so it is defined as one.** Four decisions,
+each pinned by a test:
+
+- **`min()` over the GPU rungs, not `LADDER[-2]`.** A test already pins
+  the budgets as strictly decreasing, so today they are the same figure.
+  But this number is one somebody will act on — restart jv-llm or don't
+  — and a reordered ladder must not be able to publish a figure that is
+  not the floor. The stronger test is the one that never mentions the
+  ladder's order at all: at the floor `pick_rung` reaches a GPU rung, one
+  byte below it the ladder falls to the CPU.
+- **Whole MiB, rounded UP.** MiB because that is the unit of the reading
+  it will be compared against (`context.system.gpu_vram_free_mb`, and
+  nvidia-smi's own); a threshold in different units from its reading is a
+  comparison nobody can make. Up rather than nearest, because a floor
+  rounded down is a HUD saying "it fits now" about a launch that would
+  land straight back on the CPU.
+- **`None` for a ladder with no GPU rung, never 0.** There is no VRAM
+  figure that would buy a GPU brain on such a ladder; 0 would read as
+  "any card at all will do".
+- **Published only while something is waiting on it.** Not while the
+  brain is already on the card — a requirement already met, restated
+  every 5 s, is the all-day gauge §06 refuses — and not on a machine with
+  no card at all, where a floor would send a reader hunting VRAM this
+  machine has never had (the same invented shortage `VramState` refuses
+  to draw). A blind launch DOES get it: whatever nvidia-smi would not say
+  at launch, a live reading can be compared with the floor now.
+
+**And the same comparison in words**, because `jv health` prints notes
+and not metrics: `llm on cpu — no GPU layers, replies will be slow; 943
+MiB VRAM free at launch, 5424 needed`. Unit said once, both figures MiB.
+Only next to a measured reading, though — beside a blind launch a
+requirement is a number with nothing to compare it with, and a test holds
+it out of that line.
+
+**One process note, for honesty.** This iteration opened on a dirty
+worktree: iteration 66's `next:` named B45, and the changes were sitting
+there unstaged and uncommitted, from a run that was cut off before its
+verify gate. The loop's rule is never to commit unverified code, not
+never to finish it — so it was verified from scratch rather than trusted:
+full suite, ten mutations written and run against it here, tools suite
+(it reads jv-brain's metric names off this very file), and the build.
+The first `nixos-rebuild build` of the iteration was run through a pipe
+to `tail`, which reports the exit status of `tail`; that gate was
+worthless and was re-run with `pipefail`. Worth remembering — a green
+that cannot go red is not a gate.
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` **109, was 98** (11 new),
+  plus tools **137** unchanged. **Ten mutations, ten caught**: the safety
+  margin dropped from the floor, the floor taken off the most expensive
+  GPU rung instead of the cheapest, MiB rounded down, MiB that were
+  really MB, a card-less ladder publishing 0 instead of nothing, the
+  gauge published while already on the GPU, published on a machine with
+  no card, the requirement dropped from the note, and the requirement
+  quoted beside a blind launch.
+- build: `nixos-rebuild build --flake .#ares` green. Never test/switch.
+  No schema change — `metrics` is free-form by schema and has been since
+  v1. No jv-act, no boot path, no pins.
+- files: services/jv-brain/jv_brain/launcher.py,
+  services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_vram_guard.py
+- commit: 532566f
+- next: **B46** — the HUD half of this, and the loop's own pick. The
+  floor is on the bus and nothing reads it, so the comparison still
+  happens in the reader's head. The plumbing is the shape B40 already
+  wrote (`HealthState` owns the heartbeat, `VramState` takes the floor as
+  an INPUT and never guesses it); the real work is the ROW, which is
+  thirteen characters wide by construction on a 300 px surface — so
+  `943 / 5424 MiB FREE` has to earn its width or find a shorter true
+  form, and the deficit (`4481 MiB SHORT`) may be both shorter and the
+  number a reader would actually act on. Otherwise unchanged: **B43 and
+  B44 are still a human's** (is a CPU brain a `degraded` health state,
+  and may jv-brain ever unload or relaunch itself), and **B42** (the rung
+  file decides a published state and is written non-atomically — one
+  rename) and **B38** (jv-ears, jv-guard and jv-brain still beat on a
+  timer alone) are the loop's next small ones. A remains blocked on
+  decisions and on a human at ares, and B10/A28 — one live recording of
+  one spoken turn — is still the biggest thing a human can hand this
+  loop.
+
+## 2026-09-24 — iteration 68 — B46: the other number, next to the first one
+
+B40 put the card's free VRAM under the rung line. B45 got the ladder's
+requirement onto the bus. Neither of them, on its own, tells you
+anything: `943 MiB FREE` is a figure you have to know this machine to
+judge, and a requirement with no reading beside it is a figure you
+cannot check at all. This iteration is the twenty lines that put them on
+the same plate, one under the other, and then stops.
+
+    llm   CPU RUNG 4
+    vram  943 MiB FREE
+    llm   NEEDS 5424 MiB
+
+**Two rows, not one sentence.** The obvious shape was `943 / 5424 MiB`
+on the existing row, and it was wrong twice over. `n / m` next to the
+word `vram` is the disk-usage idiom — most readers would take it as
+*used of total*, and 5424 is not this card's total — and a single string
+would have been the HUD composing a claim out of two services' numbers.
+jv-context measured the first; jv-brain computed the second off a ladder
+the HUD may not read (invariant 1). One row per publisher keeps each
+number attributable, lets either be absent on its own, and costs nothing
+but a line of a plate that is already only on screen when something is
+wrong. The second row is named `llm` and not `vram` for the same reason:
+it is the model's requirement, not a property of the card.
+
+**The requirement never appears alone.** `needKnown` gates on
+`reporting`, which is the reading's own gate — so a HUD that can see
+jv-brain but not jv-context draws exactly what it drew before B46, and
+the pair arrives and leaves together rather than leaving half a
+comparison up. This is jv-brain's own rule for its `notes`, taken
+literally: it quotes the floor only next to a reading it actually took.
+jv-brain also withholds the gauge entirely once the brain is on the card
+and on a machine with no card, so between the two of them there is no
+state in which a reader is shown a number they cannot act on.
+
+**Rounded up, always.** The unit ladder is now shared by both rows
+(`amount(mb, up)`), so they are never in different units and the
+comparison never needs arithmetic — but a measurement rounds to nearest
+and a requirement rounds UP. The one way this row could lie is by
+drawing a fit the ladder would not actually take (`943 MiB FREE` over
+`NEEDS 943 MiB` on a ladder wanting 943.4), and that is worth a branch.
+jv-brain already ceils its own floor, which makes this belt and braces;
+for a number whose entire job is to be compared with another one, belt
+and braces is right.
+
+**And it is still inside the box.** The 300 px surface is measured
+against `jv-compat DEGRADED` — seventeen characters of name plus detail
+— and a test in tst_vramstate has pinned every branch of the reading to
+that since B40. `NEEDS ` is six characters and the quantity is at most
+eight (`9999 MiB`, `99.9 GiB`, `1024 GiB`), which is fourteen under a
+three-letter name: seventeen exactly. The deficit form the plan
+suggested (`4481 MiB SHORT`) is eighteen under `vram` and would have
+been the first row in the HUD to break that line, which is how the
+two-row shape got chosen over it.
+
+- tests: `shell/jv-hud` headless suite **585, was 569** (16 new — 10 in
+  tst_vramstate, 6 in tst_healthstate), plus tools **138, was 137**.
+  **Nine mutations, nine caught**: the requirement standing with no
+  reading beside it, the requirement rounded to nearest, a zero floor
+  treated as a floor, the need row quoting the reading instead of the
+  floor, the reading itself rounded up, any metric value accepted as a
+  floor, a floor read off a heartbeat nobody expired, the plate losing
+  the binding, and the plate drawing the requirement on the reading's
+  gate. Two more against the shot gate (a floor jv-brain would not
+  compute, and a shot that omits it) — both caught.
+- photographed: `docs/hud/06-health.png` re-shot through the real
+  plates. The sheet now shows the whole sentence: the rung, the card,
+  and what the card would have to give back.
+- build: `nix build .#jv-hud` (qmllint -W 0 over every QML file + the
+  headless suite) and `nixos-rebuild build --flake .#ares` both green.
+  Never test/switch. No schema change — `metrics` is free-form by schema
+  and has been since v1. No jv-act, no boot path, no pins.
+- files: shell/jv-hud/core/VramState.qml,
+  shell/jv-hud/core/HealthState.qml, shell/jv-hud/HealthPlate.qml,
+  shell/jv-hud/tests/tst_vramstate.qml,
+  shell/jv-hud/tests/tst_healthstate.qml,
+  tools/hudshots/scene/tst_shots.qml, tools/tests/test_hudshots.py,
+  tools/tests/test_gen_theme_qml.py, docs/hud/README.md,
+  docs/hud/06-health.png
+- commit: 62efed3
+- next: B45/B46 close the VRAM story as far as it can go without a
+  decision. What is left in it is **B44**, and it is still explicitly a
+  human's: the HUD can now see the card move and jv-brain still cannot —
+  it learns its VRAM exactly once, at launch, from its own fork — and
+  the question of whether a brain may ever unload or relaunch itself is
+  a scheduling change, not an arithmetic one. **B43** (is a CPU brain a
+  `degraded` health state?) is the other sentence of judgement waiting.
+  The loop's own next small ones are unchanged: **B42** (the rung file
+  decides a published state and is written non-atomically — one rename)
+  and **B38** (jv-ears, jv-guard and jv-brain still beat on a timer
+  alone, and B35 wrote the shape to copy). Track A remains blocked on
+  decisions and on a human at ares, and **B10/A28** — one live recording
+  of one spoken turn — is still the biggest thing a human can hand this
+  loop.
+
+## 2026-09-24 — iteration 69 — B38: the stall, said when it happens
+
+`schemas/sys.health.json` has asked for this since v1, in one clause:
+every service beats "every fixed period, **and immediately on state
+change**". jv-ears only ever did the first half. So the failure this
+service exists to report — PortAudio holding a stream open that delivers
+nothing, which is the 2026-09-15 field bug verbatim — became a
+`degraded` heartbeat somewhere in the next five seconds, and
+`jv health --check` reads a **6 s** window: one nominal period plus a
+margin. A stall landing just after a beat is a stall that check can
+miss entirely, and it is the one thing a mic indicator must never be
+wrong about (invariant 10).
+
+**B35's shape could not be copied, and that is the interesting part.**
+jv-context wakes its heartbeat with an `asyncio.Event` its system pump
+sets, because there the state changes when a probe RAISES — somebody is
+holding the news. jv-ears has nobody: its state is a function of a
+CLOCK. A stream stalls by a chunk *not* arriving, `CaptureMeter.age_s`
+crosses `STALL_S` while no code of ours runs, and there is no moment at
+which a writer could set anything. A state nobody announces has to be
+WATCHED — so `pump_health` re-reads it every 250 ms and publishes only
+when the answer has moved. Four times a second, one property read and
+two comparisons; the publish is the rare case.
+
+**It compares against the bus, not against itself.** The pump keeps no
+`last_state` variable. It is handed `said()` — the state the last
+published FRAME carried — and compares the meter's answer now against
+that. This is not stylistic: a chunk arriving between `health_body`
+building a body and the loop's next read would leave a bookkeeping
+variable claiming something the bus never heard, and the whole point of
+this pump is that the bus's last word and the machine's state agree. The
+one writer is the function that builds the frame.
+
+**A floor, because every flap is a real state change.** A device
+delivering a chunk just either side of `STALL_S` alternates ok/degraded
+honestly — and without a floor the watch would publish each flip and put
+`sys.health` at 4 Hz for as long as the hardware misbehaved, which is
+exactly the "quiet topic" invariant 5 protects. `HEALTH_MIN_GAP_S` is
+1 s (= `STALL_S`), so the news is at most a second late on a fault that
+was already a second old when it became one — still four seconds inside
+the window the check reads. And a flicker that undoes itself while the
+floor holds publishes NOTHING: `said()` is still `ok` and `ok` is true
+again, so there is nothing to say. A beat there would have reported a
+state that had already ended.
+
+**Only the enum is watched.** jv-ears' degraded note is
+`microphone open but no audio for 3.2s` — a string that changes on every
+read. A pump that woke on the note would beat on every tick for as long
+as the fault lasted, which is how a 0.2 Hz heartbeat turns into a 4 Hz
+one. The growing number rides out on the periodic beat, where a number
+that changes belongs. `period_s` still says 5.0: the schema calls it
+nominal, and every consumer in the repo uses it as an expiry
+(`period_s * 2` in `MicState`, `HealthState`, `jv health`), which extra
+beats only push further away. A `--wav` run is unaffected — no device
+can stall, `meter.health()` is constant, and the pump degenerates to the
+timer it replaced.
+
+**What B38 asked for in jv-guard and jv-brain turned out to be a
+different job.** Both already beat at the instant of their faults
+(`_health("degraded", ...)` on a scan with no engine, on an `llm
+error`) — the item's premise was wrong about them. Their gap is the
+opposite one: the fault is not LATCHED, so the next periodic beat says
+`ok` again while nothing has changed. A machine with no signature
+scanner reports one `degraded` blip per screened binary and `ok` in
+between; a dead llama-server reports one blip per failed turn. Latching
+either is a few lines and makes `jv health --check` red for as long as
+the condition lasts — which is precisely the judgement **B43** is
+already waiting on. So it was NOT built: it is **B47**, to be answered
+once for all three. jv-voice is the one service still unread for this.
+
+- tests: `bash ops/ralph/runtests.sh jv-ears` — **114 green, was 104**
+  (10 new, all in tst-style scripted time: a fake clock the pump's own
+  sleeps wind, so every assertion is about seconds and none are spent).
+  **Nine mutations, nine caught**: the change rule dropped (timer only),
+  the floor dropped, the period not reset by a change beat, `said()`
+  replaced by a second look at the state, the watch interval widened to
+  the period, the floor raised above the period, main feeding the pump a
+  constant state, main comparing against the meter instead of the bus's
+  last word, and `done` ignored so the pump outlives the pipeline.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change
+  (this is the schema's existing clause, finally honoured), no jv-act, no
+  boot path, no pins. No QML touched, so no HUD shots to re-take.
+- files: services/jv-ears/jv_ears/main.py,
+  services/jv-ears/tests/test_health_watch.py, ops/ralph/PLAN.md
+- commit: 3d01c31
+- next: **B47** is the newly raised one and it is a human's, bundled with
+  **B43** — the same question ("may a check be red on an ordinary day?")
+  now in three services. The loop's own remaining small ones are
+  unchanged: **B42** (jv-brain's rung file is written non-atomically and
+  now decides a published state — one rename) and **B38's** last
+  unexamined service, jv-voice. Track A is still blocked on decisions
+  (A13/A21/A22/A25/A27 are all one human look at `docs/hud/`) and
+  **B10/A28** — one live recording of one spoken turn on ares — remains
+  the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 70 — B42: the rung file written in one move
+
+Track A is where the ladder points, and every open A item is either a
+human's to answer (A13/A21/A22/A25/A27/A38/A62/A65/A68 — one look at
+`docs/hud/`) or explicitly "do not build until that one is". So: the
+B track's smallest complete thing, and the one B41 had already turned
+from a nicety into a state.
+
+**What this file is.** `jv-llm-launch` measures free VRAM, walks the
+ladder, writes `/run/jarvis-llm/rung`, and then `execvp`s into
+llama-server. That exec is the whole reason the file exists: the
+process that knows which rung was picked is GONE a microsecond later,
+so anything it learned that nobody can re-derive is either in that file
+or lost. jv-brain re-reads it on every 5 s heartbeat — and since B39/B41
+what it reads decides a published STATE (`degraded` + `rung 4 (CPU
+fallback)`), not just the `llm_rung` gauge it used to be.
+
+**The window was real.** `path.write_text()` is open-truncate-write, so
+there is an instant in which the file exists and is empty or half a
+record. jv-brain is only `after=` jv-llm, which orders STARTS and not
+this write, and a restarted llama-server rewrites it under a running
+brain. A torn read fails safe in the parser (`ValueError` → `index=None`)
+— but "safe" now means the heartbeat says `ok` about a brain that may
+be crawling on the CPU at 2 tokens/s, which is the sensor-truthfulness
+failure invariant 10 exists against, arriving through the one topic
+meant to catch it. `os.replace` closes it: a pid-stamped temp file
+beside the target, then one rename. The reader gets the last whole
+record or this one, and never the seam between them.
+
+**The half I did not go looking for.** Writing the mode down turned up a
+live bug, not a tidiness: the file's permissions were whatever the
+launcher's umask made them. jv-llm writes it, jv-brain reads it — two
+users, one group (`jarvis`), inside a 0750 `RuntimeDirectory` — so the
+GROUP read bit is the entirety of the reader's access. systemd's default
+umask is 0022 and today's 0644 works; a `UMask=0077` added to `harden`
+one day (an obviously-correct hardening line) would hand jv-brain a file
+it cannot open, and the failure is invisible by construction: an
+unreadable file is caught as `OSError` and reads as "llama-server has
+told me nothing", which is `ok` about a CPU brain — the exact same
+silent direction as the torn read. `RUNG_FILE_MODE = 0o640`, fchmod'd on
+the fd rather than passed to `O_CREAT` (that mode is umask'd too). The
+world-read bit is dropped because a 0750 directory already made it
+unreachable, so it was never access anyone had.
+
+**No fsync, on purpose.** /run is tmpfs. A record that survived the
+reboot which emptied it would be a claim about an llama-server that no
+longer exists; durability is the opposite of what this file wants, and
+the docstring says so where the next reader will look.
+
+**The iteration's other finding, which cost more than the change did.**
+The loop's mutation practice — rewrite the source, re-run pytest, expect
+red — can silently grade UNMUTATED code. CPython validates a cached
+`.pyc` on (mtime *seconds*, size), so an equal-length edit written
+inside the same second as the one before it reuses stale bytecode: the
+run passes because the mutant never executed. It showed up as one
+mutation "surviving" and then a full-suite failure on a RESTORED file
+that was still running the mutant's bytecode — the honest tell, and the
+reason this is written down rather than shrugged off. `python -B` plus
+clearing `__pycache__` fixes it and every number below was measured that
+way. Raised as **B48**, including that pre-iteration-70 equal-length
+mutations in this journal were measured without it.
+
+- tests: `bash ops/ralph/runtests.sh jv-brain` — **114 green, was 109**
+  (5 new: the whole previous record still readable at the instant of the
+  rename, a failed write leaving the old record and no litter, a
+  finished write leaving exactly one file, two overlapping writers each
+  landing whole, and the group-readable mode measured under a 0077
+  umask). **Six mutations, six caught**: `write_text` back, the fchmod
+  dropped, the temp left behind on failure, the temp not pid-stamped,
+  the write aimed at the target itself, the mode down to 0600. One
+  survivor ON PURPOSE — 0644 is indistinguishable from 0640 behind a
+  0750 directory, so no test claims the other-read bit and none should.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change,
+  no jv-act, no boot path, no pins, no QML (so no HUD shots to re-take).
+- files: services/jv-brain/jv_brain/launcher.py,
+  services/jv-brain/tests/test_vram_guard.py, ops/ralph/PLAN.md
+- commit: 2a81605
+- next: **B48** is the loop's own and cheap — one `ops/ralph/mutate.sh`
+  with `-B` baked in, so the practice stops being re-typed per
+  iteration. **B38's** last unexamined service is jv-voice. Everything
+  else small is a human's: **B43/B47** are one question asked three
+  times ("may `jv health --check` be red on an ordinary day?"), and
+  Track A is one look at `docs/hud/` away from unblocking five items.
+  **B10/A28** — one live recording of one spoken turn on ares — is
+  still the biggest thing a human can hand this loop.
+
+## 2026-09-24 — iteration 71 — B48: the mutation numbers, with controls
+
+Track A is still where the ladder points and still where every open item
+is a human's to answer (A13/A21/A22/A25/A27/A38/A62/A63/A65/A68 — one
+look at `docs/hud/`) or says "do not build before that one is". So the
+B track again, and this time its smallest item is about the loop's own
+evidence rather than about JarvisOS.
+
+**What the claim was worth.** Sixty journal entries say some version of
+"nine mutations, nine caught". That sentence is the only evidence in
+this repo that the tests an iteration just wrote have teeth — nothing
+else distinguishes a suite that pins behaviour from a suite that
+executes code and asserts nothing. It was produced by hand: edit the
+source, re-run pytest, read the colour, put the file back. Iteration 70
+found the hole. CPython validates a cached `.pyc` against the source's
+(mtime in whole **seconds**, size), so an equal-length edit written
+inside the same second as the write before it reuses stale bytecode:
+pytest passes, the loop writes "survived", and the mutant never ran.
+
+**So this is not an automation of the old practice.** It is the old
+practice plus the two controls it never had, which is the whole of why
+it was worth a file.
+
+*The canary.* Before a single mutation is graded, the target file is
+made impossible to import — one `raise ImportError` appended at column
+zero — and the suite MUST go red. If it stays green the tests do not
+execute that file at all, every mutation of it would be a silent
+survivor, and the harness reports NOTHING rather than a perfect score.
+This asks the suite the question the hand practice assumed the answer
+to, and it is stronger than any amount of reasoning about bytecode:
+it is an experiment, not an argument.
+
+*A cache that cannot be stale.* Every suite run gets its own empty
+`PYTHONPYCACHEPREFIX`, so no run can read bytecode another compiled and
+the in-tree `__pycache__` directories become unreachable rather than
+deleted. Per-run and impossible to forget, which "remember to clear the
+cache" is not.
+
+**A correction to B48 as it was written, found by reproducing it.**
+`python -B` alone does nothing about this bug. It sets
+`dont_write_bytecode` — it stops the cache being WRITTEN, and the read
+is the half that bites. Measured three ways in a subprocess, with an
+equal-length edit and the mtime put back: plain reads the stale value,
+`-B` reads the stale value, a fresh cache prefix reads the new one. The
+half that actually worked in iteration 70 was clearing `__pycache__`.
+Both un-fixed runs are kept in the test as controls, because a probe
+that can only pass is not a probe — the same lesson A34 learned about
+counting zero frames.
+
+**The other things it refuses to do**, each because the hand practice
+could get it wrong quietly: a red baseline aborts before anything is
+touched (a broken suite catches every mutation for free); a hunk that
+matches twice is an error, not a coin flip about which copy moved; a
+mutation identical to the original is an error; the file is restored
+even when the runner raises; and the suite runs ONCE MORE at the end
+with the tree back as it was, because iteration 70's actual tell was a
+failure on an already-restored file and the next thing the loop does
+should not be built on a tree it has quietly broken.
+
+**The re-run half of the item, and what it found.** B48 said past
+equal-length numbers were "worth ONE re-run, not trusted". Iteration
+69's three equal-length mutations on jv-ears went back through the
+controls: 3/3 caught, that entry stands. Worth writing down WHY they
+stand, because it is nearly luck — `test_health_watch.py` computes its
+expectations from the very constants it mutates
+(`TICKS_PER_PERIOD = HEALTH_PERIOD_S / HEALTH_WATCH_S`), so moving one
+moves the code and the assertion together. What caught all three was
+the two ABSOLUTE claims in that file (`HEALTH_MIN_GAP_S <
+HEALTH_PERIOD_S`, `seen_at < HEALTH_PERIOD_S`). A suite parameterised
+on its own constants needs at least one assertion that is not; raised
+as **B50**, with the file/line limit of the canary.
+
+- tests: `bash ops/ralph/runtests.sh tools` — **173 green, was 138**
+  (35 new: the spec grammar and its eight refusals, the exactly-once
+  edit rule, the canary's shape, the run's order
+  (`clean → canary → mutant → clean`), one canary per FILE rather than
+  per mutation, a red baseline aborting untouched, a canary that LIVES
+  aborting the whole run with no mutation executed, restore through a
+  raising runner, a tree still red after the last restore, and the four
+  exit codes the loop reads with `$?`). **Twelve mutations on the
+  harness, by the harness, twelve caught** — including the canary never
+  planted, the cache prefix left shared, the restore dropped, and the
+  escape check opened. The first self-run scored 11/12: the survivor was
+  a `main()` that returned 0 with a mutation still standing, which is
+  the one case the exit code exists for, and the four tests that close
+  it were written because the harness found it.
+  `bash ops/ralph/runtests.sh jv-ears` — 114, unchanged, run six times
+  by the harness and green at both ends.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change,
+  no jv-act, no boot path, no pins, no service touched, no QML (so no
+  HUD shots to re-take). Nothing here is on the bus or in the closure —
+  `tools/mutate.py` is read by no derivation.
+- files: tools/mutate.py, tools/tests/test_mutate.py,
+  ops/ralph/mutate.sh, ops/ralph/README.md, ops/ralph/PLAN.md
+- commit: 3961e85
+- next: **B49** extends the canary to QML and Rust, where the
+  stale-bytecode half cannot bite but "does this suite even execute the
+  file I am mutating" is exactly as unanswered — and the A track has
+  been claiming QML mutation numbers for thirty iterations. **B38's**
+  last unexamined service is jv-voice, and reading it for this iteration
+  turned up that its only fault (`synthesis/playback error`) already
+  beats immediately, so what is left there is B47's latching question
+  and not a build. Everything else small is a human's: **B43/B47** are
+  one question asked three times ("may `jv health --check` be red on an
+  ordinary day?"), Track A is one look at `docs/hud/` away from
+  unblocking five items, and **B10/A28** — one live recording of one
+  spoken turn on ares — is still the biggest thing a human can hand
+  this loop.
+
+## 2026-09-24 — iteration 72 — B49: the harness in three languages, and what it found in two
+
+Track A is still where the ladder points and still where every open item
+is a human's (A13/A21/A22/A25/A27/A38/A47/A55/A62/A63/A65/A68 — one look
+at `docs/hud/`, or one decision about an IPC seam) or says "do not build
+before that one is". So B49, which iteration 71 raised and which is
+about the loop's own evidence: `ops/ralph/mutate.sh` graded PYTHON only,
+so the thirty-odd QML claims and every Rust one were still produced by
+the hand practice iteration 70 caught out.
+
+**What was built.** `--runner {tests,qml,cargo}`, with a `Language`
+holding the four things that differ: which script runs the suite, which
+file suffixes it may grade, what a canary looks like, and what a private
+cache means. A `raise ImportError` for Python, an unparseable `***` line
+for QML, a `compile_error!` for Rust. Each makes a slightly different
+claim and the Rust one is the weakest — a `compile_error!` proves the
+file is compiled into the crate, not that any test exercises it, so a
+Rust survivor means "no test asserts this line" and never "the tests do
+not load this file". Its docstring says so. The suffix check is not
+pedantry: `--runner tests` on a `.qml` file would append a Python
+`raise` to QML, which parses as nothing, so the canary would LIVE and
+the abort would blame the tests for the operator's mistake.
+
+**B49's own premise was wrong about both new languages.** It said the
+stale-artifact half "cannot bite" QML and Rust. It bites both.
+
+QML has the bug exactly. `qmltestrunner` writes compiled QML to
+`$XDG_CACHE_HOME/qmltestrunner/qmlcache/*.qmlc` and validates it against
+(mtime, size) just like a `.pyc`, so an equal-length edit with the mtime
+put back passes a test asserting the value the source no longer holds.
+Reproduced with the real Qt in a subprocess, with the un-fixed run as
+the control, exactly the shape B48's `.pyc` test has. It is arguably
+worse than the Python case: `__pycache__` sits beside the source where
+someone might think to clear it, and this cache sits in the user's HOME
+where nothing in this repo ever would. Both halves of the fix work
+independently — a fresh `XDG_CACHE_HOME` and `QML_DISABLE_DISK_CACHE=1`
+— and the harness sets both, so the guarantee does not depend on Qt
+honouring the first.
+
+Rust made the same lie from the mtime side, and **the harness's own new
+control was the cause.** Cargo cannot be given a private cache cheaply
+(a fresh `CARGO_TARGET_DIR` per run recompiles the world a dozen times),
+so it got the other guarantee: every write stamped a whole second newer
+than the last. The first real cargo grading then ended with the tree
+byte-for-byte clean and `proto::tests::matching` FAILING — iteration
+70's exact tell, in a third language. The counter started when the run
+did and added one second per write; the run spent forty seconds
+compiling; so the restored file claimed start+5 s while the artifacts
+cargo had just written said start+35 s. Cargo asks only "is any source
+newer than what I built", read the restore as thirty seconds old, and
+skipped the rebuild. Every stamp now re-reads the clock, which is the
+one line that makes the rule true for a suite of any speed. Worth being
+plain about what caught it: **B48's run-the-suite-once-more-at-the-end
+check, added for precisely this and firing on its first real use.**
+
+**Two findings from USING it, which is the half a tool does not give
+you.**
+
+`--runner qml` grades `shell/jv-hud/core/` and nothing else. A canary on
+`StatePlate.qml` LIVED — the suite stayed green with the file made
+unparseable — because `shell/jv-hud/tests/*` import `"../core"` and
+never a plate. So every QML mutation number ever claimed about a
+top-level plate through `qmltest.sh` meant nothing, and the harness now
+refuses those rather than grading them immune (exit 2, mutation never
+executed). The plates ARE exercised, by `ops/ralph/hudshots.sh`, which
+copies the whole shell into a stage and drives the real plates — and
+which already isolates its own QML cache per run by construction.
+Raised as **B51**: it is a fourth runner, and the only one that can
+grade a plate at all.
+
+Re-graded PlateStack's nine-caught claim from the A15 iteration through
+the controls — three of the nine (the unaskable-child fail-safe
+inverted, the children never consulted, the surface never unmapped),
+3/3 caught, canary dead. That entry stands.
+
+`--runner cargo` found a real survivor on its first honest run:
+`topic_matches` compares `topic.len() > prefix.len() + 1`, so `audio.`
+— the separator with an empty leaf — does not match `audio.*`, and the
+`>=` mutant survived because nothing asserted it. Deliberate since the
+matcher was written, written down nowhere. One line in `proto.rs`'s
+test closes it and the re-grade caught the mutant. That is the harness
+earning its keep rather than describing itself.
+
+- tests: `bash ops/ralph/runtests.sh tools` — **190 green, was 173**
+  (17 new: the three canaries and what each keeps intact, the QML
+  stale-cache reproduction with its two controls, `qml_env` and the
+  deliberately-empty `cargo_env`, the stamp that must not fall behind a
+  slow clock, the stamp that must keep increasing, the restore that
+  leaves bytes identical and mtime newer, the wrong-grader refusal
+  before any suite runs, the language table checked against the scripts
+  `ops/ralph/` really has, and the `--runner` flag reaching `run`).
+  **Nine mutations on the new code, nine caught** — the QML canary
+  reverted to the Python one, the Rust canary commented out, the QML
+  disk cache left on, the QML cache prefix left pointing at HOME, the
+  suffix guard opened, the clock re-read dropped (the cargo bug,
+  restored), the stamp frozen, the language check deferred past the
+  suite, and an unknown `--runner qml` target accepted.
+  `bash ops/ralph/qmltest.sh` — 585, unchanged, run eight times by the
+  harness and green at both ends. `bash ops/ralph/cargotest.sh jarvisd`
+  — 128+39+8, one more than before, run nine times and green at both
+  ends.
+- build: `nix build .#jarvisd` and
+  `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins, no QML touched (so no HUD shots to
+  re-take), no service behaviour changed — the one non-harness edit is
+  an assertion added to a test module.
+- files: tools/mutate.py, tools/tests/test_mutate.py,
+  services/jarvisd/src/proto.rs, ops/ralph/mutate.sh, ops/ralph/README.md
+- commit: 4fa5991
+- next: **B51** is the fourth runner and it is the one the A track needs
+  — `hudshots.sh` is the only suite that loads a plate, so it is the
+  only way a plate mutation can ever be graded, and it already stages a
+  fresh copy with its own cache so most of the work is an output
+  directory that is not `docs/hud/`. **B50** (a suite parameterised on
+  its own constants needs one claim that is not) is now cheap to
+  discharge service by service, since a re-grade is one pasted spec.
+  Everything else small is a human's: **B43/B47** are one question asked
+  three times ("may `jv health --check` be red on an ordinary day?"),
+  **A47** is one decision (OCR, an IPC seam, or leave four checks saying
+  what they say) that unblocks **A55** with it, Track A is one look at
+  `docs/hud/` away from unblocking ten items, and **B10/A28** — one live
+  recording of one spoken turn on ares — is still the biggest thing a
+  human can hand this loop.
+
+## 2026-09-24 — iteration 73 — B51: the runner that can grade a plate, and the two things it found
+
+Track A is where the ladder points and every open item there is still a
+human's (A13/A21/A22/A25/A27/A38/A47/A55/A62/A63/A65/A68 — one look at
+`docs/hud/`, or one decision about an IPC seam) or says "do not build
+before that one is answered". So B51, which iteration 72 raised and
+which is Track A's tooling: `ops/ralph/mutate.sh` could not grade a
+single one of the HUD's ten plates.
+
+**Why it could not.** B49 measured what `--runner qml` covers and the
+answer was `shell/jv-hud/core/` and nothing else: `qmltest.sh` imports
+`"../core"` and never a top-level plate, so a canary on `StatePlate.qml`
+LIVES and the harness refuses the file. The plates ARE exercised, by
+`ops/ralph/hudshots.sh`, which copies the whole shell into a `mktemp`
+stage, substitutes the two Quickshell-bound singletons and drives the
+real plates through `tst_shots.qml` and `tst_sequence.qml`. It was one
+argument away from being a runner.
+
+**What was built.** `--runner shots hud`, the fourth runner. Two things
+had to be solved and both are in the `Language` table rather than in a
+special case: it writes thirteen PNGs and DEFAULTS to `docs/hud/` — the
+committed contact sheet — so `scratch_out` hands it a directory inside
+the run's own scratch, thrown away with the rest of it (the sheet is
+never touched, and the run log naming `/tmp/jv-mutate-*/run001/shots` is
+the proof). And its cost is measured rather than promised: **53 s a
+suite run**, three times `qmltest.sh`'s 14 s, so `main` now prints the
+run count — one baseline, one canary per file, one per mutation, one
+baseline — before the first run starts. A three-mutation grading over
+two files is seven runs and took 265 s.
+
+**The canary means something weaker here, and it was checked rather than
+assumed.** `hudshots.sh` runs `qmllint` over the whole staged shell
+before either driver starts, so an unparseable `***` line is a LINT
+failure: planting one on `StatePlate.qml` exits 255 out of qmllint with
+no driver reached. That is the Rust canary's limit in a third language —
+it proves the file is in the stage, not that anything instantiates it —
+and the docstring says so, pointing at the gate that does make the
+stronger claim (`test_every_plate_in_the_shell_is_lit_in_some_shot`,
+next to the pin that ties `Corner.qml`'s membership and ORDER to
+`shell.qml`'s). What it does catch is a file the stage DROPS, and that
+was run rather than reasoned about: `--runner shots` on
+`shell/jv-hud/shell.qml` aborts with exit 2 after two runs, because the
+stage removes `shell.qml` and `tests/`. Worth saying plainly: **no
+runner in this harness can grade `shell.qml`** — it is the Quickshell
+half no other engine can load — and the abort now says which two files
+those are instead of leaving the reader checking a target that was
+correct.
+
+**What it found on its first honest run: 1 of 3 caught.**
+
+The first survivor is the one worth the iteration. `StatePlate.shown` is
+`root.voice.known && !root.voice.idle`; drop the second half so the
+plate lights while NOTHING is happening, and all thirteen photographs,
+all fifteen tests the two drivers ran and all 585 QML tests came out
+exactly as before. The reason is precise: no recording and no composed shot has
+ever carried a KNOWN idle. jv-voice is in none of the recordings
+(B10/A28), so `unknown` — the HUD unable to see — is covered everywhere
+and `idle` — the machine at rest, which is a different claim and the
+first decision this HUD ever made (A3, §06's earned emptiness) — had
+never reached a plate at all. Closed here, because it is one test: a
+hand-written `speech.state` frame from jv-voice, fresh at its own `ts`,
+and the corner must stay dark. Re-graded through the same runner
+afterwards: **1/1 caught**, 4 runs, 173 s.
+
+The second survivor is reported and not closed. `dotColor` can spend the
+ember on every state that is not idle — the exact opposite of "scarcity
+is the point" — and nothing anywhere notices, because the sheet is
+WRITTEN and never COMPARED. Nothing in this repo asserts what a plate
+says or what colour it says it in; `litNames` asserts which plate is up,
+which is A47's open question one layer further in. Raised as **B52**,
+with the cheap shape noted: A45 already made the PNGs byte-reproducible,
+so comparing a run's output against the committed sheet would turn all
+thirteen into assertions at once.
+
+- tests: `bash ops/ralph/runtests.sh tools` — **199 green, was 190**
+  (9 new: the scratch output dir reaching `hudshots.sh` and never
+  `docs/hud`, only the shots runner asking for one, a fresh unused
+  scratch per run checked while the suite holds it rather than after the
+  run has deleted it, `shots_env` disabling the disk cache the script
+  itself does not set, the suffix guard, the abort naming `--runner
+  shots` when a core canary lives, the abort naming the two files the
+  stage drops, a target the shots runner does not grade, and the run
+  count printed before a 53 s suite starts).
+  **Nine mutations on the new code, nine caught** — the scratch dir not
+  appended (a grading over the committed sheet), every runner asking for
+  one, the shots suffixes opened to `.py`, its target check removed, the
+  QML disk cache left on, both canary hints emptied, the run count short
+  by the closing baseline, and the count computed but never printed.
+  `bash ops/ralph/qmltest.sh` — 585, unchanged, green before and after.
+  `bash ops/ralph/hudshots.sh` — **16, was 15**; the 13 shots came out
+  byte-identical, which is the claim the new test had to leave intact.
+  **Plates, through the new runner: 3 mutations, 1 caught, 2 survived**
+  (both survivors described above), then **1/1** on the re-grade.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change,
+  no jv-act, no boot path, no pins. `shell/jv-hud/` was not modified at
+  all — the only QML edit is one test in `tools/hudshots/scene/`, which
+  is why the sheet is byte-identical and there is no HUD diff to look at.
+- files: tools/mutate.py, tools/tests/test_mutate.py,
+  tools/hudshots/scene/tst_sequence.qml, ops/ralph/mutate.sh,
+  ops/ralph/README.md
+- commit: 9904c46
+- next: **B52** is the sharpest thing left that is the loop's own — the
+  sheet is thirteen pictures nothing compares, and A45 already made them
+  byte-reproducible, so it is a comparison and a decision about where
+  "expected" lives rather than new machinery. **B50** (a suite
+  parameterised on its own constants needs one claim that is not) is
+  still cheap service by service. **A56** matters slightly more now:
+  `hudshots.sh` is a mutation runner and still not in `nix build
+  .#jv-hud`. And the human-sized items have not moved: **B43/B47** are
+  one question asked three times, **A47** is one decision that unblocks
+  **A55** with it, Track A is one look at `docs/hud/` away from
+  unblocking ten items, and **B10/A28** — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this
+  loop, and is now also what would put a real `speech.state idle` in a
+  recording instead of in a hand-written frame.
+
+## 2026-09-24 — iteration 74 — B52: the thirteen pictures, read back
+
+Track A is where the ladder points and every open item there is still a
+human's — one look at `docs/hud/`, or one decision about an IPC seam —
+so this is iteration 73's own finding, closed. B51 built the runner that
+can grade a plate and its first honest run found two survivors. A69 (the
+`idle` plate) was closed there. This is the other one, and it was the
+sharper of the two: `StatePlate.dotColor` can spend the ember — the one
+accent §06 reserves for a machine that is genuinely doing something — on
+every state that is not idle, the exact inversion of "scarcity is the
+point", and all thirteen photographs, all fifteen driver assertions and
+all 585 QML tests came back exactly as they were.
+
+**The reason is one sentence.** `hudshots.sh` WRITES the sheet and never
+READS it. Nothing in this repo had ever opened one of those PNGs.
+`litNames` asserts which plate is UP, which is a different claim and is
+A47's question one layer further in; what a plate SAYS, and what colour
+it says it in, was asserted nowhere.
+
+**Where "expected" lives.** The only real decision here, and it has to
+be git. A run that renders into `docs/hud` and then compares against
+`docs/hud` has compared a file to itself — and the refresh has to stay
+one command, so a second committed copy would be two things to keep
+matching. So both paths are checked against `HEAD:docs/hud`: the grading
+run (which renders into `--runner shots`'s scratch directory) and the
+refresh run (which renders over the sheet). The consequence is that a
+deliberate HUD change now ends `hudshots.sh` nonzero — which is the
+report and not a failure: the new PNGs are on disk, look at them, commit
+them, the next run is green. `docs/hud/README.md` said the opposite in
+so many words ("not byte-compared against anything — a pixel assertion
+breaks when a font ships a new version"); that worry is answered by the
+fonts and Qt both being pinned from the flake, which is what A45 made
+these bytes reproducible for, and the paragraph is rewritten with a
+test holding it.
+
+**What it says.** Bytes first — identical bytes are the same picture and
+that is the ordinary case, so thirteen comparisons cost nothing. When
+they differ, both are DECODED (a small PNG reader: 8-bit truecolour,
+all five scanline filters, multiple IDATs, refusing 16-bit, interlaced,
+palette, a header that lies about its size, anything that is not the
+shape Qt's offscreen grab writes) and the finding is a sentence. Not
+"the PNGs differ": B51's survivor, re-graded through the same runner,
+now reads
+
+    02-listening.png: 36 px of 206400 differ (0.02%), inside x 187..192, y 31..36
+        (187,34)  #41939A -> #BD5C3F
+    03-heard.png: 36 px of 206400 differ (0.02%), inside x 195..200, y 31..36
+        (195,34)  #59666F -> #BD5C3F
+
+— one 6×6 dot, in the two shots where the mic is open and Jarvis is not
+speaking, going from teal to ember. That is the ember spent where it was
+not earned, said in the terms §06 uses. **1/1 caught.**
+
+Two things the sheet gained on the way that are not the diff: the
+comparison is in both directions, so a driver that quietly stops
+photographing a plate is a finding rather than a smaller sheet; and
+`01-quiet.png` is now asserted to be an unbroken field of the declared
+backdrop — §06's earned emptiness, in bytes, for the first time. The
+backdrop is deliberately not a theme colour, so any Jarvis ink anywhere
+in the quiet shot is a plate that spoke when it should not have.
+
+- tests: `bash ops/ralph/runtests.sh tools` — **228 green, was 199** (29
+  new: the PNG reader under all five filters and across split IDATs, its
+  four refusals, byte-equality vs pixel-equality, the counted and boxed
+  and colour-named finding, sampling that spans the change, a size
+  change reported as a size, an unreadable shot as a finding rather than
+  a traceback, both directions of the sheet comparison, sheet order, the
+  committed sheet against git, every shot at the scene's surface box,
+  the quiet field, the script's wiring, the README's honesty, and three
+  CLI runs end to end over the real thirteen).
+  **Eleven mutations on the new module, eleven caught** — interlace and
+  depth and data-length unchecked, Paeth predicting only from the left,
+  truecolour filled transparent, a no-moved-pixels picture still
+  reporting, alpha never shown in a colour, one sample instead of three,
+  each direction of the sheet comparison dropped, and findings not
+  failing the run. Canary died, baseline green before and after.
+  `bash ops/ralph/qmltest.sh` — 585, unchanged. `bash ops/ralph/hudshots.sh`
+  — 16, the 13 shots byte-identical and now compared.
+  **B51's survivor, through `--runner shots`: 1/1 caught.**
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. `shell/jv-hud/` was not modified at all,
+  so the sheet is byte-identical and there is no HUD diff to look at.
+- files: tools/hudsheet.py (new), tools/tests/test_hudsheet.py (new),
+  ops/ralph/hudshots.sh, tools/mutate.py, ops/ralph/README.md,
+  docs/hud/README.md
+- commit: c15b6d0
+- raised: **B53** — measured while closing this, not reasoned. With an
+  uncommitted HUD change in the tree, `--runner shots` renders a sheet
+  that differs from HEAD, the comparator exits 1, the BASELINE is red and
+  the harness aborts with "fix the suite first". The refusal is right and
+  the sentence is wrong: the suite is fine, the sheet is stale, and the
+  fix is one `hudshots.sh` and a commit. One conditional line in
+  mutate.py's abort.
+- next: B51's two survivors are both closed, so the loop's own mutation
+  story is as far as it goes without a human. **B50** (a suite
+  parameterised on its own constants needs one claim that is not) is
+  still the cheapest open item, service by service. **A56** — the
+  sequence suite runs in `hudshots.sh` and not in `nix build .#jv-hud` —
+  matters a little more each time that script grows a gate, and it now
+  carries the sheet comparison too. The human-sized items have not
+  moved: **B43/B47** are one question asked three times, **A47** is one
+  decision that unblocks **A55** with it, Track A is one look at
+  `docs/hud/` away from unblocking ten items, and **B10/A28** — one live
+  recording of one spoken turn on ares — remains the biggest thing a
+  human can hand this loop.
+
+---
+
+## 2026-09-25 — iteration 75 — B50: the constants nothing was holding
+
+Track A is still one human look away from unblocking (A47/A55/A62/A63/A68
+are all the same two questions asked about `docs/hud/`), and every item in
+`docs/optimization-backlog.md` is human-review-required by construction, so
+this took the B track's cheapest open item — and it turned out to have a
+real bug under it.
+
+B50's claim was a lesson learned once, in one file: a suite that computes
+its expectations FROM the constants it tests moves the code and the
+assertion together, so a whole class of mutation is ungradeable by
+construction, and the only thing that saves it is one claim written in
+absolute units. This iteration RAN that as a sweep instead of repeating it
+as advice. Every Python suite that imports a constant out of the code it
+tests was mutated at that constant and graded by `ops/ralph/mutate.sh`.
+
+**Four survived, four were caught**, and the split is the lesson exactly:
+
+- survived: `FIRST_BACKOFF_S` 0.5 -> 2.0 and `MAX_BACKOFF_S` 8.0 -> 30.0
+  (jv-hud-bridge), `TURN_GAP_S` 0.5 -> 2.0 (jv-voice), `VERDICT_TIMEOUT_S`
+  60 -> 300 (jv-compat).
+- caught: `STALL_S` 1.0 -> 8.0 (jv-ears), `SAFETY_MARGIN_BYTES` x3 and -> 0
+  (jv-brain), `ENTROPY_SUSPECT` 7.2 -> 5.0 and -> 7.99 (jv-guard),
+  `ASR_LATENCY_S` 2.2 -> 4.4 (harness).
+
+Every catch came from an assertion written in absolute units. The jv-ears
+one is the cleanest illustration in the repo: five lines in
+`test_capture_meter.py` say `capture_stall_s == CaptureMeter.STALL_S` and
+one line in the middle of a different test says `clock.now += 5.0`, and
+that sixth line is the entire reason an eight-second stall budget cannot
+ship. Every survivor's file had no such line.
+
+Each survivor now has one. Not a second copy of the tuning — bounds on
+what the number exists to be true FOR, deliberately looser than the
+shipped value in both directions, with the reasoning in the docstring:
+the bridge's first retry has to land inside the grace `LinkState.qml`
+waits out before it draws NO BUS and must not be a spin; its ceiling is
+the worst-case staleness of the whole HUD after the bus returns; the
+voice's gap bridges A BUS HOP and not the brain, which is what its own
+comment says it deliberately does not do.
+
+**The real find was jv-compat.** Asking what `VERDICT_TIMEOUT_S` had to be
+true for turned up a disagreement between two services that never read
+each other: jv-compat stopped listening for `guard.verdict` after 60 s and
+then failed closed, while jv-guard's `ClamAVScanner` gives clamscan 120 s.
+An installer whose scan ran 70 s was refused with "screening unavailable —
+refusing to install (fail closed)" while the only authoritative engine on
+this machine was still scanning it and about to publish `clean` onto a
+topic nobody was reading. That is not invariant 8's guarantee working —
+it is a clean binary refused for a reason that was not true. Raised to
+180 s and the relation pinned, read out of jv-guard's SOURCE rather than
+imported (invariant 1: services never import each other), in the shape
+`RECONNECT_CADENCES` already uses for the two cadences `LinkState.qml`
+depends on. Both directions of the fix were defensible; this one was taken
+because refusing a clean binary is the worse failure, and the other is
+written down as B54 for a human.
+
+One more thing fell out of the same file: `test_fail_closed_when_no_verdict`
+said "we shorten the timeout via monkeypatch" and then assigned
+`inst_mod.VERDICT_TIMEOUT_S = 1.0` in place, never putting it back. Every
+jv-compat test after it ran with a one-second screening window, and the
+suite's result depended on its own order. It is a real `monkeypatch` now.
+
+- tests: `runtests.sh jv-compat` **10 green, was 9** · `jv-hud-bridge`
+  **26, was 25** · `jv-voice` **28, was 27** · `jv-guard` 33, unchanged.
+  Re-graded after the fix: jv-hud-bridge **4/4 caught** (both retunes plus
+  a ceiling below the first retry and a backoff of zero), jv-voice **3/3**
+  — including the 0.5 -> 0.9 edit that `mutate.sh`'s own docstring uses as
+  its usage example and that survived until today — and jv-compat **2/2**.
+  The cross-service arm could not be graded by the harness and was checked
+  by hand instead (see B55): with jv-guard's clamscan budget raised to 600
+  the new test fails, and with its `"clamscan"` argv renamed so the regex
+  misses, it fails with "cannot find clamscan's timeout ... which is how it
+  drifted" rather than passing quietly.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. One production constant moved
+  (`VERDICT_TIMEOUT_S`), in a non-forbidden service, with the relation that
+  forced it pinned by a test.
+- files: services/jv-compat/jv_compat/install.py,
+  services/jv-compat/tests/test_compat.py,
+  services/jv-hud-bridge/tests/test_bridge.py,
+  services/jv-voice/tests/test_voice_service.py
+- commit: 40e395f
+- raised: **B54** (the 180 s wait is now the longest an install can sit
+  with nothing on `compat.install` since `fingerprinted`, and the HUD says
+  nothing during it — a human should weigh that against cutting clamscan's
+  budget instead) and **B55** (the harness cannot grade a relation between
+  two files when one is READ rather than imported; its canary correctly
+  refused and exited 2, and there are now three such relations in the repo
+  that must be checked by hand).
+- honest note: the first jv-voice run after adding its test showed one
+  unrelated failure in `test_streamed_reply_is_one_speaking_idle_pair` at
+  50 s of wall clock against its usual 21 s — the jv-ears mutation was
+  running on the same machine. It passed on every run since, alone. Worth
+  remembering that this suite's timing assertions are not load-proof.
+- next: **B53** is the one concrete cheap item left (one conditional line
+  in mutate.py's red-baseline abort, so `--runner shots` says "the SHEET is
+  stale" instead of "fix the suite first"), and **B55** is the same file
+  with a harder question in it. Otherwise the loop is where it has been for
+  several iterations: **Track A is one human look at `docs/hud/` away from
+  unblocking ten items** (A47, A55, A62, A63, A68 and the A21/A22/A25
+  cluster are two questions asked five ways), **B43/B47** are one question
+  asked three times, and **B10/A28** — one live recording of one spoken
+  turn on ares — remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 76 — B53: the red baseline that was never the suite's fault
+
+Track A is still one human look at `docs/hud/` away from unblocking ten
+items, and `docs/optimization-backlog.md` is human-review-required by
+construction, so this took the one concrete cheap item the last iteration
+left: the abort the loop will hit the first time it mutates a plate it has
+just changed.
+
+The shape is worth stating because it is a harness lying about its own
+health. `--runner shots` is the only one of the four runners that reads a
+COMMITTED artifact back — B52 made `hudshots.sh` compare every PNG it
+renders against `HEAD:docs/hud`, which is the only assertion in this repo
+about what the HUD LOOKS like. The price is that an uncommitted change to a
+plate makes the BASELINE run red, so the harness aborts with "the baseline
+suite is RED before any mutation ... fix the suite first" — and the suite is
+fine. The sheet is stale, and the fix is one command.
+
+The refusal itself is right, and that is the point: it will not make a claim
+it cannot make. Only the sentence was wrong, and it sent the reader to the
+one place where nothing is broken.
+
+So the red-baseline abort now carries a per-runner `baseline_hint`, and for
+the runner that has this failure mode it is a MEASUREMENT of the working
+tree rather than a fixed sentence — because a fixed sentence would be wrong
+half the time. Three answers:
+
+- plates differ from HEAD → name them, and print the refresh: run
+  `hudshots.sh`, LOOK at the new PNGs, **commit** them. The "commit" is not
+  politeness. `hudsheet.py` compares against `HEAD:docs/hud`, so PNGs that
+  were re-rendered and left unstaged leave the baseline exactly as red as
+  before, and the hint says so when it sees a modified `docs/hud`.
+- the tree matches HEAD → say so. There is nothing for the read-back to
+  disagree with, the red is real, and a harness that sent the reader off to
+  re-render a contact sheet would be pointing at the wrong thing.
+- git cannot answer → say NOTHING. `_modified` returns `None` for "I could
+  not look" and `[]` for "nothing is modified", and the caller must not
+  print the first sentence when it only has the second. The abort it
+  decorates is a refusal to make a claim; a hint that guessed at the reason
+  would be the one thing this harness never does. That distinction was not
+  in the first draft — writing the mutation list for it is what found it,
+  which is the second time this month that asking "what would catch this"
+  changed the code rather than the tests.
+
+**Verified end to end, not reasoned.** With the listening dot repainted
+ember in the worktree (`Theme.teal` -> `Theme.ember` in `StatePlate.qml`,
+restored after), a real `bash ops/ralph/mutate.sh --runner shots hud` now
+aborts with: "The SHEET may be stale rather than the suite (B53): 1 file(s)
+under shell/jv-hud differ from HEAD (shell/jv-hud/StatePlate.qml), and
+hudshots.sh compares every PNG it renders against HEAD:docs/hud ... Run
+`bash ops/ralph/hudshots.sh`, LOOK at the new PNGs, commit them, then
+grade." One suite run, one abort, exit 2, the sheet in `docs/hud` untouched
+(the grading run renders into its own scratch).
+
+- tests: `runtests.sh tools` **234 green, was 229** — five new, four of them
+  against a throwaway git repo because a hint that measures the tree cannot
+  be tested against a bare directory. Graded with the harness on itself:
+  **6 mutations, 6 caught** (the stale-sheet branch inverted, the
+  could-not-look guard dropped, a git failure read as a clean tree, the
+  advice stopping short of "commit", the uncommitted-sheet note inverted,
+  and the hint never reaching the abort). Canary red, closing baseline green.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins, no production code at all — this is the
+  loop's own tooling.
+- files: tools/mutate.py, tools/tests/test_mutate.py, ops/ralph/mutate.sh
+- commit: 002ee84
+- raised: **B56** — the harness prints ONE line of each suite log and keeps
+  none of it. Measured today: the line it chose for the red baseline was
+  "something drew a different picture than the one in docs/hud.", the tail
+  of the comparator's closing paragraph, which is the sentence for the case
+  that was NOT what happened. B53 fixes the one abort where the loop was
+  actively misled; the general gap (a survivor or a dead canary cannot be
+  investigated without re-running a 53 s suite by hand) is cheap to close —
+  each run already has a private scratch directory to write its log into.
+- next: **B56** is the natural follow-on and is small. Otherwise unchanged
+  and worth repeating, because it is now several iterations old: **Track A
+  is one human look at `docs/hud/` away from unblocking ten items** (A47,
+  A55, A62, A63, A68 and the A21/A22/A25 cluster are two questions asked
+  five ways), **B27** needs one decision between three named options before
+  any HUD work on no-wake windows can start, **B43/B47/B54** are one
+  question asked three times, and **B10/A28** — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this
+  loop.
+
+## 2026-09-25 — iteration 77 — B56: the suite output the harness captured and threw away
+
+Track A is still one human look at `docs/hud/` away from unblocking ten
+items — every remaining A item is either a human decision or carries its
+own "do NOT build this until X is answered" — so this took the follow-on
+the last iteration raised and called small. It was, and it found two
+things in itself on the way, which is the part worth writing down.
+
+The gap: `script_runner` ran a suite with `capture_output=True`, printed
+`(proc.stdout or proc.stderr).splitlines()[-1]`, and dropped the rest with
+the scratch tree. For `--runner tests` that line is a pytest summary and is
+roughly the right line. For `--runner shots` it is whatever the
+comparator's closing paragraph happened to end with, and B53 is the record
+of that being actively wrong at the worst moment. B53 fixed the one abort
+where the loop was misled. What was left is the general shape: a survivor,
+a canary that lived or a red baseline could not be investigated at all
+without re-running the suite by hand — 53 s a run under `shots`.
+
+Each run already had a private scratch directory. It now holds three
+things, and the ordering of two of them is the only interesting decision:
+
+- `suite.log` — the command, the exit code, and BOTH streams in full.
+  Written by `script_runner` and not by `run()`, because only a runner
+  knows whether it has output to keep.
+- `WHAT` — what the run was, written **before** the suite starts. The
+  `INDEX` line is appended after, with `pass`/`fail`, and that is the
+  half a runner that dies takes with it. The run nobody can name is
+  exactly the one being investigated, so the name goes down first.
+- the tree is **kept** on a survivor or an abort and **swept** on a clean
+  sweep. A grading where everything was caught has nothing in it anyone
+  will open, and under `shots` it is a dozen runs of thirteen PNGs. Each
+  abort names the one run that went wrong, not the tree; the CLI prints
+  the tree under the summary, and says to delete it.
+
+The printed line stays ONE line and now carries its run number. It is a
+progress indicator, not the evidence, and keeping those two separate is
+the whole lesson of B53: choosing one line out of a suite's output is a
+guess about which line matters.
+
+**Reproduced end to end on the real case, not reasoned.** With the
+listening dot repainted ember (the same edit B53 used), a real
+`--runner shots` grading aborted, and the printed line was still
+"something drew a different picture than the one in docs/hud." — the
+sentence for the case that was NOT what happened. Four lines above it in
+the now-kept 41-line log: "If you changed the HUD on purpose, this is the
+sheet catching up." Next to it, `run001/shots/` with all thirteen PNGs
+that run drew, which under a surviving PLATE mutation is the only way to
+SEE what the mutant looked like.
+
+**Two things it found in itself.**
+
+1. Keeping trees made the harness's own test suite leak. Dozens of tests
+   drive `run()` to a survivor or an abort deliberately, and each now left
+   a directory in the real `/tmp` forever — **189 of them after twelve
+   suite runs**, which is how it was noticed rather than reasoned about.
+   The harness is right to keep them (the caller is told where the tree is
+   and owns it from there), so the fix belongs in the caller: an autouse
+   fixture points `mkdtemp`'s default parent at pytest's `tmp_path`, and
+   the trees stay real and inspectable while a test runs. A full suite run
+   now leaves **0**. A new guard counts that nothing is created at all
+   before the harness knows it has a file to mutate.
+2. The first grading reported a genuine survivor, and it was a bad
+   assertion rather than missing code: `test_the_cli_says_where_the_logs_
+   were_kept` asserted the path alone, and `summary()`'s survivor line
+   already contains that path as a prefix — so the assertion was satisfied
+   by a different mechanism and graded the CLI's own line immune. `if
+   report.logs is not None:` -> `if False:` survived. It asserts
+   `f"kept: {kept}"` now, and the re-grade caught it.
+
+- tests: `runtests.sh tools` **245 green, was 234** — eleven new, plus two
+  existing ones updated for real behaviour changes (a run dir is no longer
+  empty when the suite gets it — it holds the harness's own `WHAT`, and
+  the test now pins that it holds *nothing else*; and the "the hint said
+  nothing" test splits off the sentence every abort now ends with, so it
+  still holds the strong claim rather than the recognisable one).
+  Graded with the harness on itself: **11 mutations, 11 caught** — the
+  truncated log, the unnamed printed line, the name written after the run
+  instead of before, sweeping on an abort, sweeping a survivor, keeping a
+  clean sweep, an INDEX with no pass/fail, the canary abort losing its
+  run, the survivor losing its run, the CLI keeping the path to itself,
+  and a tree made before the target file is known to exist. Canary red,
+  closing baseline green, tree swept.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins, no production code at all.
+- files: tools/mutate.py, tools/tests/test_mutate.py, ops/ralph/mutate.sh
+- commit: 6b2207b
+- next: no new item raised — B56 closed what it described and the two
+  things it found were fixed in the same commit. **B55** is the remaining
+  harness gap and is a real design question rather than a flag (a canary
+  for a source-READ relation must make the file unMATCHABLE, not
+  unloadable), and there are now four such relations the grader declines
+  to grade. Otherwise unchanged, and now several iterations old: **Track A
+  is one human look at `docs/hud/` away from unblocking ten items** (A47,
+  A55, A62, A63, A68 and the A21/A22/A25 cluster are two questions asked
+  five ways), **B27** needs one decision between three named options,
+  **B43/B47/B54** are one question asked three times, and **B10/A28** —
+  one live recording of one spoken turn on ares — remains the biggest
+  thing a human can hand this loop.
+
+## 2026-09-25 — iteration 78 — B55: the five relations the grader kept refusing to grade
+
+Track A is unchanged and still one human look at `docs/hud/` away from
+unblocking ten items; every remaining A item is either a human decision
+or carries its own "do NOT build this until X is answered", and the
+optimization backlog is human-review-required end to end. B55 was the
+one open item that was the loop's own, and it was raised as "a real
+design question rather than a flag", which is what this is about.
+
+**The gap, stated exactly.** Invariant 1 forbids one service importing
+another. So every claim this repo makes about a relation BETWEEN two
+services is made by reading the other's source and matching a line in it.
+There are five:
+
+- jv-compat's `VERDICT_TIMEOUT_S` against jv-guard's clamscan budget (B50)
+- the HUD's wake-window fallback against `jv_ears/config.py`
+- the HUD's capture-stall fallback against `jv_ears/audio.py`
+- LinkPlate's grace against `jv_hud_bridge/bridge.py`'s first backoff
+- LinkPlate's grace against `shell/jv-hud/Bus.qml`'s respawn interval
+
+The harness declined to grade every one of them, and the refusal was
+right: its canary makes the target impossible to LOAD, a suite that only
+greps it never notices, the canary lives, and the run aborts rather than
+printing a score it cannot stand behind. Both arms of B50's relation were
+therefore checked by hand — edit, run, restore — which is the practice
+B48 was written to delete.
+
+**The design.** A canary for a source-read relation has to make the file
+unMATCHABLE, not unloadable. So a file is offered its controls strongest
+first — unloadable, then ERASED — and whichever kills the suite IS the
+relation. Measured, never declared. That distinction is then carried all
+the way into the report, because the two are genuinely different
+sentences: a survivor on an executed file means "no test asserts this
+line"; on a read file it means "no test matches this text". And it is not
+only about survivors — "4 of 4 caught" against a file the suite greps is
+a claim about a regex, so the summary says `the suite reads <file> — it
+never runs it` whether or not anything survived.
+
+Three decisions inside that, each with the alternative rejected in place:
+
+1. **Erasure is EMPTY, not a marker.** Anything left in the file is
+   something a regex somewhere might still find, and a canary that can be
+   matched is not a canary. Its honest limit is the mirror of the Rust
+   canary's and is written down rather than discovered later: a NEGATIVE
+   claim ("this source contains nothing that looks like X") is green on
+   an empty file too, so the harness will refuse to grade it. That is the
+   refusing direction, which is the safe one — it declines to claim
+   rather than claiming wrongly.
+2. **The suffix stops being a refusal and becomes a choice of control.**
+   `--runner tests` on a `.qml` used to be an error before any suite ran,
+   and that error was wrong about a real case: the tools suite really
+   does match a line in `shell/jv-hud/Bus.qml`. What the old rule was
+   actually protecting — a Python `raise` appended to QML parses as
+   nothing, so the canary would live for a reason that says nothing about
+   the suite — is kept exactly: an off-language file is offered the ONE
+   control it could ever fail, and never the wrong language's canary.
+3. **A file that survives every control still aborts**, in two different
+   sentences, because two different things went wrong. Both canaries
+   lived = the suite has no relation with this file at all. Off-language
+   and the erasure lived = the only relation this runner could have had
+   is a read, and it does not read it. Naming an execution that was never
+   on the table would send the reader looking for the wrong thing. Both
+   live-canary runs are named now, not just the last — two live canaries
+   are two suite logs, and which one you open depends on which relation
+   you thought you had.
+
+**Graded for real, which is the whole point.**
+
+- `--runner tests jv-compat`, both arms of B50's relation, machine-run
+  for the first time: **2/2 caught**. run002 is the load canary living on
+  `scan.py` (10 passed), run003 the erasure killing it. The same grading
+  put `install.py` through ONE canary, because it is imported — so both
+  relations appear in one run and the summary distinguishes them.
+- `--runner tests tools`, all four theme/budget mirrors **including the
+  off-language `shell/jv-hud/Bus.qml`**: **4/4 caught**, 13 suite runs
+  against a printed floor of 10. The three extra runs are exactly the
+  three in-language files whose load canary had to be seen to live before
+  erasure was the honest thing to try; `Bus.qml` cost one canary, not two.
+
+The printed count says "at least" now for that reason.
+
+- tests: `runtests.sh tools` **254 green, was 245** — nine new, plus
+  three existing ones rewritten for a real behaviour change (the two that
+  asserted "wrong grader" now assert which controls the suffix chooses,
+  and the run-naming one asserts BOTH canary runs are named and the
+  baseline is not). Graded with the harness on itself: **9 mutations, 9
+  caught** — an erasure that left the file alone, an erasure that left a
+  matchable marker, both directions of a `controls_for` that ignores the
+  suffix, a relation reported as an execution whichever canary killed the
+  suite, the summary's relation line dropped, the survivor caveat
+  dropped, the read control handed the load canary, and an abort that
+  names only its last run. Canary red, closing baseline green, tree swept.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins, no production code at all.
+- files: tools/mutate.py, tools/tests/test_mutate.py, ops/ralph/mutate.sh
+- commit: 2c9800d
+- next: **B57** raised — the harness can now grade a relation it could
+  not, and grading four of the five in one run surfaced the next
+  question: the erasure canary on `bridge.py` made FIVE tools tests fail,
+  not one, so "the suite reads this file" is true of more than the
+  relation being graded, and nothing distinguishes a suite that reads a
+  file for one reason from one that reads it for five. Not a defect —
+  the control proves what it claims — but it is the shape of the next
+  overclaim if anyone reads the relation line as naming a single test.
+  Otherwise unchanged and now several iterations old: **Track A is one
+  human look at `docs/hud/` away from unblocking ten items** (A47, A55,
+  A62, A63, A68 and the A21/A22/A25 cluster are two questions asked five
+  ways), **B27** needs one decision between three named options,
+  **B43/B47/B54** are one question asked three times, and **B10/A28** —
+  one live recording of one spoken turn on ares — remains the biggest
+  thing a human can hand this loop.
+
+## 2026-09-25 — iteration 79 — B38: the period an off-schedule beat lands in
+
+PLAN B38's last open half was one sentence — "jv-voice is the one service
+nobody has read for this at all." The reading was the iteration. What it
+found is not what B38 expected, and it is not B47 either.
+
+**What B38 expected.** jv-voice publishes `degraded` the instant a
+synthesis or playback failure reaches `_speak_one`'s handler, so it
+already does the thing `schemas/sys.health.json` asks for ("every fixed
+period, **and immediately on state change**"). Same as jv-guard, same as
+jv-brain. Its gap is theirs — the fault is not LATCHED, the next periodic
+beat says `ok` again while the condition is unchanged — and that is
+**B47**, a human's call about what the CLI says on an ordinary day.
+Nothing built for it here.
+
+**What the reading actually found.** The schema asks for two things and
+never says what the second does to the first. An off-schedule beat: does
+it take over the period, or does the old timer keep running underneath
+it? jv-voice, jv-guard and jv-brain all took the second answer, by
+omission — they publish and leave `health_at` alone. **jv-ears and
+jv-context took the first, and jv-ears wrote down why:**
+
+> Before the publish, not after: the period is the beat's, not the bus's,
+> and a change beat is this period's beat — leaving the timer alone would
+> double-publish a change that happened to land near a boundary.
+> — `jv_ears.main.pump_health`
+
+Five services, one contract, two answers, and the two that are right are
+right in two different shapes that share no code.
+
+**Why the wrong answer costs something.** The `ok` that follows a fault
+goes out with whatever was left of the period the fault interrupted.
+Three quarters of the way through, the report has a quarter of a period
+to live; at the boundary it has none. `bus.latest()` keeps ONE frame per
+topic per publisher, so the HUD's HealthPlate and `jv health --check`
+both read the newest: a `degraded` that was published truthfully, on
+time, can be erased before anything could show it. That is a scan with no
+signature engine, a dead sound card, an LLM that stopped answering — the
+three reports each of these services exists to make.
+
+jv-brain pays a second cost the others do not. Its `_state_model_share`
+beat fires on the FIRST WORD OF EVERY SPOKEN TURN. Leaving the timer
+alone made that an ADDED frame per turn on a topic meant to be quiet
+(invariant 5), rather than that period's beat moved earlier. The fix
+takes a frame off a busy machine; it never adds one.
+
+**What was built.** `jarvis_bus.HealthBeat` — `due`, `beat()`, an
+injected clock, a period it also declares so the body and the enforcement
+cannot drift apart, and a `ValueError` for a period the schema's
+`exclusiveMinimum: 0` forbids. The rule and its reasoning live in one
+docstring instead of being rediscovered per service. Every beat in the
+three services goes through it; jv-voice grew a `_beat()` so that there
+is exactly one way for it to publish a heartbeat, which is the property
+that makes "every beat owns a period" checkable by reading rather than by
+remembering.
+
+The stamp is taken BEFORE the publish, for jv-ears' reason. After the
+await, the period would start from when the bus ACCEPTED the frame, so
+every beat would drift later than the last — compounding, on the one
+number consumers use to decide a service is dead.
+
+**Three things deliberately not done.**
+1. **jv-ears and jv-context are untouched.** Both already obey this, in
+   shapes built around their own problems — a 4 Hz watcher with a 1 s
+   flap floor because their state is a function of a clock; an
+   event-driven pump woken by a fault setter. Rewriting either onto a
+   common clock would risk behaviour that was reasoned out once and is
+   correct, to unify code that is not duplicated.
+2. **The latch is still B47's question.** All three still say `ok` again
+   on the next beat. What changed is only WHEN that beat is.
+3. **No schema change.** `period_s` is published as it always was; the
+   only difference is that the number enforcing it and the number
+   declared in the body are now the same object.
+
+**Also: the gate was not testing the tree.** `ops/ralph/runtests.sh` runs
+`python -m pytest` from the service's own directory, which puts that
+directory first on `sys.path` — so `jv_guard` came from the worktree and
+`jarvis_bus` came from the NIX STORE. Every suite but pylib's own has
+been testing the shared library as last built, not as written. Found by
+the first import of `HealthBeat` failing in a service whose test had just
+been changed to use it. One `export PYTHONPATH` line. Nothing else moved:
+all ten suites are green on both sides of it.
+
+- tests: pylib **11 (was 4)**, jv-voice **29 (28)**, jv-guard **34 (33)**,
+  jv-brain **115 (114)**. Unchanged and green under the new PYTHONPATH:
+  jv-ears 114, jv-context 105, jv-compat 10, jv-hud-bridge 26, tools 254,
+  harness 88.
+- graded with `ops/ralph/mutate.sh`: **8 mutations, 8 caught.** Five on
+  the clock (the deadline turned into a strictly-greater gap, a fresh
+  clock that starts not-due, a `beat()` that forgets, a period of zero
+  reaching the bus, and "only the periodic beat owns the clock"), and
+  that last one again in each of the three services — the old behaviour
+  reproduced exactly, one line each. Each service test measures the GAP
+  after the fault rather than a silence, because a heartbeat that simply
+  stopped would pass a silence; each also asserts the fault landed inside
+  the period it was meant to interrupt, so a slow turn fails loudly
+  instead of measuring nothing and passing.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/pylib/jarvis_bus/health.py (new),
+  services/pylib/jarvis_bus/__init__.py, services/pylib/tests/test_health.py
+  (new), services/jv-voice/jv_voice/service.py,
+  services/jv-voice/tests/test_voice_service.py,
+  services/jv-guard/jv_guard/service.py,
+  services/jv-guard/tests/test_guard.py,
+  services/jv-brain/jv_brain/service.py,
+  services/jv-brain/tests/test_brain_service.py, ops/ralph/runtests.sh
+- commit: d55348b
+- next: **B58** raised — the PYTHONPATH finding is bigger than the line
+  that fixed it. For as long as the loop has existed, a suite could have
+  passed against a `jarvis_bus` that no longer matched the tree, which
+  means the gate's own honesty is a property nothing tests. `mutate.sh`
+  can grade that: a canary on `services/pylib/jarvis_bus/client.py` run
+  against, say, `runtests.sh jv-guard` should kill it, and before today
+  it would have LIVED — the harness would have called the file immune and
+  said so. Otherwise unchanged: **Track A is one human look at `docs/hud/`
+  away from unblocking ten items** (A47, A55, A62, A63, A68 and the
+  A21/A22/A25 cluster are two questions asked five ways), **B27** needs
+  one decision between three named options, **B43/B47/B54** are one
+  question asked three times — and B47 just gained a third service that
+  has now been READ for it, which is the whole of what B38 had left —
+  and **B10/A28**, one live recording of one spoken turn on ares, remains
+  the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 80 — B58: the second meaning of a canary that lived
+
+B48 gave this loop a control that makes every "n mutations, n caught"
+sentence honest: before grading anything, make the target file impossible
+to load and demand the suite go RED. A canary that LIVES has meant
+exactly one thing since — the tests do not touch this file — and the
+abort says so.
+
+It has always had a second meaning. The tests touch **another copy** of
+it. Iteration 79 found that in the wild: `runtests.sh` ran pytest from
+the service's own directory, so every jv-* suite imported `jarvis_bus`
+from the NIX STORE while importing its own package from the worktree. A
+canary on `services/pylib` would have lived, and the harness would have
+reported the file immune and been wrong about why.
+
+**Nothing inside a suite run can tell the two apart.** Both are a green
+suite with the file unloadable, and both are a green suite with it
+erased. So the harness asks outside the run. `runtests.sh --origin
+<module> <service>` resolves a module the way that suite resolves it —
+same venv, same cwd, same PYTHONPATH — and prints the file or prints
+nothing. The load question belongs to that script and to nothing else:
+an answer from this interpreter's `find_spec` would be about a different
+program.
+
+Three answers, three sentences in the abort. **SHADOWED**, naming the
+other copy, which also says every mutation graded against it would have
+meant nothing. **"this very file"**, which does not excuse the canary —
+it turns the original abort from an assumption into a measurement.
+**Nothing**, when the question could not be asked, which is the same
+discipline B53's stale-sheet hint follows: a hint that guessed would be
+the one thing this harness never does. The probe is asked only on the way
+out of a run already aborting, costs ~95 ms, and exists for `--runner
+tests` alone — "where did this come from" has an answer for an
+interpreter, and inventing one for a qmltestrunner import path or a cargo
+module tree would be the overclaim the harness exists to prevent.
+
+**And then the control was run for real, and found something.** B58's own
+ask was: a canary on `services/pylib/jarvis_bus/client.py` graded against
+jv-guard must kill that suite, where before d55348b it would have lived.
+It killed it — the gate does reach the shared library now. Then both
+mutations SURVIVED, and survived pylib's own suite too: `seq` never
+advancing, and every publish claiming `conf: 1.0`. Invariant 4 ("every
+producer publishes confidence") is implemented for the whole of Python by
+one line in `BusClient.publish`, and nothing held it — the existing
+round-trip test publishes `conf=0.93` and never looks at what arrived.
+`seq` is the same shape: the envelope's only ordering handle, and a
+client that published the same one forever was invisible to every
+consumer that watches for a drop. Two tests against the real broker
+close both, and the same three mutations are now caught 3/3.
+
+That is the first thing this harness found by grading its own reach, and
+it is worth stating plainly: the hole was not in the tests anyone wrote
+for the bus client. It was that for as long as this loop has existed, the
+one file every service depends on was the file the gate was least able to
+grade.
+
+- tests: tools **266 (was 254)**, pylib **13 (was 11)**. Green and
+  unchanged under the changed `runtests.sh`: jv-brain 115, jv-ears 114,
+  jv-voice 29, jv-context 105, jv-guard 34, jv-compat 10, jv-hud-bridge
+  26, harness 88.
+- graded with `ops/ralph/mutate.sh`: **12 mutations, 12 caught.** Nine on
+  the harness (the package walk, the `__init__` name no importer says, a
+  failed script still getting to answer, "no answer" becoming an answer,
+  the two copies never compared, the note never reaching the abort, the
+  module name never worked out, the python runner losing its probe, and
+  the CLI building a probe for a runner that has none) and three on the
+  bus client (seq that stops advancing, conf always 1.0, and a seq that
+  advances in the client but goes onto the wire as 0).
+- the abort path was also run for real, against a file jv-guard neither
+  runs nor reads: it aborted correctly and the probe said nothing,
+  because jv-guard's interpreter has never heard of `jv_brain` and
+  `find_spec` RAISES on the missing parent. The probe now catches that
+  and answers "no answer" instead of dying — found by running it, not by
+  reading it.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/mutate.py, tools/tests/test_mutate.py, ops/ralph/runtests.sh,
+  ops/ralph/mutate.sh, services/pylib/tests/test_client.py
+- commits: 3f347b4, 58ae92a
+- next: **B59** raised, and it is the obvious next question rather than a
+  new idea: `client.py` was untested on two of its five envelope fields,
+  and nothing has asked what else the gate could not reach. The harness
+  can now answer that per file — probe first, then grade — and `ts`,
+  `src` and `v`, `next_frame`'s pong skip and its `BusError`, and
+  `MAX_FRAME` are the rest of that file. Otherwise unchanged: **Track A
+  is one human look at `docs/hud/` away from unblocking ten items** (A47,
+  A55, A62, A63, A68 and the A21/A22/A25 cluster), **B27** needs one
+  decision between three named options, **B43/B47/B54** are one question
+  asked three times, and **B10/A28** — one live recording of one spoken
+  turn on ares — remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 81 — B59: the rest of the envelope, and the transport under it
+
+Track A is still one human look at `docs/hud/` away from unblocking ten
+items, and the A items that are NOT waiting on that (A11, A33, A35, A36,
+A56, A59) all say in their own words "worth it the day X happens" or
+"measure it on ares" — so this went to the B track and to the item the
+last iteration raised.
+
+B58 gave the gate its first honest reach into `services/pylib/jarvis_bus/
+client.py` and the first two mutations it ever graded there both survived.
+B59 was the obvious follow-on: ask the same question of the rest of the
+file, which every Python service on the bus imports. Six mutations, one
+per claim.
+
+**Five of six survived.** Only `src` was held, and only because the
+round-trip test happens to assert it. The other five:
+
+- `ts` could be `0.0`. The broker validates the envelope's `ts` as a
+  NUMBER and nothing more, so a wall-clock stamp routed perfectly too —
+  and `ts` is what every latency figure in this repo subtracts from:
+  `jv tap --latency`, HeardState's anchor, HealthState's expiry.
+- `v` could ignore its caller and publish 1 forever. The broker only
+  checks `v >= 1`. A bumped `v` is how a schema migration BEGINS, and a
+  client that pinned it would make one impossible while breaking nothing
+  today.
+- a pong could be returned as EOF. The Python client has no `ping()`, so
+  the skip branch was dead code as far as this suite knew — and a client
+  that reports None there is telling every consumer the bus is GONE.
+- the length-prefix guard could be a thousand times too generous.
+- `JARVIS_BUS` could be ignored entirely, because every test in the file
+  passes an address explicitly.
+
+Five tests close them. Three ride the real broker; two deliberately do
+not and say why. The pong test carries its own control — it pings a
+separate connection first and asserts a pong is a real thing this broker
+really sends — because otherwise it would pass without one ever arriving.
+The prefix test feeds four bytes and then EOF, because the claim is that
+the guard fires on the PREFIX ALONE: `readexactly(n)` allocates first and
+asks later, and that prefix is the one number on the wire that is read
+before anything is known about what follows.
+
+The frame cap is now pinned to jarvisd's own `pub const MAX_FRAME` by
+READING `services/jarvisd/src/proto.rs` — invariant 1 forbids importing
+it. That makes it a B55-style relation, so it was graded as one: move the
+Rust constant, the pylib suite goes red, and the harness reports "the
+suite reads services/jarvisd/src/proto.rs — it never runs it". If the two
+caps ever drift, the smaller silently becomes the real limit and the
+larger one's error message is a lie about why the connection died.
+
+Worth stating plainly, because it is the second iteration in a row to
+find it: the file the gate could not see for this loop's entire history
+is the file that turned out to be least tested. Two iterations of
+grading it have now found seven unheld claims in one 130-line module.
+
+- tests: pylib **19 (was 13)**. Green. Nothing else touched — the change
+  is one test file.
+- graded with `ops/ralph/mutate.sh`: **10 mutations, 10 caught.** Nine on
+  `client.py` (ts zeroed, ts on the wall clock, src constant, v pinned,
+  pong as EOF, the cap constant drifted, the guard comparison widened,
+  the env var ignored, and a set-but-empty env var becoming an address)
+  and one on `proto.rs` (the broker's cap moving while the client's does
+  not). The first grading of the same six, before the tests, was **1/6**.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/pylib/tests/test_client.py
+- commits: 9ad4eb7
+- next: **B60** raised — `client.py` was one of pylib's THREE modules, and
+  `health.py` and `schema.py` have never been graded at all. `to_body` /
+  `from_body` encode and decode every body on the bus, so a survivor
+  there is wrong in every service and every topic at once; `HealthBeat`
+  is the clock d55348b just fixed a real bug in, found by reading rather
+  than by grading. B60 also names two things left deliberately alone in
+  `client.py`: `next_event`'s two indistinguishable EOF paths, and
+  `connect()`'s address rule, under which a RELATIVE unix socket path
+  containing a colon is dialled as TCP — harmless today because every
+  real path is absolute, and a latent trap for the replay rig, which is
+  the one thing that invents socket paths. Otherwise unchanged: **Track A
+  is one human look at `docs/hud/` away from unblocking ten items** (A47,
+  A55, A62, A63, A68 and the A21/A22/A25 cluster), **B27** needs one
+  decision between three named options, **B43/B47/B54** are one question
+  asked three times, and **B10/A28** — one live recording of one spoken
+  turn on ares — remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 82 — B60: the codec every body on the bus goes through
+
+Track A is unchanged — still one human look at `docs/hud/` away from ten
+items — so this took the item the last iteration raised. B59 graded
+`client.py`, one of pylib's three modules. B60 named the other two:
+`health.py`, whose `HealthBeat` is the clock every service's `sys.health`
+beat is owed against, and `schema.py`, whose `to_body`/`from_body` are how
+EVERY body on this bus is encoded and decoded.
+
+**health.py: 4 mutations, 4 caught.** Its suite (written with d55348b) has
+teeth. The deadline becoming a gap, a clock nobody has beaten not being
+due, an off-schedule beat leaving the old schedule running, and a period of
+zero being accepted are all held. Nothing to do there, which is worth
+recording as plainly as a hole would be.
+
+**schema.py: 9 mutations, 0 caught.** The codec is eleven lines each way
+and had one test on it — `test_to_body_wire_rules`, on an `AudioWake`,
+which is the one body in the frozen set with an empty `_optional`, no
+nested field and no array. It exercises none of the rules the function
+exists for. So: the nested-object branch, both array branches, the
+Optional unwrap, the null-nested guard, the absent-key default and BOTH
+halves of the omit rule could all be broken and the suite stayed green.
+
+One of the nine was caught elsewhere, and it is worth being precise about:
+`from_body`'s absent-key branch is held by **jv-context's** suite, which
+decodes a `context.system` body with `battery_pct` missing and fails seven
+tests when the branch goes. That is the only reason any of this was held
+anywhere — a consumer's suite happening to use a shape. The other eight
+were held by nothing in the repository.
+
+A survivor here is not local. A survivor in jv-voice is wrong in jv-voice;
+a survivor in this file is wrong in eight services and on every topic at
+once, and it surfaces far from its cause: a nested dataclass left
+unconverted is a `msgpack` TypeError thrown by the transport inside
+`publish`, on a frame the calling code built correctly.
+
+The sharpest claim is the omit rule, and it is really two rules facing each
+other. **"Absent" and "present and null" are different words on this bus.**
+Optional keys are declared with a bare type (`"type": "string"`), so an
+explicit null in one fails validation — it must be omitted. But
+`in_reply_to_utterance` is required AND nullable
+(`"type": ["string", "null"]`), because a system announcement has no
+triggering utterance and has to SAY so. A codec that omitted every None
+would publish a `speech.say` rejected for a missing required key, and only
+ever for unprompted speech: the proactivity path, the one that runs when
+nobody is watching.
+
+Three tests read `schemas/*.json` instead of restating it, which is the B55
+shape — the frozen schema is the law (invariant 2) and the codec's whole
+job is to agree with it, so the assertion is a RELATION: every emitted key
+is a declared property, every required key survives the encode, and a null
+is only ever on a key the schema permits null. Stated that way it holds all
+five shapes at once, and it holds the next shape too, which a hand-written
+expected dict would not.
+
+A fourth reads `tools/gen_bindings.py`. `schema.py` says DO NOT EDIT and
+means it: the codec is the generator's epilogue copied in verbatim, so a
+fix applied to the generated file is erased by the next regeneration and a
+fix applied only to the generator is not what any service imports. The
+harness graded that one as a read relation and reported it in those words —
+"the suite reads tools/gen_bindings.py — it never runs it". (Checked while
+there: the generator's docstring claims CI runs `--check`, and
+`.github/workflows/check.yml` really does. No drift item to raise.)
+
+Two claims the grading turned up as behaviour worth PINNING rather than
+holes to close. An unknown wire key is IGNORED — `from_body` iterates the
+dataclass's fields, not the body's keys — which is the forward-compatibility
+half of the envelope's `v`: a v2 producer that adds a key cannot crash a v1
+consumer. And a body missing a REQUIRED key fails loudly at the decode
+rather than being filled with None, because a required key is required
+precisely because consumers may not check it.
+
+- tests: pylib **63 (was 19)**. Green. One new file; no source touched.
+- graded with `ops/ralph/mutate.sh`: **12 mutations, 12 caught** — 11 on the
+  codec and 1 on the generator's epilogue. Before the tests: **0 of 9**.
+  health.py separately: 4 of 4, before and after.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/pylib/tests/test_schema.py
+- commits: 184b6b1
+- next: **B61** raised, and it is the last of pylib: the two `client.py`
+  claims B60 named and deliberately left. `next_event` returns None for a
+  short read on the head and for a short read on the BODY, and neither is
+  distinguishable from a frame that never came — a truncated frame and a
+  closed bus produce the same answer to every consumer's reconnect logic.
+  And `connect()`'s address rule (`":" in addr and not addr.startswith("/")`)
+  dials a RELATIVE unix socket path containing a colon as TCP; every real
+  path is absolute so it cannot bite today, and the replay rig is the one
+  thing in this repo that invents socket paths. B61 says what the cheap
+  honest half is: pin TODAY's rule with a test so a change to it is
+  deliberate and visible, and leave the rule itself as a decision. With
+  that, all three pylib modules will have been graded. Otherwise unchanged:
+  **Track A is one human look at `docs/hud/` away from unblocking ten
+  items** (A47, A55, A62, A63, A68 and the A21/A22/A25 cluster), **B27**
+  needs one decision between three named options, **B43/B47/B54** are one
+  question asked three times, and **B10/A28** — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this
+  loop.
+
+## 2026-09-25 — iteration 83 — B61: the two rules in `client.py` every reader assumes wrong
+
+Track A is still blocked on one human look at `docs/hud/`, and the A items
+that are not blocked all say "not before X" in their own text (A18 waits on
+a topic that does not exist, A33 on the mask being edited, A39 on A22 being
+answered, A31/A35/A36/A56/A59 on a human). So this is B61, which the last
+three iterations each raised and deferred, and which finishes the grading of
+pylib: `client.py` was the last of the three modules.
+
+Two claims, neither of them fixed.
+
+`next_event` returns None for a short read on the HEAD and for a short read
+on the BODY. Every consumer in this repo reads that None as "the bus is
+gone" and leaves its loop — jv-ears' `follow_bus` returns, jv-brain's run
+loop breaks, jv-guard's and jv-compat's the same — so the one condition that
+means "the broker is mid-write and is still there" is spelled exactly like
+the one that must trigger a reconnect. The body half is the worse half: the
+prefix said 64 bytes and 8 arrived, which is the strongest evidence
+available from outside that the other end is ALIVE, and it is reported as
+the other end being gone.
+
+`connect()`'s rule `":" in addr and not addr.startswith("/")` asks whether
+the address is ABSOLUTE, not whether it is a path. Writing the table out
+made the relative case sharper than B59 had described it: `run/jarvis:bus.sock`
+does not dial some wrong host and time out — `rsplit(":", 1)` hands
+`int()` the string `"bus.sock"` and the caller gets a ValueError while
+holding what it believes is a filename. Still cannot bite today (no address
+in this repo is relative; the replay rig is the one thing here that invents
+socket paths), and that is exactly the kind of thing that changes without
+anyone noticing it changed.
+
+So: five tests that PIN today's behaviour, each saying PIN NOT ENDORSEMENT
+in its own docstring. A clean EOF is the control; a short head, a short
+body, and the same truncation arriving at consumers through `next_frame`
+(pinned separately, because a fix could land in either method) are the
+claim. The transport test is a six-row table with BOTH openers replaced, so
+nothing dials and the test is about the decision rather than about anything
+listening.
+
+The grading is the part that says these are worth having. Two of the five
+mutations are not inventions — they are the two edits a reader who noticed
+the rule would actually make: drop the absoluteness test, or replace it with
+`"/" not in addr`. Both are caught now and both passed before.
+
+- tests: pylib **68 (was 63)**. Green. One test file; no source touched.
+- graded with `ops/ralph/mutate.sh`: **5 mutations, 5 caught**. Before the
+  tests: **1 of 5** — and the one that was caught was caught by accident,
+  because swapping `host, port` breaks every test in the file that dials.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/pylib/tests/test_client.py
+- commits: de510db
+- next: **B62** raised, and unlike its three predecessors it is not the
+  loop's to take: it is the DECISION B61 refused to make, in two halves —
+  should a truncated frame be distinguishable from a closed bus (leave it /
+  raise / sentinel, and the middle one is an edit in eight files), and
+  should `connect()` route by absoluteness (today), by shape, or by an
+  explicit `unix:`/`tcp:` prefix the caller writes. Both are cheap to change
+  and neither is cheap to change by accident, which is what the new tests
+  are for: whoever answers moves them in the same commit. With pylib graded
+  end to end, the loop's remaining B work is B12/B20/B25/B28/B33/B36 and the
+  two-minute human reads (B17 with B20). Otherwise unchanged: **Track A is
+  one human look at `docs/hud/` away from unblocking ten items** (A47, A55,
+  A62, A63, A68 and the A21/A22/A25 cluster), **B27** needs one decision
+  between three named options, **B43/B47/B54** are one question asked three
+  times, and **B10/A28** — one live recording of one spoken turn on ares —
+  remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 84 — A63: the crowded corner did not fit
+
+Track A had been blocked for three iterations and the loop had been in the
+B track grading pylib. Re-reading Track A for something that was the
+loop's own rather than a human's, A63 turned out to be two questions
+wearing one number: a PICTURE of a crowded corner (which wants A62
+answered, because a photograph of eight unrelated plates stacked 8 px
+apart is the confusion A62 is asking about) and an ASSERTION that the
+corner the box is sized for fits in the box. The second one needs nobody.
+
+`shell.qml`'s surface box had grown four times — 624 → 688 in two steps —
+and every digit of it came out of an argument written in its own comment:
+"ConfirmPlate wraps to three lines", "a refused binary and a failed
+install can genuinely be up together". Four arguments, checked by nothing.
+The only fit check that existed ran inside the contact sheet's loop, and
+no shot in that sheet lights more than three plates, so it cleared 688 px
+by more than five hundred and would have passed on a HUD that crops the
+moment a fourth arrives.
+
+`tools/hudshots/scene/tst_fit.qml` builds the case those paragraphs are
+about. Every plate but `link` — which excludes all nine, since each of
+them gates on the same link `LinkPlate` reports on, and a check holds that
+split rather than assuming it — each drawing the widest thing its own cap
+allows, over a health list as long as this machine has services. One
+moment the machine can actually reach: Jarvis mid-answer into a muted
+sink, the user talking over it (the `speaking` frame is stamped BEFORE the
+transcript, which is the barge-in `HeardState` is written around), jv-act
+holding a confirmation and reporting a separate failure, a refused binary,
+a failed install, a live mic, and everybody complaining.
+
+**That corner is 713 px tall. The box was 688.** It did not fit. A
+layer-shell panel floating over every window was cutting its bottom plate
+in half — and the bottom plate is `HealthPlate`, the thing that says what
+is wrong, cropped exactly when everything is. Nothing errors and nothing
+logs; the only way anyone would ever have found out is by having it
+happen.
+
+The box is 745 px now, and the number is no longer an argument: it is
+2 × `insetPx` + the measurement. The second inset is new — §06 gives this
+corner a gap at the top and the right and the bottom edge had none, so a
+stack that exactly filled the box ended flush against the edge of a
+floating panel, which reads as a crop whether or not it is one. Both shot
+drivers use the same rule now, so the sheet's own (weak) fit check and
+this one say the same thing.
+
+Three controls, because a fit check is the easiest kind of test to make
+vacuous — every way of staging one wrong produces a stack that measures
+comfortably:
+
+  · the crowd really IS nine plates, by `litNames`, which is the plates
+    naming themselves rather than the harness assuming;
+  · every plate that declares a text cap is really AT it;
+  · no plate is wider than the surface (the half shot 13 raised).
+
+The middle one earned its place immediately: `InstallState.plainSlug`
+REFUSES a slug past `maxSlugChars` instead of truncating it, so the
+over-long probe that made every other plate draw its widest made that one
+draw an empty app name — the narrowest it can be, on a check about
+crowding. Nothing failed. The corner measured 710 px, 3 px short of the
+truth, and the fix moved the box with it.
+
+Per-plate, settled, for whoever answers A70: confirm 260x112, heard
+260x93, action 260x76, guard 260x57, install 260x57, health 180x149,
+output 131x35, state 99x35, mic 58x35 — nine plates, eight 8 px gaps,
+713 px, 260 px at the widest against a 300 px surface.
+
+Four Python gates, because everything here is a copy of something:
+each scene driver's surface box is pinned to `shell.qml`'s (three drivers
+held an unchecked copy of it), both drivers' `everyPlate` to what
+`Corner.qml` actually stacks, and the fit crowd's roster to `services/`.
+A tenth service on this machine now fails a test instead of quietly making
+the measured worst case one row short of the real one. One pre-existing
+literal went with them: `test_hudsheet.py` hard-coded 206400 pixels, which
+is 300x688, and it now reads the denominator off a committed shot.
+
+The sheet is thirteen PNGs of the same HUD with 57 rows of backdrop under
+it — checked pixel-identical above row 688 before committing, so the diff
+is the box and not the plates.
+
+Not done, on purpose, and it is the interesting half: nothing here says a
+713 px corner SHOULD exist. That is half a 1440p screen, mostly
+near-full-width plates about unrelated things, and `HealthPlate` calls
+itself "the SHORT list" in its own header while having no cap at all.
+Raised as **A70** with three named shapes and no pick — it is A62's
+question with a number attached now, which is the most useful thing this
+iteration could hand a human.
+
+- tests: `bash ops/ralph/hudshots.sh` **23 (was 16)**, `... qmltest.sh`
+  585, `... runtests.sh tools` **269 (was 265)**. All green.
+- graded with eight mutations, **eight caught**, each by exactly one check
+  and none by collateral: the box back to 688 (2 gates), a driver keeping
+  the old box, `everyPlate` forgetting a plate, the roster dropping a
+  service, the layout settle removed, `InstallState` refusing its probe,
+  `ConfirmPlate` growing a fourth line (18 px over), `GuardPlate` widening
+  past the surface (320 px). Before the tests: the two that move pixels
+  would have registered as "the sheet moved" and said nothing about the
+  surface being too small; the other six, nothing at all.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/hudshots/scene/tst_fit.qml (new), tst_shots.qml,
+  tst_sequence.qml, shell/jv-hud/shell.qml, tools/hudscreens/sheet.py,
+  shoot.py, ops/ralph/hudscreens.sh, tools/tests/test_hudshots.py,
+  test_hudsheet.py, docs/hud/README.md, docs/hud/*.png
+- commits: 06d8284
+- next: **A70** is the one to hand a human, and it is cheap to answer
+  because the numbers are above — but it is also the first Track A item in
+  a while that a human can settle in two minutes WITHOUT sitting at ares,
+  which the rest of the blocked A track cannot say. Otherwise unchanged:
+  **Track A is one human look at `docs/hud/` away from unblocking** A47,
+  A55, A62, A63's picture half and the A21/A22/A25 cluster; **A56** asks
+  whether this suite (and the sequence one) should be in the build gate at
+  all, and A63 makes that question sharper, because the strongest assertion
+  about what the HUD shows is now the one furthest from `nix build`;
+  **B27** needs one decision between three named options; **B43/B47/B54**
+  are one question asked three times; **B62** is B61's two decisions; and
+  **B10/A28** — one live recording of one spoken turn on ares — remains the
+  biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 85 — B63: the sandbox nobody had ever entered
+
+- built: **invariant 8's confinement, executed for the first time.** It
+does not work, and it has not worked since Phase 2.
+
+Track A is still one human look away from unblocking, so I went looking
+for the claim in this repo with the widest gap between what it promises
+and what holds it. jv-compat has the lowest test-to-source ratio here
+(401 / 278) and it is the service that runs UNTRUSTED Windows binaries.
+`bwrap_args` builds the bubblewrap argv that whole invariant rests on. It
+had two tests. Both stage it on `Path("/prefixes/x")` — a path the code
+cannot produce, because `prefixes_root()` puts every prefix under `$HOME`
+— and both assert that three strings are present in a list. `RealRunner`
+says `TODO(machine)`. So the sandbox had never been entered.
+
+`bwrap` is installed on this machine (`modules/windows-compat.nix` puts it
+there for exactly this service), so entering it is four lines. Two fatal
+failures, neither of them visible in any argv:
+
+  · `--symlink usr/bin /bin` and `--symlink usr/lib /lib64` are an FHS
+    distro's layout. This is NixOS. `/usr` holds exactly one file
+    (`bin/env`), `/bin` is a single symlink to bash, and every binary on
+    the machine — wine's included — is in `/nix/store`. The sandbox
+    therefore had no `/bin/sh`, and bwrap answered
+    `execvp /bin/sh: No such file or directory`. It could not start
+    anything. Ever.
+  · Repair just enough to ask the next question and it answers
+    `PREFIX-GONE`. The prefix was bound at its own host path, and then the
+    app's private home was bound over `$HOME` — which is its PARENT, since
+    prefixes live at `~/.local/share/jarvis/prefixes/<app>`. The second
+    mount hides the first. `$WINEPREFIX` named a path with nothing at it.
+
+A third came from the other side. `install()` puts the installer's HOST
+path in the inner argv, and nothing bound the file — so wine was being
+handed a path to a file that is not in the sandbox. That one survived
+because the only pipeline test uses `MockRunner`, which logs an argv and
+never opens anything in it.
+
+The fix is not three patches; it is one decision. **The sandbox's view is
+fixed and the host's is not.** The prefix goes to `/jarvis/prefix`, the
+installer read-only to `/jarvis/installer/<name>`, and the private home is
+mounted FIRST, so nothing the app needs is ever under it. Wherever this
+machine decides to keep prefixes, the app sees one place — which makes the
+shadowing class impossible rather than merely fixed. The read-only set is
+now what this OS actually has (`/nix`, `/etc`, `/bin`, `/lib64`, `/usr`,
+`/run/current-system/sw`, each bound only if it exists), and the system
+profile is in it because that is what resolves a bare `wine` on PATH.
+
+One more, found by writing the test rather than by running it:
+`home_paths` was joined onto `Path.home()` and bound with no check at all.
+`home_paths = ["."]` mounts the user's entire home over the private one —
+invariant 8 inverted by one line of TOML — and `["../.."]` reaches past it
+altogether. `grant_dest` refuses absolute, empty and `..`-bearing grants.
+Recipes are reviewed like code, which is a reason to catch a mistake, not
+a reason to assume there will not be one. `recipes/README.md` says the
+rule where a recipe author reads it.
+
+`tests/test_sandbox.py` does not model bwrap. It runs a real `/bin/sh`
+inside the real sandbox and asks what it can see, in POSIX builtins only
+(no coreutils, so a sandbox that binds no profile is still measurable):
+the prefix is writable and the writes land in the real prefix on the host;
+the installer is readable at the path the inner argv names and REFUSES to
+be written, because it is the evidence jv-guard hashed; `$HOME` lists the
+prefix's `home/` and not the user's `tax-return.pdf`; a granted
+`Documents/AppSaves` is the user's real folder while its sibling stays
+hidden; and `/proc/net/dev` holds only `lo` when the network is denied and
+exactly the host's interfaces when it is granted — the kernel asked, not a
+string matched. One argv-level whitelist stays, so a bind added later has
+to be argued for in the test: every destination is a read-only system
+path, `/jarvis/*`, or under the private home.
+
+Not added, on purpose, and it is the interesting restraint: `--new-session`
+(bubblewrap's own answer to TIOCSTI injection), `--unshare-ipc` and
+`--unshare-uts` all belong in that argv. None can be OBSERVED from inside
+by this suite — the first needs a pty, the second is only evidence on a
+host that happens to own a SysV segment, the third changes nothing
+readable. This file has just finished paying for a confinement whose
+claims nobody ran; adding three more would be repeating the mistake in the
+same commit. Raised as **B64**, with the pty fixture named as the one worth
+building — and it matters more than it looks, because `jv-compat install`
+is a CLI a human runs FROM a terminal, not only a systemd unit.
+
+- tests: `bash ops/ralph/runtests.sh jv-compat` **27 (was 10)**, all green.
+- graded with **10 mutations, 10 caught**, in two rounds: both original
+  bugs re-introduced (the prefix back at its host path; `/bin` out of the
+  read-only set), the network grant made unconditional, the installer bound
+  writable, the installer not bound, the installer bound at the host's own
+  path, `/home` added to the read-only set, the private home not mounted,
+  and the grant check weakened two different ways. Before the tests, the
+  two real bugs were caught by nothing: the suite was green with a sandbox
+  that could not execvp.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. jv-compat is not jv-act: it proposes an
+  argv, and the only thing it mutates is its own prefix dir.
+- files: services/jv-compat/jv_compat/prefix.py, install.py,
+  services/jv-compat/tests/test_sandbox.py (new), test_compat.py,
+  recipes/README.md
+- commits: 4a9e2f2
+- next: **B65** is the cheapest and it is free TODAY: a grant naming a
+  folder the user does not have yet aborts the install with a raw bwrap
+  error, and the obvious fix — create it — is forbidden, because only
+  jv-act writes outside a service's own state dir. Three options, no
+  recipes committed yet, so deciding it costs nothing and deciding it late
+  costs a recipe. **B64** is the pty fixture. Otherwise unchanged: **Track
+  A is one human look at `docs/hud/` away from unblocking** A47, A55, A62,
+  A63's picture half, A70 and the A21/A22/A25 cluster; **A56** asks whether
+  the shot suites belong in the build gate; **B27** needs one decision
+  between three named options; **B43/B47/B54** are one question asked three
+  times; **B62** is B61's two decisions; and **B10/A28** — one live
+  recording of one spoken turn on ares — remains the biggest thing a human
+  can hand this loop.
+
+## 2026-09-25 — iteration 86 — B64: three flags, and the instruments that watch them
+
+B63 ended with a restraint rather than a flourish: `--new-session`,
+`--unshare-ipc` and `--unshare-uts` all belong in the bubblewrap argv and
+none of them went in, because none could be OBSERVED by a suite that runs
+`/bin/sh` with pipes on both ends — and that file had just finished paying
+for a confinement whose claims nobody had ever run. Adding three more
+unwatched flags in the same commit would have been the same mistake with
+better vocabulary. This iteration builds the three instruments and then
+adds the flags.
+
+Every claim below is paired with a **control**: the same probe, the same
+argv, that ONE flag removed by `without()`. This is the part that matters.
+A pty fixture that never really owned a terminal would report "the sandbox
+cannot reach it" no matter what the code did, and a machine with no SysV
+segment would report an empty IPC table for free. `without()` also asserts
+the flag was in the argv to begin with, so it fails loudly the day one is
+deleted.
+
+**`--new-session`.** `sh_on_a_tty` opens a pty and the child calls
+`setsid()` then `TIOCSCTTY` before bwrap starts, so the terminal is
+genuinely the confined process's controlling one — inheriting pytest's
+(which in a headless run is none) is exactly how this test would have
+become a tautology. The control is loud: with the flag removed the
+sandboxed shell runs `echo INJECTED-FROM-THE-SANDBOX > /dev/tty` and the
+bytes arrive at the master. With it, `/dev/tty` is "No such device or
+address". Why this one is not plumbing: `jv-compat install` is a CLI a
+human types into a shell (`main.py`), and the controlling terminal is the
+capability TIOCSTI needs to push a COMMAND into that shell's input, which
+runs after wine exits. `legacy_tiocsti` is 0 on this kernel and is a host
+sysctl this repo does not own, so what gets measured is the door, not that
+one burglar — stated in the test rather than left for a reader to wonder
+about. The flag costs nothing here: `RealRunner` pipes stdout and stderr
+and the install is silent, so nothing inside ever wanted a tty.
+
+**`--unshare-ipc`.** The suite MAKES the thing it looks for — a SysV shared
+memory segment via ctypes `shmget`, removed in the fixture's teardown —
+rather than hoping this host has one. That was the whole reason B63 called
+this flag host-dependent, and creating the evidence dissolves it. The
+segment's id is absent from `/proc/sysvipc/shm` inside the sandbox and
+present with the flag removed.
+
+**`--unshare-uts`**, which on its own changes nothing a shell can read. It
+earns its place by carrying `--hostname`: every prefix is told this
+computer is called `jarvis-sandbox`, not `ares`. That is a real privacy
+gain under invariant 7 — writing down the host is among the first things a
+Windows installer does — and it fits §08's cattle-not-pets: every prefix
+sees the same machine. The test states the premise the claim rests on (the
+constant is not this machine's real name) instead of assuming it, and that
+is precisely what catches the sneaky mutation: a constant quietly computed
+from `os.uname().nodename` reads like hardening and is the leak.
+
+- tests: `bash ops/ralph/runtests.sh jv-compat` **33 (was 27)**, all green.
+- graded with **8 mutations, 8 caught**: each of the three flags deleted;
+  each swapped for a plausible real neighbour (`--as-pid-1`,
+  `--unshare-cgroup`); the constant set to `ares`; the constant computed
+  from the host; and `--hostname` without the namespace that permits it,
+  which bwrap refuses outright and turns 13 tests red.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/jv-compat/jv_compat/prefix.py,
+  services/jv-compat/tests/test_sandbox.py, recipes/README.md
+- commits: 8b5efc9
+- next: **B65** is now the only cheap thing left in jv-compat and it is
+  still free TODAY: a grant naming a folder the user does not have yet
+  aborts the install with a raw bwrap error, the obvious fix (create it) is
+  forbidden by invariant 3, and the three ways out are not equal. No
+  recipes with grants are committed yet, so the decision costs nothing now
+  and costs a recipe later. Otherwise unchanged: **Track A is one human
+  look at `docs/hud/` away from unblocking** A47, A55, A62, A63's picture
+  half, A70 and the A21/A22/A25 cluster; **A56** asks whether the shot
+  suites belong in the build gate; **B27** needs one decision between three
+  named options; **B43/B47/B54** are one question asked three times;
+  **B62** is B61's two decisions; and **B10/A28** — one live recording of
+  one spoken turn on ares — remains the biggest thing a human can hand
+  this loop.
+
+## 2026-09-25 — iteration 87 — B65: the folder the user does not have yet
+
+B65 was the last cheap thing left in jv-compat and it was cheap for one
+reason: no recipe with a grant is committed, so the decision costs nothing
+today and costs a recipe the day one is. A `home_paths` grant is a fact
+about two things — a recipe, reviewed in this repo, and the user's home,
+which is not this repo's business — and bwrap resolves a bind's SOURCE on
+the host. So a grant naming `Documents/MyAppSaves` on a machine that does
+not have it aborts the sandbox: not a degraded install, a dead one, after
+the screening and after the prefix was built, reported through `failed`
+with bwrap's own sentence about a path the user never typed.
+
+**The decision is to refuse, loudly, before doing anything**, and the two
+rejected options are recorded next to the code that took the third:
+
+- `--bind-try` is the quiet one and it is worse. The app finds an empty
+  folder, which is indistinguishable from "no saves yet", writes into its
+  private home instead, and the user's real folder stays empty. That
+  failure surfaces days later as missing work, which is the worst place
+  for it. The whole cost of the loud option is a sentence the user reads
+  before anything happens.
+- Creating it is forbidden. Only `jv-act` writes outside a service's own
+  state dir (invariant 3) and `~/Documents/MyAppSaves` is the user's, so
+  jv-compat cannot; routing it through jv-act would put a second
+  confirmation into an install that already has one, for something one
+  `mkdir` fixes.
+- And NOT at recipe-DB load, which is where B65 guessed this belonged: a
+  recipe for an app nobody is installing must not stop `find_recipe`
+  answering about the one that is. Whether a grant is there is a fact
+  about this machine, checked where the recipe meets it.
+
+`grant_problems(recipe)` answers "can THIS machine honour this recipe" and
+names EVERY bad grant, so a recipe with three does not cost three installs
+to fix. The malformed-shape refusal joins it and that closed a second hole
+nobody had filed: `grant_dest` raises, the raise was happening inside
+`bwrap_args` with nothing catching it, so a recipe reading
+`home_paths = ["."]` left `jv-compat install` with a ValueError traceback
+and published no terminal frame at all. Both are now `blocked` — already
+the word for "jv-compat refuses", which fail-closed uses for its own
+reason and not the guard's, where `failed` would claim an installer ran.
+
+Two deliberate NON-refusals, each with a test, because both look like
+oversights and are not. The predicate FOLLOWS symlinks (`exists()`, not
+`lexists`) because `--bind` does: a grant pointing at a broken link is
+absent to bwrap and has to be absent here, or the gate disagrees with the
+thing it stands in front of. And nothing is said about what KIND of thing
+a grant names — one file is a NARROWER grant than the folder around it and
+bwrap binds either, so demanding a directory would refuse the more
+conservative of two recipes. One thing is left as a sentence rather than
+machinery: the window between the pre-flight and the exec, where a folder
+deleted in between is a raw bwrap error again.
+
+The premise is EXECUTED rather than argued, which is the habit B63 and B64
+left behind. `test_sandbox.py` builds the argv for a grant that exists,
+removes the folder, and watches bwrap refuse to exec anything — the inner
+command prints `RAN-ANYWAY` and never gets the chance — and asserts bwrap
+names the path. `bwrap_args` stays willing to build that argv on purpose
+(whether this machine can honour a recipe is the pipeline's question, not
+the argv's), which is the only reason the premise can be run at all. The
+file grant is executed the same way: a shell inside the confinement reads
+the one granted `.ini` and cannot see its sibling.
+
+- tests: `bash ops/ralph/runtests.sh jv-compat` **42 (was 33)**, all green.
+- graded with **9 mutations, 9 caught** — and the first pass had a real
+  survivor worth recording: swapping the predicate for `dest.is_dir()`
+  changed nothing any test could see, because the file-grant claim was
+  held only on the bwrap side, where the pre-flight is not involved. The
+  missing line was one assertion on `grant_problems` itself. Also caught:
+  the gate disabled outright, the existence check deleted (the `--bind-try`
+  option smuggled in), the predicate stopping at `lexists`, only the first
+  problem reported, a malformed grant swallowed, the message naming the
+  recipe's words instead of the path on this machine, the refusal calling
+  itself `failed`, and the gate moved behind the prefix it exists to
+  prevent.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/jv-compat/jv_compat/prefix.py,
+  services/jv-compat/jv_compat/install.py,
+  services/jv-compat/tests/test_compat.py,
+  services/jv-compat/tests/test_sandbox.py, recipes/README.md
+- commits: e36eee5
+- next: **B66**, raised by doing this one and free for the same reason B65
+  was free: `grant_dest` promises a grant "stays under the private home"
+  and checks the STRING, while bwrap resolves the path — so a grant of
+  `Documents` binds whatever `~/Documents` is a symlink to. B65 made that
+  gap explicit by deliberately following links, and the obvious fix is
+  wrong (a home folder that genuinely lives on another disk is an ordinary
+  setup), so it is a decision between three properties and not a patch.
+  Otherwise unchanged: **Track A is one human look at `docs/hud/` away
+  from unblocking** A47, A55, A62, A63's picture half, A70 and the
+  A21/A22/A25 cluster; **A56** asks whether the shot suites belong in the
+  build gate; **B27/B28** are one decision about whether jv-ears gets a
+  state topic for the no-wake window; **B43/B47/B54** are one question
+  asked three times; **B62** is B61's two decisions; and **B10/A28** — one
+  live recording of one spoken turn on ares — remains the biggest thing a
+  human can hand this loop.
+
+## 2026-09-25 — iteration 88 — B66: the grant whose symlink hands back the home
+
+Track A is still one human look at `docs/hud/` away from unblocking, so this
+is the B track again, and it is the item iteration 87 raised while doing B65.
+
+`grant_dest` reads the recipe's WORDS: it refuses `.`, `..`, the empty grant
+and an absolute path, which reads like a promise that a grant stays inside the
+app's private home. It is not one. `--bind` resolves its source for real, so
+on a home where `~/Documents` is a symlink, `home_paths = ["Documents"]` IS
+`home_paths = ["."]` — the user's entire home, read-write, mounted back over
+the private one the confinement had just put there — and every word of the
+recipe is legal. B65 did not create this; it made it visible, by deliberately
+following links so the existence check agrees with bwrap.
+
+**The reason this shipped as a patch and not as a proposal** is that B66's own
+three options were not equally undecidable, and splitting them is the whole
+work. "Refuse everything that resolves outside the home" refuses a user whose
+`~/Documents` genuinely lives on another disk, which is an ordinary setup. But
+a grant resolving to the real home ITSELF, or to an ancestor of it, is the
+`["."]` / `["../.."]` bug arriving through the user's filesystem instead of
+through the TOML — it needs no judgement and nothing legitimate wants it. That
+line is now refused in `grant_problems` (where a recipe meets a machine, not in
+the pure `grant_dest`, which stays willing — B65's rule). Everything else is
+honoured AND pinned by a test, so the strong reading cannot arrive by accident,
+and it is raised as B67 with the candidate properties and what each refuses.
+
+The premise is EXECUTED before the refusal is asserted, which is the habit B63
+left behind and the only way a guard proves it stands in front of something:
+`test_sandbox.py` enters the sandbox and reads `tax-return.pdf` through a
+`Documents -> $HOME` link, and lists the whole machine through a `Root -> /`,
+and only then asks `grant_problems` to refuse both. Delete the check and the
+leak is what the suite reports.
+
+- tests: `bash ops/ralph/runtests.sh jv-compat` **49 (was 42)**, all green.
+- graded with **8 mutations, 7 caught** — and the first pass had a real
+  survivor that changed the code: resolving only the GRANT and comparing it
+  against an unresolved `$HOME` passed everything, because my test for it used
+  a linked `$HOME` with an ordinary grant, where the two readings agree. A
+  machine whose `$HOME` is a link has two names for one home, and the escape
+  is a grant landing on the OTHER name; that is the test now. Also caught: the
+  check deleted, the ancestor half dropped, the comparison reversed (refusing
+  every grant under the home), the grant compared unresolved, the message
+  naming the recipe's words instead of where they land, and the strong reading
+  smuggled in. The eighth — hoisting the gate past the `continue` that skips an
+  absent grant — is provably EQUIVALENT, not a gap: `exists()` follows links,
+  so anything resolving to the home or an ancestor resolves to something that
+  exists and can never be absent.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/jv-compat/jv_compat/prefix.py,
+  services/jv-compat/tests/test_compat.py,
+  services/jv-compat/tests/test_sandbox.py, recipes/README.md
+- commits: a0d02ef
+- next: **B67**, the sibling-of-the-home half of this one, and it is genuinely
+  a human's: `-> /mnt/games/Documents` and `-> /etc` (already ro-bound, so the
+  grant turns it read-write) and `-> ~/.local/share/jarvis/prefixes` (every
+  other app's prefix) are the same shape, and every property that separates
+  them refuses some real setup — a uid check fails an ntfs mount with `uid=0`,
+  which on a dual-boot machine is exactly where a Wine app's saves live. Free
+  until the first recipe with a grant is committed. Otherwise unchanged:
+  **Track A is one human look at `docs/hud/` away from unblocking** A47, A55,
+  A62, A63's picture half, A70 and the A21/A22/A25 cluster; **A56** asks
+  whether the shot suites belong in the build gate; **B27/B28** are one
+  decision about whether jv-ears gets a state topic for the no-wake window;
+  **B43/B47/B54** are one question asked three times; **B62** is B61's two
+  decisions; and **B10/A28** — one live recording of one spoken turn on ares —
+  remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 90 — B68: the suites you did not think to run
+
+This iteration inherited a working tree, which has never happened before and
+is the whole reason it did what it did. A71 (d049a9c) committed 31 files and
+left four behind: two documentation lines, a leftover MUTATION of
+`ReplyState.qml` (`root.noteAsked();` blanked to `;`), and the one-line fix
+that made `runtests.sh tools` green — so `tools` was red at HEAD, and the
+journal entry that would have said an iteration ended mid-STEP-4 was never
+written either. Confirmed before touching anything: 269 passed, 1 failed at
+d049a9c; 270 passed with the inherited line. The mutation is reverted, the two
+fixes are committed as 5a3f1e9 with iteration 89's own PLAN bookkeeping, and
+that is the third time in three iterations this exact thing has happened.
+
+So the task is B68, which A71 raised about itself. B65 changed
+`jv_compat/prefix.py` and ran `runtests.sh jv-compat`: green, `tools` red. B66,
+the same. A71 found it and then did it again in a different way. Every author
+was right that they had run the relevant suite for the directory they were in,
+and every author was wrong — because **invariant 1 forbids one service
+importing another, so every claim this repo makes about a RELATION between two
+of its parts is made by a THIRD suite that reads them both as source text.**
+`tools` alone reads jv-compat's installer, jv-guard's heuristics, jv-brain's
+prompts, jv-act's tool table, the frozen schemas, `personality/theme.toml` and
+every QML file in the HUD. Nothing said so, and PLAN's option (c) — write the
+rule down in PROMPT.md — is precisely what had just failed twice.
+
+`tools/dependents.py` derives it instead, every run, so it cannot go stale.
+The rule, whole: **a suite reads what it names, if what it names exists.**
+Names are lifted from the syntax tree — `ROOT / "services" / "jv-compat"`, a
+path-shaped string literal, an import — and a changed path is read by a suite
+that names it or any directory above it. `runtests.sh` ends by printing the
+answer with the exact commands, excluding the suite it just ran.
+
+Two things it found, both about the repo rather than about itself, and both
+changed the design:
+
+  **jv-ears' suite names `jarvis_bus` nowhere** — not a path, not an import —
+  and a change to the bus codec runs inside it anyway, because the suite
+  imports `jv_ears` and `jv_ears/main.py` imports the client. The first draft
+  stopped at the first edge and called that suite safe. Imports are now
+  followed transitively (in-repo only, cycle-guarded); paths are NOT, because
+  a suite reading another service's source as TEXT depends on the characters
+  in the file, not on what that file imports.
+
+  **jv-brain's suite has `assert ("tools" in warm)`** — a key in a warm-up
+  set, and a word that happens to be a directory in this repo. Reading it as a
+  path made every edit under `tools/` name jv-brain's suite, which reads
+  nothing of the kind. A plain string now has to carry a slash to be a path;
+  an expression built with `/` is a path by construction and needs none.
+
+Generous where it cannot know better and says so: `(ROOT / "services").
+iterdir()` claims every service, because that test really does depend on what
+is in there. One suite too many costs five seconds; one missed costs a red
+commit that stands for two days. Narrow where a reading would swallow the
+repo: comments are not in the tree, so the paragraph of prose above a test
+names nothing, and `Path(".")`, `".."` and `/etc` are refused — a candidate
+resolving to the root or outside it answers "run every suite", which is the
+same as saying nothing. Only the longest `/` chain counts, so
+`ROOT / "services" / "jv-compat"` claims one service and not the sub-expression
+`ROOT / "services"`.
+
+It is advice, not a verdict — pytest's exit status is still the script's, and a
+clean tree prints nothing — and that is deliberate, not laziness: a change to
+`jarvis_bus` honestly names all ten suites and one of them spawns the real
+broker, so binding it is minutes per iteration against a mistake that has
+happened three times in ninety. The three shapes are B70. What it CANNOT see
+is QML, which is where the HUD's strongest gates live: a QML test names its
+subject by TYPE (`ReplyState {}`), so `qmltest.sh` and `hudshots.sh` are
+invisible to it and are printed as a standing caveat instead of being left out
+silently. Mapping type -> file is mechanical in this repo and is B69.
+
+The gate's own tail is tested by EXECUTING it, not by reading it: the lines
+from `rc=0` to `exit $rc` are lifted out of `runtests.sh` and run with a stub
+interpreter, once with a failing suite and once with a passing one. Under
+`set -e` a plain `rc=$?` after a red pytest never runs at all — the script is
+already gone — and the notice would have been missing from exactly the run
+that needed it most.
+
+- tests: `bash ops/ralph/runtests.sh tools` **302 (was 270)**, all green. The
+  five paths this iteration changed name no other Python suite, and the tool
+  said so itself.
+- graded with **12 mutations, 12 caught** — and the first pass had a survivor
+  that changed the test rather than the code: `/run/jarvis/bus.sock` resolves
+  to nothing under a repo whether or not the leading slash is honoured, so the
+  absolute-path rule was being "proved" by a premise that never reached it.
+  The test now names an absolute path that WOULD resolve if the slash were
+  ignored. Also caught: the bare-word rule reverted, the `..` refusal dropped,
+  the existence check dropped, the ancestor half of the match dropped, the
+  containment reversed, chain prefixes re-claimed, the import closure cut, the
+  Rust `tests/` directories admitted as Python suites, a changed directory not
+  expanded, the caller's own suite named back to it, and the clean-tree silence
+  removed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py (new), tools/tests/test_dependents.py (new),
+  ops/ralph/runtests.sh, ops/ralph/PROMPT.md, ops/ralph/README.md;
+  repair: shell/jv-hud/README.md, tools/tests/test_hudsheet.py
+- commits: 5a3f1e9 (the repair), 60ea576 (B68)
+- next: **B69** — teach the map QML types, which is the half of this that the
+  HUD track actually needs, since every Track A iteration changes `shell/
+  jv-hud` and the two gates over it are the two this cannot name. Then
+  **A73**, which is the same disease in documentation: `docs/hud/screens/`
+  says `300x560` while the surface has gone 688 -> 745 -> 807 and nothing
+  compares the number to `sheet.py`. Otherwise unchanged: **Track A is one
+  human look at `docs/hud/` away from unblocking** A47, A55, A62, A63's
+  picture half, A70/A72 (the corner is now 807 px tall and has grown twice
+  without a human seeing either measurement) and the A21/A22/A25 cluster;
+  **A56** asks whether the shot suites belong in the build gate; **B27/B28**
+  are one decision about a jv-ears state topic; **B43/B47/B54** are one
+  question asked three times; **B62** is B61's two decisions; **B67** is
+  B66's sibling-of-the-home half; and **B10/A28** — one live recording of one
+  spoken turn on ares — remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 91 — B69: the two gates a string could not find
+
+B68 gave the verify gate a derived answer to "which suites read what you
+changed", and ended it with an apology: `ops/ralph/qmltest.sh` and
+`ops/ralph/hudshots.sh` were printed as a standing caveat on every run,
+because a QML file names its subject by TYPE (`ReplyState {}`) and never by
+path. Those two are the strongest assertions this repo makes about
+`shell/jv-hud`, and every Track A iteration changes a file one of them opens.
+
+A type is a file, though, and the engine finds it the same two ways every
+time: the directories `import "..."` puts on the path, and the `qmldir` that
+directory ships. So the gates are now walked the way the engine walks them —
+from the files the runner is handed, outward through the types they name, one
+hop per import. `shell/jv-hud/core/ReplyState.qml` names **both**:
+`tst_replystate.qml` says `ReplyState {}` under `import "../core"`, and the
+sheet reaches it four files down (`tst_shots.qml` -> `Corner` -> `ReplyPlate`
+-> `ReplyState`). A plate names the sheet ALONE, because nothing under
+`shell/jv-hud/tests` imports `".."` — the headless tests have never drawn a
+plate. And `tools/hudshots/stub/Bus.qml`, which no Python suite and no other
+script in the repo opens, names the sheet too.
+
+Two narrow rules decide whether this is trustworthy rather than merely
+generous. Comments and string literals are blanked before the scan:
+`Sessions.qml` carries whole recorded bus frames as string literals and every
+driver opens with a paragraph naming the plates it draws, so a raw scan would
+report a gate that a SENTENCE about it had named. And a type is looked for
+only on the file's own import path, because that is the only place the engine
+would have found it — a driver that says `Plate` without importing the
+directory it lives in did not load it either.
+
+A directory that ships a `qmldir` is read through it and not through a file
+scan, which is what makes the sheet's shadowing honest: the generated
+`shell/jv-hud/qmldir` still says `singleton Bus 1.0 Bus.qml` while the stage
+has written `tools/hudshots/stub/Bus.qml` over that file, so the type resolves
+to the stub and the real `Bus.qml` — which imports Quickshell and cannot load
+in any other engine — is correctly NOT a thing the sheet reads.
+
+WHERE the QML is assembled is the one thing written down rather than derived,
+and it had to be: `hudshots.sh` copies the shell into a temp directory, drops
+`shell.qml`, writes two stubs over it and puts the drivers in a subdirectory,
+so a driver's `import ".."` means something no reader of the QML could work
+out. That staging is four lines of `QML_GATES` — and
+`test_each_gate_stages_exactly_what_it_says_it_stages` checks every directory
+of it against the script that does the staging, which is the only way this map
+can lie and the way that would show up nowhere else. A whole-HUD sweep holds
+the other end: every `.qml` under `shell/jv-hud` and `tools/hudshots` is read
+by at least one gate except the three the repo deliberately keeps out —
+`shell.qml` (Quickshell, gated by `nix build .#jv-hud`) and the two singletons
+the sheet replaces.
+
+The caveat did not go away, it got honest: it is about Rust now. `jarvisd` and
+`jv-act` keep their tests inside the source they test, so there is no third
+file to derive a relation from and nothing here will ever name
+`cargotest.sh`.
+
+- tests: `bash ops/ralph/runtests.sh tools` **321 (was 302)**, all green. The
+  four paths this iteration changed name no other suite and no QML gate, and
+  the tool said so itself. No `.qml` changed, so neither QML gate was in
+  scope — which is the first iteration where that sentence is a derived fact
+  rather than a guess.
+- graded with **17 mutations, 17 caught** — 16 on the first pass, and the
+  survivor was a test that proved nothing: "a gate whose script this repo
+  does not have is not offered" was asserted against a synthetic repo with no
+  `shell/jv-hud` either, so the answer was empty for the wrong reason. It now
+  builds the tree WITHOUT the script and checks the silence is the script's.
+  Also caught: the qmldir ignored, lowercase files admitted as types, the
+  stage's shadowing reversed, types looked for off the import path, the walk
+  stopped at the driver, strings scanned, comments scanned, an unstaged import
+  silently skipped, the non-QML reads dropped, `tst_*.qml` treated as drivers
+  of the sheet, `..` flattened at the entry, the resolving qmldir left unread,
+  the stubs dropped from the stage, the gates computed and then left out of
+  the notice, and the Rust caveat removed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py, tools/tests/test_dependents.py,
+  ops/ralph/README.md, ops/ralph/PROMPT.md
+- commit: af794cc
+- note for whoever runs `mutate.sh`: do NOT interrupt it. A SIGTERM mid-run
+  leaves the mutation applied in the worktree, and the next run reports the
+  baseline red for a reason that is not in the tree you think you are reading.
+  That cost fifteen minutes here.
+- next: **A73's second half** — pin `docs/hud/screens/README.md`'s box to
+  `tools/hudscreens/sheet.py` the way `test_hudscreens.py` already pins
+  `sheet.py` to `shell.qml`. The prose has said `300x560` since A30 while the
+  surface went 688 -> 745 -> 807, and a stale number nobody checks is how the
+  first one survived three growths. Then **B70**, which is now a smaller
+  question than B68 left it: the named set for a HUD change is two gates and
+  `tools`, and `hudshots.sh` is ~53 s — (b), "bind it when the set is small",
+  has a concrete cost to quote at last. Otherwise unchanged: **Track A is one
+  human look at `docs/hud/` away from unblocking** A47, A55, A62, A63's
+  picture half, A70/A72 and the A21/A22/A25 cluster; **A56** asks whether the
+  shot suites belong in the build gate; **B27/B28** are one decision about a
+  jv-ears state topic; **B43/B47/B54** are one question asked three times;
+  **B62** is B61's two decisions; **B67** is B66's sibling-of-the-home half;
+  and **B10/A28** — one live recording of one spoken turn on ares — remains
+  the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 92 — A73 (the loop's half): the box in the prose
+
+`docs/hud/screens/README.md` said `300x560` three times. It was right when
+A30 wrote it and wrong four growths later — 560 -> 624 -> 688 -> 745 -> 807
+— and the reason it survived all four is the reason worth writing down:
+every measurement in that document is derived (shoot.py checks the corner
+against `sheet.SURFACE_*`, and `test_the_surface_box_is_the_one_shell_qml_
+declares` checks THAT against `shell.qml`), and the sentence a reader
+actually reads was the one number nothing held.
+
+It is held now, and by the same rule as everywhere else here: a WxH in that
+README must be a box the harness declares — the surface, one of ares'
+monitors, the whole desk, or the older surface the committed pictures were
+photographed against. The scanner is `sheet.boxes_in_prose`, in `sheet.py`
+beside the frame counter and the sway config, because a regex nothing can
+run is a gate that grades itself; one that quietly stopped matching would
+report a clean document forever, which is precisely the silence the 560
+lived in.
+
+The part worth reading twice: pinning prose to `sheet.py` makes the sheet
+MORE wrong on its own. The box in the text becomes today's and the pictures
+stay yesterday's, so a reader measures an old HUD against a current
+sentence and catches the document lying. So the difference is stated — and
+both numbers are derived. `shot_surface_box` asks git which commit last
+WROTE a PNG in that directory and what `sheet.py` declared AT that commit.
+No literal anywhere, because a literal is a fifth number to remember on a
+day nobody is thinking about it: **PLAN A73 says the pictures were taken at
+745, and git says 688.** That item was written last night, by this loop,
+about a number it could have looked up. The notice cannot go stale, and the
+half of A73 that needs a compositor — re-shooting on ares — deletes it
+rather than editing it.
+
+- tests: `bash ops/ralph/runtests.sh tools` **330 (was 321)**, all green.
+  The dependents notice named one more gate for the README — `bash
+  ops/ralph/hudshots.sh` — and it was run: 23 passed, 14 shots match
+  HEAD:docs/hud, tree clean afterwards.
+- graded with **10 mutations, 10 caught**: the prose back to 560; the
+  pictures' box set to the number PLAN A73 had; the notice stripped of that
+  number; the notice stripped of its claim; `shot_surface_box` reading the
+  WORKING COPY instead of git (which makes then == now, so the gate then
+  demands the notice be deleted — that is the one that matters); the
+  pathspec widened from `*.png` to the whole directory; `SELF_REL` losing
+  its top directory; the parser accepting half a box; the scanner blinded
+  to three-digit widths; the scanner reading a comma as a separator.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: docs/hud/screens/README.md, tools/hudscreens/sheet.py,
+  tools/tests/test_hudscreens.py
+- commit: c8099c2
+- two notes on the harness, both cheap and both cost time here. `mutate.sh`
+  matches the spec's `-` line against the file BYTE for byte, so a source
+  line written `[x×]` cannot be mutated by a spec written `[x×]`; the
+  literal is in the source now and it reads better anyway. And an abort on
+  a bad spec happens AFTER the runs before it, so the first nine gradings
+  were thrown away — worth writing the spec against `grep`'d lines.
+- next: **A74**, raised here: `docs/hud/README.md` opens with "300 × 807
+  px, the box" — the same unpinned sentence one directory up, correct today
+  only because A71 happened to update it, and now five lines from being
+  gated since `boxes_in_prose` exists. Then **B70**, unchanged and now
+  fully priced by B68/B69: a HUD change names `tools` (5 s), `qmltest.sh`
+  (~14 s) and `hudshots.sh` (~53 s), which is the shape (b) was invented
+  for. Also unchanged: **B71** (`mutate.sh` leaves the mutation applied
+  when it is killed — bitten twice now); **Track A is one human look at
+  `docs/hud/` away from unblocking** A47, A55, A62, A70/A72 and the
+  A21/A22/A25 cluster; **A56** asks whether the shot suites belong in the
+  build gate; **B27/B28** are one decision about a jv-ears state topic;
+  **B43/B47/B54** are one question asked three times; **B62** is B61's two
+  decisions; **B67** is B66's sibling-of-the-home half; and **B10/A28** —
+  one live recording of one spoken turn on ares — remains the biggest thing
+  a human can hand this loop.
+
+## 2026-09-25 — iteration 93 — A74: the sibling sheet's box, held by the instrument built for its twin
+
+A73 pinned every box `docs/hud/screens/README.md` quotes to a box the harness
+declares. The sentence it fixed has a twin one directory up: `docs/hud/README.md`
+opens with "300 × 807 px, the box `shell.qml` asks the compositor for", and it
+was right today only because A71 happened to update it by hand. The twin that
+nobody updated said `300x560` through four growths of the surface. Fixing one
+document and leaving the identical sentence in the other loose is the shape of
+bug this loop keeps finding in its own work, so A74 was raised last night and
+taken this morning.
+
+The gate is `sheet.boxes_in_prose` — A73's scanner, unchanged, now reading a
+second document. Two regexes looking for the same mistake in two READMEs would
+mean one of them going quietly out of date while the other keeps passing. The
+box it is held against is read off `tools/hudshots/scene/tst_shots.qml`, which
+`test_hudshots.py` already pins to `shell.qml` (A63), so the derivation runs
+prose -> scene -> shell and holds no literal anybody has to remember. The scene
+box was already extracted inline by the test above; it is a `scene_box()` helper
+now, used by both.
+
+Two things that make this gate different from A73's, both decided in the PLAN
+item and both kept:
+
+- It is **stricter**. The screens sheet quotes monitors and the whole desk
+  legitimately, because it photographs a real compositor on ares' three screens.
+  The contact sheet disclaims everything a compositor owns — layer-shell, the
+  input mask, the exclusive zone, the monitors — so the only box it can honestly
+  describe is the one the scene renders, and a monitor size appearing in its
+  prose is prose that has wandered into the other sheet's subject. The allowed
+  set is one box, not five.
+- It needs **no staleness notice**. A73 had to add one, because pinning the
+  prose to today's box left the pictures at yesterday's. Here `hudshots.sh`
+  re-renders all fourteen PNGs on every HUD iteration and the test above this
+  one measures each against this same box, so a picture cannot be older than
+  the sentence.
+
+The README also now says the number is held, in a paragraph that quotes no box
+of its own (so it cannot itself go stale, and the gate has nothing extra to
+allow). That line is for the reader the 560 fooled: a document that leaves you
+guessing which of two sizes is the HUD is worse than one that tells you which
+direction the drift gets fixed from.
+
+- tests: `bash ops/ralph/runtests.sh tools` **331 (was 330)**, all green. The
+  dependents notice named one gate for the README change — `bash
+  ops/ralph/hudshots.sh` — and it was run: 23 passed, 14 shots match
+  HEAD:docs/hud, tree clean afterwards.
+- graded with **6 mutations, 6 caught**: the prose back to the `300x560` its
+  twin went stale at; the prose quoting a monitor (`2560 × 1440`); the box
+  removed from the sentence entirely, which the empty-quote guard catches and
+  not the comparison; the scanner blinded to three-digit widths; the scanner no
+  longer reading the `×` this prose is actually written with; and the scene
+  rendering a box the sheet no longer describes.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: docs/hud/README.md, tools/tests/test_hudsheet.py
+- commit: b1ccf6b
+- one harness note, cheaper than A73's: writing the mutation spec into a file
+  and passing it as an argument (`mutate.sh tools /tmp/a74.spec`) avoids the
+  byte-for-byte heredoc trap iteration 92 hit — the `—` and `×` in that README
+  line survive a file that Python wrote and would not survive being retyped.
+- next: the loop has now spent three iterations on gates over its own documents
+  and harness (B68, B69, A73, A74), which is the right work when nothing else
+  is unblocked but is not the blueprint. **Track A is still one human look at
+  `docs/hud/` away** from A47, A55, A62, A70/A72 and the A21/A22/A25 cluster,
+  and A73's remaining half is the same seat: re-shoot `docs/hud/screens/` on
+  ares. Doable by the loop, in rough order: **B70** (whether the dependents
+  notice should be a verdict rather than advice — now fully priced: a HUD
+  change names `tools` at 5 s, `qmltest.sh` at ~14 s and `hudshots.sh` at
+  ~53 s), **B71** (`mutate.sh` leaves the mutation applied when it is killed —
+  bitten twice), **A56** (whether the shot suites belong in the build gate),
+  **B62** (B61's two decisions), **B67** (B66's sibling-of-the-home half).
+  Waiting on one human sentence each: **B27/B28** (a jv-ears state topic),
+  **B43/B47/B54** (the same question asked three times), and **B10/A28** — one
+  live recording of one spoken turn on ares, still the biggest thing a human
+  can hand this loop.
+
+## 2026-09-25 — iteration 94 — B71: the mutation the harness left behind when it was killed
+
+The loop's evidence about its own tests is `ops/ralph/mutate.sh`, and it had a
+failure mode that damages the tree it is supposed to be protecting. The restore
+is a `finally`. A `finally` is code, and SIGTERM's default action is to end the
+process without running any — so a timeout, a Ctrl-C, or a loop that decided a
+53 s suite run was too slow left the worktree holding whichever mutation was in
+flight. The next run then reported "the baseline suite is RED before any
+mutation", which is a true sentence that points at nothing. It cost iteration 91
+fifteen minutes and would have cost far more had that iteration committed
+instead of re-running.
+
+B71 offered two shapes and reserved the choice for a human: (a) a trap, small
+and right for the common case but no help against SIGKILL; (b) refuse to mutate
+in place at all and stage a copy of the worktree per run, proof against every
+signal at the price of a repo copy per mutation. Both are shipped in the sense
+that matters, and the decision turned out not to need making: (a) verbatim, plus
+the guarantee (b) existed to buy, bought for a few hundred bytes instead.
+
+- `restore_on_signal` traps INT/TERM/HUP and raises, so the unwind runs the
+  restore that was already written. It is ONE-SHOT — the first signal disarms
+  the rest — because the second Ctrl-C from an impatient hand would otherwise
+  interrupt the restore the first one asked for.
+- `InFlight.swap_in` writes a note before every mutant write, naming the file,
+  the text that was overwritten, and the sha of what overwrote it. The note
+  lives in this WORKTREE's git directory (`--absolute-git-dir`): not in the
+  tree, where a `git add -A` could commit it and `git status` would call a
+  clean tree dirty; not in /tmp, because it has to be found by a run that
+  happens after a reboot; and per-worktree, because two worktrees grade
+  different trees and a note from one would name a file the other never
+  touched.
+- `recover_inflight` reads it at the very top of `run()`, BEFORE a single
+  original is read. That order is the whole thing: reading originals first
+  would capture a stale mutant as the text to restore TO, which is the one way
+  this harness could have made the damage permanent. It is its own mutation.
+
+Three outcomes and only one of them writes. The file is still exactly the
+mutant the note records, so nobody has been here since and putting the original
+back is provably safe: it is put back, stamped strictly newer than the mutant it
+replaces (the dead run may have stamped that into the future — iteration 70's
+bug wearing a new hat), and the run says RECOVERED and explains what it would
+otherwise have reported. The file is already the original, so only the note
+outlived the restore: sweep it. Anything else — an edit, a different mutation, a
+half-written file — and the harness refuses and says where the original text is
+kept, because overwriting somebody's work with a text from a dead process is
+worse than any red baseline.
+
+Not taken: (b) proper. What a copy-per-run would still buy over the note is one
+`write_text` wide — a kill landing part-way through the mutant write — and that
+case is the third outcome above: reported, not guessed. The docstring says so
+rather than leaving the reader to assume the note covers everything.
+
+- tests: `bash ops/ralph/runtests.sh tools` **347 (was 331)**, all green. The
+  three that carry the claim run a REAL grading in a REAL subprocess, blocked
+  with the mutation on disk, and then kill it: SIGTERM with the trap (the file
+  comes back, the note is gone), the same SIGTERM with the trap removed — the
+  control, and it is B71 verbatim, the mutant still in the worktree — and
+  SIGKILL, whose leftovers are then handed to `run()`, which recovers them. The
+  dependents notice named `bash ops/ralph/runtests.sh pylib`; it was run, 68
+  green.
+- graded with **9 mutations, 8 caught on the first pass**. The survivor is the
+  interesting one: "arm the note AFTER the mutant is written". No test could see
+  it, because once the run is over both orderings leave the same files — and the
+  window it opens is exactly the window the note exists for. The fix was to make
+  the order a thing rather than two statements: `InFlight.swap_in(mutant, write)`
+  arms and then writes, and a test asserts the note is on disk at the moment the
+  write happens, which is the only moment it can be asked. Re-graded 1/1.
+  A second bug the tests found before the grading did: the recovery read the
+  mutant's mtime AFTER `write_text` had already reset it, so the "strictly
+  newer" stamp was computed against the wrong number.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: ops/ralph/mutate.sh, tools/mutate.py, tools/tests/test_mutate.py
+- commit: c007204
+- harness note for the next iteration: grading `tools` is no longer 5 s. The
+  three subprocess tests wait up to 30 s each for a driver that a mutant may
+  stop from ever reaching its mutation, so a mutant that breaks the harness
+  makes its own suite run ~90 s slower. The 9-mutation grading above took about
+  eight minutes wall clock against the ~2.5 the count would have predicted.
+  B70 prices the dependents notice on the assumption `tools` is cheap; that
+  assumption is now worth re-measuring before (b) is chosen.
+- next: Track A is still one human look at `docs/hud/` away from A47, A55, A62,
+  A70/A72 and the A21/A22/A25 cluster, and A73's remaining half is the same
+  seat: re-shoot `docs/hud/screens/` on ares. Doable by the loop: **B70** (now
+  with a corrected price for `tools`, above), **A56** (whether the shot suites
+  belong in the build gate), **B62** (B61's two decisions), **B67** (B66's
+  sibling-of-the-home half). Waiting on one human sentence each: **B27/B28**
+  (a jv-ears state topic), **B43/B47/B54** (the same question asked three
+  times), and **B10/A28** — one live recording of one spoken turn on ares,
+  still the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 95 — B70: the notice stops being advice
+
+Track A is still one human look at `docs/hud/` away from everything it has
+left, so this is the B track, and it is the last of the three items B68 spun
+off. B68 derived which suites read a change; B69 taught the derivation QML;
+both stopped one step short of a verdict. `runtests.sh` PRINTS the readers and
+exits with pytest's status — which is the same shape as the rule it replaced,
+"run the relevant test suite(s)", with better information behind it. That rule
+was wrong three times in ninety iterations.
+
+`ops/ralph/verify.sh` (+ `tools/verify.py`) is the gate now: ask the worktree
+what changed, ask `dependents` who reads it, run all of them, exit non-zero if
+any is red. Nobody picks the suites.
+
+**The measurement the decision was missing.** B70 called this a cost question
+and left it for a human, and the honest way to answer a cost question is to
+measure it. One suite at a time, warm venvs, this machine:
+
+    pylib          1.6 s      jv-guard       3.9 s      jv-voice      23.0 s
+    jv-hud-bridge  1.6 s      jv-context    11.4 s      jv-brain      36.3 s
+    jv-compat      2.7 s      tools         12.2 s      jv-ears      145.8 s
+    harness        3.4 s                               ----------------------
+                                                        all ten      241.7 s
+
+Four minutes, ONCE, for the one change in the repo that names every suite
+(`services/pylib/`, which every service imports), and 60% of it is jv-ears
+alone. Everything else is seconds, or ~80 s for the HUD's three gates. So
+shape (a), bind always — and (b), bind only when the named set is small, was
+rejected on an argument and not on the price: it is not a cheaper (a), it is
+(a) with the `services/pylib/` case cut out, and that case is the only one
+where the author could not possibly have guessed the readers. A cutoff that
+drops coverage exactly where coverage is the point is not a compromise. That
+is why this did not need the human the PLAN reserved for it.
+
+Four decisions, each with a reason rather than a default. Every step runs even
+after one fails — fail-fast on a gate whose whole subject is the OTHER red
+suite hands back the partial picture this replaces, and costs a second full
+run. Output is NOT captured; a 146-second suite behind a pipe cannot be told
+from a hang. The Rust caveat became a step, because "a changed file under a
+directory with a `Cargo.toml` is that crate" is a rule and a rule can be run —
+read off the directory, so a third crate needs no edit here. And an empty plan
+exits **2**: the gate runs BEFORE the commit, so being asked about a clean
+tree means it was asked after, which is 5a3f1e9 exactly — the green iteration
+89 reported was in its working tree while its commit was red. `--since HEAD~1`
+asks the question about what a commit actually took, and the verdict prints the
+paths it covers because nothing here can see the index. This entry's own commit
+was checked that way after the fact, and it is green.
+
+`runtests.sh` keeps its notice to itself under `RALPH_GATE=1` — a ten-step run
+would otherwise urge the reader, once per step, to run the suites the gate is
+in the middle of running. PROMPT.md STEP 3 now names one command instead of a
+rule about obeying a line that was printed.
+
+**The gate found a bug in its first real run, which is the best argument for
+it.** The `RALPH_GATE` it exports reaches the suites it spawns, and B68's own
+test for the notice read it and went red. The test now states which half of
+the pair it is asserting instead of inheriting whatever ran it.
+
+- tests: `bash ops/ralph/verify.sh` green — `runtests.sh tools` **372** (was
+  347). 11 mutations, 10 caught on the first pass. The survivor is worth the
+  line: the test for "a gate that cannot be started" deleted the SCRIPT, and
+  bash starts fine and exits 127, so nothing had ever reached the
+  `except OSError` that stands between "one step could not run" and "no
+  verdict at all". A direct test of that branch, re-graded 1/1.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: ops/ralph/verify.sh (new), tools/verify.py (new),
+  tools/tests/test_verify.py (new), ops/ralph/runtests.sh, ops/ralph/PROMPT.md,
+  ops/ralph/README.md, tools/tests/test_dependents.py
+- commit: 855642a
+- next: **B72** is the honest hole this leaves — `nixtest.sh` and
+  `hudscreens.sh` are gates `verify.sh` cannot plan, and a change to
+  `modules/*.nix` today names only `tools`. Otherwise doable by the loop:
+  **A56** (whether the shot suites belong in the build gate), **B62** (B61's
+  two decisions), **B67** (B66's sibling-of-the-home half). Waiting on one
+  human sentence each: **B27/B28**, **B43/B47/B54**, and **B10/A28** — one
+  live recording of one spoken turn on ares, still the biggest thing a human
+  can hand this loop. Track A needs one look at `docs/hud/` to unblock A47,
+  A55, A62, A70/A72, the A21/A22/A25 cluster and A73's remaining half.
+
+## 2026-09-25 — iteration 96 — B72: the two gates that are a nix evaluation
+
+Track A is still one human look at `docs/hud/` away from nearly everything it
+has left, so this is the B track and it is the hole B70 left behind. `verify.sh`
+plans Python, QML and Rust. `ops/ralph/nixtest.sh` and `ops/ralph/hudscreens.sh`
+are none of those: what they read is a nix EVALUATION — `.#nixosConfigurations.ares`
+and `.#jv-hud` — and a flake attribute names no path that any syntax tree can
+be walked for. So a change to `modules/` or `hosts/ares/` named `tools`, which
+reads those files as TEXT for the fonts check, and never the gate built to
+evaluate them.
+
+Both are declared now, in `DECLARED_GATES`, with the rule the QML staging
+already follows: written once, and checked against the script it describes.
+Each script carries a `# reads:` header about itself and `test_dependents.py`
+holds the two lists equal in both directions, so a subject that moves cannot
+leave the table behind. A gate also reads its own SCRIPT, implicitly — that is
+not in the header, because a header that names itself is stating a rule rather
+than a subject, and this commit is the case in point: it rewrote the header of
+`nixtest.sh`, and without that line nothing in the plan would have run the file
+it had just edited.
+
+`nixtest.sh` becomes an ordinary step. 22 s, and it is the only thing in this
+repo that asserts what a module OPTION does to the unit text ares is handed.
+Deliberately not bound to `services/`: a service's source moves a store path
+inside an ExecStart and nothing that gate asserts, and 22 s on every Python
+edit to learn that is the noise that gets a gate switched off.
+
+**The half B72 got wrong, and it took two runs to find out.** B72 said
+`hudscreens.sh` "cannot run in this sandbox and must not become a step that
+always fails". It runs here fine — twice this iteration, 2m25s each, green,
+seven screens, both into a scratch directory so the tree stayed clean. What
+actually disqualifies it is two things, and the second one is a measurement
+nobody had: its product is pictures a human looks at, and THEY ARE NOT
+REPRODUCIBLE. The two runs differ from each other, and from the sheet
+committed at HEAD, in five of the seven files — `02-heard` on all three
+monitors and `03-confirm` on two. Decoded and counted: 4 pixels of 3 686 400 in
+one, 3 in the other, one channel, by exactly one. Compositor rounding, not
+content. The plain-QML sheet `hudshots.sh` renders is byte-identical run to
+run, which is why that gate can compare itself against HEAD and this one
+cannot. So binding `hudscreens.sh` would dirty the tree the plan was computed
+from, every time, with churn no eye can tell from a real change. It is NAMED
+instead, on every verdict, green or red, ABOVE the verdict rather than under
+it, beside the paths that asked for it — because a list headed "the gates that
+read what you changed" which quietly drops one reads as coverage, and that is
+the exact failure the whole of B68–B70 exists to prevent. `runtests.sh`'s
+notice prints the same block.
+
+That measurement is now B74: nothing checks that `docs/hud/screens/` still
+shows the HUD this repo draws, and unlike the shots it cannot be made to,
+without a tolerant comparator whose threshold is measured rather than guessed.
+B73 is the same self-reading hole in the QML gates, left alone here rather
+than folded into an iteration whose subject was the table.
+
+- tests: `bash ops/ralph/verify.sh` green, and it planned itself correctly —
+  `runtests.sh tools` **385** (was 372) and `nixtest.sh` 7/7, with
+  `hudscreens.sh` named as not-run because this commit edits it. 7 mutations,
+  7 caught on the first pass, including the two that make the REPORTED set and
+  the RUN set disagree (a skipped gate promoted to a command, a bound gate
+  demoted to a note) and the one that matches a declared prefix as a string
+  instead of a path segment. `bash ops/ralph/hudscreens.sh <scratch>` twice:
+  7 screens, every window and probe green — run as the measurement, and not
+  committed, because the only difference is the ±1 noise above.
+  `verify.sh --since HEAD~1` re-asked about the commit: green over the same
+  8 paths.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py, tools/verify.py, tools/tests/test_dependents.py,
+  tools/tests/test_verify.py, ops/ralph/nixtest.sh, ops/ralph/hudscreens.sh,
+  ops/ralph/PROMPT.md, ops/ralph/README.md
+- commit: caffd09
+- next: **B74** is the one this iteration earned and it is worth taking — a
+  tolerant comparator would let `hudscreens.sh` say "the committed sheet is
+  stale" instead of silently overwriting it, and would reopen B72's decision.
+  Also doable by the loop: **B73** (the QML gates reading their own scripts),
+  **A56** (whether the shot suites belong in the build gate), **B62**, **B67**.
+  Waiting on one human sentence each: **B27/B28**, **B43/B47/B54**, and
+  **B10/A28** — one live recording of one spoken turn on ares is still the
+  biggest thing a human can hand this loop. Track A needs one look at
+  `docs/hud/` to unblock A47, A55, A62, A70/A72, the A21/A22/A25 cluster and
+  A73's remaining half.
+
+## 2026-09-25 — iteration 97 — B74: the seven screens, compared instead of overwritten
+
+`ops/ralph/hudshots.sh` has read its own contact sheet back since B52: every
+PNG it renders, against the one committed at HEAD, and a run whose plates drew
+something else ends nonzero naming the pixels. `ops/ralph/hudscreens.sh` — the
+harder sibling, which photographs the REAL `.#jv-hud` through a real
+compositor on ares' three monitors — could only ever WRITE. Nothing in the
+repo had ever asked whether `docs/hud/screens/` still showed the HUD this
+repo draws, and a stale screen is exactly as convincing as a current one.
+
+**The measurement, which is most of the work and refutes half of what raised
+it.** B72 had reported the noise as "3 and 4 pixels of 3.7 M, one channel, by
+one". Four renders this iteration — three back to back, plus the sheet
+committed at HEAD — compared six ways over seven files say something bigger:
+`01-quiet` (draws nothing) and `04-unheard` (two short mono labels) are
+byte-identical in all six comparisons, and `02-heard`/`03-confirm` differ by
+**3 to 111 px**, at most **3 on one channel**, always inside the plate on
+antialiased glyph edges and the plate's own rounded corner. Renders taken back
+to back never exceed 1 per channel; the 2s and 3s are all against HEAD's
+sheet, which was rendered days ago.
+
+So B74's own proposal — "under ~100 pixels by at most 1", with a threshold
+below the smallest real change a plate can make (A34's 4x4 ember square, 16
+px) — is not reachable. The noise is ALREADY past 16 px, so no count can
+discriminate. **Amplitude can**: §06's quietest ink (`text_3`, `teal`,
+`ember`) sits more than a hundred values from the glass it is drawn on, so
+every word, colour and box a plate can change is two orders of magnitude
+above the floor, and antialiasing is one to three. `NOISE_CHANNEL = 3` is the
+bound that grades; `NOISE_PIXELS = 256` is the backstop it needs for the one
+change that is faint AND enormous (a plate opacity of 0.86 -> 0.855 moves
+every pixel of the glass by one). A test holds the first half against
+`personality/theme.toml` itself rather than against a number written down
+twice — raise the floor to where it could swallow a word and it fails there,
+not in a photograph nobody compared.
+
+**What it does with a difference it forgives.** Says so, every time, on a
+GREEN run — a comparison whose tolerance is silent is one nobody can audit —
+and then, ONLY when the run is writing over the committed sheet, puts the
+committed bytes back over the screens that moved by rounding alone. That is
+what makes the run idempotent, and it is deliberately not done for a run
+pointed at a scratch directory: the next person measuring this noise would
+otherwise be measuring the restore. The real run proves it end to end: 5 of 7
+absorbed (worst 111 px, 3 per channel), `git status` on `docs/hud/screens/`
+clean afterwards. A dirty one now means the HUD really did draw something
+else.
+
+The floor is a property of the SHEET, not of the comparator: `EXACT` stays the
+default, `hudshots.sh` passes no tolerance at all, and a test fails if it ever
+starts to — that sheet is byte-reproducible (A45) and has no honest reason to
+move.
+
+**Half of B72's argument is gone and it is written down rather than acted on.**
+`hudscreens.sh` kept out of the verify gate for two reasons: 2m25s and seven
+pictures for a human, and "it rewrites the tree the plan was computed from".
+The second is now only true of a run that DID change the HUD. Reason 1 carries
+the decision on its own today; **B75** asks whether it should, and names the
+option nobody has measured — binding the PROBES (corner, exclusive zone,
+click, idle frames, which are verdicts) without the seven `grim` captures and
+the comparison (which are pictures).
+
+- tests: `bash ops/ralph/verify.sh` green — it planned `runtests.sh tools`
+  **407** (was 385) and `hudshots.sh` 14/14, and named `hudscreens.sh` as
+  not-run beside the four paths that asked for it. Nine mutations, nine
+  caught, but not on the first pass: "the restore runs on every shot, not
+  only the absorbed ones" SURVIVED, because every test that had a real change
+  in it had nothing absorbed, so the restore block never ran. The test it
+  earned is the refresh a real HUD change actually produces — one screen drew
+  something else, the other six jittered — and it is now the strongest thing
+  in the file. `bash ops/ralph/hudscreens.sh` run for real over the committed
+  sheet: 7 screens, every window and probe green, 5 absorbed and restored,
+  tree clean. `verify.sh --since HEAD~1` re-asked about the commit: green over
+  the same 11 paths.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/hudsheet.py, tools/hudscreens/sheet.py, ops/ralph/hudscreens.sh,
+  tools/dependents.py, tools/verify.py, tools/tests/test_hudsheet.py,
+  tools/tests/test_hudscreens.py, tools/tests/test_dependents.py,
+  tools/tests/test_verify.py, docs/hud/screens/README.md
+- commit: e305ac9
+- next: **B75** is the one this iteration earned, and (c) — measuring what the
+  probes cost without the captures — is a loop-sized job. Also doable by the
+  loop: **B73** (the QML gates reading their own scripts), **B62**, **B67**.
+  Track A is still where the value is and still almost entirely waiting on one
+  human look at `docs/hud/`: A47's OCR-or-IPC decision blocks A55 and four
+  growth checks, A13/A27/A38 block the multi-monitor question, and A56 asks
+  whether the sequence suite belongs in the build gate. Waiting on one human
+  sentence each: **B27/B28**, **B43/B47/B54**, and **B10/A28** — one live
+  recording of one spoken turn on ares is still the biggest thing a human can
+  hand this loop.
+
+## 2026-09-25 — iteration 98 — the four gates that could not see a change to themselves (B73)
+
+Track A is still where the value is and still almost entirely waiting on one
+human look: every open A item is a decision (A13/A27/A38, A21/A22/A25, A47
+and the five it blocks, A50/A60/A62/A65/A68/A70/A72) or is deliberately
+deferred until a signal exists (A11 needs frozen-schema fields, A18 waits for
+the topic that would break it, A33/A35/A36 wait for a second moving element).
+So the ladder's step 2, and the item the last iteration named: **B73**.
+
+**One sentence, finished on every path that had it.** B72 wrote it down for
+the declared gates — *the change most likely to break a gate is a change to
+the gate* — and closed it for exactly one table. Three other code paths had
+the same hole and each had a different reason nothing could reach it:
+
+- `qml_reads` walks OUT from the entry directory, following `import` lines
+  and `qmldir` declarations. A bash script that points an engine at that
+  directory is not a type on anybody's import path, so `qmltest.sh` and
+  `hudshots.sh` could not be found from themselves.
+- A Python suite cannot import the script that runs it. `runtests.sh` picks
+  the interpreter, layers the venv and sets the PYTHONPATH that decides which
+  copy of `jarvis_bus` gets imported — and the line that did exactly that is
+  sitting in its own header, which is the whole argument in one artifact.
+- `cargotest.sh` is read by nothing at all: a crate's tests live inside the
+  source they test, which is why `dependents` apologises for Rust instead of
+  answering. It is *how* a crate's tests run — the nix dev shell, the
+  vendored registry, the cache outside the repo.
+
+All four are implicit reads now. Each is guarded on the script being THERE,
+which is the refusal the QML and declared gates already make: a DELETED
+runner is a changed path like any other, and `bash ops/ralph/runtests.sh
+tools` is still a command that cannot run. Before this every one of the four
+named `tools` alone — which reads them as TEXT, to check the service list in
+`runtests.sh`'s header against `suites()`. A real reader, and not the one at
+risk.
+
+**What it costs, and the case B73 called argued rather than obvious.** The
+two runners take a TARGET, so binding one is binding all of its targets: ten
+Python suites (241.7 s, the `services/pylib/` case) and both crates. That is
+the most expensive rule in this table, and the numbers are what make it a
+trade and not a tax — `runtests.sh` has been touched by 6 commits in 262,
+`cargotest.sh` by 1, `qmltest.sh` by 1, `hudshots.sh` by 3. B72 made the
+opposite call one table over (`nixtest.sh` is deliberately not bound to
+`services/`, because 22 s on every Python edit is the noise that gets a gate
+switched off) and the difference is entirely which side of "rare" the trigger
+falls on. **B76** writes down the one place that reasoning is thin: the rule
+cannot tell a comment from code, so editing the `# Services:` prose in
+`runtests.sh` now buys four minutes to learn nothing.
+
+**The claim is made once over the tables, not five times per kind.** This is
+the part worth keeping. The sentence now has four implementations in four
+shapes — `declared_readers` adds `gate.script` to a tuple at the call site,
+`qml_reads` seeds its output set with it, the two runners each carry their
+own `is_file()` guard — and the way that goes wrong is the FIFTH gate, which
+gets the walk or the declaration and silently not the self-read. That is
+precisely what B72 and B73 each spent an iteration on, once per code path. So
+`test_every_gate_this_repo_names_is_planned_by_a_change_to_itself` walks
+`QML_GATES`, `DECLARED_GATES`, `RUNTESTS_SH` and `CARGOTEST_SH` and asserts
+the one claim over all six, counting both halves of a plan — a gate that is
+not run here (`hudscreens.sh`) is planned by being NAMED, which is what
+`unrun` is for.
+
+**The mutation that survived, and the test it earned.** Nine of ten were
+caught first pass. `or (runner and p == CARGOTEST_SH)` mutated to a bare `or
+runner` — every crate claiming every changed path once the runner is among
+them — lived through the whole suite, because every assertion in the file
+changed the runner and NOTHING else, so "every crate reads the runner" and
+"every crate reads everything" were literally the same answer. A README
+edited in the same breath tells them apart, and `why` is the audit trail
+printed beside each step: a step claiming a path with nothing to do with it
+is what makes a plan unreadable. The second grading run took that one and the
+declared-gate self-read (B72's own rule, never mutated until now): 2/2.
+
+- tests: `bash ops/ralph/verify.sh` green — it planned `runtests.sh tools`
+  **420** (was 411) over the 4 changed paths, 34.1 s. Ten mutations, ten
+  caught (8 then 2). Checked by hand afterwards, which is the demonstration:
+  `verify.sh --list ops/ralph/qmltest.sh` now plans 2 gates, `hudshots.sh` 2,
+  `cargotest.sh` 3 (both crates), `runtests.sh` **10**.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py, tools/verify.py, tools/tests/test_dependents.py,
+  tools/tests/test_verify.py
+- commit: b7b1abd
+- next: **B75(c)** is still the loop-sized measurement the last two iterations
+  named — what `hudscreens.sh`'s probes cost without the seven `grim`
+  captures — and it is the only thing that lets anyone choose between (a),
+  (b) and (c). Also doable by the loop: **B62**, **B67**, **B76** (but not
+  until a four-minute run is really bought by a paragraph). Track A remains
+  blocked on human sentences: A47's OCR-or-IPC decision blocks A55 and four
+  growth checks; A13/A27/A38 are one two-minute look at
+  `docs/hud/screens/02-heard-desk.png`; A21/A22/A25 are one answer to one
+  question about time on screen. And **B10/A28** — one live recording of one
+  spoken turn on ares — is still the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 99 — B75: the gate's price, in parts
+
+Track A is unchanged and still waiting on human sentences — every open A item
+is a decision (A13/A27/A38, A21/A22/A25, A47 and the five it blocks,
+A50/A60/A62/A65/A68/A70/A72), a signal that does not exist yet (A11 needs two
+frozen-schema fields, A18 waits for the topic that would break it, A33/A35/A36
+wait for a second moving element), or a seat at ares (A28/A59/A73's re-shoot).
+So the ladder's step 2, and the item the last two iterations both named as the
+loop's: **B75**, the measurement that lets somebody choose what to do about
+`hudscreens.sh`.
+
+**The question, and why nobody could answer it.** `verify.sh` runs every gate
+it plans and NAMES this one instead, on a reason B74 left standing: minutes,
+and seven photographs rather than a verdict. B75's follow-up was the obvious
+one — the probes (the corner, the exclusive zone, the click, the idle frames)
+ARE verdicts, so is there a cheaper half worth binding? The obstacle was that
+the price was a single number with no parts in it. `2m25s` appeared in six
+files and nothing under it.
+
+**So the run books its own seconds.** One file in the run's scratch stage,
+appended by both halves of the harness — bash owns `realize`, `compositor` and
+`compare`, the driver owns the seven inside it — and `sheet.PHASES` classifies
+each phase once, as a cost a picture-less run would still pay (`probe`) or one
+only the screens need (`sheet`). The table prints at the end of every run, so
+this is re-measurable and not quoted; `tools/tests/test_hudscreens.py` holds
+both ends of the classification, because a phase the harness books and nothing
+classifies would be charged to neither half and the shares would be fractions
+of a total the rows never covered.
+
+    probe     19.6 s  realize      probe     97.6 s  idle
+    probe      1.3 s  compositor   probe      7.2 s  click
+    probe      2.5 s  processes    sheet      0.6 s  encode
+    probe     15.1 s  settle       sheet     34.3 s  compare
+    probe      0.3 s  capture                 0.2 s  unaccounted
+    probe      1.2 s  checks       ------------------------------
+                                   probe    144.8 s  80.5%
+                                   sheet     34.9 s  19.4%   of 179.8 s
+
+**The answer is (a), and it is not close.** A verdict-only run saves 19% and
+still costs 2m25s. The PICTURES — the thing "seven photographs rather than a
+verdict" is about — are `grim` and seven PNG encodes: **0.9 s between them**,
+half a percent of the run. Almost the whole `sheet` half is B74's read-back
+against HEAD, and what the gate actually costs is the idle probe: 97.6 s, 54%
+of everything, five windows deliberately holding still. There is no cheap half
+to bind, so B75 closes on (a) — named, not run — with a number instead of a
+hunch, and B76's rule applies to itself here: this iteration bought a
+measurement, not a green.
+
+**Two things fell out of it.** The `2m25s` in six files was stale by exactly
+the price of the thing B74 added: 145 + 34 = 179, and nobody re-measured the
+total when the comparison landed. It says 3m00s now, and the table is beside
+it so the next drift is visible. And `ops/ralph/README.md` was still carrying
+B72's pre-B74 reasoning ("binding it would dirty the tree, every time"), which
+B74 had already made false; it now says what is true. The other finding is a
+lever nobody should pull yet — **B77** — the idle probe's five windows each
+bring up their own shell (four their own broker) to reach a state the window
+before it had already reached. That is startup paid five times; the six-second
+windows themselves are load-bearing and must not shrink, because the failure
+they exist for is a once-a-second blink.
+
+**The accounting is the part that can lie, so it is the part with the tests.**
+Nesting raises rather than sums — `capture()` is called by the shot loop and
+again inside both probes, so a `cost.phase` in the wrong place is a live
+hazard, and double counting would report a cheaper `sheet` half than the run
+has, which is a gate bound on a fiction. A book over the clock is refused the
+same way: phases that charge more than the run took mean some stretch was
+billed twice. Unbooked seconds are PRINTED (`unaccounted`, 0.2 s here) rather
+than dropped, so no reader divides a half by a total the rows never covered.
+Fourteen mutations over two gradings, thirteen caught first pass; the survivor
+was a book that never closed a phase — every phase after the first would raise
+— and it lived because every test around it opened exactly one. Two phases in
+a row is the test, and the re-grade took it 2/2.
+
+- tests: `bash ops/ralph/verify.sh` green — it planned `runtests.sh tools`
+  **434** (was 420) over the 10 changed paths, 34.9 s. And the gate itself,
+  which is the measurement: `bash ops/ralph/hudscreens.sh /tmp/hs-cost` green,
+  all 7 shots matching the sheet at HEAD (5 of them inside the noise floor),
+  179.8 s. Run against a scratch directory on purpose — a run pointed at
+  `docs/hud/screens` restores committed bytes over rounding, and the next
+  person measuring must not be measuring the restore. The HUD did not change,
+  so there are no new screens to commit.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  ops/ralph/hudscreens.sh, tools/tests/test_hudscreens.py, tools/verify.py,
+  tools/dependents.py, tools/tests/test_verify.py, ops/ralph/README.md,
+  ops/ralph/PROMPT.md
+- commit: 2bee285
+- next: **B62**, **B67** and **B76** are the loop-sized items left in the B
+  table (B77 is real but explicitly "not until somebody wants this gate
+  bound"). Track A remains blocked on human sentences: A47's OCR-or-IPC
+  decision blocks A55 and four growth checks; A13/A27/A38 are one two-minute
+  look at `docs/hud/screens/02-heard-desk.png`; A21/A22/A25 are one answer
+  about time on screen. And **B10/A28** — one live recording of one spoken
+  turn on ares — is still the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 100 — A75: the frames the bus threw away, drawn instead of only printed
+
+**Every open item in both tables was waiting on somebody.** A47's OCR-or-IPC
+decision blocks A55 and four growth checks; A13/A27/A38 and A21/A22/A25 want
+two minutes of a human at a screen; A73's other half and B10/A28 want a seat
+at ares; A11, B36 and B27(a) want a frozen schema opened; B62, B67, A76 and
+B76 are decisions with a human in them, and B76 says in its own text not to
+build it on a hunch. So this followed PROMPT's fallback — three ideas written
+into `PLAN.md` and committed (5b1f1a3) before one was picked — and the one
+worth picking came out of the orientation itself.
+
+**`sys.health.drops` has been on the bus since v1 and nothing in the HUD has
+ever read it.** The schema says "frames dropped since the last heartbeat,
+keyed by topic. Published by jarvisd per slow subscriber; empty/absent =
+none", and `broker.rs` really fills it: an out-queue overflow charged to the
+topic it threw away, a broadcast lag to `_lagged`, a control frame to `_ctl`,
+summed across every connection and drained into each heartbeat. `jv health`
+really prints it — `drops={"audio.vad":2}`. In `shell/jv-hud`, `seq` appears
+in eleven files under `core/` and in every single one of them it is an
+identity component (`seq + "@" + ts`), never a gap check, and `HealthState`
+reads `state`, `notes` and `metrics` and not `drops`. So invariant 5's one
+failure — something blocked the bus long enough that frames were discarded —
+was legible at a terminal and invisible on screen, underneath a corner every
+line of which is drawn from the frames that happened to arrive. That is worse
+than an ordinary missing reading, because it is a fact ABOUT the other plates.
+
+**`core/DropState.qml` decides; `HealthPlate` draws one row, `bus 41
+DROPPED`, above the findings.** Five rules, each with the tests that hold it.
+NOT A GAUGE: absent, empty and zero are all silence, which is exactly where
+this parts company with `VramState` — 0 MiB free is the most informative
+reading that field can carry, and 0 frames dropped is a machine that is well.
+AN AGGREGATE NAMES NOBODY: the map is summed across every subscriber before it
+is published, so the HUD may not be the reader that lost anything; the row
+names no topic, no key and no subscriber, and a tools gate fails the build if
+either file so much as spells `_lagged`. ONE PERIOD, NOT TWO: the count
+describes the interval that just closed, so it speaks for `period_s` and not
+for the two the schema grants a service's LIVENESS — borrowing `HealthState`'s
+window would put an interval's news on screen for twice the interval.
+ONLY THE BROKER SAYS THIS: read off jarvisd by NAME. A TOTAL THAT CANNOT BE
+TOTALLED IS NOT A TOTAL: one unreadable value refuses the whole frame rather
+than being skipped, because a partial total presented as a total understates
+by an unknown amount and saying nothing claims nothing.
+
+**`shown` is the load-bearing half and it is the one that would have rotted
+silently.** `ok` beside a non-empty map is not contrived: `publish_health`
+hardcodes `SysHealthState::Ok` in the same body it drains the drops into, and
+`HealthState.rank("ok")` is 0 — so on a machine where every service is well
+and the brain is on the card, a plate bound to `HealthState.reporting` alone
+would compose the row, never map the surface, and look exactly like a healthy
+machine. Shot 15 is that machine, and its caption (`mic` · `health`, with no
+finding, rung or VRAM row under it) is the assertion.
+
+**The mutation harness earned its keep four times over.** 24 mutations across
+five gradings, 8 first-pass survivors, all repaired. Two were real bugs. The
+broker was read by RECENCY: every test passed, because jv-ears' heartbeat is
+refused by the name check either way — but nine services beat every five
+seconds on a live machine, so `latest("sys.health")` would have taken the row
+off a fraction of a second after it appeared, for the life of the process.
+And `expired` was never cleared on a new frame, so the row could never come
+back for a SECOND interval, which is the ordinary shape of this failure —
+whatever blocked the bus for five seconds rarely stops at five. Two survivors
+were tests that did not test what they said (an array of STRINGS is refused by
+the value check, so it was no test of the shape check). Two were guards no
+input could reach: `withinPeriod` is now the single comparison both the row
+and its timer share, rather than two that could disagree at the boundary, and
+the one case that genuinely differed — a frame arriving exactly one period old
+— is a test. The last one was killable after all, by driving the element with
+a bus that KEEPS its frame through a link loss, which a `BusModel` can never
+be (`applyLink(false)` wipes its caches) and which is why the link check has
+to be written rather than inferred from the model backing it today.
+
+**The box grew for the first time without a plate.** One 11 px row inside an
+existing plate took the crowded corner from 775 px to 794, so the surface is
+826 — and `tst_fit.qml` is what said so, to the pixel, rather than a paragraph
+guessing. A row is not cheaper than a plate: per line, the box pays the same.
+That is the fifth growth and it makes A70's question bigger without answering
+it, exactly as A71's did.
+
+- tests: `bash ops/ralph/verify.sh --since HEAD~1` GREEN — 5 gates over the 31
+  changed paths, 120.2 s: `runtests.sh tools` 436 (was 434), `qmltest.sh` 653
+  (was 615), `runtests.sh jv-compat` 49, `runtests.sh jv-hud-bridge` 26,
+  `hudshots.sh` 23 with a 15th shot. The working-tree run before the commit was
+  RED on two gates and both were the sheet comparing against HEAD, which is the
+  documented refresh (ops/ralph/README.md): look at the PNGs, commit them, and
+  the next run is green. I looked at 15-bus-drops.png and 06-health.png before
+  committing either. And the gate verify names but does not run:
+  `bash ops/ralph/hudscreens.sh` GREEN, 179.1 s, all 7 screens matching the
+  sheet at HEAD — the taller box changed no screen, because the growth is
+  downward into surface the HUD does not paint.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. (It failed once first, usefully: a flake build
+  reads the git tree, so an untracked `DropState.qml` under a tracked `qmldir`
+  is a build error rather than a silent omission.)
+- files: shell/jv-hud/core/DropState.qml (new), shell/jv-hud/tests/
+  tst_dropstate.qml (new), shell/jv-hud/HealthPlate.qml, shell/jv-hud/shell.qml,
+  shell/jv-hud/core/qmldir, tools/gen_theme_qml.py, tools/tests/
+  test_gen_theme_qml.py, tools/hudshots/scene/{tst_shots,tst_fit,tst_sequence}
+  .qml, tools/hudscreens/{sheet,shoot}.py, tools/tests/test_hudsheet.py,
+  ops/ralph/hudscreens.sh, docs/hud/README.md + 15 PNGs,
+  docs/hud/screens/README.md
+- commits: 5b1f1a3 (the three ideas), 1764a52 (the row)
+- next: **A76** is the question this row works around and it is a human's —
+  should the broker ever call itself `degraded` while it is dropping? It is
+  one enum and its tests, and the argument against is real (a per-interval
+  counter flaps, and `jv health --check` would exit 1 on it). **A77** is the
+  design half: the row sums an overflow, a lag and a lost control frame into
+  one number, and a lag is the one of the three that means the HUD's own
+  picture may be missing a stretch. A note for whoever takes either: while
+  writing `DropState` I found `HealthState.trust` tests `period_s` with a bare
+  `!(period_s > 0)`, which `"5" > 0` passes — harmless there, since the value
+  is only ever multiplied, and deliberately stricter in `DropState`, where it
+  becomes a timer interval. Beyond those, the tables are unchanged: Track A is
+  still blocked on human sentences and one seat at ares (A47 → A55 and four
+  growth checks; A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
+  B62/B67/B76 are still the loop-sized-but-undecided items in the B table.
+
+## 2026-09-25 — iteration 101 — the empty corner over a service that keeps dying
+
+Track A's table is human-blocked end to end and every item in
+`docs/optimization-backlog.md` is marked human-review, so this iteration
+began with PROMPT.md's brainstorm step — and the brainstorm was a sweep
+rather than a mood: every property of the thirteen topics
+`jv_hud_bridge.DEFAULT_TOPICS` forwards, against every name the shipped QML
+mentions. Fourteen fields came back unread. Three were worth a plan line
+(A78, A79, A80) and one of them was the only REQUIRED field of
+`schemas/sys.health.json` that nothing in `shell/jv-hud` reads.
+
+**What the field is for.** `uptime_s` counts from one process's own start,
+so it only ever rises while that process lives. Every unit in
+`modules/jarvis-services.nix` is `Restart=on-failure` — jv-ears' says so in
+a comment about the bug it is the recovery path for — so a service that
+crashes is replaced by a new process that heartbeats `starting`, then `ok`.
+`HealthState.rank("ok")` is 0. The corner over a jv-ears dying every eight
+seconds was therefore EMPTY, which is the one thing §06's earned emptiness
+has taught this HUD's reader to trust. Nothing on the bus says "I was
+restarted": the process that could is the one that just lost the memory.
+
+So `HealthState.lives` is the first memory in that file, and the comment
+says why it has to be one — `latestFrom` keeps a single frame per publisher,
+so the beat that proves a restart is gone by the time the next one lands.
+Three rules, each of them a refusal:
+
+- **`restarted` is the element's own word**, like `lost` and `unknown`. A
+  heartbeat that PUBLISHES it is outside the frozen enum and comes out
+  `unknown`, which is a test — otherwise any process could claim a death it
+  never had.
+- **It ties with `degraded` and loses the tie to the service.** A restarted
+  process is running and answering, which is the bracket `degraded` names;
+  ranking a completed death above a live impairment would push a jv-voice
+  that cannot reach the speakers off a list three lines deep for a jv-ears
+  that crashed once at boot.
+- **News for `period_s * 2`** — the same span this file already believes one
+  heartbeat for, and deliberately not a new constant. It reads off the
+  frame's own body, so **no timer is involved anywhere in this**: every
+  heartbeat carries a larger uptime than the last, and the beat carrying one
+  too large is the one that takes the row off. A service crash-looping
+  inside that window never stops reporting; one that restarted an hour ago
+  says nothing until it does it again, and then says `2x`.
+
+**The mutations were the interesting part, and four of five survivors failed
+the same way.** The first grading caught 7 of 11. Of the four that lived,
+one was genuinely dead code (`up >= 0` inside `uptimeOf`, redundant with the
+`< 0` its two callers recognise the refusal by — removed rather than tested,
+and the sentinel documented as "negative" instead of "-1"). The other three
+were tests that could not see their own subject: they drove the element at
+`uptime_s: 30` with a 5 s period, which is OUTSIDE the freshness window, so
+a version of the file that called a repeated uptime a death reported nothing
+and the assertion passed having proved only that 30 is more than two
+periods. Every one of them had to be rewritten around a number the window
+still calls new — and two of them needed a 1000 s heartbeat, because the
+damage (a corrupted high-water mark) is only visible when the number AFTER
+the bad frame is larger than the one before it and still inside the window.
+
+The fifth survivor was `isFinite`, and it taught me something about this
+harness. I wrote the test as a raw bridge line with `1e999` in it, copying
+`tst_earsbudgets.qml` — and QML's `JSON.parse` refuses that line WHOLE
+("unparseable bridge line dropped"), so the field never arrived and the
+guard looked dead. tst_earsbudgets knows this and says so in the test next
+to it; the infinity has to come through a hand-built bus, which is also what
+proves the link-loss forgetting, because `BusModel.applyLink` empties its
+caches BEFORE it lowers `linkUp` — so the frame-driven pass a drop triggers
+still sees a live link with nothing on it, and only the falling edge of
+`known` is left to notice. That ordering is why the forgetting is
+`onKnownChanged` and not a line in `observe()`.
+
+**One thing fixed on the way past.** `trust()` tested `period_s` with a bare
+`!(period_s > 0)`, which `"5" > 0` passes — the note A75 left about this
+file. It was harmless while the value was only ever multiplied by a
+coercible string; it stopped being harmless the moment it became the window
+inside which the HUD calls a service unwell. It is a `typeof` test now, and
+a string period is `unknown`, which is a finding.
+
+**The box did not grow.** Shot 16 is one plate and one line. `tst_fit`'s
+crowded corner now drives jv-act past the tally's cap — 101 heartbeats
+counting down is 100 deaths, one more than the two digits the plate prints —
+so `RESTARTED 99+x`, the widest DETAIL this plate can draw, is measured
+rather than argued, and it fits the 300 px surface with the existing crowd.
+The height is unchanged because the restart replaces jv-act's line rather
+than adding one.
+
+- tests: `bash ops/ralph/verify.sh --since HEAD~1` GREEN — 3 gates over the
+  7 changed paths, 117.2 s: `runtests.sh tools` 431 (was 429),
+  `qmltest.sh` 679 (was 653), `hudshots.sh` 23 with a 16th shot. The
+  working-tree run before the commit was RED on five `test_hudsheet.py`
+  tests and every one of them was the sheet comparing against HEAD, which
+  is the documented refresh (ops/ralph/README.md): look at the PNG, commit
+  it, and the next run is green. I looked at 16-restarting.png before
+  committing it. And the gate verify names but does not run:
+  `bash ops/ralph/hudscreens.sh` GREEN, 179.6 s, all 7 screens matching the
+  sheet at HEAD — none of them contains a restart, and `detailOf` returns
+  the same word it always did for every other state.
+  Mutations: 18 over three gradings, 5 survivors closed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins — `uptime_s` has been in
+  `schemas/sys.health.json` since v1 and is required there.
+- files: shell/jv-hud/core/HealthState.qml, shell/jv-hud/HealthPlate.qml,
+  shell/jv-hud/tests/tst_healthstate.qml, tools/hudshots/scene/{tst_shots,
+  tst_fit}.qml, docs/hud/README.md + 16-restarting.png, ops/ralph/PLAN.md
+- commits: 22b0a7a (the three ideas), 3b9bf1b (the restart row)
+- next: **A81** is the collapse this shipped with and it is a §06 question —
+  a service that is both `degraded` and crash-looping draws `DEGRADED` and
+  the count is dropped, because a bare `3x` beside a different word is a
+  tally of nothing a reader can name. It should be answered with A70, which
+  is already asking what the corner does with several stories at once.
+  **A82** is the honest limit: the memory starts when the HUD starts, so the
+  boot crash loop — the most likely one there is — is the one this cannot
+  see. systemd has the number and invariant 1 says the HUD may not ask it,
+  which makes it R5's `sys.roster` question with a second caller behind it.
+  **B78** is the terminal half: `jv health` is a snapshot and can never say
+  this, `jv tap` watches the stream and could. Two of the three unread
+  fields from this iteration's sweep are still on the table as **A79**
+  (`action.confirm.granted` — the reading half of A22, and nothing in
+  `core/` can currently tell a granted destructive tool from a denied one)
+  and **A80** (`context.system.load1` / `mem_used_pct`, whose whole design
+  question is the gate). Otherwise the tables are unchanged: Track A is
+  still blocked on human sentences and one seat at ares (A47 -> A55 and the
+  growth checks; A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
+  A76/A77 and B62/B67/B76/B77 are still the raised-but-undecided items.
+
+## 2026-09-25 — iteration 102 — A79: the yes and the no, both of them silence until now
+
+A78's sweep of the fields nothing in `shell/jv-hud` reads left three plan
+lines, and this is the second of them. `granted` is the one body field of
+`schemas/action.confirm.json` that no element reads — and it is the field
+that says what happened to a DESTRUCTIVE tool.
+
+**What was missing.** `ConfirmState` (A20) latches jv-act's question while
+the window is open, and the answer frame lands on the same topic and takes
+the whole latch with it. So `pending` going false was three different
+endings wearing one face: you said yes, you said no, or you said nothing
+and jv-act denied it for you. The plate vanishes identically for all three,
+which A22 already names — but A22 is a §06 decision (what a fixed-duration
+element is allowed to be in this HUD, the first one whose lifetime is a
+clock rather than a signal) and a human's. The READING half is not blocked
+by that decision, and a human answering A22 should not also have to write
+it. That separation is the whole of this iteration.
+
+**The ending is latched beside the question.** `outcome` is "granted",
+"denied", "unknown" or ""; `answeredBy` is the route; and
+`answeredRequestId` / `answeredTool` / `answeredSummary` are the question
+that ended. That last part is not redundancy — everything `textOf` returns
+is gated on `pending`, deliberately (A20's mutation finding: words that
+outlive their window are a question the user can still read and can no
+longer answer), so by the time there is an ending there is nothing left to
+read off `request`. Both halves of the latch are held because the answer
+frame carries neither `tool` nor `summary`: they are request-only in the
+frozen schema.
+
+**Three refusals, and the third is the one worth arguing about.**
+
+- *Only for a question this element was HOLDING.* An answer whose
+  request_id we never saw asked is a verdict out of nowhere. Same rule
+  that already stops a stranger's answer from blanking a live question.
+- *Only from an answer FRAME.* `expired` is the HUD's own backstop for a
+  jv-act that died mid-question; it ends the asking and settles nothing,
+  and reading it as a denial would be the HUD deciding the fate of a
+  destructive tool on its own timer. The mirror case is taken: an answer
+  that lands AFTER our ceiling let go is still what really happened to a
+  question the user was shown.
+- *`granted` decides and nothing else does.* An answer whose `granted` is
+  not a boolean is `unknown` — **including `answered_by: "timeout"`.** The
+  schema's prose does say a timeout is a denial, and jv-act publishes
+  `granted: false` when it times out, which is exactly the reason not to
+  infer it here: it would be a second copy of a rule the frame already
+  states (A14), and the copy is the half that drifts. The route is read
+  separately, because "you said no" and "you were not there" are both
+  denials and a reader wants them apart — and a route word the frozen enum
+  does not have comes out empty WITHOUT taking the verdict with it.
+
+**Forgetting.** A new question clears it (a verdict readable beside an
+unanswered question gets attached to the wrong one) and a link drop clears
+it (a decision latched off a bus we can no longer see). Nothing else does,
+because "how long does an ending stay on screen" is precisely A22.
+
+Nothing draws any of it yet, on purpose — which is why the two photograph
+gates came back byte-identical to HEAD, and that is the correct result for
+a reader with no renderer.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over the 2 changed
+  paths, 117.7 s: `runtests.sh tools` 431, `qmltest.sh` 699 (was 679),
+  `hudshots.sh` 23 with all 16 shots matching the sheet at HEAD. The gate
+  verify names but does not run: `bash ops/ralph/hudscreens.sh` GREEN,
+  194.1 s, 7/7 matching HEAD. All 20 new tests were RED before the
+  implementation existed. Mutations: 6 graded through `--runner qml`,
+  6 caught — including the tempting one (a timeout route read as the
+  denial jv-act did not state) and the two forgettings.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins — `granted` has been in
+  `schemas/action.confirm.json` since v1.
+- files: shell/jv-hud/core/ConfirmState.qml,
+  shell/jv-hud/tests/tst_confirmstate.qml, ops/ralph/PLAN.md
+- commits: 67a9cfc (the reader)
+- next: **A22** is now a design decision and nothing else — the reader is
+  under it, so whoever answers it writes a plate and not a state machine.
+  **A83** is the limit this shipped with and belongs in the same
+  conversation: an answer to a question the HUD never saw (started
+  mid-window, bridge reconnected) is dropped, and the obstacle to drawing
+  it is that the answer frame names no tool. **B79** is the terminal half,
+  the same shape B78 is for A78: `jv tap` can put a confirmation's question
+  and its outcome on one line, and must not become a second opinion about
+  what a denial is. **A80** (`load1` / `mem_used_pct`, gated on
+  `SpeechState.thinking`) is the last of A78's three and still a proposal
+  because its gate crosses two elements. Otherwise unchanged: Track A is
+  human-blocked (A47 -> A55 and the growth checks; A13/A27/A38;
+  A21/A22/A25; A73's re-shoot; B10/A28), and A76/A77/A81/A82 and
+  B62/B67/B76/B77/B78 are raised-but-undecided.
+
+## 2026-09-25 — iteration 103 — B79: the confirmation, as one sentence
+
+Three UI iterations in a row (A75, A78, A79), so the ladder says take a
+feature. B79 was the obvious one: it is the B-track half of the reader
+A79 just shipped, and the A track is human-blocked almost everywhere.
+
+**What was wrong.** A confirmation is two `action.confirm` frames on one
+topic threaded by a `request_id`, with a human's silence in between. The
+question carries `tool`, `summary` and `window_s`; the answer carries
+`granted` and `answered_by`. Neither carries the other, and nothing on
+the wire carries the wait. So `jv tap` printed two JSON blobs seconds
+apart and said nothing about the pair, and `jv tap --latency` — which
+prints hop lines instead of frames — printed two topic names. The one
+sentence the stream can make about a destructive tool was a correlation
+the reader did by hand, in a scrollback.
+
+    >>> confirm req-4: fs.delete -> granted (cli, 0.2s)
+
+**What it decides: nothing.** This is the whole design of it. What a
+denial IS was argued in `core/ConfirmState.qml` one iteration ago, and a
+second reader that disagreed would be worse than one that only prints
+fields — so the three refusals are kept verbatim rather than re-derived:
+
+- *Only a question this tap SAW asked.* An answer for a request_id we
+  never heard opened is a verdict out of nowhere — and it could not name
+  a tool anyway, since `tool` is request-only in the frozen schema. This
+  is also, for free, what deduplicates jv-act's ECHO of the answer it
+  acted on: every confirmed tool puts two answer frames on the wire, and
+  the second one is a stranger's answer to a question already closed.
+- *Only from an answer FRAME.* Nothing here times a window out. The tap
+  has a cap, not a clock, so a question whose answer never comes is
+  eventually dropped in silence rather than reported as an ending the
+  machine never stated. That silence is the limit this shipped with, and
+  it is B81.
+- *`granted` decides and nothing else does.* Absent, or not a msgpack
+  boolean, reads `unknown` — **including under `answered_by: "timeout"`**,
+  for the reason ConfirmState gives: the schema's prose says a timeout is
+  a denial and jv-act publishes `granted: false` when it times out, so
+  inferring it off the route would be a second copy of a rule the frame
+  already states (A14). `get_bool` is strict for the same reason: a `1`
+  or a `"true"` is a producer writing a different schema, and reading it
+  as a yes would be the CLI reporting an authorization nobody gave.
+
+**Two choices worth naming.** Seconds, not the milliseconds every turn
+line uses: the turn ladder decomposes ONE latency and its terms have to
+be comparable with each other, while this number is a person deciding —
+it is the same span `Turn::confirm_line` calls `you=`, and the reason
+that one is in ms is that it is a share of a ms whole. And the `summary`
+is omitted: 80 columns holds the tool or jv-act's spoken sentence, and
+the tool is the name the same event goes by in `intent.action`, in the
+audit and in `jv act-log`, so it is the one a reader can follow between
+them. Under `--latency` that omission costs something real, which is B80.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over the 3 changed
+  paths, 78.9 s: `runtests.sh pylib` 37.7 s, `runtests.sh tools` 35.1 s,
+  `cargotest.sh jarvisd` 6.1 s (140 unit, was 129; 40 integration, was
+  39). The gate verify names but does not run: `bash
+  ops/ralph/hudscreens.sh` GREEN, 179.4 s, 7/7 matching HEAD — the right
+  answer for a change no pixel of the HUD can see. All 11 new tests were
+  RED before the type existed, and the integration test was re-run with
+  the `println!` removed and went red, so it is load-bearing on the
+  binary and not only on the unit. Mutations: 10 graded, 10 caught —
+  a stranger's answer as a verdict, the timeout route read as a denial,
+  the echo reported twice, an unknown route read aloud, a backwards clock
+  as `abs()`, an unbounded memory, an id asked twice as two questions, an
+  invented tool, a non-answer frame closing a question, an integer
+  `granted` coerced.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins — both fields have been in
+  `schemas/action.confirm.json` since v1.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs, ops/ralph/PLAN.md
+- commits: ca95b21 (the line)
+- next: **B78** is now the last unbuilt half of the A78/A79 pair and the
+  cheaper of the two remaining B items — `jv tap` can see a restart
+  because it holds state across frames while `jv health` is a snapshot,
+  and the same caution applies (the freshness window and the monotonicity
+  argument live in `core/HealthState.qml` and must not be re-derived).
+  **B80** and **B81** are this iteration's own limits and are both
+  questions about what `jv tap` is for rather than patches. On the A
+  track: **A22** is a design decision with the reader already under it,
+  **A83** belongs with it, and **A80**'s gate crosses two elements.
+  Otherwise unchanged: Track A is human-blocked (A47 -> A55 and the
+  growth checks; A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
+  A76/A77/A81/A82 and B62/B67/B76/B77 are raised-but-undecided.
+
+## 2026-09-25 — iteration 104 — B78: the restart, seen on the wire
+
+A79, B79 and A78 all pointed here, and B78 is the last unbuilt half of
+the A78/A79 pair. The A track is human-blocked almost everywhere, so the
+ladder says feature.
+
+**What was wrong.** Every unit in `modules/jarvis-services.nix` is
+`Restart=on-failure`, so a service that crashes is replaced by a new
+process that heartbeats `starting`, then `ok`. Nothing on the bus
+publishes "I was restarted" — and a service that could would be the one
+least able to, having just lost the memory. A78 gave the HUD the one
+reading that can see it anyway: `uptime_s` counts from one process's own
+start, so it only rises while that process lives, and a heartbeat
+carrying LESS of it than the last one from the same service was written
+by a different process. The terminal had none of that. `jv health` prints
+`uptime_s` and is a snapshot — one line per frame, no memory — so it can
+never say a service restarted, however long it runs. `jv tap` already
+holds per-turn state across frames and was the reader that could.
+
+    >>> restart jv-ears: 2x (was up >=8.2s)
+
+**What it decides: nothing**, and that is the design. What a restart IS
+is argued in `core/HealthState.qml`, and two readers of the same bus that
+disagreed about it would be worse than one that cannot see it at all. So
+`cli::Lives` keeps that file's rules rather than re-deriving them:
+
+- *A first sighting claims nothing.* With nothing remembered there is no
+  direction for the number to have moved in, and a small `uptime_s` on a
+  first beat is what every service looks like on a machine that just
+  booted. The consequence is the same one A82 names for the HUD: the boot
+  crash loop, the most likely one there is, is invisible to both readers,
+  and systemd's `NRestarts` is not the bus's to ask for (R5).
+- *An unreadable `uptime_s` is SKIPPED, not forgotten*, so the next good
+  frame is compared against the last good one — the comparison that means
+  something. `"5" < 400` is true in JavaScript and that is why the QML
+  checks the type; here `get_f64` refuses a string outright, and the test
+  says so out loud rather than leaving it to the reader of a helper.
+- *`<` and not `<=`.* Two beats a coarse clock stamped with the same
+  number are one process.
+
+**The trust gate is now one function.** `HealthCheck::trust` became a
+free `trust_health` that both readers of `sys.health` in this binary
+pass through, so `jv health --check` and `jv tap` cannot come to believe
+different frames about the same service. It is STRICTER than the HUD's in
+one place — a `state` word outside the frozen enum refuses the whole
+frame here and only the word there — and that asymmetry is safe in one
+direction only, which is the direction it points: refusing a frame can
+lose a death and can never invent one, because a smaller `uptime_s` is
+the only evidence there is and a frame never read cannot make a number go
+backwards.
+
+**The one rule deliberately not carried over** is `restartsOf`'s
+freshness window. The HUD draws its row only while the replacement
+process is still young, because a plate asserts its claim continuously
+and a standing `RESTARTED 3x` over a service up for a week is a stale
+sentence. A tap prints once, at the moment of observation, into a stream
+whose position is itself the timestamp — there is no duration for a
+window to bound. That is a difference about how long a claim is
+DISPLAYED, not about what a restart is.
+
+**Three smaller choices worth naming.** `3x` is the notation
+`HealthPlate` already draws this fact in, so the corner and the terminal
+do not spell one number two ways. `>=` is `SayGauge`'s mark for a bound
+rather than a reading: the dead process is only known to have REACHED the
+uptime it last heartbeated and may have lived up to a period longer, and
+8.2 s is a crash loop where 418.7 s is one bad afternoon. And the roster
+is capped at 64 with a new name REFUSED past the cap rather than the
+oldest evicted — the opposite of `Confirmations`, because there the
+newest question is the one somebody is waiting on, while here the oldest
+service is the one whose history is worth the most and a tally that
+silently begins again is worse than one that never begins.
+
+What this shipped without is B83: the line says how many and nothing
+says when, so two deaths four hours apart print like two four seconds
+apart. And B82 is the neighbour it did not take — `jv health --check`
+holds a window and could nearly see this, but an eighth state word and a
+new non-zero exit are a flapping gate, which is A76's question again.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over the 3 changed
+  paths, 79.4 s: `runtests.sh pylib` 38.6 s, `runtests.sh tools` 35.1 s,
+  `cargotest.sh jarvisd` 5.7 s (151 unit, was 140; 42 integration, was
+  40). Re-asked as `verify.sh --since HEAD~1` after the commit: same 3
+  paths, GREEN. The gate verify names but does not run: `bash
+  ops/ralph/hudscreens.sh` GREEN, 185.9 s, 7/7 matching HEAD — the right
+  answer for a change no pixel of the HUD can see. All 13 tests were RED
+  before `Lives` existed; the integration pair was re-run with the
+  `println!` removed from `bin/jv.rs` and went red, so it is load-bearing
+  on the binary and not only on the unit. Mutations: 12 graded, 12
+  caught — an equal uptime read as a death, a tally that never rises, the
+  NEW life reported instead of the one that ended, an off-by-one cap, the
+  trust gate bypassed, the NaN/negative filter dropped, an empty `src`
+  admitted, `>=` written as `=`, an unclipped name, the cap evicting
+  instead of refusing, a first sighting reported as a death, and the line
+  never printed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins — `uptime_s` has been required in
+  `schemas/sys.health.json` since v1.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs, ops/ralph/PLAN.md
+- commits: 4b3441d (the reader and the line)
+- next: the A78/A79 pairs are now both complete on both tracks. **B82**
+  is the cheapest remaining thing here and is half a decision (it shares
+  A76's flap question, so answer them together or not at all). **B80**
+  and **B81** are B79's own limits, **B83** is this one's. On the A
+  track: **A22** is a design decision with its reader already written and
+  **A83** belongs with it; **A80**'s gate crosses two elements. Otherwise
+  unchanged: Track A is human-blocked (A47 -> A55 and the growth checks;
+  A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
+  A76/A77/A81/A82 and B62/B67/B76/B77 are raised-but-undecided.
+
+## 2026-09-25 — iteration 105 · the audio this machine captured and threw away
+
+Track A is human-blocked (A11/A13/A21/A22/A25/A27/A28/A38/A47-A55 and
+A76/A77/A80-A83 are all a human's call or waiting on a schema), and
+`docs/optimization-backlog.md` says human-review-required in its own
+header, so this was PROMPT.md's brainstorm step: three ideas raised
+(becd98a — **B84**, **A84**, **B85**), then the first one built.
+
+The sweep behind them: every body field of the 18 frozen schemas against
+every name the shipped QML and jarvisd's CLI actually read, then the
+places a service loses data and publishes nothing. Two dead ends worth
+recording so nobody re-walks them. **`guard.verdict.scanned_by`** looks
+unread and is not a gap: `decide()` returns None when no authoritative
+engine ran, so a `clean` verdict always names one, and the outage goes to
+`sys.health` as `degraded` — already the honest answer. And
+**`audio.transcript.t0/t1`** cannot say the ASR covered only part of an
+utterance, because jv-ears publishes `t0: 0.0` and `t1` as the buffer
+length: they describe the audio, not the transcribed span.
+
+**What shipped (97bac94).** `MicSource.chunks` handed PortAudio a callback
+with two silent discards in it. `except queue.Full: pass` — the hand-off
+queue is 64 chunks deep and drop-newest, so a pipeline that fell behind
+lost whole chunks of the room. And `if status: pass`, under a comment
+reading "Overruns are logged by the caller via health" while nothing
+anywhere logged one. Neither reached the bus, because `CaptureMeter`
+counts what the device DELIVERED — the wrong side of the queue. So the
+heartbeat said `ok`, `capture_age_s` stayed fresh, `captured_s` kept
+rising, and `MicPlate` drew a calm MIC while the ASR was fed a recording
+with holes in it. It is the 2026-09-15 field bug's twin — jv-ears up and
+cheerful with the audio gone — and it is the missing MEASUREMENT behind
+optimization-backlog §2 and §6, both of which are arguments about whether
+the mic starves that nothing on this machine could settle.
+
+**Two losses, not one total.** `Loss.samples` is what jv-ears itself
+dropped, and its size is known exactly: PortAudio tells the callback how
+many frames it is holding. `Loss.overruns` is what the DEVICE dropped, and
+its length is not knowable — PortAudio reports the event, never its
+duration — so it stays a count and is never converted into seconds. They
+are separate because they send a reader to different places: one is this
+process falling behind, the other is the machine or the driver, and a
+single number would average two bug reports into one. Same reasoning
+`OutputState` uses for "muted" versus "zero". `_overflowed` reads the one
+flag that means discarded input rather than the truthy `CallbackFlags`, so
+an output underflow cannot put a fault on the heartbeat that never
+happened. The queue policy is unchanged: this is the measurement, not the
+fix.
+
+**It adds no gauge, and that is B7.** `metrics` is free-form, so
+`mic_lost_s` could have ridden out today — but nothing reads a loss
+window, the HUD's `MicState` has no word for a device that is open and
+losing audio, and a gauge nobody consumes is noise on the bus and a second
+thing to keep true. So the fault ships on `state` + `notes`, which every
+consumer already reads: `HealthPlate` draws `jv-ears DEGRADED` with the
+note, `jv health` prints it, and `jv health --check` now exits 1 on it.
+The numbers arrive with A84 or not at all, and a test pins their absence
+so that day is a decision rather than a diff.
+
+**Why `degraded` at all, when the same question stalls A76.** `degraded`
+is in the frozen enum and jv-ears already calls a silent device degraded —
+same publisher, same class of fault, same shape of rule (a freshness
+window over a condition that self-clears). The flap argument that blocks
+the broker does not carry here: `main.HEALTH_MIN_GAP_S` already floors the
+transition beat at one second, so a device dropping in bursts cannot turn
+`sys.health` into a 4 Hz topic. (The commit message for 97bac94 writes
+this as "A26's flap worry"; it is **A76**. Left uncorrected rather than
+amended — GUARDRAILS forbids rewriting history, including a commit that
+has not been pushed yet.)
+
+**Two orderings are decisions, each with its own test.** A stall outranks
+a loss: both are `degraded`, so the only thing at stake is which note goes
+out, and "no audio at all" is the one a reader needs first. And a loss
+outranks `starting`, which reads backwards until you see the case — the
+queue can fill before the pipeline thread has pulled its first chunk, so
+`capture_age_s` is still absent while audio is already being discarded,
+and a discard is then the only evidence the meter has.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 1 gate over 3 paths, 35.0 s
+  (`runtests.sh tools`, 436 tests). **And `bash ops/ralph/runtests.sh
+  jv-ears` run separately, 136 passed (was 114), 143.9 s, exit 0 — because
+  verify did not name it and could not, which is B86 below.** All 22 new
+  tests were RED before `Loss` existed; the integration test drives
+  `main.amain` with a losing source and asserts the published heartbeat,
+  so the unit work is load-bearing on the frame and not only on the
+  method. Mutations: 12 graded, 12 caught — the overflow flag ignored, any
+  truthy status counted, the discarded chunk uncounted, the chunk size
+  assumed instead of taken from PortAudio, only the first loss stamped,
+  `.copy()` dropped so PortAudio overwrites a queued view, the window made
+  exclusive, both orderings inverted, the `--wav` guard deleted, the note
+  forgetting the device's share, and the meter refusing to ask its source.
+  The stamp one SURVIVED the first run and was a real test weakness, not a
+  harmless mutant: `FakeClock()` starts at 0.0, 0.0 is falsy, so
+  `last_loss_at or clock()` restamped anyway. The clock now starts at 4.0
+  and the mutation is caught.
+- build: `nixos-rebuild build --flake .#ares` green, twice (before and
+  after the mutation run restored the tree). No schema change — `state` is
+  frozen and `degraded` is in it, `metrics` grew nothing. No jv-act, no
+  boot path, no pins.
+- files: services/jv-ears/jv_ears/audio.py,
+  services/jv-ears/tests/test_mic_loss.py (new), ops/ralph/PLAN.md
+- commits: becd98a (the three ideas), 97bac94 (the counting and the fault)
+- next: **B86 first, and ahead of the feature work.** Verifying this
+  iteration found that `verify.sh` cannot see jv-ears at all:
+  `tools/dependents.py` resolves an import by looking for
+  `<pkg>/__init__.py`, and `services/jv-ears/jv_ears/` is the one service
+  package in this repo without one, so a change to `jv_ears/audio.py`
+  plans `runtests.sh tools` and never the 136-test suite that executes it.
+  The gate went green in 35.8 s over code it had not run. That is B68's
+  failure with the roles reversed and it is silent in the worst direction,
+  since a suite that is never named cannot report being skipped — fix both
+  halves (the missing `__init__.py`, and `_module_path` learning that a
+  PEP 420 namespace package is importable, with a `tools` test on it).
+  Then **A84**, which is B84's reader and the only thing that makes the
+  gauges publishable. **B85**'s tap half (a turn's ENDING, which
+  `--latency` never reports) is the next cheap one; its HUD half should
+  probably stay unbuilt for A71's reason. Otherwise unchanged: B82 is
+  still half of A76's decision, B80/B81/B83 are the tap's own limits, and
+  A22/A83 want answering together.
+
+## 2026-09-25 — iteration 106 · the service the gate could not see
+
+Iteration 105's own `next:` named this and put it ahead of the feature
+work, which was right: until it was fixed, every future iteration that
+touched jv-ears would have been verified by a gate that did not run its
+tests, and would have SAID it was verified.
+
+**The bug, as the gate performed it.** `bash ops/ralph/verify.sh` over a
+change to `services/jv-ears/jv_ears/audio.py` planned one gate,
+`runtests.sh tools` — which reads that package as TEXT — and never
+`runtests.sh jv-ears`, the 136-test suite that executes it. Iteration 105
+went green in 35.8 s over code the gate had not run, then found it by
+running jv-ears' suite by hand anyway.
+
+`tools/dependents.py` resolved `import <top>` by asking for
+`<base>/<top>/__init__.py` or `<base>/<top>.py`. PEP 420 made the first of
+those optional twelve years ago, and `services/jv-ears/jv_ears/` is this
+repo's one service package without an `__init__.py` — setuptools ships it
+regardless, because its pyproject discovery defaults to `namespaces =
+true`, so nothing anywhere complained. `import jv_ears` therefore resolved
+to NOTHING, the closure walk stopped at the first edge, and the suite was
+never named. B68 with the roles reversed: there the human guess missed the
+third suite that reads two parts of the repo, here the derivation missed
+the FIRST one, the suite that simply runs the file. And it is silent in
+the worse direction, because a suite that is never named cannot report
+being skipped — there is no line to notice.
+
+**Why two passes and not one.** The one-line version (`or any(glob)` in
+the existing loop) is wrong, and not subtly: a directory with no
+`__init__.py` is a namespace *portion*, and the interpreter does not stop
+at one either — it remembers it, finishes the path, and lets a real
+package or a plain module found LATER win. `_package_bases` puts `""`
+first and the services in sorted order, so an eager rule would resolve on
+the accident of which base sorts first and aim an import at source Python
+does not read. A wrong suite is more confident than a missing one.
+
+**And where it is deliberately narrower than Python.** Any directory at
+all is a portion to the interpreter, so `import docs` would claim every
+PNG under `docs/` and the answer would drift toward "run every suite",
+which is this tool's one forbidden answer. A portion is taken only when it
+is a directory with Python UNDER it — asked of `_module_files`, the same
+function that decides what a resolved import brings in, so it is one rule
+and not two. Not narrower than that: `*.py` directly inside would have
+refused a `foo/` whose only modules live in `foo/bar/`, which is the shape
+namespace packages are mostly FOR, and `import foo.bar` arrives here as
+the top name `foo`. Refusing costs a missed reader, the expensive way to
+be wrong.
+
+**The `__init__.py` is the other half and it is the lesser one.** It makes
+jv-ears look like its seven siblings and changes no behaviour; the rule
+above is what stops the next namespace package from reintroducing this
+silently. It is deliberately untested — a test pinning "every service
+package has an `__init__.py`" would forbid exactly the shape the tool just
+learned to read.
+
+**Two mutations survived the first grading, and both were my tests being
+wrong rather than the mutants being harmless.** The precedence test put
+its decoy package under `svc-c`; bases sort `svc-a` before `svc-c`, so the
+merged-pass mutant found the real package first and passed a test written
+to catch it — the decoys are at the repo root now, where base `""` really
+does come first. And the depth of the Python-under-it rule had no test at
+all, so `glob("*.py")` and `glob("**/*.py")` were indistinguishable. Both
+pinned, then re-graded. A third, weaker guard (`is_dir()`, without which
+an extensionless script beside a package would resolve under its own name)
+survived a further round and has its own case now.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 3 paths, 182.7 s
+  (`runtests.sh jv-ears` 136 passed, `runtests.sh tools` 440 passed, was
+  436). **The gate naming jv-ears at all is the fix reporting itself**;
+  before the change the same three paths planned `tools` alone. Four new
+  `tools` tests, two of them RED before the fix — the synthetic PEP 420
+  case, and a whole-repo one asserting that every service suite reads its
+  own service's package, which is the assertion that would have caught
+  this in the first place and was red for jv-ears' eight modules. Also
+  `bash ops/ralph/verify.sh --since HEAD~1` GREEN, so the commit took
+  exactly what was verified. Mutations: 5 graded, 5 caught, after the two
+  survivors above were fixed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py, tools/tests/test_dependents.py,
+  services/jv-ears/jv_ears/__init__.py (new), ops/ralph/PLAN.md
+- commits: 1da7d1d (the rule and the missing file)
+- next: the gate is honest about jv-ears now, so **A84** is the feature
+  item — B84's reader, the mic indicator that draws MIC while audio is
+  being lost, and the thing that makes B84's new gauges publishable. The
+  two raised here are cheap and both are B86's own class, i.e. a rule
+  written down instead of derived: **B87** (the base LIST is written down
+  too — a Python package outside `services/` is invisible the same silent
+  way; derive a base from a `pyproject.toml`, and note `harness/` is this
+  repo's second namespace package, unimported today) and **B88** (every
+  `*.py` in the repo has a reader — measured, 0 unread — and nothing
+  asserts it; a green test waiting to be written). **B85**'s tap half (a
+  turn's ENDING, which `--latency` never reports) is still the next cheap
+  feature; its HUD half should stay unbuilt for A71's reason. Otherwise
+  unchanged: B82 is still half of A76's decision, B80/B81/B83 are the
+  tap's own limits, and A22/A83 want answering together.
+
+## 2026-09-25 — iteration 107 — the microphone that is recording holes
+
+- what: **A84.** `MicPlate` grew a third line, `MIC LOSING AUDIO`, and
+  `core/MicState.qml` the fourth word under it. jv-ears has counted its
+  discarded chunks since B84 (iteration 105) but shipped the fault on
+  `state` + `notes` only, because B7 says a gauge nobody consumes is noise
+  on the bus; the HUD therefore drew a calm teal `MIC` over a recording
+  with holes in it, which is invariant 10's not-fakeable half over-claiming
+  in the one direction it may not. Two gauges now ride the heartbeat —
+  `capture_loss_age_s` (absent until something HAS been discarded) and
+  `capture_loss_window_s` (the budget, from the first beat) — `EarsBudgets`
+  reads the second as its third budget, and `MicState` judges the first
+  against it.
+
+  **Two gauges and not the three the item guessed.** The third was
+  `mic_lost_s`, how MUCH was lost, and leaving it off is B7 answered
+  rather than ignored: half of that number can never exist — PortAudio
+  reports a device overrun without its length — so a run that lost audio
+  only that way would publish a zero total beside a degraded state, which
+  is B13's number that has stopped meaning its label. The amounts stay in
+  `notes`, named by culprit (jv-ears dropping chunks is this process being
+  slow; a device overrun is the machine), because a reader acts on those
+  differently and nothing computes with them.
+
+  **The word is ranked, not added.** `stalled` outranks `losing` outranks
+  `live`, which is exactly the order `CaptureMeter.health()` puts the same
+  two faults in, and the window boundary is `<=` on both sides. That is
+  the point: the plate and the heartbeat it was drawn from cannot end up
+  disagreeing about whether anything is wrong. `capturing` stays TRUE
+  through `losing` — a microphone dropping chunks is still recording the
+  ones it keeps, and the privacy light is not a quality light, so the
+  plate stays lit and only the word and the colour move.
+
+  **A loss age we cannot read is a loss, not a silence.** jv-ears
+  publishes that gauge only once something was discarded, so its PRESENCE
+  is the evidence and its value only dates it; a garbage value leaves a
+  known hole we cannot call old, and the reading is `losing`. Which is the
+  same asymmetry this file already had one fault over — an unreadable
+  `capture_age_s` comes out `stalled`, never `live` — and the absence of
+  the gauge is still the honest "nothing was lost", because ears would
+  have said.
+
+  **And the screenshot sheet was quietly relying on an absence.** The A43
+  mic-and-health window measures a plate ARRIVING (HealthPlate, 43 px of
+  growth under an unchanged MicPlate line) and its first exposure is only
+  the narrow `MIC` because `sheet.MIC_OPEN` happens to carry no loss
+  gauge. That was true and unasserted, so a future fixture with one would
+  have widened MicPlate and left the growth measurement quoting a number
+  about something else. It is a `tools` assertion now, on both exposures.
+
+- why: B84 made the machine able to say it was losing audio and the HUD
+  still could not show it, so the one indicator invariant 10 calls not
+  fakeable was drawing "fine" over the fault. Everything this needed was
+  already built — the freshness-rule-over-a-gauge-and-a-budget shape from
+  A14 — so it was one derived reading rather than new machinery.
+- tests: `bash ops/ralph/verify.sh` GREEN — 6 gates over 11 paths, 270.7 s
+  (jv-compat 49, jv-ears **142 (was 136)**, jv-hud-bridge 26, tools 440,
+  `qmltest.sh` 709 with **10 new cases** — 652 test functions, was 642 —
+  and `hudshots.sh`). Both new-gauge ears tests were RED before the
+  metrics change and the MicState cases RED before the fourth word. Also
+  `bash ops/ralph/hudscreens.sh` GREEN and the shots looked at: the mic
+  exposure still draws the narrow `MIC` at (2485, 16, 2543, 50) and the
+  deaf pair still grows 43 px, so nothing already photographed moved —
+  the seven PNGs came back byte-identical to HEAD.
+- build: `nixos-rebuild build --flake .#ares` green (new closure
+  b56123my80z1b4jifk69iwihvafx5102). No schema change — `metrics` is
+  free-form and service-local by `schemas/sys.health.json` — no jv-act, no
+  boot path, no pins.
+- files: services/jv-ears/jv_ears/audio.py,
+  services/jv-ears/tests/test_mic_loss.py, shell/jv-hud/MicPlate.qml,
+  shell/jv-hud/core/MicState.qml, shell/jv-hud/core/EarsBudgets.qml,
+  shell/jv-hud/tests/tst_micstate.qml,
+  shell/jv-hud/tests/tst_earsbudgets.qml, shell/jv-hud/README.md,
+  tools/tests/test_gen_theme_qml.py, tools/tests/test_hudscreens.py,
+  tools/tests/test_mutate.py
+- commits: 40e5a90 (the fourth word and the two gauges under it)
+- next: **A85** is the cheap companion and the one with a new assertion in
+  it — the losing word is on no photograph, and the A43 window it belongs
+  in measures a plate ARRIVING while this one gets WIDER, which this
+  harness cannot yet say. **B89** is the deeper one raised here: nothing
+  anywhere checks that a plate draws every word its state element can
+  produce, so the next fifth word will be silently drawn as `MIC` — it is
+  B88's class, a relation between two files that no third thing asserts.
+  Otherwise unchanged: **B85**'s tap half (a turn's ENDING, which
+  `--latency` never reports) is still the next cheap feature and its HUD
+  half should stay unbuilt for A71's reason; B87/B88 are the gate's own
+  written-down rules; A62/A70 — the corner now has two plates for this one
+  event, which this iteration took the `stalled` precedent on rather than
+  answering — are still a human's call.
+
+## 2026-09-25 — iteration 108 · the word a plate never names
+
+- what: **B89.** A `tools` test that reads a state element and the plate
+  that draws it as TEXT, and fails on a word the element can say that the
+  plate never names. `core/MicState.qml` has had five readings since A84
+  and `MicPlate.qml` draws three of them, two of those by deliberate
+  silence; the mapping is one ternary with a fall-through at the end, and
+  nothing anywhere asserted it covered the set. The sixth word would have
+  been drawn as a calm `MIC` with every suite green.
+
+  **Why no existing suite can see it.** The QML suites test the ELEMENT —
+  they are headless, and a plate imports the Quickshell singletons a
+  headless run cannot load (A56) — so `tst_micstate.qml` can prove
+  MicState says `losing` and can never ask what MicPlate drew for it. The
+  two screenshot sheets go the other way and photograph plates, but only
+  the states somebody remembered to stage: `MIC LOSING AUDIO` is on
+  neither sheet today (that is A85, still open). So the claim is B88's
+  class — a relation between two files with no third thing reading both —
+  and it goes where the other cross-file HUD claims already live.
+
+  **It asks for a NAME, not a branch.** Drawing a word as nothing is a
+  real decision and often the right one: `off` and `unknown` are both
+  silence on MicPlate, for two different reasons, and both reasons are
+  worth more written down than a branch would be. What the gate refuses
+  is the word going UNMENTIONED, which is the shape the silent failure
+  takes — and its message says that in those words, because a veto the
+  next author cannot act on is a veto they delete.
+
+  **Backticks or quotes, and not a bare occurrence.** `live` is already
+  in MicPlate's first line, inside "the live-microphone indicator", so a
+  substring rule would have passed on a sentence that is not about the
+  reading at all. The repo already spells a word off the wire in
+  backticks; that is the rule, and it is the difference between a gate
+  that fires and one that cannot.
+
+  **One literal had to be excluded and only one.** `typeof
+  m.capture_age_s === "number"` is inside MicState's `state` block, and
+  `"number"` is a JavaScript type name that no plate will ever draw. The
+  exclusion is that narrow — the operand of a `typeof` comparison — and
+  everything else in both blocks came out right: five words for MicState,
+  six for SpeechState (including the two that reach `return named;`
+  through an equality guard rather than a literal return).
+
+  **Non-vacuity, both ways.** This finds its work by a convention — a
+  `state` block in an element a plate declares as a property — and a
+  convention is exactly what a rename makes silently untrue. So it
+  asserts it found pairs at all, and that every element in `core/` with a
+  word set is drawn by a plate it checked. A gate that quietly reads
+  nothing is the failure it was written to prevent.
+
+- why: invariant 10 says the sensor indicators are not fakeable, and A84
+  had just added the fourth word to the one indicator that clause is most
+  about. The plate that drops a word does not draw nothing — it draws the
+  fall-through, which for MicPlate is the calm teal recording light over a
+  microphone that is in trouble. That is the not-fakeable half
+  over-claiming in the one direction it may not, and until this commit the
+  only thing standing between the HUD and it was that somebody remembered.
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 2 paths, 111.0 s
+  (jv-compat 2.7, jv-hud-bridge 1.5, tools **441 (was 440)**, `hudshots.sh`
+  67.6 with all 16 shots matching HEAD). The new test was RED before
+  MicPlate named its three words, with the message naming exactly
+  `['live', 'losing', 'stalled']`. Also `bash ops/ralph/hudscreens.sh`
+  GREEN (189.8 s, exit 0) because the gate named it: the change is a
+  comment in a plate, so nothing should have moved, and nothing did — 5 of
+  7 screens differed by the compositor's rounding alone (worst 108 px
+  inside a 256 px floor) and were restored, and all 7 match HEAD.
+- build: `nixos-rebuild build --flake .#ares` green (new closure
+  ramv5kzb1mhw8clb5nl2k9lxyhnjr3cq). No schema change, no jv-act, no boot
+  path, no pins.
+- files: shell/jv-hud/MicPlate.qml, tools/tests/test_gen_theme_qml.py
+- commits: 5a5ccf0 (the gate and the three words it made MicPlate say)
+- next: **A85** is still the photograph of `MIC LOSING AUDIO`, and it now
+  carries a warning it did not have this morning — the widening it wants
+  to measure looks like it is worth about a pixel. The arithmetic is in
+  the PLAN item; somebody should MEASURE it before building the assertion
+  around it, because if it is really zero then the whole shape of that
+  item is wrong. **B90** is raised here: four other elements decide
+  between closed word sets and none of them calls the result `state`, so
+  this gate walks past them, and the naive generalisation collects `"@"`
+  out of a key builder. Otherwise unchanged: **B85**'s tap half (a turn's
+  ENDING, which `--latency` never reports) is still the next cheap
+  feature; B87/B88 are the gate's own written-down rules; A62/A70 — the
+  corner with two plates for one event — are still a human's call.
+
+## 2026-09-25 — iteration 109 · the words nobody heard
+
+- what: **B85, the TAP half.** `cli::Endings` — a reader in `jv tap` that
+  says how each reported turn's reply ENDED, one line as it happens and a
+  table under the latency summary. `speech.state.reason` has carried
+  `completed` / `wake` / `preempted` / `error` since the schema was
+  frozen, and until this commit nothing in this repo read it: not the
+  HUD, and not `schema.rs`, where `SpeechStateReason` was a generated
+  type with no caller.
+
+  **What was wrong.** A turn is reported the moment its first
+  `speech.say` lands, because that is what time-to-first-word means — so
+  nothing after that moment is in the number. A reply that died in
+  synthesis, one the user talked over after two words, and one spoken to
+  its last sentence all printed the same `respond=2.1s`. B13's failure
+  with the label still attached: a number whose name stopped covering
+  what it measures.
+
+  **The seam was free, and it is a JOIN.** jv-voice publishes exactly ONE
+  terminal state per reply — `_speak_turn` speaks a whole `reply_group`
+  and leaves it with `idle`+`completed`, `interrupted`+`wake`/`preempted`
+  or `idle`+`error` — and that frame carries a `say_id`, which the
+  `speech.say` beside it had already threaded to an
+  `in_reply_to_utterance`. Two frames, both already on the bus, no new
+  publisher and no schema change: the same shape `hear`/`think` and
+  `tool` were found on. The difference is that those read a field and
+  this one correlates two frames, which is why it cost a bounded reader
+  (128 says, oldest evicted) rather than a line.
+
+  **It decides nothing, and the refusals are the work.** A transition
+  with no `reason` on it is not an ending — `idle` alone is jv-voice's
+  queue draining and its first frame at startup. A reason naming a
+  `say_id` nobody saw requested belongs to a turn this tap cannot name,
+  and is dropped rather than attached to the latest one (Confirmations'
+  rule about an answer out of nowhere). `in_reply_to_utterance` is
+  required and NULLABLE, and a null one is a system announcement: real
+  speech with a real ending, and no turn here for its ending to qualify.
+  Nothing is timed out. And a turn ends ONCE — the ending drops every say
+  of that utterance and not only the one it named, so that is a property
+  of the reader rather than of what jv-voice happens to publish today.
+
+  **Two written-down lists were avoidable and both were avoided**, which
+  is B87's lesson bought cheaply this time. The vocabulary accepted is
+  parsed by the GENERATED `schema::SpeechStateReason`, so it IS
+  `schemas/speech.state.json`'s and not a copy that can drift; and
+  `ending_slot` is an exhaustive `match` over that enum, so a fifth word
+  makes this file stop COMPILING rather than going silently untallied. A
+  match is the one form of a written-down list that cannot rot. A word
+  OUTSIDE the enum is still printed verbatim (clipped to its own column)
+  and tallied nowhere — guessing its row would put a number under a name
+  it does not stand for — and the summary says how many it refused.
+
+  **Silence would have read as "they all finished."** A tap that reported
+  turns and saw none of them end now prints that gap and names the frame
+  it wanted, rather than an empty space under the turn table. That is why
+  `Endings::summary` takes `turns.reported()`, and why it says the gap in
+  prose rather than as a fraction: the two counts are over different sets
+  (a reply whose input boundaries the tap never heard is an ending with
+  no turn), and a fraction would have claimed a relation nobody measured.
+  That unmeasured relation is B92.
+
+- why: B85 called this the stronger half and it was. The HUD half stays
+  unbuilt exactly as the item argued — `error` rides an `idle` frame the
+  plate draws nothing for, and the same `except` beats `degraded` with
+  the failure in its notes one `await` later, which HealthPlate already
+  draws (A71 refused that duplication). What is left there is `wake` vs
+  `preempted`, now worth writing down for a new reason: the CLI reads a
+  field the HUD does not, which is B91.
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over 3 paths, 84.1 s
+  (pylib 39.1, tools 38.9, jarvisd 6.2). 12 new unit tests (164 lib, was
+  152) and 2 new integration tests through a real broker (44 cli, was
+  42), every one of them RED before the reader existed. Six mutations,
+  six caught: a reason that defaults to `completed`, an ending that drops
+  only the say it named, an unknown `say_id` landing on the newest turn,
+  an unnamed word tallied as `completed`, an announcement treated as a
+  turn, and a cap that evicts the newest instead of the oldest. Also
+  `bash ops/ralph/hudscreens.sh` GREEN (179.0 s) because the gate named
+  it: no QML changed, so nothing should have moved and nothing did — 5 of
+  7 shots differed by the compositor's rounding alone (worst 114 px
+  inside a 256 px floor) and were restored, and all 7 match HEAD.
+- build: `nixos-rebuild build --flake .#ares` green (new closure
+  7dgm1yjkmvnlr52hk9s4kgwklx49kdaq). No schema change, no jv-act, no boot
+  path, no pins.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs
+- commits: c0f8632 (the reader, the lines, and the refusals)
+- next: **B92** is the half this commit SAID and did not FIX — `respond`
+  p50 is still one distribution over the turns that were heard in full
+  and the ones that were talked over, with the warning printed under the
+  very rows it warns about. `brain_split` is the precedent for moving a
+  sample after the fact; the trap is the unmatched turns, which must be
+  refused rather than quietly binned as completed. **B91** is the new
+  asymmetry (the CLI reads `reason`, `core/SpeechState.qml` does not) and
+  is worth one word at most. **A85** still wants somebody to MEASURE the
+  widening before the assertion is designed — the arithmetic in the item
+  says it may be worth about a pixel. B87/B88 are still the gate's own
+  written-down rules, and B87 just got cheaper to argue for: this commit
+  is what avoiding one looks like. A62/A70 — the corner with two plates
+  for one event — are still a human's call.
+
+## 2026-09-25 — iteration 110 · which of the two of you stopped the sentence
+
+- found: **a dirty worktree, and this is the first thing this entry should
+  say.** Iteration 110 opened on five modified files nobody had committed —
+  the B91 change, written and finished but never verified, plus five
+  screens off HEAD by a byte or two. So this iteration did not start a
+  thing; it FINISHED one, and the honest account is that the code below was
+  written by the iteration that did not get to commit it. What this one
+  added is the part that was missing, which is the part that matters: a
+  gate, three mutations, a sheet, a build, and a hash.
+
+  The screens went back to HEAD first. Two of them are `02-heard` and one
+  is `03-confirm` — plates with nothing to do with this word — and the byte
+  deltas were 1 to 3, which is B74's floor talking, not news. The later
+  `hudscreens.sh` run confirmed it: 5 of 7 differed by rounding alone
+  (worst 102 px inside a 256 px floor), all 7 restored, all 7 match HEAD.
+
+- what: **B91.** `core/SpeechState.qml` reads the whole `speech.state`
+  frame, not just its `state` word. `interrupted` + `reason: preempted` is
+  PREEMPTED — Jarvis cutting its own sentence short for something more
+  urgent — and everything else stays INTERRUPTED.
+
+  **Everything else**, and that is the design rather than a gap: a `wake`,
+  no `reason` at all, one that is not a string, a word a later schema adds,
+  one that contradicts its own state. INTERRUPTED is true of every one of
+  them. Only `preempted` earns a word of its own, because only `preempted`
+  is a thing the user did not do and otherwise cannot tell from the thing
+  they did.
+
+  **Three things B91 did not know when it was raised.**
+
+  (1) *The plate cannot grow.* `preempted` is 9 characters against
+  `interrupted`'s 11, so the crowded-corner objection the item inherited
+  from A62/A85 does not apply to this word — the box SHRINKS. That is not
+  an argument, it is a measurement: all 7 screens and all 16 shots match
+  HEAD to the byte.
+
+  (2) *The test helper was already lying.* `speech(voice, state, over)` put
+  its third argument on the ENVELOPE, and four call sites passed a `reason`
+  into it — a body field landing where nothing reads one. A new reader
+  would have looked tested by fixtures that never carried what they
+  claimed. It takes `(voice, state, body, over)` now, like `wake`/`ask`/
+  `reply` beside it. This was found by the change, not by a test, which is
+  worth noticing: a field nothing reads is a field nothing can catch.
+
+  (3) *`reason` rides transitions other than `interrupted`.* jv-voice
+  stamps `completed` on the idle after a finished utterance (service.py:171)
+  and `error` on the idle after a failed one (service.py:200). So the check
+  is nested UNDER the `interrupted` branch rather than standing beside
+  `listening`: a level up, it would put a word on a plate that must keep
+  drawing nothing, and a reply that FAILED is HealthPlate's sentence (A6),
+  not a fifth word in this corner.
+
+- checked, because committing another iteration's unverified code is
+  exactly when you check: the test table's `idle` fixtures were read back
+  against the publisher. They match — jv-voice's post-interruption idle
+  carries no `reason` at all, and the two that do carry one (`completed`,
+  `error`) are the two the table stages. No fixture asserts a frame this
+  machine cannot produce.
+
+  Nothing else in the HUD broke, and the reason is structural: `ActionState`,
+  `HeardState` and `OutputState` all read the RAW topic's `state` field, not
+  this element's derived word, and that field still says `interrupted`. The
+  new word exists in exactly one place and is drawn by exactly one plate.
+
+- why: B85's tap half made the HUD the less legible of two readers of one
+  topic — the CLI told `wake` from `preempted` and the screen told neither.
+  Invariant 10 is about not FAKING state; this is the quieter failure beside
+  it, a true word that is less true than the frame it came from.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over 5 paths, 121.2 s
+  (tools 39.0, qmltest 14.8, hudshots 67.4), and again as
+  `--since HEAD~1` after the commit, GREEN over what the commit actually
+  took. 8 new QML tests (74 in tst_speechstate, was 66; 721 in the suite).
+  Three mutations, three caught: an element that never says the word (2
+  red), one that attributes every interruption it cannot explain to Jarvis
+  (7 red), one that reads the reason beside the state instead of under it
+  (1 red — the `speaking` frame that carries one). Also
+  `bash ops/ralph/hudscreens.sh` GREEN (178.8 s) because the gate named it:
+  7 screens, all matching HEAD, which is the right outcome — no staged
+  frame in that sheet carries a `reason`, so nothing should have moved.
+  The `tools` gate is the one that would have caught a plate refusing to
+  name the new word (B89's rule); StatePlate names it in the dotColor
+  comment.
+- build: `nixos-rebuild build --flake .#ares` green (new closure
+  9b5gamgwmlplz7isgnjabh3zwqy3dn5c). No schema change — `preempted` has
+  been in `schemas/speech.state.json` since it was frozen; this commit
+  only starts reading it. No jv-act, no boot path, no pins.
+- files: shell/jv-hud/core/SpeechState.qml, shell/jv-hud/StatePlate.qml,
+  shell/jv-hud/tests/tst_speechstate.qml, shell/jv-hud/README.md
+- commits: 4c2dead (the word, the helper, and the nesting)
+- next: **B93** is the direct follow-up and it got cheaper again — the word
+  is on no photograph, and this commit proved the box does not grow, so the
+  shot is an ordinary "a plate arrived saying this" with no growth
+  assertion and no second plate welded to it. Its one real cost is A85's:
+  another idle hold in a probe that already spends 97 s of its 179 on idle
+  windows. **Pair it with A85 in one iteration** — two words for one hold
+  is the only way either of them is worth the seconds. **B92** is still the
+  larger one: `respond` p50 mixes turns that finished with turns that were
+  talked over, with the warning printed under the very rows it warns about,
+  and the trap is the unmatched turns, which must be refused rather than
+  binned as completed. B87/B88 are the gate's own rules and unchanged.
+  A62/A70 — one corner, two plates, one event — are still a human's call.
+
+## 2026-09-25 — iteration 111 — the word you would never be quick enough to read
+
+- built: **PLAN B93** — `docs/hud/screens/05-preempted-primary.png`, the
+  first and only picture of the word B91 taught the HUD to say. One
+  composed `speech.state` from jv-voice (`state: interrupted`,
+  `reason: preempted`, the utterance 04-unheard photographs being spoken,
+  one transition later), on the primary, with no `hold` and no second
+  plate. The shot is the cheapest thing in the sheet: no heartbeat behind
+  it, nothing that expires, one frame sitting in `bus.latest()` until the
+  camera is done.
+
+- and the thing taking it found, which is worth more than the picture:
+  **jv-voice publishes `idle` in the statement straight after the
+  interruption**, with nothing awaited between them (`_speak_one`, both
+  branches), and core/SpeechState.qml draws `idle` as nothing at all. So
+  PREEMPTED is on screen for as long as it takes one frame to follow
+  another over a Unix socket — and so has INTERRUPTED been since A3, with
+  nothing in this repo saying so. The caption says it now, a test pins
+  that sentence to the two adjacent `await self._state(...)` lines in
+  service.py, and **B94** raises the three ways to fix it for a human
+  (stop sending the redundant idle / latch the word / do not draw it),
+  because each of them is a different service's decision.
+
+- three things B93 did not know, all found by writing its tests:
+
+  (1) *FOUR elements read `speech.state`, not two.* The item's shape
+  assumed SpeechState and OutputState. ActionState and HeardState read it
+  too — as an EXIT from an outcome and from a heard line. The picture is
+  still one plate, but for three separate reasons rather than one, and
+  each of the three is now asserted: ActionState needs an `action.result`,
+  HeardState an `audio.transcript`, OutputState a `context.system`, and
+  this shot publishes none of them. The first version of that test said
+  `["OutputState", "SpeechState"]` and went red immediately, which is the
+  only reason any of this was looked at.
+
+  (2) *Adding a picture retired A73's staleness notice.* `shot_surface_box`
+  answers "the box these were taken against" by asking git which commit
+  last wrote a PNG here; that is now this commit, declaring today's
+  `300x826`, so `then == now` and the paragraph deleted itself as
+  designed. Read honestly, the derivation establishes that the NEWEST
+  picture is current — the other seven are established by B74, which
+  re-takes all of them every run and compares them to the committed
+  bytes. The replacement prose says that instead of the git heuristic.
+
+  (3) *The gate keys on a phrase, so the phrase is reserved.* The first
+  epitaph opened "These pictures used to be **older than the box**" and
+  the gate went red on it, correctly: a substring search cannot tell prose
+  saying a condition is OVER from prose saying it holds. Reworded, and the
+  test's own docstring now says the phrase is reserved and why.
+
+- also measured, and it corrects two PLAN items: **a shot is not an idle
+  window.** Adding this one took `hudscreens.sh` from 183.8 s to 184.0 s
+  — a settle and one jarvisd/jv-hud pair, about 2 s. Both B93 and A85 led
+  with a cost objection that priced a photograph as a ~20 s idle hold, and
+  it does not apply. A85's photograph half (`MIC LOSING AUDIO` on the
+  sheet) is therefore cheap and should just be taken; what stays expensive
+  in A85 is the growth assertion it leads with, for a widening its own
+  note computes at about one pixel. Both items now say so.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths, 107 s
+  (tools 40.0, hudshots 67.4), and again as `--since HEAD~1` after the
+  commit, GREEN over the four files the commit actually took. 6 new tests
+  in `tools/tests/test_hudscreens.py` (446 in the suite, was 440): the
+  body is legal against the frozen `speech.state` schema, it is the body
+  jv-voice's own test asserts verbatim, it is the same `say_id` as the
+  sheet's speaking frame, it lights exactly one plate for the three
+  reasons above, and the caption names both words and the `idle` that
+  follows. `bash ops/ralph/hudscreens.sh` run twice: once to take the
+  shot (183.8 s), and once at HEAD after committing — GREEN, all 8 shots
+  matching, 5 restored from compositor rounding.
+- honesty about the gate: the first `--since HEAD~1` after the commit was
+  RED on one test (the reserved phrase above), so the commit was amended
+  rather than left broken and re-verified green. It was never pushed.
+  Three tests are also unavoidably red BEFORE a commit that adds a screen
+  and green after it — they read git for the commit that last wrote a PNG,
+  so the tree cannot satisfy them until the commit exists.
+- build: `nixos-rebuild build --flake .#ares` green, closure
+  9b5gamgwmlplz7isgnjabh3zwqy3dn5c — unchanged from iteration 110, which
+  is right: this commit touches a harness, a document and a picture, and
+  nothing that ships. No schema change, no jv-act, no boot path, no pins.
+- files: tools/hudscreens/sheet.py, tools/tests/test_hudscreens.py,
+  docs/hud/screens/README.md, docs/hud/screens/05-preempted-primary.png
+- commits: fe69aa8 (the shot, its tests, and the notice it retired)
+- next: **B94** is the one to read first, and it is a human's — the HUD
+  has two words nobody can read, and the three fixes live in three
+  different files. **A85's photograph half is now cheap** (~2 s) and is
+  the obvious loop task: a `MIC_LOSSY` fixture and a `06-lossy` shot, with
+  its growth assertion explicitly deferred. **B92** is still the larger
+  one: `respond` p50 mixes turns that finished with turns that were talked
+  over, and the trap is the unmatched turns, which must be refused rather
+  than binned as completed. B87/B88/B90 are the gate's own rules and
+  unchanged. A62/A70 — one corner, two plates, one event — are still a
+  human's call, and B94 is the same shape with a clock on it.
+
+## 2026-09-25 — iteration 112 · the recording with holes in it
+
+- built: **PLAN A85, the photograph half** — `sheet.MIC_LOSSY` and
+  `docs/hud/screens/06-lossy-primary.png`. One composed jv-ears heartbeat
+  on the primary, and the first picture in this repo of the recording
+  light saying anything but a bare `MIC`: **MIC LOSING AUDIO** on a `warn`
+  dot, with **jv-ears DEGRADED** under it. The device is open and audio is
+  arriving on time; what is wrong is that some of it never got here.
+
+- and the reason it is two plates rather than one, which is the half worth
+  having: **both lines come off a single frame.** `CaptureMeter.health()`
+  calls a losing device `degraded` in the same beat that reports the loss,
+  so MicPlate and HealthPlate are welded and cannot be photographed apart.
+  Every other two-plate picture in this sheet is two publishers agreeing.
+  A43's idle window has exploited that coincidence for the *stalled* fault
+  since it was built; this is the first time anyone can SEE it.
+
+- A85 is marked done for the picture and **A86 carries the rest**, which
+  is what the item actually led with: nobody has ever measured the plate
+  getting WIDER. Every growth assertion this harness has proves a plate
+  ARRIVED (same top, same right edge, taller box); a second word on an
+  existing plate is invisible to all of them, so `06-lossy` is a
+  photograph with no measurement under it — nothing in the run would
+  notice if it said `MIC`. A86 says to take the measurement (`deaf →
+  lossy`, the only pair that isolates the mic line) BEFORE designing the
+  assertion, because A85's own arithmetic puts the widening at about a
+  pixel and the new picture agrees: `jv-ears DEGRADED` is the wider plate,
+  so it, not the mic line, is what `drawn_box`'s left edge is measuring.
+
+- four things A85 did not know, all found by writing its tests:
+
+  (1) *The fixture is the first one here held to what the service really
+  sends.* Its gauges are the exact set `CaptureMeter.metrics()` writes for
+  an open, delivering, losing device, and its `notes` is the sentence
+  `loss_note()` composes. `MIC_OPEN` and `MIC_DEAF` are not: MIC_DEAF's
+  note (`"capture stalled"`) is a sentence jv-ears cannot send, and
+  MIC_OPEN is missing `capture_loss_window_s`, which real ears ships from
+  the first beat. Raised as **A87**, with the trap written down — MIC_OPEN's
+  narrow gauge set is LOAD-BEARING, because A43's window is measured on the
+  absence of the loss pair, so the one gauge that would complete it is the
+  one that must not be added.
+
+  (2) *The method is `metrics()`, not `gauges()`.* The test asserting the
+  fixture against jv-ears was written against the wrong name and went red
+  on the first run, which is the gate doing its job rather than a mishap.
+
+  (3) *"Which plates does this frame light" cannot be answered by grep.*
+  Every plate NAMES the others in prose, so `MicState|HealthState` matched
+  LinkPlate and StatePlate as well. It has to be the declaration
+  (`MicState {`) — and the fifth reader of `sys.health`, `EarsBudgets`,
+  which StatePlate also takes, lights nothing on its own and needed saying
+  separately rather than being lumped in.
+
+  (4) *A caption cannot link to another picture by its file name.* The
+  sheet's own gate requires every PNG to appear in exactly ONE `###`
+  section, and the first draft's link to `03-confirm-primary.png` broke
+  it. The caption points at the healthy-mic picture by anchor now, and the
+  test that requires the pointer says why it is an anchor.
+
+- **a shot costs about 4 s, not 0.2 s** — and this corrects the number
+  B93 recorded, which A85 then reasoned from. This run: 192.5 s against
+  iteration 111's 184.0 s. The phases a new shot really adds are one
+  jarvisd/jv-hud pair and two settles (`settle` booked 21.7 s over six
+  shots, ≈3.2 s each) plus an encode and a read-back — about 4 s. The rest
+  of the 8.5 s is variance: the idle probe alone is 97.6 s of the run.
+  B93's +0.2 s was inside that noise. A shot is still far cheaper than an
+  idle window, which is the conclusion both items drew, so nothing about
+  their advice changes — only the figure.
+
+- also: the harness's own prose counted its pictures, and the count had
+  been wrong since the eighth shot. Six files said "seven pictures" about
+  a run that takes nine. They are count-free now rather than renumbered,
+  so the next shot cannot make them wrong again — except where the number
+  is a RECORD of a measurement (`sheet.py`'s B74 floor, measured over the
+  seven files that existed then), which is left exactly as it was.
+
+- tests: `bash ops/ralph/verify.sh` GREEN. 7 new tests in
+  `tools/tests/test_hudscreens.py` (453 in the suite, was 446): the body is
+  legal against the frozen `sys.health` schema, the gauges are the whole
+  set `CaptureMeter.metrics()` writes, the note is `loss_note()`'s
+  sentence, the frame reads as `losing` and not as the `stalled` that
+  outranks it, this is the ONLY shot photographing a microphone in
+  trouble (asserted over the other shots, not stated), the shot lights
+  exactly two plates, and the caption names both words, says one heartbeat
+  put them there, and points at the healthy picture.
+  `bash ops/ralph/hudscreens.sh` run once, 192.5 s, 9 screens — 6 restored
+  to committed bytes by the B74 floor, `06-lossy-primary.png` new.
+- build: `nixos-rebuild build --flake .#ares` green, closure
+  9b5gamgwmlplz7isgnjabh3zwqy3dn5c — unchanged from iterations 110 and
+  111, which is right: a harness, a document and a picture, nothing that
+  ships. No schema change, no jv-act, no boot path, no pins.
+- files: tools/hudscreens/sheet.py, tools/tests/test_hudscreens.py,
+  docs/hud/screens/README.md, docs/hud/screens/06-lossy-primary.png,
+  ops/ralph/hudscreens.sh, tools/verify.py, tools/tests/test_verify.py,
+  tools/dependents.py
+- commits: 61a326e (the fixture, the shot, its seven tests and the caption)
+- next: **A86** is the one this iteration hands over deliberately — take
+  the `deaf → lossy` measurement before designing anything. **A87** is a
+  small, well-scoped commit with its one trap already written down.
+  **B94** is still the one for a human, and it is the oldest question in
+  this corner: the HUD draws two words nobody can read. **B92** stays the
+  larger loop task: `respond` p50 mixes finished turns with talked-over
+  ones, and the unmatched turns must be refused rather than binned.
+  A62/A70 — one corner, two plates, one event — remain a human's call.

@@ -89,6 +89,36 @@ from jarvis_bus import BusError
 # the rest of the body (load, memory, net, VRAM, battery) rides the pipe
 # because the envelope is forwarded whole and is read by no element.
 #
+# guard.verdict is the fifth (PLAN A51), and the one topic here that is not
+# about Jarvis at all — it is about a file somebody handed this machine.
+# Invariant 8 says a Windows binary is untrusted by default and jv-guard
+# screens every one before jv-compat builds a prefix for it; a refusal is
+# the one moment JarvisOS says NO to something the user asked for, and it
+# used to happen entirely off screen. core/GuardState.qml reads the
+# `verdict` (a frozen enum), the `sha256` and the `path`, and NOT the
+# `reasons` — the schema says those are "spoken on request", and they are
+# the only text on this topic written by a scanner rather than fixed by a
+# schema, so they are the same call as action.result's `detail`.
+#
+# The `path` is the one body field the HUD renders that an ATTACKER chose:
+# a file name comes from whoever built the installer, and on Linux it may
+# carry newlines, control characters and bidirectional overrides. It is
+# rendered anyway — a refusal that cannot name the file is barely a report
+# — but GuardState sanitises it first, and that is a rule about the HUD
+# rather than about this pipe, which forwards the envelope whole.
+#
+# compat.install is the sixth (PLAN A52), and the other half of the same
+# story: jv-guard says whether a binary may run at all, and jv-compat says
+# what happened when it did. It is the only LIFECYCLE on this list — six
+# events for one install, minutes apart — and the HUD draws exactly one of
+# them, `failed`. core/InstallState.qml reads the `event` (a frozen enum),
+# the `app` slug and the `sha256`, and NOT the `error`: on a failed frame
+# that field is the last 500 bytes of the confined Windows installer's own
+# stdout, which is free text written by the one thing invariant 8 calls
+# untrusted outright. Same call as the scanner's `reasons` and jv-act's
+# `detail` — it rides this pipe because the envelope is forwarded whole,
+# and it reaches no pixel.
+#
 # `intent.action.args` is the most sensitive body on this list: it is
 # whatever the tool was asked to operate on, a path or a search string or
 # a window title. It rides this pipe because the envelope is forwarded
@@ -108,6 +138,8 @@ DEFAULT_TOPICS: Sequence[str] = (
     "intent.action",
     "action.result",
     "context.system",
+    "guard.verdict",
+    "compat.install",
 )
 
 # Exactly the envelope (schemas/envelope.json). Forwarding the whole thing

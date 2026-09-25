@@ -193,6 +193,21 @@ in
       description = "Jarvis context (window events + system snapshot)";
       wantedBy = [ "default.target" ];
       unitConfig.ConditionUser = "ofek";
+      # wpctl is how the 1 Hz snapshot reads the default sink, and it ships
+      # in wireplumber rather than in this service's own closure. Inherited
+      # PATH happened to carry it; a unit that shells out names the package
+      # it shells out to, the way jv-act does below. Without it the snapshot
+      # now reports itself degraded rather than inventing a volume — which
+      # is the right failure and still a failure.
+      #
+      # nvidia-smi is the same story with a quieter ending: it lives in the
+      # driver's `bin` output, nothing put it on this PATH, and so
+      # `gpu_vram_free_mb` — the one number behind invariant 6's "6 GB VRAM
+      # is a scheduling problem" — had never once been on the bus on ares.
+      # The field is optional, so nothing broke and nothing lied; it was
+      # simply never measured. Named the way jv-llm below already names it:
+      # this READS hardware.nvidia, it does not set it.
+      path = [ pkgs.wireplumber config.hardware.nvidia.package.bin ];
       environment = commonEnv;
       serviceConfig = {
         ExecStart = "${pyEnvs.contextEnv}/bin/jv-context";

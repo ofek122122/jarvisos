@@ -21,13 +21,20 @@ run against the wrong machine, or not run at all.
 
 import json
 import re
+import subprocess
 import sys
+import tomllib
 from pathlib import Path
+
+import pytest
 
 from test_gen_theme_qml import ROOT
 
 sys.path.insert(0, str(ROOT / "tools" / "hudscreens"))
 import sheet  # noqa: E402
+
+sys.path.insert(0, str(ROOT / "tools"))
+import hudsheet  # noqa: E402
 
 SCREENS = ROOT / "docs" / "hud" / "screens"
 DRIVER = ROOT / "ops" / "ralph" / "hudscreens.sh"
@@ -738,6 +745,18 @@ def test_the_two_heartbeats_light_exactly_the_plates_the_window_claims():
         "the second exposure's device is not stalled by jv-ears' own budget, "
         "so MicPlate still says MIC and the window is measuring one plate"
     )
+    # A84 gave MicPlate a third line — `MIC LOSING AUDIO`, for a device that
+    # is open and delivering and dropping chunks anyway. It is wider than
+    # `MIC` and it rides on a gauge that is ABSENT here, which is the only
+    # reason the first exposure draws the narrow line. An absence is not an
+    # assertion, so it is one now: a loss gauge added to either body would
+    # change what is on screen and leave the growth below measuring a plate
+    # that got wider rather than a plate that arrived.
+    for body, which in ((before, "first"), (after, "second")):
+        assert "capture_loss_age_s" not in body["metrics"], (
+            f"the {which} exposure now reports a discarded chunk, so MicPlate "
+            "is drawing a line this window was not measured against"
+        )
 
 
 def test_the_two_exposures_differ_only_in_the_device_going_silent():
@@ -1457,6 +1476,186 @@ def test_the_growth_rule_is_stated_once():
     )
 
 
+# ------------------------------------ one plate, one word, one instant (B93)
+
+
+def preempted() -> dict:
+    for shot in sheet.SHOTS:
+        if shot["file"] == "05-preempted":
+            return shot
+    raise AssertionError(
+        "the sheet no longer takes 05-preempted — the only picture of the "
+        "word B91 taught the HUD to tell apart from INTERRUPTED"
+    )
+
+
+def test_the_preempted_body_is_a_legal_speech_state():
+    """invariant 2: schemas are law, and a harness publishing an illegal
+    body is photographing a machine that cannot exist. Hand-written, so
+    checked rather than trusted — and the `reason` is checked against the
+    frozen enum rather than against the one word this shot needs, because
+    a `reason` outside it is the case core/SpeechState.qml deliberately
+    draws as plain INTERRUPTED.
+    """
+    schema = json.loads((ROOT / "schemas" / "speech.state.json").read_text("utf-8"))
+    body = preempted()["frames"][0]["publish"]["body"]
+    missing = set(schema["required"]) - set(body)
+    assert not missing, f"speech.state: body is missing {sorted(missing)}"
+    extra = set(body) - set(schema["properties"])
+    assert not extra, f"speech.state: body has unknown keys {sorted(extra)}"
+    assert body["state"] in schema["properties"]["state"]["enum"], (
+        f"speech.state: {body['state']} is not one of the three words the "
+        "frozen enum allows, and core/SpeechState.qml draws nothing for a "
+        "state it does not recognise"
+    )
+    assert body["reason"] in schema["properties"]["reason"]["enum"], (
+        f"speech.state: {body['reason']} is not a reason jv-voice can send"
+    )
+
+
+def test_the_preempted_frame_is_the_one_jv_voice_actually_publishes():
+    """The shot's whole claim is that this body happens on this machine.
+    jv-voice's own test asserts the frame verbatim — an urgent utterance
+    preempting an interruptible one — so that assertion is the source, and
+    a sheet that drifted from it would be a picture of a transition no
+    service makes.
+    """
+    body = preempted()["frames"][0]["publish"]["body"]
+    voice = (
+        ROOT / "services" / "jv-voice" / "tests" / "test_voice_service.py"
+    ).read_text("utf-8")
+    asserted = re.search(
+        r'==\s*\{"state": "interrupted", "say_id": \w+, "reason": "preempted"\}',
+        voice,
+    )
+    assert asserted, (
+        "services/jv-voice no longer asserts the body this shot composes, so "
+        "nothing outside docs/hud/screens says this frame is one jv-voice sends"
+    )
+    assert body["state"] == "interrupted" and body["reason"] == "preempted", (
+        f"the shot composes {body}, and jv-voice's own test says the "
+        "preemption frame is state=interrupted with reason=preempted"
+    )
+    assert set(body) == {"state", "say_id", "reason"}, (
+        f"the shot composes {sorted(body)} and jv-voice publishes exactly "
+        "state, say_id and reason for this transition"
+    )
+
+
+def test_the_preempted_frame_is_the_speaking_one_a_transition_later():
+    """The two composed jv-voice frames in this sheet are ONE utterance:
+    04-unheard photographs it being spoken and this one photographs it
+    being cut short. A second say_id would be two unrelated turns wearing
+    the same publisher, and `say_id` is the only thing in either body that
+    could say so.
+    """
+    speaking = sheet.VOICE_SPEAKING["publish"]
+    stopped = preempted()["frames"][0]["publish"]
+    assert speaking["src"] == stopped["src"] == "jv-voice", (
+        "core/SpeechState.qml reads speech.state from jv-voice; a frame "
+        "under another name is one this HUD would refuse"
+    )
+    assert speaking["body"]["say_id"] == stopped["body"]["say_id"], (
+        f"the sheet's speaking frame is {speaking['body']['say_id']} and the "
+        f"preempted one is {stopped['body']['say_id']} — two turns, "
+        "photographed as if they were one"
+    )
+
+
+def test_the_preempted_shot_lights_exactly_the_plate_it_claims():
+    """One plate, and the caption says so. Two elements in `core/` read
+    `speech.state` — SpeechState, which draws the word, and OutputState,
+    which needs a `context.system` snapshot as well before it can say
+    anything — so a snapshot added to these frames would put a second line
+    under a caption describing one.
+    """
+    shot = preempted()
+    assert "hold" not in shot and "grows_from" not in shot, (
+        "05-preempted now feeds or grows from something, so it is no longer "
+        "the one-frame shot its caption describes"
+    )
+    topics = {f["publish"]["topic"] for f in shot["frames"]}
+    assert topics == {"speech.state"}, (
+        f"05-preempted publishes {sorted(topics)} — the shot is of one word "
+        "on one plate, and every other topic here is another plate"
+    )
+    # FOUR elements read this topic, not one, and only SpeechState draws a
+    # word off it alone. The other three read it as an EXIT from something
+    # else they are already showing — an outcome, a heard line, a sink —
+    # so each of them needs a topic this shot does not publish, and the
+    # picture is one plate because of three separate facts rather than one.
+    # An element that stopped needing its own subject would put a second
+    # line under a caption describing one.
+    core = ROOT / "shell" / "jv-hud" / "core"
+
+    def topics_of(path):
+        return set(re.findall(r'(?:frameOn|bus\.latest)\("([\w.]+)"\)', path.read_text("utf-8")))
+
+    subjects = {
+        "ActionState": "action.result",
+        "HeardState": "audio.transcript",
+        "OutputState": "context.system",
+    }
+    readers = sorted(
+        path.stem for path in core.glob("*.qml") if "speech.state" in topics_of(path)
+    )
+    assert readers == sorted(["SpeechState", *subjects]), (
+        f"{readers} read speech.state now, and this shot was measured "
+        f"against {sorted(['SpeechState', *subjects])} — a new reader may be "
+        "drawing a plate the caption does not mention"
+    )
+    for name, subject in subjects.items():
+        assert subject in topics_of(core / f"{name}.qml"), (
+            f"core/{name}.qml no longer reads {subject}, so jv-voice's frame "
+            "may now be enough to light it on its own and this shot is of "
+            "more than one plate"
+        )
+        assert subject not in topics, (
+            f"05-preempted now publishes {subject}, which is what "
+            f"core/{name}.qml is waiting for — the caption says one plate"
+        )
+
+
+def test_the_readme_says_the_word_in_this_picture_does_not_linger():
+    """The one thing a reader cannot get from the photograph. jv-voice
+    publishes `idle` in the statement after this frame, with nothing
+    awaited between them, and `idle` draws nothing — so PREEMPTED is on
+    screen for one frame's flight over a Unix socket. A caption that left
+    that out would be showing a state nobody can actually see and calling
+    it what the HUD shows.
+    """
+    readme = readme_text()
+    for name in sheet.capture_files(preempted()):
+        assert name in readme, f"docs/hud/screens/README.md never shows {name}"
+    section = [s for s in readme.split("\n### ") if "05-preempted-primary.png" in s]
+    assert len(section) == 1
+    section = section[0]
+    assert "PREEMPTED" in section, (
+        "the caption never names the word the picture is of"
+    )
+    assert "INTERRUPTED" in section, (
+        "the caption never names the word PREEMPTED is worth telling apart "
+        "from, which is the whole of why B91 added it"
+    )
+    assert re.search(r"\bidle\b", section), (
+        "the caption never says jv-voice publishes `idle` immediately after "
+        "this frame — without it the picture reads as a state you could sit "
+        "and look at, and it is an instant"
+    )
+    service = (
+        ROOT / "services" / "jv-voice" / "jv_voice" / "service.py"
+    ).read_text("utf-8")
+    assert re.search(
+        r'_state\("interrupted", say_id, self\._interrupt_reason or "preempted"\)\n'
+        r'\s*await self\._state\("idle"\)',
+        service,
+    ), (
+        "jv-voice no longer publishes `idle` in the statement straight after "
+        "the interruption, so the caption is describing a sequence this "
+        "service has stopped making — re-read it and rewrite it"
+    )
+
+
 def test_the_readme_shows_the_one_picture_of_two_plates_disagreeing():
     """A photograph nobody is told how to read is decoration. This one
     needs its caption more than most: both plates are telling the truth,
@@ -1484,4 +1683,965 @@ def test_the_readme_says_the_screens_are_not_byte_reproducible():
         "docs/hud/screens/README.md no longer says the screens are not "
         "reproducible byte for byte — without it a clean diff after a "
         "re-run reads as evidence, and a dirty one reads as a regression"
+    )
+
+
+# ------------------------- one heartbeat, two plates, a holed recording (A85)
+#
+# `06-lossy` is the first photograph in this repo of the recording light
+# saying anything but a bare `MIC`. Until it, the two ways an open
+# microphone stops being one you can trust — silent (`MIC NO AUDIO`) and
+# holed (`MIC LOSING AUDIO`) — existed only as prose and as an idle
+# window's stopwatch, and the wider of the two shipped unphotographed.
+#
+# The shot is also the sheet's only TWO-plate picture off a single frame,
+# and that is the interesting part rather than an economy: `CaptureMeter`
+# calls a losing device `degraded`, so ONE jv-ears beat is a MicPlate line
+# and a HealthPlate line at once. Everywhere else in this corner a second
+# line means a second publisher agreeing.
+#
+# So the gates here are about FIDELITY. The frames are composed, which
+# means nothing but this file stops them from being a heartbeat jv-ears
+# would never send — and a photograph of a machine that cannot exist is
+# worse than no photograph, because it looks exactly as real as the others.
+
+
+def lossy() -> dict:
+    for shot in sheet.SHOTS:
+        if shot["file"] == "06-lossy":
+            return shot
+    raise AssertionError(
+        "the sheet no longer takes 06-lossy — the only picture of a "
+        "microphone that is open, delivering, and losing chunks anyway"
+    )
+
+
+def ears_beats(shot: dict) -> list[dict]:
+    """Every jv-ears heartbeat body a shot puts on the bus, in any of the
+    three places a shot can put frames."""
+    out = []
+    for frame in [*shot["frames"], *shot.get("hold", []), *shot.get("grows_from", [])]:
+        pub = frame.get("publish")
+        if pub and pub["topic"] == "sys.health" and pub["src"] == "jv-ears":
+            out.append(pub["body"])
+    return out
+
+
+def capture_meter() -> str:
+    return (ROOT / "services" / "jv-ears" / "jv_ears" / "audio.py").read_text("utf-8")
+
+
+def test_the_lossy_body_is_a_legal_heartbeat():
+    """invariant 2: schemas are law. Hand-written, so checked rather than
+    trusted — a body with a key `sys.health` does not allow is one jarvisd
+    would refuse and the picture would be of an empty corner.
+    """
+    schema = json.loads((ROOT / "schemas" / "sys.health.json").read_text("utf-8"))
+    body = sheet.MIC_LOSSY["publish"]["body"]
+    missing = set(schema["required"]) - set(body)
+    assert not missing, f"sys.health: body is missing {sorted(missing)}"
+    extra = set(body) - set(schema["properties"])
+    assert not extra, f"sys.health: body has unknown keys {sorted(extra)}"
+    assert body["state"] in schema["properties"]["state"]["enum"], (
+        "core/HealthState.qml renders only the schema's own state words and "
+        "turns anything else into `unknown` — a different finding entirely"
+    )
+
+
+def test_the_lossy_gauges_are_the_whole_set_jv_ears_would_publish():
+    """The fixture is a photograph's worth of jv-ears, so it has to be the
+    gauges jv-ears really writes for this device — all of them, and nothing
+    invented. `CaptureMeter.metrics()` writes four unconditionally and two
+    more once there is something to measure, and a device that is open,
+    delivering AND losing has both of those.
+
+    MIC_OPEN and MIC_DEAF are held to the same standard one fault back
+    (A87) — the whole set MINUS `capture_loss_age_s`, which a device that
+    has never lost a chunk really does omit, and which A43's idle window is
+    measured on the absence of.
+    """
+    src = capture_meter()
+    body = re.search(r"\n    def metrics\(.*?\n    def ", src, re.S)
+    assert body, "jv_ears/audio.py no longer has a CaptureMeter.metrics()"
+    body = body.group(0)
+    always = set(re.findall(r'^\s+"(\w+)":', body, re.M))
+    conditional = set(re.findall(r'out\["(\w+)"\]', body))
+    assert always and conditional, (
+        "nothing was parsed out of CaptureMeter.metrics() — its shape moved, "
+        "and this gate is now asserting a fixture against an empty set"
+    )
+    assert set(sheet.MIC_LOSSY["publish"]["body"]["metrics"]) == always | conditional, (
+        f"the composed gauges are {sorted(sheet.MIC_LOSSY['publish']['body']['metrics'])} "
+        f"and jv-ears publishes {sorted(always | conditional)} for a device "
+        "that is open, delivering and losing — the photograph is of a "
+        "heartbeat this service does not send"
+    )
+
+
+def test_the_lossy_note_is_the_sentence_jv_ears_composes():
+    """`notes` reaches no plate — HealthPlate draws the service and the
+    word and nothing else — so this is fidelity for its own sake, and it
+    is worth it: the note is the only place the two culprits are named
+    apart, and the sheet is where a reader meets the format.
+    """
+    src = capture_meter()
+    note = sheet.MIC_LOSSY["publish"]["body"]["notes"]
+    for literal in (
+        '"microphone losing audio: " + " and ".join(parts) + " since start"',
+        'f"jv-ears dropped {lost.samples / self.rate:.1f}s"',
+        'f"{lost.overruns} device overrun{plural} (length unknown)"',
+    ):
+        assert literal in src, (
+            f"CaptureMeter.loss_note() no longer composes {literal} — re-read "
+            "it and rewrite the note this sheet publishes"
+        )
+    assert re.fullmatch(
+        r"microphone losing audio: jv-ears dropped \d+\.\ds and "
+        r"\d+ device overruns? \(length unknown\) since start",
+        note,
+    ), (
+        f"the sheet publishes {note!r}, which is not the sentence "
+        "CaptureMeter.loss_note() composes when both culprits lost audio"
+    )
+
+
+def ears_budget(name: str) -> float:
+    """A `CaptureMeter` class constant, read out of the Python that
+    enforces it.
+
+    These two are BUDGETS and not measurements: `metrics()` writes them
+    from the first heartbeat, before any audio has arrived, because a
+    consumer needs to know the rule before it can judge a number by it.
+    So a fixture may not choose its own — there is exactly one value
+    jv-ears can send, and it is this one.
+    """
+    src = capture_meter()
+    m = re.search(rf"^    {name} = ([\d.]+)$", src, re.M)
+    assert m, f"CaptureMeter no longer declares {name} — this gate is reading air"
+    return float(m.group(1))
+
+
+def mic_fixtures() -> dict:
+    return {
+        "MIC_OPEN": sheet.MIC_OPEN,
+        "MIC_DEAF": sheet.MIC_DEAF,
+        "MIC_LOSSY": sheet.MIC_LOSSY,
+    }
+
+
+def test_the_budget_gauges_are_the_constants_jv_ears_actually_ships():
+    """Every mic fixture here used to publish `capture_stall_s: 2.0`, and
+    there is no jv-ears that sends that: the gauge is `CaptureMeter.STALL_S`
+    itself, copied onto the heartbeat unchanged. It read as a harmless
+    choice because 0.02s is live and 9.4s is stalled against 2.0 exactly as
+    they are against 1.0 — which is the whole trouble with an invented
+    number, that it costs nothing until the day the real one moves past it
+    and the sheet keeps photographing the old rule.
+
+    Held over ALL the sheet's jv-ears beats rather than the three fixtures,
+    because the next hand-written heartbeat is the one that would drift.
+    """
+    stall = ears_budget("STALL_S")
+    loss_window = ears_budget("LOSS_S")
+    seen = 0
+    for shot in sheet.SHOTS:
+        for body in ears_beats(shot):
+            m = body.get("metrics", {})
+            if not m:
+                continue
+            seen += 1
+            assert m.get("capture_stall_s") == stall, (
+                f"{shot['file']} publishes capture_stall_s "
+                f"{m.get('capture_stall_s')!r} and jv-ears ships "
+                f"CaptureMeter.STALL_S, which is {stall}"
+            )
+            assert m.get("capture_loss_window_s") == loss_window, (
+                f"{shot['file']} publishes capture_loss_window_s "
+                f"{m.get('capture_loss_window_s')!r} and jv-ears ships "
+                f"CaptureMeter.LOSS_S, which is {loss_window}"
+            )
+    assert seen >= 3, (
+        f"only {seen} of this sheet's heartbeats carry gauges at all, so "
+        "this gate is passing by having nothing to read"
+    )
+
+
+def test_the_deaf_note_is_the_sentence_jv_ears_composes():
+    """`notes` said "capture stalled", which is a summary of the fault and
+    not a sentence any jv-ears writes: `CaptureMeter.health()` sends the
+    AGE, and the age is the half a reader cannot get anywhere else — the
+    plate says the device is deaf, the note says for how long.
+
+    Nothing draws it (HealthPlate draws the service and the word), which is
+    why it survived from A43 to A87 unread. Fidelity for its own sake, same
+    as the lossy note above: the sheet is where a reader meets the format.
+    """
+    body = sheet.MIC_DEAF["publish"]["body"]
+    literal = 'f"microphone open but no audio for {age:.1f}s"'
+    assert literal in capture_meter(), (
+        f"CaptureMeter.health() no longer composes {literal} — re-read it "
+        "and rewrite the note this sheet publishes"
+    )
+    age = body["metrics"]["capture_age_s"]
+    assert body["notes"] == f"microphone open but no audio for {age:.1f}s", (
+        f"the sheet publishes {body['notes']!r} over a device last heard "
+        f"from {age}s ago, which is not what jv-ears would have said"
+    )
+
+
+def test_the_healthy_and_deaf_gauges_are_the_whole_set_minus_the_one_loss_gauge():
+    """The other two thirds of A87. `CaptureMeter.metrics()` writes four
+    gauges unconditionally and two more once there is something to measure,
+    and a device that is open and delivering has exactly one of the two: the
+    age. The loss age is genuinely absent — a device that never lost a chunk
+    omits it — so "the whole set minus that one" is not a concession to
+    these fixtures, it IS the faithful body for the device they photograph.
+
+    Which is also why adding the loss age here would not be a fidelity
+    improvement but a different device: it moves MicPlate from `MIC` to
+    `MIC LOSING AUDIO`, and A43's idle window measures a plate ARRIVING
+    against a plate whose width does not move (see the window's own test).
+    """
+    src = capture_meter()
+    body = re.search(r"\n    def metrics\(.*?\n    def ", src, re.S)
+    assert body, "jv_ears/audio.py no longer has a CaptureMeter.metrics()"
+    body = body.group(0)
+    always = set(re.findall(r'^\s+"(\w+)":', body, re.M))
+    conditional = set(re.findall(r'out\["(\w+)"\]', body))
+    assert "capture_age_s" in conditional and "capture_loss_age_s" in conditional, (
+        f"CaptureMeter.metrics() now writes {sorted(conditional)} "
+        "conditionally, so the split this gate is built on has moved"
+    )
+    for name in ("MIC_OPEN", "MIC_DEAF"):
+        gauges = set(mic_fixtures()[name]["publish"]["body"]["metrics"])
+        assert gauges == always | {"capture_age_s"}, (
+            f"sheet.{name} publishes {sorted(gauges)} and jv-ears publishes "
+            f"{sorted(always | {'capture_age_s'})} for a device that is open, "
+            "delivering and keeping all of it"
+        )
+
+
+def test_reporting_the_loss_window_was_safe_because_no_plate_reads_it():
+    """The argument that let A87 add `capture_loss_window_s` to the two
+    older fixtures at all, written down so it stays checkable.
+
+    It moves `EarsBudgets.lossWindowS` from the pinned fallback to the
+    reported value — the SAME second, since the fallback mirrors
+    `CaptureMeter.LOSS_S` and a tools test fails the build if it drifts —
+    and the only other thing that changes is `lossWindowReported`, which
+    no plate reads. So a gauge arrived, one boolean flipped, and nothing
+    on screen moved. The day a plate starts drawing that boolean, this
+    goes red and the sheet's pictures need re-reading.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    budgets = (hud / "core" / "EarsBudgets.qml").read_text("utf-8")
+    assert "lossWindowReported" in budgets, (
+        "core/EarsBudgets.qml no longer answers whether the loss window came "
+        "off a heartbeat, so the claim below is about a property that is gone"
+    )
+    readers = sorted(
+        f.name
+        for f in hud.glob("*.qml")
+        if "lossWindowReported" in f.read_text("utf-8")
+    )
+    assert readers == [], (
+        f"{readers} now draw whether jv-ears REPORTED its loss window, so "
+        "adding capture_loss_window_s to MIC_OPEN and MIC_DEAF changed what "
+        "the sheet photographs — re-read the pictures before trusting them"
+    )
+
+
+def test_the_lossy_frame_reads_as_losing_and_not_as_the_fault_above_it():
+    """`stalled` and `losing` are both degraded and only one can be drawn:
+    core/MicState.qml ranks a stall first, because no audio at all is the
+    bigger fact. So a fixture whose `capture_age_s` drifted past the stall
+    budget would still light two plates, still pass every gate about the
+    picture being lit, and put `MIC NO AUDIO` under a caption about holes.
+    """
+    m = sheet.MIC_LOSSY["publish"]["body"]["metrics"]
+    assert m["mic_open"] == 1, (
+        "the composed device is not open, so MicPlate draws nothing at all "
+        "and the picture is of an empty corner"
+    )
+    assert m["capture_age_s"] <= m["capture_stall_s"], (
+        f"the composed device last delivered {m['capture_age_s']}s ago "
+        f"against jv-ears' own {m['capture_stall_s']}s budget, so MicState "
+        "reads it as `stalled` and the plate says MIC NO AUDIO"
+    )
+    assert m["capture_loss_age_s"] <= m["capture_loss_window_s"], (
+        f"the composed loss is {m['capture_loss_age_s']}s old against a "
+        f"{m['capture_loss_window_s']}s window, so it is no longer news and "
+        "MicPlate says a confident bare MIC"
+    )
+    assert '"MIC LOSING AUDIO"' in (
+        ROOT / "shell" / "jv-hud" / "MicPlate.qml"
+    ).read_text("utf-8"), (
+        "MicPlate no longer draws the words this picture and its caption "
+        "are of"
+    )
+
+
+def test_this_is_the_only_photograph_of_a_microphone_in_trouble():
+    """The caption's claim, and the reason the shot is worth its two
+    seconds. It is an ASSERTION about the other shots rather than a
+    sentence: a loss gauge added to 02-heard would make that picture the
+    same picture, and this one's caption would be describing a first that
+    had stopped being one.
+    """
+    healthy = []
+    for shot in sheet.SHOTS:
+        if shot["file"] == lossy()["file"]:
+            continue
+        for body in ears_beats(shot):
+            m = body.get("metrics", {})
+            assert "capture_loss_age_s" not in m, (
+                f"{shot['file']} now reports a discarded chunk, so its "
+                "microphone is losing audio too and this shot is no longer "
+                "the first picture of one"
+            )
+            assert m["capture_age_s"] <= m["capture_stall_s"], (
+                f"{shot['file']} now photographs a stalled device, which is "
+                "the other half of the same caption"
+            )
+            healthy.append(shot["file"])
+    assert len(healthy) >= 2, (
+        f"only {healthy} photograph an open microphone that is keeping all "
+        "of it, so there is nothing in this sheet for the lossy picture to "
+        "be read against"
+    )
+
+
+def test_the_lossy_shot_lights_exactly_the_two_plates_its_caption_names():
+    """One frame, two plates, and every other plate dark. The two are
+    welded — a losing device IS `degraded`, by CaptureMeter — so the
+    caption cannot describe one of them; what it CAN stop describing is a
+    third, and a third would arrive silently.
+    """
+    shot = lossy()
+    assert "hold" not in shot and "grows_from" not in shot, (
+        "06-lossy now feeds or grows from something, so it is no longer the "
+        "one-frame shot its caption describes"
+    )
+    published = {(f["publish"]["topic"], f["publish"]["src"]) for f in shot["frames"]}
+    assert published == {("sys.health", "jv-ears")}, (
+        f"06-lossy publishes {sorted(published)} — one heartbeat from one "
+        "service is the whole of what this picture claims"
+    )
+
+    core = ROOT / "shell" / "jv-hud" / "core"
+    asks = {}
+    for path in sorted(core.glob("*.qml")):
+        text = path.read_text("utf-8")
+        if not re.search(r'(?:latestFrom|frameOn)\("sys\.health"|publishersOf\("sys\.health"\)', text):
+            continue
+        asks[path.stem] = set(re.findall(r'property string \w+: "([\w-]+)"', text))
+    assert sorted(asks) == [
+        "DropState",
+        "EarsBudgets",
+        "HealthState",
+        "MicState",
+        "OutputState",
+    ], (
+        f"{sorted(asks)} read sys.health now, and this shot was measured "
+        f"against five elements — a new reader may be drawing a plate the "
+        "caption does not mention"
+    )
+    for name in ("MicState", "EarsBudgets"):
+        assert asks[name] == {"jv-ears"}, (
+            f"core/{name}.qml no longer asks for jv-ears by name, so the "
+            "beat this shot publishes may not be the one it reads"
+        )
+    for name, whose in (("DropState", "jarvisd"), ("OutputState", "jv-voice")):
+        assert asks[name] == {whose} and "jv-ears" not in asks[name], (
+            f"core/{name}.qml now reads a jv-ears heartbeat, so this frame "
+            "lights a plate the caption does not name"
+        )
+    assert "publishersOf(\"sys.health\")" in (core / "HealthState.qml").read_text("utf-8"), (
+        "core/HealthState.qml no longer reads every publisher of sys.health, "
+        "so a degraded jv-ears may no longer reach HealthPlate and the "
+        "caption's second line is of a plate that is dark"
+    )
+
+    hud = ROOT / "shell" / "jv-hud"
+    plates = {path.stem: path.read_text("utf-8") for path in hud.glob("*Plate.qml")}
+
+    def instantiates(text: str, element: str) -> bool:
+        # The declaration, not a mention: every one of these files talks
+        # about the others in prose, and a plate that merely names an
+        # element draws nothing off it.
+        return re.search(rf"\b{element} {{", text) is not None
+
+    drawn = sorted(
+        name
+        for name, text in plates.items()
+        if instantiates(text, "MicState") or instantiates(text, "HealthState")
+    )
+    assert drawn == ["HealthPlate", "MicPlate"], (
+        f"{drawn} draw the elements this frame can light on its own, and "
+        "the caption describes two plates"
+    )
+    # The fifth reader is the odd one, and it is not a third plate.
+    # EarsBudgets carries jv-ears' own budgets into whichever plate asked
+    # for them and decides nothing; StatePlate takes them for the wake
+    # window and stays dark here, because the topics it draws off are not
+    # on this bus.
+    budgeted = sorted(
+        name for name, text in plates.items() if instantiates(text, "EarsBudgets")
+    )
+    assert budgeted == ["MicPlate", "StatePlate"], (
+        f"{budgeted} take jv-ears' budgets now — a new one may be a plate "
+        "this heartbeat lights"
+    )
+    speech = (core / "SpeechState.qml").read_text("utf-8")
+    subjects = set(re.findall(r'(?:frameOn|bus\.latest\w*)\("([\w.]+)"', speech))
+    assert subjects, "core/SpeechState.qml reads no topic at all"
+    assert not subjects & {topic for topic, _ in published}, (
+        f"core/SpeechState.qml now reads {sorted(subjects & {t for t, _ in published})}, "
+        "so StatePlate may light off this heartbeat and the caption names "
+        "two plates"
+    )
+
+
+def test_the_readme_reads_the_holed_recording_picture():
+    """A photograph nobody is told how to read is decoration, and this one
+    needs three things a reader cannot get from the pixels: which words are
+    on it, that ONE heartbeat put both of them there, and what the same
+    plate looks like when the microphone is fine.
+
+    The phrases below are therefore reserved: a rewrite that drops them
+    turns this gate red, which is the point — re-read the picture and
+    write the new sentence.
+    """
+    readme = readme_text()
+    for name in sheet.capture_files(lossy()):
+        assert name in readme, f"docs/hud/screens/README.md never shows {name}"
+    section = [s for s in readme.split("\n### ") if "06-lossy-primary.png" in s]
+    assert len(section) == 1
+    section = section[0]
+    assert "MIC LOSING AUDIO" in section, (
+        "the caption never names the line the picture is of"
+    )
+    assert "jv-ears DEGRADED" in section, (
+        "the caption never names the second plate, which is half of why "
+        "this shot exists"
+    )
+    assert re.search(r"\bone\b[^.]*\bheartbeat\b", section), (
+        "the caption never says the two lines come from ONE heartbeat — "
+        "without it this reads as two services agreeing, which is what "
+        "every other two-plate picture in this sheet actually is"
+    )
+    # By anchor, and it has to be: every PNG here is shown in exactly ONE
+    # `###` section (the gate that says which screens are recordings), so
+    # a caption cannot link to another picture by its file name.
+    assert "03-confirm-primary" in section, (
+        "the caption never points at a picture of the same plate over a "
+        "microphone that is keeping all of it, so there is nothing to read "
+        "the warn dot and the second word against"
+    )
+    assert "teal" in section, (
+        "the caption never says the dot stopped being teal, which is the "
+        "only part of this picture a reader sees before they read a word"
+    )
+
+
+# ------------------------------------------------ the numbers in the prose (A73)
+#
+# Every measurement above is derived: shoot.py checks the corner against
+# `sheet.SURFACE_*`, which this file checks against `shell.qml`. The PROSE
+# was not. `docs/hud/screens/README.md` quoted the surface box three times
+# and said `300x560`, which was true when A30 wrote it and stopped being
+# true four plates later — the box went 560 -> 624 -> 688 -> 745 -> 807 and
+# the sentence never moved, because no gate had ever read it.
+#
+# That is the same class of failure as a stale `SURFACE_H`, one document
+# down: a number a reader trusts, that nothing checks. So the boxes the
+# prose quotes are pinned to the boxes the harness declares, the way
+# `test_the_surface_box_is_the_one_shell_qml_declares` pins the harness to
+# the HUD.
+
+def readme_text() -> str:
+    return (SCREENS / "README.md").read_text("utf-8")
+
+
+def declared_boxes() -> dict[tuple[int, int], str]:
+    """Every WxH this harness can honestly be describing, and what each one
+    is — the surface, each monitor, the whole desk, and the older surface
+    the committed pictures were taken against."""
+    boxes = {
+        (sheet.SURFACE_W, sheet.SURFACE_H): "the surface shell.qml declares",
+        (sheet.DESK_WIDTH, sheet.DESK_HEIGHT): "the whole desk",
+        shot_box(): "the surface the committed PNGs were photographed against",
+    }
+    for out in sheet.OUTPUTS:
+        boxes.setdefault((out["width"], out["height"]), f"the {out['role']} monitor")
+    return boxes
+
+
+def shot_box() -> tuple[int, int]:
+    return sheet.shot_surface_box(ROOT, str(SCREENS.relative_to(ROOT)))
+
+
+def test_every_box_the_readme_quotes_is_one_the_harness_declares():
+    """The sentence that went stale said `300x560` while shoot.py measured
+    against 807, and a reader has no way to tell which of the two is the
+    HUD. There is no third source here: a box in this document is the
+    surface, a monitor, the desk, or the older surface these pictures were
+    taken against — and anything else is a number somebody typed.
+    """
+    allowed = declared_boxes()
+    quoted = sheet.boxes_in_prose(readme_text())
+    assert quoted, (
+        "docs/hud/screens/README.md quotes no box at all — this gate has "
+        "stopped reading the thing it was built for"
+    )
+    for box in sorted(quoted - set(allowed)):
+        raise AssertionError(
+            f"docs/hud/screens/README.md quotes {box[0]}x{box[1]}, which is "
+            f"nothing this harness declares. It knows "
+            + ", ".join(f"{w}x{h} ({what})" for (w, h), what in sorted(allowed.items()))
+        )
+
+
+def test_the_readme_says_its_pictures_predate_the_box_it_quotes():
+    """Pinning the prose to `sheet.py` makes the document MORE wrong on its
+    own if nothing else changes: the box in the text becomes today's and
+    the pictures are still yesterday's, so a reader measures a 688 px HUD
+    against an 807 px sentence and finds the sheet lying to them.
+
+    Both numbers are derived — today's from `tools/hudscreens/sheet.py`,
+    the pictures' from the commit that last wrote a PNG here — so the
+    notice cannot itself go stale, and a re-shoot retires it rather than
+    updating it.
+
+    It has been retired (B93 added a screen, so the last commit to write
+    one here declared today's box), and this test is now guarding the
+    other edge: the notice must not come BACK while the pictures are
+    current, and it must return the moment the box moves without them. The
+    phrase it keys on is therefore reserved — the paragraph that replaced
+    the notice deliberately does not use it, because prose saying a
+    condition is over reads to a substring search exactly like prose
+    saying it holds.
+    """
+    then, now = shot_box(), (sheet.SURFACE_W, sheet.SURFACE_H)
+    readme = readme_text()
+    if then == now:
+        assert "older than the box" not in readme, (
+            "the committed screens were taken against today's surface box, so "
+            "docs/hud/screens/README.md still carries a staleness notice that "
+            "is no longer true — delete it"
+        )
+        return
+    assert "older than the box" in readme, (
+        f"the committed screens were photographed against a {then[0]}x{then[1]} "
+        f"surface and shoot.py now measures {now[0]}x{now[1]}, and "
+        "docs/hud/screens/README.md does not say so — every caption below is "
+        "then a description of a HUD that is not in the picture"
+    )
+    for w, h in (then, now):
+        assert f"{w}x{h}" in readme, (
+            f"docs/hud/screens/README.md says its pictures are older than the "
+            f"box without naming {w}x{h} — a reader cannot tell by how much"
+        )
+
+
+# The picture's own box is read out of git rather than written down, which
+# is the only version of this that survives: the last three times the
+# surface grew, somebody would have had to remember to bump a literal here,
+# and the PLAN item that raised this had the number wrong (it says 745; the
+# commit that last wrote a PNG here declared 688).
+
+
+def mkscreens(tmp_path: Path, then: int, now: int) -> Path:
+    """A repo shaped like this one's two halves: a sheet module declaring a
+    box, and a directory of pictures taken against it. The box then moves
+    with the pictures left alone, which is exactly what this repo did."""
+    root = tmp_path / "repo"
+    (root / "tools" / "hudscreens").mkdir(parents=True)
+    (root / "docs" / "hud" / "screens").mkdir(parents=True)
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+    def sheet_py(height):
+        (root / "tools" / "hudscreens" / "sheet.py").write_text(
+            f"SURFACE_W = 300\nSURFACE_H = {height}\n", "utf-8"
+        )
+
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    sheet_py(then)
+    (root / "docs" / "hud" / "screens" / "01-quiet-desk.png").write_bytes(b"\x89PNG")
+    git("add", "-A")
+    git("commit", "-qm", "shot")
+    sheet_py(now)
+    (root / "docs" / "hud" / "screens" / "README.md").write_text("prose", "utf-8")
+    git("add", "-A")
+    git("commit", "-qm", "the box grew, the pictures did not")
+    return root
+
+
+def test_the_shot_box_is_the_one_in_force_when_the_pictures_were_written():
+    """Against this repo, where the answer is a fact about its history. For
+    a long time it was 688 — the PNGs were last written by the commit that
+    took the box there, and five growths after it moved the box without
+    moving a picture. B93 added a screen, so the last commit to write one
+    is a recent one and the answer is today's box; the notice that existed
+    for the gap between the two is retired rather than updated, which is
+    what `test_the_readme_says_its_pictures_predate_the_box_it_quotes`
+    asserts from the other side."""
+    assert shot_box() == (300, 826)
+
+
+def test_the_shot_box_is_read_out_of_git_and_not_the_working_copy(tmp_path):
+    """The whole point. The working copy's `sheet.py` says what the harness
+    would photograph TODAY; the pictures were photographed by whatever it
+    said on the day they were written, and that copy exists only in git.
+    """
+    root = mkscreens(tmp_path, then=688, now=807)
+    assert sheet.shot_surface_box(root, "docs/hud/screens") == (300, 688)
+
+
+def test_a_directory_with_no_pictures_in_it_is_refused():
+    """`git log -- <dir>/*.png` on a directory with no pictures prints
+    nothing, and `git show :sheet.py` on an empty revision would answer
+    with the WORKING COPY. That reads as "the pictures are current", which
+    is the one wrong answer nobody would think to question."""
+    with pytest.raises(ValueError):
+        sheet.shot_surface_box(ROOT, "personality")
+
+
+def test_pictures_older_than_the_sheet_are_an_error_rather_than_todays_box(tmp_path):
+    """The other way the question can have no answer: a picture committed
+    before this file existed. `git show` fails, and it must be allowed to.
+    """
+    root = tmp_path / "repo"
+    (root / "docs" / "hud" / "screens").mkdir(parents=True)
+    (root / "docs" / "hud" / "screens" / "01-quiet-desk.png").write_bytes(b"\x89PNG")
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    for args in (
+        ("config", "user.email", "t@t"),
+        ("config", "user.name", "t"),
+        ("add", "-A"),
+        ("commit", "-qm", "a picture, and no sheet to have taken it"),
+    ):
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    with pytest.raises(subprocess.CalledProcessError):
+        sheet.shot_surface_box(root, "docs/hud/screens")
+
+
+def test_a_sheet_that_declares_no_box_is_refused():
+    """The parser is the instrument. If `sheet.py` is reshaped so the box is
+    no longer two module-level ints, this must stop rather than quietly
+    return half an answer."""
+    assert sheet.parse_surface_box("SURFACE_W = 300\nSURFACE_H = 807\n") == (300, 807)
+    with pytest.raises(ValueError):
+        sheet.parse_surface_box("SURFACE_W = 300\n")
+    with pytest.raises(ValueError):
+        sheet.parse_surface_box("# SURFACE_W = 300\n# SURFACE_H = 807\n")
+
+
+def test_the_prose_scanner_reads_a_box_however_a_person_typed_it():
+    """The instrument, over the shapes this document actually uses: an
+    `x`, a `×`, and either with spaces around it. A scanner that stopped
+    matching would report a clean README forever, which is precisely the
+    silence the stale `300x560` lived in for five plates.
+    """
+    assert sheet.boxes_in_prose("the 300x807 box") == {(300, 807)}
+    assert sheet.boxes_in_prose("300 × 807 px, the box") == {(300, 807)}
+    assert sheet.boxes_in_prose("a 2560 x 1440 panel and a 300x807 surface") == {
+        (2560, 1440),
+        (300, 807),
+    }
+
+
+def test_the_prose_scanner_is_not_reading_ordinary_prose():
+    """...and it has to stay narrow, because this README is full of
+    numbers: opacities, pixel counts, drawn regions, seconds. Anything it
+    picked up out of those would be a box no harness declares, and the gate
+    would fail on a document that is perfectly correct.
+    """
+    assert sheet.boxes_in_prose("an 11 px label at 0.86 opacity") == set()
+    assert sheet.boxes_in_prose("the region (2284, 16, 2543, 178)") == set()
+    assert sheet.boxes_in_prose("six windows, 807 px tall, 745 before") == set()
+
+
+# ------------------------- reading the screens back, with a floor (B74)
+#
+# `hudshots.sh` has compared its own sheet against HEAD since B52. This
+# harness could not: it photographs a real compositor, and two runs of an
+# unchanged HUD do not agree to the byte. So for thirty iterations these
+# the pictures were WRITTEN and never READ, and nothing in the repo could
+# tell a current screen from one taken four plates ago.
+
+
+def test_the_harness_reads_its_own_sheet_back():
+    """The whole of B74: a sheet that can only be overwritten is a sheet that
+    cannot go stale out loud. It goes stale silently instead."""
+    text = driver_text()
+    assert "tools/hudsheet.py" in text, (
+        "ops/ralph/hudscreens.sh takes its photographs and never compares "
+        "one — a stale screen looks exactly as convincing as a current one"
+    )
+    assert "--sheet docs/hud/screens" in text, (
+        "the screens are compared against some other sheet than their own"
+    )
+
+
+def test_the_floor_it_compares_with_is_the_measured_one():
+    """Written down twice is how a measurement goes out of date. The numbers
+    live in tools/hudscreens/sheet.py, beside the measurement that set them,
+    and the driver reads them from there."""
+    text = driver_text()
+    assert "sheet.NOISE_PIXELS" in text and "sheet.NOISE_CHANNEL" in text, (
+        "ops/ralph/hudscreens.sh does not take its floor from sheet.py"
+    )
+    for literal in (str(sheet.NOISE_PIXELS), str(sheet.NOISE_CHANNEL)):
+        assert f"--tolerance-pixels {literal}" not in text
+        assert f"--tolerance-channel {literal}" not in text
+
+
+def test_it_restores_only_over_the_sheet_it_was_compared_against():
+    """--accept-noise puts committed bytes over rendered ones, which is only
+    honest for the committed sheet itself. A run pointed at a scratch
+    directory is a measurement or a grading run, and must come back holding
+    exactly what it rendered — the next person measuring the noise would
+    otherwise be measuring the restore."""
+    code = [
+        line
+        for line in driver_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    guarded = [line for line in code if "--accept-noise" in line]
+    assert len(guarded) == 1, guarded
+    assert "docs/hud/screens" in guarded[0], (
+        "ops/ralph/hudscreens.sh restores committed bytes without first "
+        f"checking that it is writing over the committed sheet: {guarded[0]!r}"
+    )
+
+
+def test_the_floor_is_far_below_anything_a_plate_can_say():
+    """The bound that does the discriminating, checked against the palette it
+    is an argument about. §06's text on §06's glass is the FAINTEST thing the
+    HUD draws, and it is two orders of magnitude past the floor; the ember is
+    further still. A floor raised to where it could swallow a word would fail
+    here rather than in a photograph nobody compared.
+    """
+    palette = tomllib.loads((ROOT / "personality" / "theme.toml").read_text("utf-8"))["palette"]
+    glass = hudsheet.parse_hex(palette["ground_deep"])
+    for quietest in ("text_3", "teal", "ember"):
+        ink = hudsheet.parse_hex(palette[quietest])
+        apart = max(abs(a - b) for a, b in zip(ink, glass))
+        assert apart > 10 * sheet.NOISE_CHANNEL, (
+            f"{quietest} is {apart} from the plate it is drawn on and the "
+            f"screens' floor forgives {sheet.NOISE_CHANNEL} per channel — "
+            "the floor is close enough to a legible change to hide one"
+        )
+
+
+def test_the_readme_states_the_floor_the_harness_compares_with():
+    """The numbers in the prose, pinned to the numbers in the code (A73's
+    rule, applied to B74's). A README that quotes a floor the harness no
+    longer uses is worse than one that quotes none."""
+    readme = (SCREENS / "README.md").read_text("utf-8")
+    # Both numbers in the units they are quoted in, because a bare `256` is
+    # also the first three digits of this monitor and a bare `3` is in every
+    # other sentence on the page — a gate either reads the claim or it reads
+    # the page it happens to be printed on.
+    assert f"{sheet.NOISE_PIXELS} px" in readme, (
+        "docs/hud/screens/README.md does not say how many pixels the harness "
+        f"forgives, which is {sheet.NOISE_PIXELS}"
+    )
+    assert f"{sheet.NOISE_CHANNEL} per channel" in readme, (
+        "docs/hud/screens/README.md does not say how faint a difference has "
+        f"to be to be forgiven, which is {sheet.NOISE_CHANNEL} per channel"
+    )
+
+
+# ------------------------------ where the run's time goes (B75)
+#
+# `verify.sh` names this gate and does not run it, on one reason B74 left
+# standing: it costs minutes and produces pictures rather than a verdict.
+# B75 asks whether a CHEAPER HALF exists — the probes are verdicts, the
+# screens are not — and nobody could answer it, because the cost was a
+# single number with no parts in it. The run books its own seconds now,
+# and `sheet.PHASES` says which half each phase belongs to.
+#
+# These are the gates on the ACCOUNTING, which is the part that can lie:
+# a table that drops a phase, or charges one stretch twice, would report a
+# cheap sheet-half that is not there and get this gate bound on a fiction.
+
+
+def booked_phases():
+    """Every phase name the two halves of the harness actually book."""
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    return set(re.findall(r'cost\.phase\("([a-z]+)"\)', shoot)) | set(
+        re.findall(r"^\s*book ([a-z]+) ", driver_text(), re.M)
+    )
+
+
+def test_every_phase_the_harness_books_is_classified_and_the_other_way_round():
+    """The two ends of the split. A phase the harness books and nothing
+    classifies would be charged to neither half — so the table would be
+    printed under a total that excludes it, and the sheet half would look
+    smaller than it is. A phase classified here and booked by nobody is a
+    row that silently never appears, which is how a gate gets bound on a
+    price that was never measured.
+    """
+    assert booked_phases() == set(sheet.PHASES), (
+        "the phases the harness books and the phases sheet.PHASES classifies "
+        f"disagree: booked-only {sorted(booked_phases() - set(sheet.PHASES))}, "
+        f"classified-only {sorted(set(sheet.PHASES) - booked_phases())}"
+    )
+
+
+def test_the_expensive_probes_are_booked_as_probes_and_the_pictures_as_sheet():
+    """The classification is the whole answer to B75, so it is asserted and
+    not just declared: the two probes `verify.sh` would want a verdict from
+    are on the bill a picture-less run still pays, and the two things only
+    the sheet needs — the PNG encodes and reading them back against HEAD —
+    are the only ones on the other side.
+    """
+    kinds = {name: kind for name, (kind, _) in sheet.PHASES.items()}
+    assert kinds["idle"] == sheet.PROBE and kinds["click"] == sheet.PROBE
+    assert {n for n, k in kinds.items() if k == sheet.SHEET} == {"encode", "compare"}
+
+
+def test_the_table_accounts_for_every_second_of_the_run():
+    """The seconds nobody booked are PRINTED, not dropped. A table that
+    silently summed to less than the run took would let the next reader
+    divide a half by a total the rows never covered."""
+    table = "\n".join(sheet.cost_table([("idle", 60.0), ("encode", 8.0)], 100.0))
+    assert "unaccounted" in table
+    assert "32.0 s" in table, table
+
+
+def test_a_phase_that_ran_four_times_is_one_row():
+    """Every shot books `processes` and `capture`, so the rows are sums. Four
+    rows for four shots would be a table nobody can compare against the next
+    run's, which is the only use it has."""
+    table = "\n".join(sheet.cost_table([("capture", 1.5)] * 4, 100.0))
+    assert len([l for l in table.splitlines() if " capture " in l]) == 1, table
+    assert "6.0 s" in table, table
+
+
+def test_the_two_halves_are_summed_and_shown_as_shares_of_the_run():
+    """The bottom line is what B75 gets read for: what a verdict-only run
+    would still pay, next to what only the pictures cost."""
+    table = "\n".join(
+        sheet.cost_table(
+            [("idle", 60.0), ("click", 20.0), ("encode", 8.0), ("compare", 2.0)],
+            100.0,
+        )
+    )
+    assert f"{sheet.PROBE}" in table and f"{sheet.SHEET}" in table
+    assert "80.0 s" in table and "10.0 s" in table, table
+    assert "80.0%" in table and "10.0%" in table, table
+
+
+def test_a_phase_nobody_classified_is_refused_rather_than_ignored():
+    """An unknown phase is a table missing a row and a total missing its
+    seconds. Refusing it is what makes the gate above enforceable."""
+    with pytest.raises(ValueError, match="grim"):
+        sheet.cost_table([("grim", 1.0)], 10.0)
+
+
+def test_an_accounting_that_charges_more_than_the_run_took_is_refused():
+    """The one bookkeeping error this table cannot survive: a phase opened
+    inside another one charges the same stretch twice, and the sheet half
+    would come out cheaper than it is — which is a gate bound on a fiction.
+    """
+    with pytest.raises(ValueError, match="twice"):
+        sheet.cost_table([("idle", 60.0), ("click", 60.0)], 100.0)
+    # Tenths are two clocks rounding, not double counting.
+    sheet.cost_table([("idle", 100.2)], 100.0)
+
+
+def test_a_run_that_took_no_time_is_refused():
+    """Every share in the table is a fraction of the total."""
+    with pytest.raises(ValueError, match="no time"):
+        sheet.cost_table([], 0.0)
+
+
+def test_the_book_refuses_a_phase_opened_inside_another(tmp_path):
+    """The runtime half of the same rule. `capture` is called by the shot
+    loop AND from inside both probes, so a `cost.phase` in the wrong place
+    is a live hazard rather than a hypothetical one — and it would be
+    invisible in the table, which is exactly why it raises here instead.
+    """
+    ticks = iter([0.0, 1.0, 2.0, 3.0])
+    cost = sheet.Cost(tmp_path / "cost.tsv", clock=lambda: next(ticks))
+    with pytest.raises(RuntimeError, match="inside"):
+        with cost.phase("idle"):
+            with cost.phase("capture"):
+                pass
+
+
+def test_the_book_records_a_phase_whose_body_failed(tmp_path):
+    """A run that dies in a check has still spent the seconds, and the
+    stretch it died in is the one worth reading."""
+    # The ticks do not start at zero on purpose: a book that wrote down the
+    # clock instead of the ELAPSED time would agree with a run that did,
+    # forever, if every fake clock in these tests started at 0.0.
+    ticks = iter([5.0, 12.0])
+    cost = sheet.Cost(tmp_path / "cost.tsv", clock=lambda: next(ticks))
+    with pytest.raises(KeyError):
+        with cost.phase("checks"):
+            raise KeyError("a check said no")
+    assert sheet.read_cost((tmp_path / "cost.tsv").read_text("utf-8")) == [
+        ("checks", 7.0)
+    ]
+
+
+def test_the_book_opens_the_next_phase_after_closing_the_last(tmp_path):
+    """The nesting guard, turned back on the run that respects it. A book
+    that never CLOSED a phase would refuse every phase after the first, and
+    a harness that books ten of them would die in the second shot — which
+    every test around this one misses, because each opens exactly one.
+    """
+    ticks = iter([0.0, 2.0, 10.0, 13.0])
+    cost = sheet.Cost(tmp_path / "cost.tsv", clock=lambda: next(ticks))
+    with cost.phase("capture"):
+        pass
+    with cost.phase("encode"):
+        pass
+    assert sheet.read_cost((tmp_path / "cost.tsv").read_text("utf-8")) == [
+        ("capture", 2.0),
+        ("encode", 3.0),
+    ]
+
+
+def test_the_book_is_a_file_because_two_processes_write_it(tmp_path):
+    """Half the phases are bash's (the flake, the compositor, the
+    comparison) and half are the driver's. Appending, not rewriting: the
+    shell's lines are already in the file when python opens it."""
+    path = tmp_path / "cost.tsv"
+    path.write_text("realize\t12.500\n", "utf-8")
+    ticks = iter([100.0, 103.0])
+    with sheet.Cost(path, clock=lambda: next(ticks)).phase("click"):
+        pass
+    assert sheet.read_cost(path.read_text("utf-8")) == [
+        ("realize", 12.5),
+        ("click", 3.0),
+    ]
+
+
+def test_a_line_neither_half_wrote_is_refused():
+    """The file is read by one side and written by two, in two languages."""
+    with pytest.raises(ValueError, match="seconds"):
+        sheet.read_cost("realize 12.5\n")
+
+
+def test_the_run_prints_its_table_even_when_the_sheet_changed():
+    """The interesting run is the one whose comparison says the HUD moved —
+    it exits nonzero by design, and under `set -e` that would take the
+    table with it. The price of the run a human is looking at is the price
+    worth knowing."""
+    driver = driver_text()
+    assert "compare_status=$?" in driver and "exit $compare_status" in driver, (
+        "ops/ralph/hudscreens.sh lets the comparison's exit status end the "
+        "run, so the one run whose cost anybody asks about prints no table"
+    )
+    assert driver.index("cost_table(") > driver.index("tools/hudsheet.py"), (
+        "the table is printed before the comparison it is supposed to price"
     )

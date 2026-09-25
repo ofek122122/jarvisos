@@ -405,6 +405,92 @@ TestCase {
     verify(lowest < 0.8, "the noisy room no longer scores low, so this proves nothing");
   }
 
+  // --- the ASR takes time, and the recordings now say so (A58) ---------
+
+  function test_the_recorded_words_arrive_after_the_turn_they_end() {
+    // The number every test in this file used to be blind to. jv-ears
+    // publishes the final from inside `_on_speech_end`, after whisper
+    // returns, so on the bus it lands a couple of seconds after the
+    // boundary beside it — and the generator stamped both at the sample
+    // clock, which cannot see an ASR. A57 was a bug about exactly that
+    // gap and no replay could express it. State it here, once, because
+    // the two tests below are only worth anything while it holds.
+    for (let i = 0; i < recordings.names.length; i++) {
+      const name = recordings.names[i];
+      const final = finalOn(name);
+      if (final === null)
+        continue;
+      const ended = firstOn(name, "audio.vad", "speech_end");
+      verify(ended !== null, name + " transcribes an utterance with no end");
+      verify(final.ts - ended.ts > 1,
+             name + " has an instantaneous ASR again (" +
+             (final.ts - ended.ts).toFixed(2) + " s): every test built on " +
+             "this recording is blind to the gap A57 was about");
+    }
+  }
+
+  function test_the_hold_is_timed_from_the_boundary_and_not_from_the_words() {
+    // A57 read off a recording rather than off frames written here: the
+    // words belong to an utterance that ENDED at the boundary, and the
+    // "THINKING" above them is timed from that same frame. An element
+    // that timed its own window from the transcript would hand back the
+    // transcript here, and would hold the line for the length of the ASR
+    // longer than the word above it.
+    const heard = makeHeard();
+    replay(heard, "hey-jarvis-clean");
+    const ended = firstOn("hey-jarvis-clean", "audio.vad", "speech_end");
+    verify(heard.anchor !== null, "a held line with nothing to time it from");
+    compare(heard.anchor.ts, ended.ts, "the hold is timed from the words");
+    compare(heard.utteranceId, ended.body.utterance_id);
+  }
+
+  function test_a_real_turn_takes_both_plates_down_together() {
+    // The same claim as the paired test in tst_heardstate.qml, driven by
+    // the recording instead of by frames with the expectation's author.
+    // Both elements sit on one bus and real Timers run, so a window that
+    // was never armed fails here rather than passing on a clock nobody
+    // wound.
+    //
+    // The arithmetic, because the numbers are load-bearing and not taste.
+    // Both windows are 3 s, equal the way the shipped pair is equal, and
+    // both must clear the recording's 2.2 s of ASR — they start at the
+    // boundary and the words arrive partway through, so a window shorter
+    // than the ASR would expire the line before it was ever shown. The
+    // state plate then has 3.0 s left when the boundary lands and the
+    // words have 0.8 s left when they do, and 1.6 s is the budget that
+    // separates the two readings: it is twice what the anchored hold
+    // needs and half of what a hold timed from the transcript would take.
+    // So the element this file is about going back to reading the
+    // transcript fails HERE, on a real recording, rather than in a race.
+    suite.fakeNow = 0;
+    const bus = spawn(busModel);
+    bus.monotonic = () => suite.fakeNow;
+    bus.ingest('{"t":"link","up":true}');
+    const heard = spawn(heardState);
+    const voice = spawn(speechState);
+    heard.bus = bus;
+    voice.bus = bus;
+    heard.holdS = 3.0;
+    voice.thinkWindowS = 3.0;
+
+    const frames = envelopes("hey-jarvis-clean");
+    for (let i = 0; i < frames.length; i++) {
+      suite.fakeNow = Math.max(suite.fakeNow, frames[i].ts);
+      bus.ingest(JSON.stringify({
+        "t": "frame",
+        "frame": frames[i]
+      }));
+    }
+    compare(voice.state, "thinking");
+    compare(heard.heard, true, "the real transcript never reached the plate");
+
+    tryCompare(heard, "heard", false, 1600,
+               "the words are still up 1.6 s after a 3 s window that began " +
+               "2.2 s before them: the hold is timed from the transcript again");
+    compare(voice.state, "thinking", "the words outlived the word above them");
+    tryCompare(voice, "state", "unknown", 4000, "the thinking window has to close too");
+  }
+
   function test_the_words_leave_when_the_link_does() {
     const heard = makeHeard();
     replay(heard, "hey-jarvis-clean");

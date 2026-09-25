@@ -52,6 +52,11 @@ Item {
   // WHICH silence this is, and the plate decides what to call it.
   readonly property string line: root.output.reason === "muted" ? "OUTPUT MUTED" : root.output.reason === "zero" ? "OUTPUT AT ZERO" : ""
 
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "output"
+
   // On screen exactly while Jarvis is speaking into a silent output.
   readonly property bool shown: root.output.unheard && root.line.length > 0
 

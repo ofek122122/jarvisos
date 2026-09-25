@@ -248,6 +248,163 @@ def test_every_plate_in_the_stack_answers_for_itself():
         )
 
 
+def test_every_plate_says_which_plate_it_is():
+    """A53: `anyLit` made "is anything on screen" answerable and left "WHICH
+    plate" to a human with the picture in front of them.
+
+    Five checks across the two shot harnesses measure that the drawn corner
+    got taller or shorter, and not one of them can name the plate that did
+    it — a `HealthPlate` saying `jv-voice lost` and an `ActionPlate` saying an
+    action failed are the same corner, the same two lines, the same severity
+    colour and nearly the same pixels. `core/PlateStack.qml` collects
+    `plateName` from its children so the assertion can be about the caption.
+
+    The name has to be the plate's own claim about itself, and it also has to
+    be impossible for it to lie, so it is pinned HERE to the file name rather
+    than agreed by convention: `GuardPlate.qml` says `"guard"` or this fails.
+    That also keeps `litNames`'s `"?"` branch unreachable in the real shell,
+    the same way the `shown`/`lit` check above keeps `anyLit`'s fail-safe
+    unreachable.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    seen: dict[str, str] = {}
+    for child in plate_stack_children(shell_text()):
+        qml = hud / f"{child}.qml"
+        want = child[: -len("Plate")].lower()
+        got = re.findall(
+            r'^  readonly property string plateName: "([^"]*)"$',
+            qml.read_text("utf-8"),
+            re.M,
+        )
+        assert got == [want], (
+            f'{qml.name} must declare `readonly property string plateName: '
+            f'"{want}"` exactly once — got {got}. The stack reports these as '
+            f"the plates that are on screen, so a name that drifts from the "
+            f"file is a harness confidently naming the wrong element."
+        )
+        assert want not in seen, (
+            f"{qml.name} and {seen[want]} would both report {want!r}; two "
+            f"plates with one name makes the list unreadable"
+        )
+        seen[want] = qml.name
+
+
+# --- B89: a plate draws every word its element can say --------------------
+
+# The convention this gate is written against: an element that decides
+# between a CLOSED set of words calls the result `state`, and writes it as a
+# block. `core/MicState.qml` and `core/SpeechState.qml` both do; the
+# one-line string properties elsewhere in `core/` (`ActionState.tool`,
+# `HeardState.text`, `GuardState.verdict`) pass free text off the bus
+# through and have no word set to cover.
+STATE_BLOCK = re.compile(r"^  readonly property string state: \{$", re.M)
+
+# `typeof x === "number"` is a JavaScript type name, not something the HUD
+# ever puts on a screen. It is the one kind of literal that appears in these
+# blocks without being a word the element can return.
+TYPEOF_LITERAL = re.compile(r'typeof\s[^=!]*[=!]==\s*"([^"]*)"')
+
+# What counts as the plate NAMING a word: backticks or double quotes. Not a
+# bare occurrence — `live` is in the first line of MicPlate.qml as part of
+# "the live-microphone indicator", and a gate a passing sentence satisfies
+# is a gate that fires on nothing. The point is a decision written where
+# the next author will read it, and the repo already spells a word off the
+# wire that way.
+def names_word(text: str, word: str) -> bool:
+    return f"`{word}`" in text or f'"{word}"' in text
+
+
+def strip_qml_comments(text: str) -> str:
+    return re.sub(r"//[^\n]*", "", text)
+
+
+def state_words(element: str) -> set[str]:
+    """Every word `readonly property string state` can hand a plate."""
+    found = STATE_BLOCK.search(element)
+    if found is None:
+        return set()
+    body, depth = [], 0
+    for ch in element[found.end() - 1:]:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        body.append(ch)
+    code = strip_qml_comments("".join(body))
+    noise = set(TYPEOF_LITERAL.findall(code))
+    return {w for w in re.findall(r'"([^"]*)"', code) if w and w not in noise}
+
+
+def state_elements_of(plate: str) -> list[str]:
+    """The `core/*State.qml` types a plate declares as properties of its own."""
+    return re.findall(r"^  readonly property (\w+State) \w+:", plate, re.M)
+
+
+def test_every_plate_names_every_word_its_state_element_can_say():
+    """B89: the mapping from an element's word to what a plate draws lives in
+    one ternary in the plate, and nothing asserts it covers the set.
+
+    `MicState` decides between five words and `MicPlate` draws three of them,
+    two by deliberate silence. Add a sixth tomorrow and the plate draws `MIC`
+    over it: nothing goes red, because the QML suites test the ELEMENT — they
+    are headless, and a plate imports Quickshell singletons a headless run
+    cannot load (A56) — and the screenshot sheets only photograph the states
+    somebody remembered to stage. So it is a claim about two files, asserted
+    by a third thing that reads them both.
+
+    It asks for a NAME and not for a branch, because drawing a word as
+    nothing is a real decision — `off` and `unknown` are both silence on
+    MicPlate, for different reasons, and both of those reasons are worth more
+    on screen than a branch would be. What it will not allow is the word
+    going unmentioned, which is the shape the silent failure takes.
+    """
+    hud = ROOT / "shell" / "jv-hud"
+    checked: dict[str, str] = {}
+    for child in plate_stack_children(shell_text()):
+        plate = (hud / f"{child}.qml").read_text("utf-8")
+        for kind in state_elements_of(plate):
+            element = hud / "core" / f"{kind}.qml"
+            assert element.exists(), f"{child}.qml declares a {kind} with no {element}"
+            words = state_words(element.read_text("utf-8"))
+            if not words:
+                continue
+            checked[kind] = child
+            missing = sorted(w for w in words if not names_word(plate, w))
+            assert not missing, (
+                f"core/{kind}.qml can say {sorted(words)} and {child}.qml never "
+                f"names {missing}. Whatever it draws for those words, it draws "
+                f"by falling off the end of a ternary — and drawing one as "
+                f"NOTHING is a decision too, so name it in the comment beside "
+                f"the line and say why. A word no plate mentions is the one "
+                f"that reaches a screen as the wrong word with nothing red."
+            )
+
+    # Non-vacuity, both ways. This gate finds its work by a convention — a
+    # `state` block in an element a plate declares — and a convention is
+    # exactly the thing a rename makes silently untrue. So: it must have
+    # found some work, and every element that HAS a word set must be drawn
+    # by a plate that was checked.
+    assert checked, (
+        "no plate in the stack declares an element with a `state` block, so "
+        "this gate just passed without reading anything. Either the plates "
+        "stopped declaring their elements as `readonly property <Kind> <name>:` "
+        "or the elements stopped calling their word `state`"
+    )
+    deciders = {
+        f.stem
+        for f in sorted((hud / "core").glob("*State.qml"))
+        if state_words(f.read_text("utf-8"))
+    }
+    assert deciders == set(checked), (
+        f"{sorted(deciders - set(checked))} decide between words that no plate "
+        f"in the stack draws, so nothing here reads them. An element whose "
+        f"word set has no consumer is either dead or wired into something "
+        f"this gate cannot see"
+    )
+
+
 # --- A10: invariant 10, asserted rather than assumed ----------------------
 
 # Quickshell's window types. Each one puts a surface on the compositor, and
@@ -331,6 +488,52 @@ def assigned(body: str, prop: str) -> list[str]:
 def hud_qml_files() -> list[Path]:
     hud = ROOT / "shell" / "jv-hud"
     return [q for q in sorted(hud.rglob("*.qml")) if not q.is_relative_to(hud / "tests")]
+
+
+def test_no_qml_file_is_a_file_git_calls_binary():
+    """A source file with a NUL byte in it is a file nobody reviewed.
+
+    git decides text-or-binary by looking for a NUL in the first 8 kB, and a
+    file it calls binary has no diff at all: `GuardPlate.qml | Bin 0 -> 8407
+    bytes`, which is how the entire A51 plate landed — 226 lines of a surface
+    that sits above every window, committed as an opaque blob, with no line
+    for a human to object to. It was not sabotage and it was not noticed: the
+    plate wanted a joiner no attacker-chosen file name could contain, and
+    `"\0"` typed as the byte itself works perfectly at runtime.
+
+    So the escape is the rule, not the byte. The check is deliberately about
+    the FILE and not about QML: it is the same claim for every `.qml` in the
+    tree, including the harness stages, because "its diff is readable" is a
+    property of a text file rather than of a language.
+
+    Only `\t` and `\n` are allowed through. A stray `\r` would not make git
+    call the file binary, but it would make every line of it differ from the
+    one next to it for a reason nobody can see, which is the same failure one
+    notch quieter.
+    """
+    qmls = sorted(
+        q
+        for d in ("shell", "tools", "pkgs", "harness")
+        for q in (ROOT / d).rglob("*.qml")
+    )
+    assert len(qmls) > 20, f"found only {len(qmls)} QML files; the glob is wrong"
+    for qml in qmls:
+        raw = qml.read_bytes()
+        where = qml.relative_to(ROOT)
+        assert b"\x00" not in raw, (
+            f"{where} contains a raw NUL byte, so git calls it binary and "
+            f"commits it with no diff. Write the escape — `\\0` — which is the "
+            f"same string at runtime and a reviewable line in the file."
+        )
+        bad = sorted({b for b in raw if b < 0x20 and b not in (0x09, 0x0A)})
+        assert not bad, (
+            f"{where} contains control bytes {[hex(b) for b in bad]}; a source "
+            f"file is text, and a byte you cannot see is a change nobody can read"
+        )
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError as exc:  # pragma: no cover - a corrupt tree
+            pytest.fail(f"{where} is not valid UTF-8: {exc}")
 
 
 def test_every_hud_surface_pins_the_properties_that_make_it_safe():
@@ -441,6 +644,12 @@ BUDGET_MIRRORS = (
         re.compile(r"^\s*STALL_S = ([\d.]+)", re.M),
         re.compile(r"^\s*(?:readonly\s+)?property\s+real\s+(stall\w*S)\s*:\s*([\d.]+)\s*$", re.M),
     ),
+    (
+        "capture loss window",
+        Path("services/jv-ears/jv_ears/audio.py"),
+        re.compile(r"^\s*LOSS_S = ([\d.]+)", re.M),
+        re.compile(r"^\s*(?:readonly\s+)?property\s+real\s+(lossWindow\w*S)\s*:\s*([\d.]+)\s*$", re.M),
+    ),
 )
 
 
@@ -500,6 +709,7 @@ def test_the_plates_take_their_budgets_from_jv_ears_not_from_the_fallback():
     for plate, element, prop in (
         ("StatePlate.qml", "SpeechState", "wakeWindowS"),
         ("MicPlate.qml", "MicState", "stallS"),
+        ("MicPlate.qml", "MicState", "lossWindowS"),
     ):
         text = strip_qml_comments((hud / plate).read_text("utf-8"))
         assert f"{element} {{" in text, f"{plate} no longer builds a {element}"
@@ -509,6 +719,127 @@ def test_the_plates_take_their_budgets_from_jv_ears_not_from_the_fallback():
         )
         assert re.search(rf"^\s*{prop}\s*:\s*\w+\.\w+\.{prop}\s*$", text, re.M), (
             f"{plate} never binds `{prop}` to the EarsBudgets it built"
+        )
+
+
+# --- B40: the VRAM row may never be drawn on its own account ---------------
+
+
+def test_the_vram_row_is_gated_on_the_rung_it_explains():
+    """VramState says nothing until something is waiting on the card.
+
+    The gate is an input (`brainOnCpu`), fed from HealthState's reading of
+    jv-brain's own heartbeat, because two files deciding the same fact off the
+    same topic is how they come to disagree. The cost of that shape is that
+    the wiring lives in a plate, and plates cannot be tested headless — they
+    import the Quickshell singletons. A HealthPlate that built a VramState and
+    forgot the binding would be silent, correct-looking, and wrong in exactly
+    one direction: the free-VRAM figure on screen all day, which is the
+    all-day gauge §06 refuses and the reason the gate exists.
+
+    Two claims, because either alone can rot: the gate is bound to the rung,
+    and the row is drawn only while VramState says it is worth drawing.
+    """
+    plate = ROOT / "shell" / "jv-hud" / "HealthPlate.qml"
+    text = strip_qml_comments(plate.read_text("utf-8"))
+    assert "VramState {" in text, "HealthPlate no longer builds a VramState"
+    assert re.search(r"^\s*brainOnCpu\s*:\s*\w+\.\w+\.llmOnCpu\s*$", text, re.M), (
+        "HealthPlate builds a VramState and never binds `brainOnCpu` to the "
+        "rung HealthState read, so the VRAM figure would be on screen all day"
+    )
+    assert re.search(r"if\s*\(\s*\w+\.vram\.reporting\s*\)", text), (
+        "HealthPlate draws its vram row without asking VramState whether there "
+        "is anything worth reporting"
+    )
+
+
+def test_the_requirement_row_is_bound_to_the_brain_that_publishes_it():
+    """B46: the second row quotes jv-brain, and may not invent it.
+
+    Same shape as the gate above and the same reason for it: the floor
+    (`llm_gpu_floor_mb`) arrives on jv-brain's own heartbeat, HealthState is
+    the file that owns that heartbeat and its expiry, and VramState takes the
+    number as an INPUT. A plate that built the element and forgot the binding
+    would draw the reading with no requirement under it — silent, correct
+    looking, and a row short — and nothing headless can catch it, because
+    plates import the Quickshell singletons.
+
+    The third claim is the one that matters most on screen: the requirement is
+    drawn only while VramState offers it, and VramState offers it only under a
+    reading. A row that appeared on its own would put "the brain needs 5424
+    MiB" in front of someone who has not been told what their card has.
+    """
+    plate = ROOT / "shell" / "jv-hud" / "HealthPlate.qml"
+    text = strip_qml_comments(plate.read_text("utf-8"))
+    assert re.search(r"^\s*gpuFloorMb\s*:\s*\w+\.\w+\.llmGpuFloorMb\s*$", text, re.M), (
+        "HealthPlate builds a VramState and never binds `gpuFloorMb` to the "
+        "floor HealthState read, so the reading would stand with nothing to "
+        "compare it against"
+    )
+    assert re.search(r"if\s*\(\s*\w+\.vram\.needKnown\s*\)", text), (
+        "HealthPlate draws its requirement row without asking VramState "
+        "whether there is a reading to put it under"
+    )
+
+
+# --- A75: the drop row is the plate's own reason to appear -----------------
+
+
+def test_the_drop_row_is_wired_to_the_plate_that_draws_it():
+    """A75: HealthState cannot see `drops`, so HealthPlate must ask twice.
+
+    `HealthState.reporting` is findings-or-rung and knows nothing about the
+    broker's drop count — the field lives on jarvisd's heartbeat with a
+    different lifetime (one period, not two) and is read by DropState. So the
+    plate has two reasons to be on screen, and the one that rots silently is
+    the second: a HealthPlate that built a DropState and left `shown` bound to
+    HealthState alone would compose the row, never map the surface, and look
+    exactly like a machine whose bus is fine. On a machine where every service
+    says `ok` that is the ONLY finding there is.
+
+    Three claims, because each can rot alone: the element is built, the row is
+    drawn only while it reports, and `shown` counts it.
+    """
+    plate = ROOT / "shell" / "jv-hud" / "HealthPlate.qml"
+    text = strip_qml_comments(plate.read_text("utf-8"))
+    assert "DropState {" in text, "HealthPlate no longer builds a DropState"
+    assert re.search(r"if\s*\(\s*\w+\.drops\.reporting\s*\)", text), (
+        "HealthPlate draws its bus row without asking DropState whether there "
+        "is anything worth reporting"
+    )
+    assert re.search(
+        r"^\s*readonly\s+property\s+bool\s+shown\s*:.*\.drops\.reporting", text, re.M
+    ), (
+        "HealthPlate's `shown` does not count the drop count, so a bus "
+        "shedding frames on an otherwise healthy machine would draw nothing"
+    )
+
+
+def test_the_drop_row_names_no_topic_and_no_subscriber():
+    """A75/A77: the count is an aggregate, so the row may not attribute it.
+
+    jarvisd sums every subscriber connection's tally into one map before
+    publishing it, which means the HUD may not be the reader that lost
+    anything — and the map's keys are not all topics (`_lagged`, `_ctl`). A
+    row that named a key would read as "audio.vad is broken" when the fault is
+    a slow consumer three processes away, and it would not fit the 300 px box
+    either. So DropState renders a total and the plate quotes it verbatim: no
+    key from the map may reach a screen through either file.
+
+    Checked against the SOURCE rather than a render, because the two places
+    this could go wrong are a renderer that interpolates a key and a plate
+    that reaches past `line` into the frame.
+    """
+    for name in ("core/DropState.qml", "HealthPlate.qml"):
+        text = strip_qml_comments((ROOT / "shell" / "jv-hud" / name).read_text("utf-8"))
+        for key in ("_lagged", "_ctl"):
+            assert key not in text, (
+                f"{name} names `{key}`, one of the broker's own map keys — the "
+                "count is an aggregate and the row attributes it to nobody (A77)"
+            )
+        assert "body.drops[" not in text, (
+            f"{name} indexes into the drops map by key, which is how a topic "
+            "name reaches a screen"
         )
 
 
@@ -666,6 +997,16 @@ def test_the_heard_line_and_the_thinking_word_time_out_together():
     belongs to, words with nothing left saying they are still live. The
     other direction is merely odd — "THINKING" with nothing under it — and
     equality is the only relation that catches a retune of either.
+
+    Equal lengths are only half the rule, and this gate only ever checked
+    that half. Two equal windows started at different instants are not one
+    window: until A57 this one was timed from the transcript, which lands
+    however long the ASR took after the `audio.vad speech_end` SpeechState
+    times its own from, so the words outlived the word above them by exactly
+    that much. The other half — both windows anchored to the same frame —
+    is a behaviour and is proved where behaviour can be: HeardState's
+    `anchor`, under tst_heardstate.qml, which pairs the two real elements on
+    one bus and fails if the line outlives the "THINKING".
     """
     core = ROOT / "shell" / "jv-hud" / "core"
     windows = {}

@@ -28,7 +28,10 @@
 //   · `warn`, not `risk`, for a stalled device: the theme spends those
 //     colours only where something is genuinely degraded, and an open mic
 //     delivering nothing is exactly that — still recording as far as the
-//     OS is concerned, and deaf.
+//     OS is concerned, and deaf. A microphone dropping chunks takes the
+//     same colour for the same reason (A84): it is recording the room
+//     with holes in it, which is not the teal this plate reserves for a
+//     recording anyone should trust.
 import QtQuick
 import "."
 import "core"
@@ -47,18 +50,44 @@ Item {
   readonly property MicState mic: MicState {
     bus: Bus
     stallS: root.ears.stallS
+    lossWindowS: root.ears.lossWindowS
   }
 
-  // On screen exactly while the microphone is open — live or stalled.
-  // `off` and `unknown` are both silence, for different reasons.
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "mic"
+
+  // On screen exactly while the microphone is open: `live` (capturing all
+  // of it), `losing` (capturing it with holes in it) and `stalled` (open
+  // and gone silent). `off` and `unknown` are both silence, for different
+  // reasons — a closed microphone has earned its dark indicator, and a HUD
+  // that cannot see the bus has nothing to claim about a device.
   readonly property bool shown: root.mic.capturing || root.mic.stalled
 
   // True while anything is still drawn, including the fade out, so
   // shell.qml can keep the surface mapped until the plate is really gone.
   readonly property bool lit: plate.opacity > 0
 
-  // Teal: audio is being captured. Warn: the device is open and silent.
-  readonly property color dotColor: root.mic.capturing ? Theme.teal : Theme.warn
+  // Teal: audio is being captured, all of it. Warn: the device is open
+  // and either silent or losing chunks — one colour for "this recording
+  // is not what you think it is", because from where the user sits those
+  // are the same warning, and the word beside the dot says which.
+  readonly property color dotColor: root.mic.stalled || root.mic.losing ? Theme.warn : Theme.teal
+
+  // The one line this plate says. "MIC" alone is the recording light; a
+  // second word appears only when there is a second thing to say, and it
+  // says what is wrong rather than dressing it up. Only one can be true
+  // at a time — MicState ranks them, so the plate never has to.
+  //
+  // Every word MicState can say has a place here, which is the thing a
+  // ternary cannot state and a test therefore does (B89): `stalled` and
+  // `losing` each earn the second word, `live` is the bare MIC, and `off`
+  // and `unknown` never reach this line at all because `shown` is false
+  // for both. The last clause is the one to watch — it is a fall-through,
+  // so a sixth word would be drawn as a plain recording light with nothing
+  // anywhere going red.
+  readonly property string label: root.mic.stalled ? "MIC NO AUDIO" : root.mic.losing ? "MIC LOSING AUDIO" : "MIC"
 
   implicitWidth: plate.implicitWidth
   implicitHeight: plate.implicitHeight
@@ -107,11 +136,7 @@ Item {
       }
 
       Text {
-        // "MIC" alone is the recording light. The second word appears
-        // only when there is a second thing to say, and it says what is
-        // wrong rather than dressing it up: the device is open and no
-        // audio is arriving.
-        text: root.mic.stalled ? "MIC NO AUDIO" : "MIC"
+        text: root.label
         color: Theme.text2
         font.family: Theme.familyMono
         font.pixelSize: Theme.labelPx

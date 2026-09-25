@@ -525,9 +525,212 @@ fn pump_turns_with_model_gauge(bus: &TestBus, every_ms: u64) -> tokio::task::Joi
     })
 }
 
+/// How long jv-act is made to hold a tool call in `pump_tool_turns`. Far
+/// enough above the bus hops around it that the measured span can only be
+/// the round trip and not the noise beside it.
+const TOOL_HOLD_MS: u64 = 150;
+
+/// One turn that ran a TOOL, as the three services publish it.
+///
+/// The order is the real one and it is the whole point: jv-brain holds its
+/// sentences back while a tool call is open (`on_sentence` is suppressed
+/// while tool fragments are present), so `action.result` lands BEFORE the
+/// first `speech.say` and jv-act's time is genuinely inside `think`. The
+/// confirmation window — 15 s by design, and never spoken — sits in exactly
+/// this gap, which is why the span is worth naming.
+fn pump_tool_turns(bus: &TestBus, hold_ms: u64) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut ears = BusClient::connect(&addr, "jv-ears").await.expect("ears connect");
+        let mut brain = BusClient::connect(&addr, "jv-brain").await.expect("brain connect");
+        let mut act = BusClient::connect(&addr, "jv-act").await.expect("act connect");
+        let mut n = 0u32;
+        loop {
+            n += 1;
+            let utt = format!("utt-tool-{n}");
+            let rid = format!("req-{n}");
+            for (_, topic, b) in whole_turn(&utt) {
+                if ears.publish(topic, 1.0, 1, b).await.is_err() {
+                    return;
+                }
+            }
+            let req = body(&[
+                ("request_id", rid.as_str().into()),
+                ("tool", "app.launch".into()),
+                ("args", body(&[]).into()),
+                ("capability", "benign".into()),
+                ("utterance_id", utt.as_str().into()),
+            ]);
+            if brain.publish("intent.action", 1.0, 1, req).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(hold_ms)).await;
+            let res = body(&[
+                ("request_id", rid.as_str().into()),
+                ("ok", true.into()),
+                ("duration_ms", (hold_ms as f64).into()),
+            ]);
+            if act.publish("action.result", 1.0, 1, res).await.is_err() {
+                return;
+            }
+            let say = body(&[("text", "done".into()), ("in_reply_to_utterance", utt.as_str().into())]);
+            for _ in 0..2 {
+                if brain.publish("speech.say", 1.0, 1, say.clone()).await.is_err() {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+}
+
+/// How long the confirmation question in `pump_confirm_turns` stays open,
+/// and how long jv-act then takes to run the tool. The window is the bigger
+/// of the two on purpose: it is what the real 15 s looks like beside a tool
+/// that runs in a moment, and it is what makes an undivided `tool` unarguable.
+const CONFIRM_WINDOW_MS: u64 = 200;
+const CONFIRM_RUN_MS: u64 = 60;
+
+/// One turn that ran a CONFIRMING tool, as the four frames put it on the bus.
+///
+/// The real order, from `services/jv-act/src/service.rs`: jv-brain publishes
+/// `intent.action`; jv-act answers with `action.confirm{kind=request}` and
+/// waits; the answer arrives (here as the CLI's `kind=answer`, which jv-act
+/// then ECHOES — both frames are published, as they are live); jv-act runs
+/// the tool and publishes `action.result`.
+fn pump_confirm_turns(bus: &TestBus) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut ears = BusClient::connect(&addr, "jv-ears").await.expect("ears connect");
+        let mut brain = BusClient::connect(&addr, "jv-brain").await.expect("brain connect");
+        let mut act = BusClient::connect(&addr, "jv-act").await.expect("act connect");
+        let mut cli = BusClient::connect(&addr, "jv-cli").await.expect("cli connect");
+        let mut n = 0u32;
+        loop {
+            n += 1;
+            // jv-ears stamps `uuid.uuid4()` on every utterance
+            // (`jv_ears/pipeline.py`), and this is the widest ladder any
+            // turn prints, so the live id shape belongs here: four lines,
+            // each carrying an id `short_id` has to cut down.
+            let utt = format!("{n:08x}-6d1e-4b7a-9c05-8ef23a41d9b7");
+            let rid = format!("req-{n}");
+            for (_, topic, b) in whole_turn(&utt) {
+                if ears.publish(topic, 1.0, 1, b).await.is_err() {
+                    return;
+                }
+            }
+            let req = body(&[
+                ("request_id", rid.as_str().into()),
+                ("tool", "fs.delete".into()),
+                ("args", body(&[]).into()),
+                ("capability", "destructive".into()),
+                ("utterance_id", utt.as_str().into()),
+            ]);
+            if brain.publish("intent.action", 1.0, 1, req).await.is_err() {
+                return;
+            }
+            let ask = body(&[
+                ("kind", "request".into()),
+                ("request_id", rid.as_str().into()),
+                ("tool", "fs.delete".into()),
+                ("summary", "Delete 3 files — yes or no?".into()),
+                ("window_s", 15.0.into()),
+            ]);
+            if act.publish("action.confirm", 1.0, 1, ask).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(CONFIRM_WINDOW_MS)).await;
+            let answer = body(&[
+                ("kind", "answer".into()),
+                ("request_id", rid.as_str().into()),
+                ("granted", true.into()),
+                ("answered_by", "cli".into()),
+            ]);
+            if cli.publish("action.confirm", 1.0, 1, answer.clone()).await.is_err() {
+                return;
+            }
+            // jv-act echoes the answer it acted on, on the same topic.
+            if act.publish("action.confirm", 1.0, 1, answer).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(CONFIRM_RUN_MS)).await;
+            let res = body(&[
+                ("request_id", rid.as_str().into()),
+                ("ok", true.into()),
+                ("duration_ms", ((CONFIRM_WINDOW_MS + CONFIRM_RUN_MS) as f64).into()),
+            ]);
+            if act.publish("action.result", 1.0, 1, res).await.is_err() {
+                return;
+            }
+            let say = body(&[("text", "done".into()), ("in_reply_to_utterance", utt.as_str().into())]);
+            if brain.publish("speech.say", 1.0, 1, say).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+}
+
 /// Every `>>> turn` line the child printed.
 fn turn_lines(out: &Out) -> Vec<&str> {
     out.stdout.lines().filter(|l| l.starts_with(">>> turn ")).collect()
+}
+
+/// Those lines gathered per turn, in the order the turns were reported.
+///
+/// A turn is a LADDER of lines now and not one line (B22): the turn, the
+/// machine's half of it, jv-act's share, your share of jv-act's — and the
+/// `think` split, which arrives later off jv-brain's next heartbeat and is
+/// not adjacent to the rest. The id every line carries is what ties them
+/// together, which is also why it is on every line.
+fn turn_ladders(out: &Out) -> Vec<Vec<&str>> {
+    let mut order: Vec<&str> = Vec::new();
+    let mut by_id: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+    for l in turn_lines(out) {
+        let id = l.split_whitespace().nth(2).unwrap_or_default().trim_end_matches(':');
+        if !by_id.contains_key(id) {
+            order.push(id);
+        }
+        by_id.entry(id).or_default().push(l);
+    }
+    order.into_iter().map(|id| by_id.remove(id).expect("an id we just recorded")).collect()
+}
+
+/// Every column `jv tap` may use for a line it writes as a REPORT.
+///
+/// `cli::TAP_COLUMNS`, restated here because a test that imported the number
+/// it is checking would pass on any number at all.
+const TERMINAL_COLUMNS: usize = 80;
+
+/// Where a hop line's columns fall: `cli::TOPIC_COLUMNS` and the offset of
+/// the `seq=` label past `cli::SRC_COLUMNS` behind it.
+///
+/// Restated here for the same reason `TERMINAL_COLUMNS` is, and load-bearing
+/// for a second one: a width test alone passes on `bin/jv.rs` keeping its own
+/// narrower `format!`, because every topic on a real bus is short enough to
+/// fit either. This is what says the binary is printing `cli::hop_line` and
+/// not a copy of it.
+const TOPIC_COLUMNS: usize = 22;
+const SEQ_AT: usize = TOPIC_COLUMNS + 1 + 13 + 1;
+
+/// Every line this output writes as a REPORT, at a real terminal's width.
+///
+/// The `>>> ` turn ladder, and — under `--latency` — the per-frame hop line,
+/// which used to be formatted in `bin/jv.rs` where this test could not see it
+/// (PLAN B23). It is `cli::hop_line` now, covered by a unit test at inputs no
+/// publisher is stopped from producing; this is the half that proves the
+/// binary still calls it.
+fn every_reported_line_fits(out: &Out) {
+    let reported: Vec<&str> = out
+        .stdout
+        .lines()
+        .filter(|l| l.starts_with(">>> ") || l.contains(" hop="))
+        .collect();
+    assert!(!reported.is_empty(), "nothing was reported:\n{}", out.stdout);
+    for l in reported {
+        let w = l.chars().count();
+        assert!(w <= TERMINAL_COLUMNS, "{w} columns, {} too many: {l}", w - TERMINAL_COLUMNS);
+    }
 }
 
 #[tokio::test]
@@ -539,15 +742,16 @@ async fn a_streamed_reply_reports_its_turn_exactly_once() {
     p.abort();
 
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
-    let lines = turn_lines(&out);
-    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
+    let ladders = turn_ladders(&out);
+    assert!(!ladders.is_empty(), "no turn was reported:\n{}", out.stdout);
     // Three speech.say frames per utterance, one report each: only the first
-    // sentence is time-to-first-word.
-    let mut ids: Vec<&str> = lines.iter().filter_map(|l| l.split_whitespace().nth(2)).collect();
-    let before = ids.len();
-    ids.sort_unstable();
-    ids.dedup();
-    assert_eq!(ids.len(), before, "a turn was reported more than once: {lines:?}");
+    // sentence is time-to-first-word. A turn reported twice would put two
+    // headlines under one id.
+    for l in &ladders {
+        let heads = l.iter().filter(|x| x.contains("total=")).count();
+        assert_eq!(heads, 1, "a turn was reported more than once: {l:?}");
+    }
+    every_reported_line_fits(&out);
 }
 
 #[tokio::test]
@@ -563,11 +767,25 @@ async fn a_turn_is_reported_split_at_the_boundaries_jv_ears_published() {
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     // At least one turn measured every span: the hold was read off jv-ears'
     // heartbeat, not assumed.
-    let full: Vec<&str> = turn_lines(&out).into_iter().filter(|l| !l.contains('?')).collect();
+    let full: Vec<Vec<&str>> = turn_ladders(&out)
+        .into_iter()
+        .filter(|l| !l.iter().any(|x| x.contains('?')))
+        .collect();
     assert!(!full.is_empty(), "no fully-measured turn:\n{}", out.stdout);
-    assert!(full[0].contains("hold=20ms"), "the hold must be the one ears published: {:?}", full[0]);
+    let (head, respond_line) = (full[0][0], full[0][1]);
+    assert!(head.contains("hold=20ms"), "the hold must be the one ears published: {head:?}");
 
     let s = &out.stdout;
+    // The per-frame stream really is in this output, so the width filter
+    // above is not quietly matching nothing in the only mode that emits it.
+    let hops: Vec<&str> = s.lines().filter(|l| l.contains(" hop=")).collect();
+    assert!(!hops.is_empty(), "no per-frame hop line was streamed:\n{s}");
+    for l in &hops {
+        assert!(l.ends_with("ms"), "a hop line does not end in its number: {l}");
+        assert_eq!(l.as_bytes()[TOPIC_COLUMNS], b' ', "the topic column is not {TOPIC_COLUMNS} wide: {l}");
+        assert!(l[TOPIC_COLUMNS..].starts_with(" jv-"), "no publisher after the topic: {l}");
+        assert_eq!(&l[SEQ_AT..SEQ_AT + 4], "seq=", "the src column moved: {l}");
+    }
     assert!(s.contains("--- turn latency:"), "{s}");
     for span in ["spoke", "hold", "hear", "think", "respond", "total"] {
         assert!(s.contains(&format!("\n{span:<10} ")), "no {span} row:\n{s}");
@@ -575,18 +793,20 @@ async fn a_turn_is_reported_split_at_the_boundaries_jv_ears_published() {
     assert!(s.contains("hold+respond"), "the machine's share must be named:\n{s}");
     // hear and think are a PARTITION of respond, measured on real frames
     // through a real broker: the two halves must add up to the whole.
-    let n = numbers_in(full[0]);
-    let (respond, hear, think) = (n[3], n[4], n[5]);
+    let n = numbers_in(respond_line);
+    let (respond, hear, think) = (n[0], n[1], n[2]);
     assert!(
         (hear + think - respond).abs() <= 1.0,
-        "hear {hear} + think {think} != respond {respond} in {:?}",
-        full[0]
+        "hear {hear} + think {think} != respond {respond} in {respond_line:?}"
     );
     // Cross-process CLOCK_MONOTONIC: every number is a small positive latency,
     // not a negative or a wall-clock-sized nonsense.
-    for ms in numbers_in(full[0]) {
-        assert!((0.0..10_000.0).contains(&ms), "implausible {ms}ms in {:?}", full[0]);
+    for line in &full[0] {
+        for ms in numbers_in(line) {
+            assert!((0.0..10_000.0).contains(&ms), "implausible {ms}ms in {line:?}");
+        }
     }
+    every_reported_line_fits(&out);
 }
 
 #[tokio::test]
@@ -633,6 +853,122 @@ async fn think_splits_into_the_llm_and_everything_around_it() {
     assert!(!s.contains("think unsplit"), "the table apologises for a split think:\n{s}");
 }
 
+/// One voice turn per cycle whose reply carries the `say_id` jv-brain really
+/// mints, and the terminal `speech.state` jv-voice answers with — the two
+/// frames a turn's ENDING is made of, on a real broker, from a real
+/// jv-voice connection.
+///
+/// Odd turns finish; even turns are talked over. Both are timed to their
+/// first word and print the same `respond`, which is the whole reason the
+/// ending lines exist: without them the two are indistinguishable in this
+/// output.
+fn pump_turns_with_endings(bus: &TestBus, every_ms: u64) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut ears = BusClient::connect(&addr, "jv-ears").await.expect("ears connect");
+        let mut brain = BusClient::connect(&addr, "jv-brain").await.expect("brain connect");
+        let mut voice = BusClient::connect(&addr, "jv-voice").await.expect("voice connect");
+        let mut n = 0u32;
+        loop {
+            n += 1;
+            let utt = format!("utt-ralph-{n}");
+            for (topic, b) in [
+                ("sys.health", ears_heartbeat(0.02)),
+                ("audio.vad", vad("speech_start", &utt)),
+                ("audio.vad", vad("speech_end", &utt)),
+                ("audio.transcript", transcript("final", &utt)),
+            ] {
+                if ears.publish(topic, 1.0, 1, b).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(every_ms)).await;
+            }
+            // A streamed reply: one say_id per sentence, one reply_group.
+            let mut last = String::new();
+            for s in 0..3 {
+                last = format!("say-{n}-{s}");
+                let say = body(&[
+                    ("text", "hi".into()),
+                    ("say_id", last.as_str().into()),
+                    ("in_reply_to_utterance", utt.as_str().into()),
+                    ("reply_group", format!("grp-{n}").as_str().into()),
+                ]);
+                if brain.publish("speech.say", 1.0, 1, say).await.is_err() {
+                    return;
+                }
+            }
+            // jv-voice leaving `speaking`: exactly one terminal frame per
+            // reply, naming the sentence it was holding when the turn ended.
+            let state = if n % 2 == 0 {
+                body(&[("state", "interrupted".into()), ("say_id", last.as_str().into()), ("reason", "wake".into())])
+            } else {
+                body(&[("state", "idle".into()), ("say_id", last.as_str().into()), ("reason", "completed".into())])
+            };
+            if voice.publish("speech.state", 1.0, 1, state).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(every_ms)).await;
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_reply_that_was_cut_off_is_not_reported_like_one_spoken_in_full() {
+    let bus = start(Config::default()).await;
+    let p = pump_turns_with_endings(&bus, 30);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.5"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let endings: Vec<&str> = out
+        .stdout
+        .lines()
+        .filter(|l| l.starts_with(">>> turn ") && l.contains("reply ended"))
+        .collect();
+    assert!(endings.len() >= 2, "no reply was ever reported as ending:\n{}", out.stdout);
+    assert!(endings.iter().any(|l| l.contains("completed")), "nothing finished:\n{}", out.stdout);
+    assert!(endings.iter().any(|l| l.contains("wake")), "nothing was cut off:\n{}", out.stdout);
+
+    // The ending names the TURN, not the sentence jv-voice was holding — a
+    // say_id would be an identifier nothing else in this output prints.
+    for line in &endings {
+        assert!(line.contains("utt-ralph-"), "the ending names no turn: {line}");
+        assert!(!line.contains("say-"), "the ending names a say_id: {line}");
+    }
+    // One ending per reply, however many sentences it took.
+    let mut ids: Vec<&str> = endings.iter().filter_map(|l| l.split_whitespace().nth(2)).collect();
+    let before = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), before, "a turn ended twice:\n{}", out.stdout);
+
+    let s = &out.stdout;
+    assert!(s.contains("--- turn endings:"), "no endings table:\n{s}");
+    assert!(s.contains("\ncompleted "), "no completed row:\n{s}");
+    assert!(s.contains("\nwake "), "no wake row:\n{s}");
+    assert!(s.contains("did not complete"), "the table does not say what it qualifies:\n{s}");
+    assert!(!s.contains("no turn ending"), "the table apologises for endings it has:\n{s}");
+}
+
+#[tokio::test]
+async fn turns_whose_endings_never_landed_say_so_rather_than_looking_finished() {
+    let bus = start(Config::default()).await;
+    // The same turns, replied to by a jv-brain that mints no say_id — so
+    // nothing on this bus can thread an ending back to a turn.
+    let p = pump_turns(&bus, 30, whole_turn);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.2"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let s = &out.stdout;
+    assert!(!turn_lines(&out).is_empty(), "no turn was reported at all:\n{s}");
+    assert!(!s.contains("reply ended"), "an ending came from nowhere:\n{s}");
+    assert!(s.contains("no turn ending"), "the summary must say the gap is a gap:\n{s}");
+    assert!(s.contains("speech.state"), "and name the frame it wanted:\n{s}");
+}
+
 #[tokio::test]
 async fn a_think_nobody_divided_says_so_rather_than_guessing() {
     let bus = start(Config::default()).await;
@@ -666,10 +1002,14 @@ async fn without_jv_ears_own_budget_the_spoken_share_is_a_question_mark() {
     p.abort();
 
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
-    let lines = turn_lines(&out);
-    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
-    assert!(lines[0].contains("spoke=? hold=?"), "{:?}", lines[0]);
-    assert!(lines[0].contains("respond="), "what WAS measured is still printed: {:?}", lines[0]);
+    let ladders = turn_ladders(&out);
+    assert!(!ladders.is_empty(), "no turn was reported:\n{}", out.stdout);
+    assert!(ladders[0][0].contains("spoke=? hold=?"), "{:?}", ladders[0][0]);
+    assert!(
+        ladders[0][1].contains("respond="),
+        "what WAS measured is still printed: {:?}",
+        ladders[0][1]
+    );
 
     let s = &out.stdout;
     // The two spans that need the gauge are absent from the table, and the
@@ -734,10 +1074,11 @@ async fn a_partial_transcript_is_not_the_seam_even_where_the_seam_would_be() {
     p.abort();
 
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
-    let lines = turn_lines(&out);
-    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
-    assert!(lines[0].contains("hear=? think=?"), "{:?}", lines[0]);
-    assert!(!lines[0].contains("respond=?"), "the whole is still measured: {:?}", lines[0]);
+    let ladders = turn_ladders(&out);
+    assert!(!ladders.is_empty(), "no turn was reported:\n{}", out.stdout);
+    let respond_line = ladders[0][1];
+    assert!(respond_line.contains("hear=? + think=?"), "{respond_line:?}");
+    assert!(!respond_line.contains("respond=?"), "the whole is still measured: {respond_line:?}");
 
     let s = &out.stdout;
     assert!(s.contains("\nrespond   "), "{s}");
@@ -770,6 +1111,205 @@ async fn a_tap_that_joined_mid_utterance_reports_the_span_it_heard_and_no_other(
     assert!(!lines[0].contains("respond=?"), "{:?}", lines[0]);
     assert!(out.stdout.contains("\nrespond   "), "{}", out.stdout);
     assert!(!out.stdout.contains("\ntotal     "), "{}", out.stdout);
+}
+
+#[tokio::test]
+async fn a_tool_turn_says_how_much_of_its_think_was_jv_act() {
+    let bus = start(Config::default()).await;
+    let p = pump_tool_turns(&bus, TOOL_HOLD_MS);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.5"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let tool: Vec<&str> = out.stdout.lines().filter(|l| l.contains("tool=")).collect();
+    assert!(!tool.is_empty(), "no tool split was reported:\n{}", out.stdout);
+    assert!(tool[0].contains("(1 jv-act call)"), "{:?}", tool[0]);
+
+    // The round trip we made jv-act hold, measured off the two frames that
+    // bracket it — not the sleep, but within reach of it from above.
+    let ns = numbers_in(tool[0]);
+    assert_eq!(ns.len(), 2, "think and tool: {:?}", tool[0]);
+    let (think, held) = (ns[0], ns[1]);
+    assert!(held >= TOOL_HOLD_MS as f64, "{held}ms < the {TOOL_HOLD_MS}ms jv-act held");
+    assert!(held < TOOL_HOLD_MS as f64 + 400.0, "{held}ms is not a round trip: {:?}", tool[0]);
+    assert!(held <= think, "a share cannot exceed its whole: {:?}", tool[0]);
+
+    // Neither of the two lines it follows grew a number.
+    let l = &turn_ladders(&out)[0];
+    assert!(l[0].starts_with(">>> turn utt-tool-"), "{:?}", l[0]);
+    assert!(!l[0].contains("tool="), "{:?}", l[0]);
+    assert!(!l[1].contains("tool="), "{:?}", l[1]);
+    every_reported_line_fits(&out);
+
+    let s = &out.stdout;
+    assert!(s.contains("\n  tool "), "the summary must carry the row:\n{s}");
+    assert!(s.contains("the whole window it waited for your answer in"), "and say what is in it:\n{s}");
+    // A turn that ran tools publishes no first-say gauge, so the OTHER split
+    // of think must not appear standing on these turns.
+    assert!(!s.contains("\n  model "), "{s}");
+}
+
+#[tokio::test]
+async fn a_confirming_tool_says_which_half_of_its_span_was_you() {
+    let bus = start(Config::default()).await;
+    let p = pump_confirm_turns(&bus);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.5"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    // The whole ladder, on the id shape jv-ears really stamps: four lines,
+    // each one dividing a span the line above it valued.
+    let full: Vec<Vec<&str>> = turn_ladders(&out).into_iter().filter(|l| l.len() == 4).collect();
+    assert!(!full.is_empty(), "no confirmation split was reported:\n{}", out.stdout);
+    let (head, tool_line, split) = (full[0][0], full[0][2], full[0][3]);
+    assert!(split.contains("(1 confirmation)"), "{split:?}");
+
+    // tool = you + ran, each measured off the frames that bracket it. The
+    // window we held is the bulk of it, which is the whole point: undivided,
+    // this turn reads as a slow machine.
+    let ns = numbers_in(split);
+    assert_eq!(ns.len(), 2, "you and ran: {split:?}");
+    let (you, ran) = (ns[0], ns[1]);
+    let tool = numbers_in(tool_line)[1];
+    // `<=` and not `<`: `ran` IS `tool - you` to the float, but the three
+    // are rounded to whole milliseconds INDEPENDENTLY for printing, so the
+    // two halves of a 262.4 ms tool can print as 202 + 61. One is the whole
+    // of the error and anything larger is a real disagreement. (This has
+    // always been true of these three numbers; the tolerance was `<` and
+    // the test flaked about one run in three under load.)
+    assert!((tool - (you + ran)).abs() <= 1.0, "the halves must add up: {:?}", full[0]);
+    assert!(you >= CONFIRM_WINDOW_MS as f64, "{you}ms < the {CONFIRM_WINDOW_MS}ms we held");
+    assert!(you < CONFIRM_WINDOW_MS as f64 + 400.0, "{you}ms is not the window: {split:?}");
+    assert!(ran < you, "the machine's half must be the smaller one here: {split:?}");
+
+    // Its own line, under the `tool` line, under the two the turn always
+    // prints — and none of the ones above it grew a number.
+    assert!(!head.contains("you="), "{head:?}");
+    assert!(!full[0][1].contains("you="), "{:?}", full[0][1]);
+    assert!(tool_line.contains("includes tool="), "{tool_line:?}");
+    assert!(!tool_line.contains("you="), "{tool_line:?}");
+
+    // The live utterance id is a UUID and no line carries one: every rung
+    // shows the same abbreviated id, and every rung fits a terminal. This
+    // is B22 on real output rather than on a constructed `Turn`.
+    let shown = head.split_whitespace().nth(2).expect("an id").trim_end_matches(':');
+    assert_eq!(shown.chars().count(), 11, "the id is not the width it is capped at: {shown}");
+    assert!(shown.ends_with("..."), "an abbreviated id must say so: {shown}");
+    for l in &full[0] {
+        assert!(l.contains(shown), "a rung carries a different id: {l:?}");
+        assert!(!l.contains("-6d1e-"), "the whole uuid reached a turn line: {l:?}");
+    }
+    every_reported_line_fits(&out);
+
+    let s = &out.stdout;
+    assert!(s.contains("\n    you "), "the summary must carry the row:\n{s}");
+    assert!(s.contains("\n    ran "), "and its other half:\n{s}");
+    assert!(s.contains("action.confirm"), "and say where the number came from:\n{s}");
+}
+
+/// Every `>>> confirm` line the child printed.
+fn confirm_lines(out: &Out) -> Vec<&str> {
+    out.stdout.lines().filter(|l| l.starts_with(">>> confirm ")).collect()
+}
+
+#[tokio::test]
+async fn a_confirmation_on_the_wire_is_one_line_and_not_two_frames_to_correlate() {
+    let bus = start(Config::default()).await;
+    let p = pump_confirm_turns(&bus);
+
+    // No `--latency`: the plain tap is the one that prints every frame as
+    // JSON, so this also proves the line is not merely the frames restated.
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--for", "1.5"]), 8.0).await;
+    p.abort();
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    let lines = confirm_lines(&out);
+    assert!(!lines.is_empty(), "no confirmation was reported:\n{}", out.stdout);
+    let line = lines[0];
+    // The question's tool and the answer's verdict and route, which live on
+    // two different frames and never on one.
+    assert!(line.contains("fs.delete -> granted (cli,"), "{line}");
+    // And the wait between them, which lives on neither: the window this
+    // fixture holds open is 200 ms, and it is printed in the unit a person
+    // answers in.
+    assert!(line.contains("0.2s)"), "{line}");
+
+    // jv-act ECHOES the answer it acted on, so every one of these exchanges
+    // put TWO answer frames on the wire — and each exchange is still one
+    // line. Counted against the questions actually asked in the window.
+    let asked = out
+        .stdout
+        .lines()
+        .filter(|l| l.contains("\"kind\":\"request\"") && l.contains("action.confirm"))
+        .count();
+    let answered = out
+        .stdout
+        .lines()
+        .filter(|l| l.contains("\"kind\":\"answer\"") && l.contains("action.confirm"))
+        .count();
+    assert!(asked >= 2, "the window was too short to prove anything: {asked} questions");
+    assert!(answered > asked, "the echo did not happen, so nothing was deduplicated: {answered}");
+    assert!(
+        lines.len() == asked || lines.len() == asked - 1,
+        "{} lines for {asked} questions (the last may be unanswered when the tap stopped):\n{}",
+        lines.len(),
+        out.stdout
+    );
+
+    // The request id is abbreviated like every other id these lines carry,
+    // and this one fits whole — `pump_confirm_turns` names them `req-N`.
+    assert!(line.starts_with(">>> confirm req-"), "{line}");
+    every_reported_line_fits(&out);
+}
+
+#[tokio::test]
+async fn an_action_no_result_answered_leaves_the_turn_unsplit() {
+    let bus = start(Config::default()).await;
+    // jv-act never answers. The turn is still a turn and `think` is still
+    // measured — it simply contains a tool call of unknown length, and a
+    // share that cannot be stated is not stated.
+    let addr = bus.addr.clone();
+    let p = tokio::spawn(async move {
+        let mut ears = BusClient::connect(&addr, "jv-ears").await.expect("ears");
+        let mut brain = BusClient::connect(&addr, "jv-brain").await.expect("brain");
+        let mut n = 0u32;
+        loop {
+            n += 1;
+            let utt = format!("utt-open-{n}");
+            for (_, topic, b) in whole_turn(&utt) {
+                if ears.publish(topic, 1.0, 1, b).await.is_err() {
+                    return;
+                }
+            }
+            let req = body(&[
+                ("request_id", format!("req-{n}").as_str().into()),
+                ("tool", "app.launch".into()),
+                ("args", body(&[]).into()),
+                ("capability", "benign".into()),
+                ("utterance_id", utt.as_str().into()),
+            ]);
+            if brain.publish("intent.action", 1.0, 1, req).await.is_err() {
+                return;
+            }
+            let say = body(&[("text", "ok".into()), ("in_reply_to_utterance", utt.as_str().into())]);
+            if brain.publish("speech.say", 1.0, 1, say).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    });
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.2"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let lines = turn_lines(&out);
+    assert!(!lines.is_empty(), "no turn was reported:\n{}", out.stdout);
+    assert!(!out.stdout.contains("tool="), "{}", out.stdout);
+    assert!(out.stdout.contains("\nthink     "), "think is still measured:\n{}", out.stdout);
+    assert!(!out.stdout.contains("\n  tool "), "{}", out.stdout);
 }
 
 /// Every `<digits>ms` in a line, as f64.
@@ -1084,6 +1624,103 @@ async fn a_filter_does_not_hide_a_torn_line() {
     assert_eq!(lines.len(), 1, "the ok entry was filtered out, the hole was not: {lines:?}");
     assert!(lines[0].starts_with("!! unreadable audit line 2"), "{:?}", lines[0]);
     assert!(out.stderr.contains("could not be read"), "{}", out.stderr);
+}
+
+
+// ------------------------------------------------------------ restarts (B78)
+
+/// jv-ears as a service that keeps crashing: its uptime climbs for two beats
+/// and then starts over, which is what a heartbeat looks like when the process
+/// behind it was replaced. `pump_as` cannot serve — the frames differ from one
+/// another, and that difference is the whole of the evidence.
+fn pump_crash_loop(bus: &TestBus, lives: &'static [f64]) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut c = BusClient::connect(&addr, "jv-ears").await.expect("pump connect");
+        loop {
+            for uptime in lives {
+                let beat = body(&[
+                    ("service", "jv-ears".into()),
+                    ("state", "ok".into()),
+                    ("uptime_s", (*uptime).into()),
+                    ("period_s", 5.0.into()),
+                ]);
+                if c.publish("sys.health", 1.0, 1, beat).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_service_that_died_and_came_back_is_a_line_the_frames_do_not_carry() {
+    let bus = start(silent_broker()).await;
+    // Two beats of one life, then a process that starts over. Nothing on the
+    // wire says "restarted" — only the number going backwards does.
+    let p = pump_crash_loop(&bus, &[4.1, 8.2, 0.3]);
+
+    // No `--latency`: the plain tap prints every frame as JSON, so this also
+    // proves the line is not merely the frames restated.
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--for", "1.0"]), 8.0).await;
+    p.abort();
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    let lines: Vec<&str> = out.stdout.lines().filter(|l| l.starts_with(">>> restart ")).collect();
+    assert!(!lines.is_empty(), "no restart was reported:\n{}", out.stdout);
+    // The service, the tally, and the life that ended — the last of which is a
+    // LOWER bound, because the dead process is only known to have reached the
+    // uptime it last heartbeated.
+    assert!(lines[0].starts_with(">>> restart jv-ears: 1x (was up >=8.2s)"), "{:?}", lines[0]);
+    // The word is on no frame. If it were, the JSON lines would carry it too.
+    assert!(
+        !out.stdout.lines().any(|l| l.starts_with('{') && l.contains("restart")),
+        "the bus said it, so the tap did not have to:\n{}",
+        out.stdout
+    );
+    // It keeps counting: the fixture crashes three times a second, and the
+    // second death is 2x rather than 1x again.
+    assert!(lines.len() >= 2, "only one death in a second of crash looping:\n{}", out.stdout);
+    assert!(lines[1].contains(" 2x "), "the tally did not rise: {:?}", lines[1]);
+    every_reported_line_fits(&out);
+}
+
+/// jv-ears as a service that simply keeps running: an uptime that only ever
+/// rises, and that repeats each value once — the same number twice is what a
+/// coarse clock produces, and it is not a death.
+fn pump_living_service(bus: &TestBus) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut c = BusClient::connect(&addr, "jv-ears").await.expect("pump connect");
+        for n in 0.. {
+            let beat = body(&[
+                ("service", "jv-ears".into()),
+                ("state", "ok".into()),
+                ("uptime_s", (400.0 + (n / 2) as f64).into()),
+                ("period_s", 5.0.into()),
+            ]);
+            if c.publish("sys.health", 1.0, 1, beat).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_service_that_merely_keeps_running_is_reported_as_nothing() {
+    let bus = start(silent_broker()).await;
+    // The control for the test above.
+    let p = pump_living_service(&bus);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--for", "1.0"]), 8.0).await;
+    p.abort();
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    assert!(out.stdout.contains("sys.health"), "the tap heard nothing at all:\n{}", out.stdout);
+    let lines: Vec<&str> = out.stdout.lines().filter(|l| l.starts_with(">>> restart ")).collect();
+    assert!(lines.is_empty(), "a living process was reported dead: {lines:?}");
 }
 
 // ---------------------------------------------------------------- confirm

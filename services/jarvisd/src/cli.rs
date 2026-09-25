@@ -7,7 +7,8 @@
 //! and they are cheap to pin down directly. `bin/jv.rs` keeps only argument
 //! parsing and the async stream loop.
 
-use std::collections::{HashMap, VecDeque};
+use crate::schema::SpeechStateReason;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // ---------------------------------------------------------------- envelope reads
 
@@ -30,6 +31,18 @@ pub fn get_f64(v: &rmpv::Value, key: &str) -> Option<f64> {
         rmpv::Value::Integer(i) => i.as_f64(),
         rmpv::Value::F32(f) => Some(*f as f64),
         rmpv::Value::F64(f) => Some(*f),
+        _ => None,
+    }
+}
+
+/// A boolean field, or None. Strictly a msgpack bool: a 1, or the string
+/// "true", is a producer writing a different schema, and reading it as a
+/// yes would be this CLI granting a destructive action nobody granted.
+/// `action.confirm.granted` is why this exists, and there the difference
+/// between absent and `false` is the whole of the field's meaning.
+pub fn get_bool(v: &rmpv::Value, key: &str) -> Option<bool> {
+    match get(v, key)? {
+        rmpv::Value::Boolean(b) => Some(*b),
         _ => None,
     }
 }
@@ -125,13 +138,111 @@ impl HopStats {
         rows.sort_by(|a, b| b.3.total_cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
 
         let frames: usize = rows.iter().map(|r| r.1).sum();
+        let t = table_topic_columns(&rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>());
         let mut out = format!("--- hop latency: {frames} frames, {} topics\n", rows.len());
-        out.push_str(&format!("{:<22} {:>5} {:>10} {:>10} {:>10}\n", "topic", "n", "p50", "p95", "max"));
+        out.push_str(&format!(
+            "{:<t$} {:>5} {:>10} {:>10} {:>10}\n",
+            "topic",
+            "n",
+            "p50",
+            "p95",
+            "max",
+        ));
         for (topic, n, p50, p95, max) in &rows {
-            out.push_str(&format!("{topic:<22} {n:>5} {p50:>8.2}ms {p95:>8.2}ms {max:>8.2}ms\n"));
+            out.push_str(&format!(
+                "{:<t$} {n:>5} {p50:>8.2}ms {p95:>8.2}ms {max:>8.2}ms\n",
+                clip(topic, t),
+            ));
         }
         out
     }
+}
+
+/// The widest a topic prints inside a line `jv tap --latency` writes.
+///
+/// One cap for BOTH views of a topic — the per-frame stream and the summary
+/// table under it — because the value of either is that its columns line up,
+/// and a label wider than its column breaks the table's alignment exactly as
+/// it breaks the stream's width budget. 22 because the table was already
+/// built to it; the longest topic any schema declares is `audio.transcript`
+/// at 16, so nothing on this bus today is clipped at all.
+///
+/// The cost is `short_id`'s cost: two topics sharing their first 19
+/// characters print alike. The whole topic is one `jv sub '*'` away — that
+/// view prints frames, which are raw data and are as wide as they are.
+///
+/// The table pays that cost only while it can: `table_topic_columns` widens
+/// its column past this cap rather than print two topics as one row of
+/// numbers (B24). So this is the table's width for every topic set that can
+/// be told apart at 22 — which is every topic set this bus can produce — and
+/// the STREAM's width always.
+pub const TOPIC_COLUMNS: usize = 22;
+
+/// How wide the summary table makes its topic column, for the topics it is
+/// about to print.
+///
+/// `TOPIC_COLUMNS` normally, which is what lines the table up under the
+/// per-frame stream — and WIDER when that cap would print two topics as the
+/// same label (PLAN B24). A clip is a promise that what it hid is one
+/// `jv sub '*'` away, and that promise is good enough for the stream, where
+/// every line is about a frame that named itself. It is not good enough for
+/// the table, where the label is the only thing saying which topic a row of
+/// numbers is about: two rows that cannot be told apart are worse than one
+/// row that wraps, so identity outranks alignment here and the column grows.
+///
+/// It grows by the smallest amount that separates the labels, so the budget
+/// is spent only as far as identity needs. That can exceed `TAP_COLUMNS` —
+/// deliberately, and only when a distinguishing character sits past column
+/// 41 (a row is `columns + 39` wide). Nothing this bus carries comes near
+/// it: `audio.transcript` is 16 of the 22.
+///
+/// The search always finds a width: `topics` are the keys of a map, so at
+/// the longest topic's own length nothing is clipped and every label is its
+/// whole distinct topic.
+///
+/// PRINTED labels are compared, never the topics. Comparing topics would be
+/// tautological — map keys are distinct, so the column would never grow —
+/// and it would also miss a clipped label colliding with a WHOLE one, which
+/// needs the shorter topic to end in the marker's own `...`. That second
+/// case cannot reach a live tap: `validate_envelope` refuses an empty topic
+/// segment, so no topic the broker accepts ends in two dots. It is covered
+/// anyway, because nothing in `clip` or `TOPIC_COLUMNS` assumes an alphabet
+/// and this should not be the one place that does.
+fn table_topic_columns(topics: &[&str]) -> usize {
+    let widest = topics.iter().map(|t| t.chars().count()).max().unwrap_or(0);
+    (TOPIC_COLUMNS..=widest.max(TOPIC_COLUMNS))
+        .find(|columns| {
+            let mut seen = HashSet::new();
+            topics.iter().all(|t| seen.insert(clip(t, *columns)))
+        })
+        .expect("unclipped topics are map keys and therefore distinct")
+}
+
+/// The widest a publisher's name prints inside one of those lines.
+///
+/// 13 is `jv-hud-bridge`, the longest `src` on this bus. Like the topic it
+/// is CLIPPED rather than assumed, because `validate_envelope` bounds a
+/// src's emptiness and never its length: both of these strings are chosen by
+/// a remote process, and the one thing a report line may not do is let one
+/// of those decide how wide it is.
+pub const SRC_COLUMNS: usize = 13;
+
+/// One frame, as `jv tap --latency` streams it above the two tables.
+///
+/// Here rather than in `bin/jv.rs` so the width test that covers every other
+/// line the tap writes as a report can reach this one too (PLAN B23).
+///
+/// `seq` is signed because the tap reads it defensively — a frame the broker
+/// would have rejected prints `-1` rather than being dropped from the
+/// measurement silently.
+pub fn hop_line(topic: &str, src: &str, seq: i64, ms: f64) -> String {
+    format!(
+        "{:<t$} {:<s$} seq={seq:<8} hop={ms:8.2}ms",
+        clip(topic, TOPIC_COLUMNS),
+        clip(src, SRC_COLUMNS),
+        t = TOPIC_COLUMNS,
+        s = SRC_COLUMNS,
+    )
 }
 
 /// jv-ears, and the gauge on its heartbeat that says how long it sits in
@@ -267,8 +378,31 @@ fn service_metrics<'a>(frame: &'a rmpv::Value, service: &str) -> Option<&'a rmpv
 ///     ~2.2 s; prefill fixed, generation not), and one number over both
 ///     cannot say which one a change moved.
 ///
-/// `think` splits once more, and this one needs a PUBLISHER rather than a
-/// frame that was already there. It contains the LLM AND the bus hop each
+/// `think` splits two ways, and the two are mutually exclusive per turn.
+///
+/// The first needs no new publisher at all. A turn that ran a TOOL spends
+/// part of its `think` inside jv-act, and both ends of that are already on
+/// the bus: jv-brain publishes `intent.action` and jv-act answers
+/// `action.result`, threaded by `request_id`, with the input `utterance_id`
+/// carried on the request. So:
+///
+///   * **tool** — of `think`: the time at least one `intent.action` was
+///     outstanding. jv-act's execution AND, when the tool is a confirming
+///     one, the whole confirmation window — which is 15 s by design and
+///     today looks exactly like the LLM being slow.
+///
+/// It is the UNION of the round trips and not their sum, because two
+/// requests outstanding at once are one moment of jv-act's time; and not
+/// the bracket from the first request to the last result either, because
+/// jv-brain runs a completion between serial calls and that time is not
+/// jv-act's. What it does NOT contain: a tool call that never reached
+/// jv-act — a hallucinated name, unparseable arguments, or one past the
+/// per-turn cap — is answered inside jv-brain and publishes no
+/// `intent.action`, so its time stays in the rest of `think`, where it
+/// belongs.
+///
+/// The second split needs a PUBLISHER rather than a frame that was already
+/// there, and applies to a turn that ran NO tool. It contains the LLM AND the bus hop each
 /// way AND however long the transcript sat in jv-brain's input queue, and
 /// the span PHASE1-STATUS wants to optimise is the model's alone. Nothing on
 /// the bus marks the moment the completion request went out, because only
@@ -279,6 +413,10 @@ fn service_metrics<'a>(frame: &'a rmpv::Value, service: &str) -> Option<&'a rmpv
 ///     LLM's prefill and generation up to the first sentence closing.
 ///   * **wait** — `think` less `model`: the two bus hops, the input queue,
 ///     and jv-brain's own work before the model ran.
+///
+/// A turn that ran tools publishes no such gauge at all (jv-brain states it
+/// only for a first word that came straight out of the first completion), so
+/// `wait`/`model` and `tool` never describe the same turn.
 ///
 /// Those two live on `TurnStats` and not on this type, because the gauge
 /// arrives one frame AFTER the turn is reported — a turn is printed the
@@ -311,6 +449,87 @@ pub struct Turn {
     /// The final `audio.transcript` -> first speech.say: jv-brain to its
     /// first word. The second half of `respond`.
     pub think_ms: Option<f64>,
+    /// Of `think`: how long at least one `intent.action` was outstanding —
+    /// jv-act's share, confirmation window included. None when the turn ran
+    /// no tool, and also when it ran one this tap could not time (see
+    /// `tool_calls`).
+    pub tool_ms: Option<f64>,
+    /// How many `intent.action` frames this tap saw for the turn. Kept
+    /// beside `tool_ms` because "no tool ran" and "a tool ran and could not
+    /// be timed" are different facts and both print `tool=?`.
+    pub tool_calls: usize,
+    /// Of `tool`: how long at least one `action.confirm` question was open —
+    /// YOUR time, not the machine's. None when no confirming tool ran, when
+    /// one ran that this tap could not time (see `confirm_waits`), and when
+    /// `tool` itself is unmeasured: a share of a whole nobody measured is
+    /// not a share.
+    pub confirm_ms: Option<f64>,
+    /// How many `action.confirm` questions this tap saw opened for the turn.
+    /// Beside `confirm_ms` for the same reason `tool_calls` is beside
+    /// `tool_ms`: "you were never asked" and "you were asked and the wait
+    /// could not be timed" are different facts.
+    pub confirm_waits: usize,
+}
+
+/// Every line `jv tap` prints ABOUT a turn fits this many columns.
+///
+/// Not the frames — those are raw data and are as wide as they are — but
+/// every line the tap writes as a REPORT: the `turn` ladder, the per-frame
+/// hop line, the hop table, and the latency summary. 80 because it is the
+/// floor every terminal has, and because the summary table was already built
+/// to it.
+///
+/// Nothing enforces this at runtime; three tests enforce it at the widest
+/// input that can reach each kind of line — `every_line_a_turn_prints_fits
+/// _eighty_columns`, `the_summary_table_and_the_hop_table_fit_the_same
+/// _eighty_columns`, `the_streamed_hop_line_fits_eighty_columns_whatever_a
+/// _publisher_is_called` — and each names the bounds it assumes rather than
+/// enforces.
+pub const TAP_COLUMNS: usize = 80;
+
+/// The widest an utterance id may print inside one of those lines.
+///
+/// jv-ears stamps a `uuid.uuid4()` on every utterance, so the live id is 36
+/// characters — three of them on one line is the whole of the width problem
+/// (`jv_ears/pipeline.py`). Eight characters of a UUID is 4.3e9 and this tap
+/// holds a handful of turns at a time, so the prefix identifies the turn for
+/// as long as anyone is reading; the `...` says out loud that it is a prefix
+/// and not the id, and the frames printed alongside carry the whole thing.
+pub const ID_COLUMNS: usize = 11;
+
+/// An utterance id as a turn line carries it: verbatim when it already fits,
+/// otherwise its first characters and `...` to say what happened.
+///
+/// Short ids are never touched, so an id that fits is never made longer by
+/// being abbreviated — the same shape `echo_raw` uses for audit lines.
+pub fn short_id(id: &str) -> String {
+    clip(id, ID_COLUMNS)
+}
+
+/// A string as one of these lines carries it: verbatim when it already fits
+/// `columns`, otherwise its first characters and `...` to say what happened.
+///
+/// Counts CHARACTERS, because the budget is columns and not bytes. `columns`
+/// must leave room for the marker; every caller here passes a column from a
+/// named constant, and the assertion is what would catch a future one that
+/// does not.
+fn clip(s: &str, columns: usize) -> String {
+    debug_assert!(columns >= 4, "{columns} columns cannot hold a clipped string");
+    if s.chars().count() <= columns {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(columns - 3).collect();
+    out.push_str("...");
+    out
+}
+
+/// A span as every one of these lines prints it. None is `?` and is never a
+/// plausible zero.
+fn ms(v: Option<f64>) -> String {
+    match v {
+        Some(v) => format!("{v:.0}ms"),
+        None => "?".to_string(),
+    }
 }
 
 impl Turn {
@@ -327,22 +546,128 @@ impl Turn {
         (speech >= hold).then_some(speech - hold)
     }
 
-    /// The live one-line report, printed as each turn completes.
+    /// The turn's own line: what the user waited, and their two shares of it.
+    ///
+    /// `total` is `spoke + hold + respond`, and the third term lives on
+    /// `respond_line` — the six numbers this line used to carry came to 133
+    /// columns on a live utterance id and wrapped, which is worse than the
+    /// one number they replaced (B17). See `TAP_COLUMNS`.
     pub fn line(&self, id: &str) -> String {
-        let ms = |v: Option<f64>| match v {
-            Some(v) => format!("{v:.0}ms"),
-            None => "?".to_string(),
-        };
         format!(
-            "turn {id}: total={} spoke={} hold={} respond={} (hear={} think={})",
+            "turn {}: total={} spoke={} hold={}",
+            short_id(id),
             ms(self.total_ms),
             ms(self.spoke_ms()),
             ms(self.hold_ms),
+        )
+    }
+
+    /// The machine's half, split where jv-ears hands over to jv-brain.
+    ///
+    /// `X is A + B` for an exact partition, the same grammar
+    /// `TurnStats::brain_split` and `confirm_line` use; `X includes Y` when
+    /// the parts do not account for the whole.
+    pub fn respond_line(&self, id: &str) -> String {
+        format!(
+            "turn {}: respond={} is hear={} + think={}",
+            short_id(id),
             ms(self.respond_ms),
             ms(self.hear_ms),
             ms(self.think_ms),
         )
     }
+
+    /// Every line this turn has to say, in the order `jv tap` prints them.
+    ///
+    /// The ladder is why this is one method and not four calls at the call
+    /// site: each line after the first names a span the line above it gave a
+    /// value for, so printing one without the ones over it would leave a
+    /// name pointing at nothing.
+    pub fn lines(&self, id: &str) -> Vec<String> {
+        let mut out = vec![self.line(id), self.respond_line(id)];
+        out.extend(self.tool_line(id));
+        out.extend(self.confirm_line(id));
+        out
+    }
+
+    /// Of `tool`: jv-act's OWN work, the confirmation window taken out.
+    ///
+    /// The half a faster machine could shorten. Its complement, `confirm_ms`,
+    /// is 15 s by design and is you — which is the whole reason the two are
+    /// worth separating, exactly as `spoke` is separated from `hold` one
+    /// level up.
+    ///
+    /// The subtraction always fits and nothing here has to check that it
+    /// does: `confirm_span` refuses a window that is not nested inside its
+    /// own call's round trip, so the union of the windows is a subset of the
+    /// union of the calls. Pinned by
+    /// `a_confirmation_window_outside_its_own_round_trip_is_refused`.
+    pub fn ran_ms(&self) -> Option<f64> {
+        Some(self.tool_ms? - self.confirm_ms?)
+    }
+
+    /// The follow-up line for a turn whose `think` jv-act was inside, or
+    /// None when there is nothing to say.
+    ///
+    /// Its own line rather than a seventh number on `line()`: that line is
+    /// already six numbers wide and has to survive a terminal, and this one
+    /// describes a minority of turns. Same shape as the `wait`/`model` split
+    /// jv-brain's gauge prints, for the same reason.
+    pub fn tool_line(&self, id: &str) -> Option<String> {
+        let (think, tool) = (self.think_ms?, self.tool_ms?);
+        let plural = if self.tool_calls == 1 { "" } else { "s" };
+        Some(format!(
+            "turn {}: think={think:.0}ms includes tool={tool:.0}ms ({} jv-act call{plural})",
+            short_id(id),
+            self.tool_calls
+        ))
+    }
+
+    /// The follow-up line for a turn where jv-act stopped and asked you, or
+    /// None when no confirmation was opened or none could be timed.
+    ///
+    /// Its own line again, under the `tool` line it divides, for the reason
+    /// that line is its own: the widths have to survive a terminal, and this
+    /// describes a minority of the minority of turns that ran a tool at all.
+    pub fn confirm_line(&self, id: &str) -> Option<String> {
+        // `think` is required for nothing this line prints, and required
+        // anyway: without it there is no `tool_line`, and this line names
+        // `tool` without restating its value. A name whose value was never
+        // printed is worse than a longer line.
+        let _think = self.think_ms?;
+        let (you, ran) = (self.confirm_ms?, self.ran_ms()?);
+        let plural = if self.confirm_waits == 1 { "" } else { "s" };
+        Some(format!(
+            "turn {}: tool is you={you:.0}ms + ran={ran:.0}ms ({} confirmation{plural})",
+            short_id(id),
+            self.confirm_waits
+        ))
+    }
+}
+
+/// How many `intent.action` frames one turn may record before this stops
+/// counting.
+///
+/// jv-brain caps EXECUTIONS at 5 per turn, but its tool loop has no round
+/// cap (optimization backlog #5), so a stuck model can publish requests for
+/// as long as the turn lasts. `jv tap` is meant to be left running for
+/// hours, and a vector that grows with a wedged turn is the one shape it
+/// must not have. Past the cap the turn keeps its count and loses its
+/// measurement: a number we stopped taking is not a short number.
+pub const ACTS_PER_TURN: usize = 32;
+
+/// One `intent.action` and the `action.result` answering it, if it came,
+/// plus the `action.confirm` question inside it for a tool that needed one.
+struct Act {
+    request_id: String,
+    sent: f64,
+    done: Option<f64>,
+    /// `action.confirm` kind=request: the moment jv-act asked YOU. None for
+    /// a tool whose capability needs no confirmation, which is most of them.
+    asked: Option<f64>,
+    /// `action.confirm` kind=answer: the moment the question stopped being
+    /// open, by an answer or by the window expiring.
+    answered: Option<f64>,
 }
 
 /// Where one input utterance's boundaries are collected until its reply
@@ -354,6 +679,10 @@ struct Utt {
     end: Option<f64>,
     /// The final `audio.transcript` — the seam between ASR and the brain.
     heard: Option<f64>,
+    /// The tools this turn asked jv-act for, in the order they were asked.
+    acts: Vec<Act>,
+    /// Set when `acts` hit `ACTS_PER_TURN` and recording stopped.
+    acts_overflowed: bool,
     reported: bool,
 }
 
@@ -385,11 +714,20 @@ pub struct Utterances {
     utts: HashMap<String, Utt>,
     order: VecDeque<String>,
     cap: usize,
+    /// `request_id` -> `utterance_id`, because `action.result` carries only
+    /// the former. Swept when its utterance is evicted: it is the one map
+    /// here not keyed by utterance, so nothing else bounds it.
+    reqs: HashMap<String, String>,
 }
 
 impl Utterances {
     pub fn with_capacity(cap: usize) -> Self {
-        Self { utts: HashMap::new(), order: VecDeque::new(), cap: cap.max(1) }
+        Self {
+            utts: HashMap::new(),
+            order: VecDeque::new(),
+            cap: cap.max(1),
+            reqs: HashMap::new(),
+        }
     }
 
     /// `audio.vad` `speech_start` for `id`, at envelope `ts`.
@@ -413,6 +751,100 @@ impl Utterances {
         }
     }
 
+    /// An `intent.action` naming `utterance_id`, at envelope `ts`: jv-brain
+    /// asking jv-act for a tool inside this turn.
+    ///
+    /// Like the ASR seam and unlike the two boundaries, this does NOT create
+    /// an utterance — only `audio.vad` says a turn happened, and an action
+    /// with no turn around it is jv-act serving something that was never a
+    /// voice turn at all (`utterance_id` is optional on the schema for
+    /// exactly that reason).
+    pub fn acted(&mut self, utterance_id: &str, request_id: &str, ts: f64) {
+        // An absent id and an empty one are the same fact — the frame named
+        // nobody — and the guard lives HERE rather than only in the caller
+        // that unwraps the field, so a reader cannot re-introduce it by
+        // defaulting the Option away.
+        if utterance_id.is_empty() || request_id.is_empty() {
+            return;
+        }
+        let Some(u) = self.utts.get_mut(utterance_id) else { return };
+        if let Some(a) = u.acts.iter_mut().find(|a| a.request_id == request_id) {
+            // A re-delivered request is the same moment in the turn, not a
+            // second tool call. The EARLIEST ts, like every other anchor
+            // here: a request is when jv-brain asked, not when this process
+            // got round to the frame.
+            a.sent = a.sent.min(ts);
+            return;
+        }
+        if u.acts.len() >= ACTS_PER_TURN {
+            u.acts_overflowed = true;
+            return;
+        }
+        u.acts.push(Act {
+            request_id: request_id.to_string(),
+            sent: ts,
+            done: None,
+            asked: None,
+            answered: None,
+        });
+        self.reqs.insert(request_id.to_string(), utterance_id.to_string());
+    }
+
+    /// The `action.result` for `request_id`, at envelope `ts`.
+    ///
+    /// Joined through the `intent.action` that named the utterance, because
+    /// the result frame names none. A result for a request this tap never
+    /// saw belongs to no turn it can name, and is dropped rather than
+    /// attached to whichever turn happens to be open.
+    pub fn act_done(&mut self, request_id: &str, ts: f64) {
+        if let Some(a) = self.act_mut(request_id) {
+            Self::keep_earliest(&mut a.done, ts);
+        }
+    }
+
+    /// The `action.confirm` kind=request for `request_id`, at envelope `ts`:
+    /// jv-act stopped and asked the user, and everything until the answer is
+    /// the user's time and not the machine's.
+    ///
+    /// Joined through the `intent.action` that named the utterance, like
+    /// `action.result` and for the same reason — `action.confirm` carries a
+    /// `request_id` and no `utterance_id`. A question for a request this tap
+    /// never saw belongs to no turn it can name.
+    pub fn confirm_asked(&mut self, request_id: &str, ts: f64) {
+        if let Some(a) = self.act_mut(request_id) {
+            Self::keep_earliest(&mut a.asked, ts);
+        }
+    }
+
+    /// The `action.confirm` kind=answer for `request_id`, at envelope `ts`.
+    ///
+    /// The EARLIEST, and that matters here more than anywhere else: jv-act
+    /// ECHOES the answer it acted on onto the same topic the `jv confirm`
+    /// CLI publishes its answer on, so one decision produces two frames.
+    /// The user stopped deciding at the first of them.
+    pub fn confirm_answered(&mut self, request_id: &str, ts: f64) {
+        if let Some(a) = self.act_mut(request_id) {
+            Self::keep_earliest(&mut a.answered, ts);
+        }
+    }
+
+    /// The recorded call for `request_id`, through the utterance the
+    /// `intent.action` named. None for a request this tap never saw.
+    fn act_mut(&mut self, request_id: &str) -> Option<&mut Act> {
+        if request_id.is_empty() {
+            return None;
+        }
+        let utt = self.reqs.get(request_id)?;
+        let u = self.utts.get_mut(utt)?;
+        u.acts.iter_mut().find(|a| a.request_id == request_id)
+    }
+
+    /// How many `request_id`s are still joined to a live utterance. Exists
+    /// so a test can assert the sweep, and so the bound is checkable.
+    pub fn pending_requests(&self) -> usize {
+        self.reqs.len()
+    }
+
     /// The EARLIEST ts seen for a boundary, not the first one delivered: the
     /// frames carrying an `utterance_id` need not arrive in ts order, and a
     /// boundary is a moment in the audio rather than a moment in this
@@ -426,12 +858,25 @@ impl Utterances {
 
     fn entry(&mut self, id: &str) -> &mut Utt {
         if !self.utts.contains_key(id) {
-            self.utts
-                .insert(id.to_string(), Utt { start: None, end: None, heard: None, reported: false });
+            self.utts.insert(
+                id.to_string(),
+                Utt {
+                    start: None,
+                    end: None,
+                    heard: None,
+                    acts: Vec::new(),
+                    acts_overflowed: false,
+                    reported: false,
+                },
+            );
             self.order.push_back(id.to_string());
             while self.order.len() > self.cap {
                 if let Some(old) = self.order.pop_front() {
-                    self.utts.remove(&old);
+                    if let Some(u) = self.utts.remove(&old) {
+                        for a in u.acts {
+                            self.reqs.remove(&a.request_id);
+                        }
+                    }
                 }
             }
         }
@@ -457,6 +902,7 @@ impl Utterances {
         let seam = u
             .heard
             .filter(|h| *h <= say_ts && u.end.map_or(true, |t1| *h >= t1));
+        let tool = seam.and_then(|h| Self::tool_span(&u.acts, u.acts_overflowed, h, say_ts));
         Some(Turn {
             total_ms: u.start.map(|t0| (say_ts - t0) * 1e3),
             speech_ms: match (u.start, u.end) {
@@ -470,7 +916,103 @@ impl Utterances {
                 _ => None,
             },
             think_ms: seam.map(|h| (say_ts - h) * 1e3),
+            // `tool` is a share of `think`, so it needs the same seam: a
+            // share of a whole nobody measured is not a share, and the
+            // summary table indents it under the row it divides.
+            tool_ms: tool,
+            tool_calls: u.acts.len(),
+            // And `confirm` is a share of `tool` by exactly the same rule,
+            // one level further down: without a `tool` there is no whole for
+            // the user's half to be a half OF.
+            confirm_ms: tool.and(Self::confirm_span(&u.acts, u.acts_overflowed)),
+            confirm_waits: u.acts.iter().filter(|a| a.asked.is_some()).count(),
         })
+    }
+
+    /// The time at least one of `acts` was outstanding, given the `think`
+    /// span `[lo, hi]` it must lie inside.
+    ///
+    /// None — not zero, and not a partial total — when:
+    ///
+    ///   * **recording stopped** (`overflowed`): we know more tools ran than
+    ///     we kept, so any sum is short by an unknown amount;
+    ///   * **a request is unanswered**: it ran for a length nobody can state,
+    ///     and reporting the answered ones alone would look complete;
+    ///   * **a round trip runs backwards**, or falls outside the `think` it
+    ///     is supposed to be a share of. Same rule as the ASR seam and as
+    ///     jv-brain's own gauge: two frames that disagree about the order
+    ///     the pipeline ran in produce no third number.
+    ///
+    /// Otherwise the UNION of the intervals — overlapping requests are one
+    /// moment of jv-act's time, not two.
+    fn tool_span(acts: &[Act], overflowed: bool, lo: f64, hi: f64) -> Option<f64> {
+        if acts.is_empty() || overflowed {
+            return None;
+        }
+        let mut spans: Vec<(f64, f64)> = Vec::with_capacity(acts.len());
+        for a in acts {
+            let done = a.done?;
+            if !(a.sent <= done && a.sent >= lo && done <= hi) {
+                return None;
+            }
+            spans.push((a.sent, done));
+        }
+        Some(Self::union_ms(spans))
+    }
+
+    /// Of `tool`: the time at least one `action.confirm` question was open —
+    /// the part of jv-act's span that was the USER deciding.
+    ///
+    /// None — not zero — when:
+    ///
+    ///   * **no question was asked**: most tools are benign and confirm
+    ///     nothing, and a window that never opened is not a 0 ms window;
+    ///   * **recording stopped** (`overflowed`), for the same reason `tool`
+    ///     refuses: we know more calls ran than we kept;
+    ///   * **a question is still open**, or its call never came back: it was
+    ///     open for a length nobody can state;
+    ///   * **the window does not NEST inside its own call's round trip**.
+    ///     A question asked before jv-brain requested the tool, or answered
+    ///     after jv-act reported it done, means two frames disagree about
+    ///     the order the pipeline ran in. That nesting is also what makes
+    ///     this a genuine SHARE — it is what guarantees the union of the
+    ///     windows cannot exceed the union of the calls, so `ran_ms` needs
+    ///     no fit check of its own.
+    ///
+    /// Otherwise the UNION, like the calls around it: jv-act holds one
+    /// confirmation open at a time today, but that is its rule and not this
+    /// reader's, and two questions open at once are one moment of your time.
+    fn confirm_span(acts: &[Act], overflowed: bool) -> Option<f64> {
+        if overflowed {
+            return None;
+        }
+        let mut spans: Vec<(f64, f64)> = Vec::new();
+        for a in acts {
+            let Some(asked) = a.asked else { continue };
+            let (answered, done) = (a.answered?, a.done?);
+            if !(a.sent <= asked && asked <= answered && answered <= done) {
+                return None;
+            }
+            spans.push((asked, answered));
+        }
+        (!spans.is_empty()).then(|| Self::union_ms(spans))
+    }
+
+    /// The total length covered by `spans`, in ms, counting overlap once.
+    /// Panics on an empty slice; both callers check.
+    fn union_ms(mut spans: Vec<(f64, f64)>) -> f64 {
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut union = 0.0;
+        let (mut open, mut close) = spans[0];
+        for (s, e) in &spans[1..] {
+            if *s > close {
+                union += close - open;
+                (open, close) = (*s, *e);
+            } else if *e > close {
+                close = *e;
+            }
+        }
+        (union + close - open) * 1e3
     }
 
     pub fn len(&self) -> usize {
@@ -506,6 +1048,14 @@ pub struct TurnStats {
     think: Vec<f64>,
     wait: Vec<f64>,
     model: Vec<f64>,
+    tool: Vec<f64>,
+    /// Two halves of one subtraction, and unlike `spoke`/`hold` they cannot
+    /// come apart: `ran` IS `tool - you`, so it exists exactly when `you`
+    /// does. The pair is pushed in one statement to say so, not to enforce
+    /// it — the enforcement is `Turn::ran_ms`, which cannot answer without a
+    /// `confirm_ms` to subtract.
+    you: Vec<f64>,
+    ran: Vec<f64>,
     respond: Vec<f64>,
     total: Vec<f64>,
     /// The id and `think` of the most recently reported turn, until
@@ -529,6 +1079,13 @@ impl TurnStats {
         }
         if let Some(v) = t.think_ms {
             self.think.push(v);
+        }
+        if let Some(v) = t.tool_ms {
+            self.tool.push(v);
+        }
+        if let (Some(you), Some(ran)) = (t.confirm_ms, t.ran_ms()) {
+            self.you.push(you);
+            self.ran.push(ran);
         }
         if let Some(v) = t.respond_ms {
             self.respond.push(v);
@@ -565,12 +1122,19 @@ impl TurnStats {
         self.model.push(model_ms);
         self.wait.push(wait);
         Some(format!(
-            "turn {id}: think={think:.0}ms is wait={wait:.0}ms + model={model_ms:.0}ms"
+            "turn {}: think={think:.0}ms is wait={wait:.0}ms + model={model_ms:.0}ms",
+            short_id(&id)
         ))
     }
 
     pub fn is_empty(&self) -> bool {
         self.turns == 0
+    }
+
+    /// How many turns have been reported. `Endings::summary` needs it: a tap
+    /// that reported turns and saw none of them end has a gap worth naming.
+    pub fn reported(&self) -> usize {
+        self.turns
     }
 
     pub fn summary(&self) -> String {
@@ -583,13 +1147,16 @@ impl TurnStats {
             self.turns
         );
         out.push_str(&format!("{:<10} {:<31} {:>4} {:>9} {:>9} {:>9}\n", "span", "whose time it is", "n", "p50", "p95", "max"));
-        let rows: [(&str, &str, &Vec<f64>); 8] = [
+        let rows: [(&str, &str, &Vec<f64>); 11] = [
             ("spoke", "you, talking", &self.spoke),
             ("hold", "jv-ears' endpoint wait", &self.hold),
             ("hear", "jv-ears' ASR", &self.hear),
             ("think", "jv-brain, to its first word", &self.think),
             ("  wait", "of think: before the model ran", &self.wait),
             ("  model", "of think: the LLM itself", &self.model),
+            ("  tool", "of think: jv-act ran the tool", &self.tool),
+            ("    you", "of tool: you, deciding", &self.you),
+            ("    ran", "of tool: jv-act's own work", &self.ran),
             ("respond", "hear + think: ASR + brain + bus", &self.respond),
             ("total", "speech start -> first word", &self.total),
         ];
@@ -617,6 +1184,16 @@ impl TurnStats {
                 "--- think unsplit: no jv-brain heartbeat carried `{BRAIN_FIRST_SAY_METRIC}` for a\n    reported turn, so `think` stays the model plus the bus hops and the queueing\n    around it. (jv-brain states the gauge only for a turn whose first word came\n    straight out of the first completion — a turn that ran tools has tool time\n    inside `think`, and calling that the model would be a lie.)\n"
             ));
         }
+        if !self.tool.is_empty() {
+            out.push_str(
+                "--- tool is `intent.action` -> `action.result`: jv-act running it AND, for a\n    confirming tool, the whole window it waited for your answer in — 15 s by\n    design and never spoken — which is why the `you`/`ran` rows sit under it.\n    It is the UNION of the round trips, so overlapping calls count once and the\n    completions jv-brain runs between serial calls are not in it. A call that\n    never reached jv-act (a name it invented, arguments it could not write, or\n    one past its own per-turn cap) publishes no `intent.action`, and that time\n    stays in the rest of `think`, where it was spent.\n",
+            );
+        }
+        if !self.you.is_empty() {
+            out.push_str(
+                "--- of a confirming tool's `tool`, `you` is the window jv-act held open waiting\n    for your answer — `action.confirm` request -> answer, both already on the\n    bus — and `ran` is the rest. `you` is the half no faster machine shortens,\n    and a 15 s window inside `tool` is why the undivided number could not be\n    argued about against a budget. Both are refused rather than guessed when a\n    question was still open, so a tool row with no split under it is a turn\n    where nothing was asked or nothing could be timed.\n",
+            );
+        }
         if self.spoke.is_empty() {
             out.push_str(&format!(
                 "--- spoke/hold unmeasured: no jv-ears heartbeat carried `{EARS_HOLD_METRIC}`, and a\n    measurement may not substitute a default for a reading. `total` therefore\n    still contains the user's own speaking time, and no budget applies to it.\n"
@@ -628,6 +1205,582 @@ impl TurnStats {
         }
         out
     }
+}
+
+// ---------------------------------------------------------------- turn endings
+
+/// How many spoken outputs one tap remembers the turn behind.
+///
+/// Bounded for the reason every memory in this file is: `jv tap` is meant to
+/// be left running for hours, and a `speech.say` whose ending never comes —
+/// jv-voice died mid-turn, or the tap stopped before the state frame — is
+/// forgotten by nothing else. Past the cap the OLDEST is dropped, the same
+/// argument `Confirmations` makes about its oldest question: the newest
+/// output is the one still being spoken, and its ending is the one still to
+/// come.
+///
+/// 128 is far past any plausible reply. jv-brain emits one `speech.say` per
+/// sentence and jv-voice reports one ending per `reply_group`, so this holds
+/// a dozen streamed replies at once, and an ending lands inside the turn it
+/// belongs to.
+pub const SAYS_REMEMBERED: usize = 128;
+
+/// The widest a `reason` word prints inside an ending line.
+///
+/// Only a word OUTSIDE the frozen enum can reach it — the four inside are 5
+/// to 9 characters — and it is off the wire, so it is as long as whatever
+/// published it decided. 16 is what the line has left at the widest
+/// utterance id.
+pub const ENDING_WORD_COLUMNS: usize = 16;
+
+/// The endings table in the order the summary prints it: the word jv-voice
+/// puts on the wire, and what it means for a turn this tap already reported.
+///
+/// The glosses are about the TURN and not about jv-voice's internals, because
+/// what a reader of `--latency` needs from them is whether the `respond`
+/// number above stands for words that were heard.
+const ENDING_TABLE: [(&str, &str); 4] = [
+    ("completed", "spoken in full"),
+    ("wake", "you cut it off"),
+    ("preempted", "something urgent cut in"),
+    ("error", "synthesis or playback threw"),
+];
+
+/// Which row of `ENDING_TABLE` a reason is tallied in.
+///
+/// An exhaustive match over the GENERATED `schema::SpeechStateReason`, and
+/// that is the enforcement: a fifth word added to
+/// `schemas/speech.state.json` makes this match non-exhaustive and this file
+/// stops compiling, rather than the new word going silently untallied. A
+/// written-down list is the failure PLAN B87 is about; a `match` is the one
+/// form of it that cannot rot.
+fn ending_slot(reason: SpeechStateReason) -> usize {
+    match reason {
+        SpeechStateReason::Completed => 0,
+        SpeechStateReason::Wake => 1,
+        SpeechStateReason::Preempted => 2,
+        SpeechStateReason::Error => 3,
+    }
+}
+
+/// A `reason` word off the wire as the frozen enum, or None for a word
+/// outside it.
+///
+/// Parsed by the generated binding rather than compared against a list here,
+/// so the vocabulary this reader accepts IS `schemas/speech.state.json`'s.
+fn ending_reason(word: &str) -> Option<SpeechStateReason> {
+    serde_json::from_value(serde_json::Value::String(word.to_string())).ok()
+}
+
+/// One spoken output this tap saw requested, and the input utterance it
+/// answers.
+struct Said {
+    say_id: String,
+    utterance: String,
+}
+
+/// How each reported turn's reply ENDED — `jv tap`'s answer to "were those
+/// words actually heard?" (PLAN B85).
+///
+/// A turn is reported the moment its first `speech.say` lands, because that
+/// is what time-to-first-word means. Nothing after that moment is in the
+/// number: a reply that died in synthesis, one the user talked over after two
+/// words, and one spoken to its last sentence all print the same
+/// `respond=2.1s`. That is B13's failure with the label still attached — a
+/// number whose name stopped covering what it measures — and the frames that
+/// fix it were already on the bus.
+///
+/// jv-voice publishes exactly ONE terminal `speech.state` per reply: it
+/// speaks a whole `reply_group` inside `_speak_turn` and leaves it with
+/// `idle`+`completed`, `interrupted`+`wake`/`preempted`, or `idle`+`error`.
+/// That frame carries a `say_id`, and the `speech.say` that asked for it
+/// carried `in_reply_to_utterance` beside the same id — so the ending threads
+/// back to the turn with no new publisher and no schema change, the same free
+/// seam `hear`/`think` and `tool` were found on.
+///
+/// **It decides nothing.** `reason` is the only thing on this bus that says
+/// how an utterance ended, and this reader never infers one:
+///
+///   * only from a `reason` FRAME. `idle` on its own is jv-voice's queue
+///     draining, and its first frame at startup; a transition with no reason
+///     on it is not an ending. Nothing is timed out here, so a reply whose
+///     ending never comes is dropped by the cap, silently, and is never
+///     reported as an ending the machine did not state.
+///   * only about an output this tap SAW requested. A reason naming a
+///     `say_id` we never heard asked for belongs to a turn this tap cannot
+///     name — it is dropped rather than attached to the latest turn, which is
+///     the refusal `Confirmations` makes about an answer out of nowhere.
+///   * only about a VOICE TURN. `in_reply_to_utterance` is required and
+///     NULLABLE, and a null one is a system announcement: real speech with a
+///     real ending, but no turn was reported for it and there is no number
+///     here for its ending to qualify.
+///
+/// A turn ends ONCE: an ending drops every say of that utterance and not only
+/// the one it named. jv-voice publishes no second terminal state for a reply
+/// today, and this way that is a property of the reader rather than of the
+/// publisher's current shape.
+pub struct Endings {
+    said: VecDeque<Said>,
+    cap: usize,
+    counts: [usize; ENDING_TABLE.len()],
+    /// Endings whose `reason` was a word outside the frozen enum: printed
+    /// verbatim on their own line, and in no row of the table. A word this
+    /// binary does not know is not a diagnosis, and guessing which tally it
+    /// belongs in would put a number under a name it does not stand for.
+    unnamed: usize,
+}
+
+impl Default for Endings {
+    fn default() -> Self {
+        Self::with_capacity(SAYS_REMEMBERED)
+    }
+}
+
+impl Endings {
+    /// A reader holding at most `cap` outputs. A cap of zero would be a
+    /// reader that can report nothing, so one is the floor — the same floor
+    /// `Confirmations::with_capacity` sets for the same reason.
+    pub fn with_capacity(cap: usize) -> Self {
+        Endings {
+            said: VecDeque::new(),
+            cap: cap.max(1),
+            counts: [0; ENDING_TABLE.len()],
+            unnamed: 0,
+        }
+    }
+
+    /// How many outputs are remembered — the memory this holds, for a test
+    /// that wants to prove it is bounded.
+    pub fn remembered(&self) -> usize {
+        self.said.len()
+    }
+
+    /// Whether any ending has been seen at all. An ending whose word was
+    /// unusable still happened, so it counts here.
+    pub fn is_empty(&self) -> bool {
+        self.counts.iter().all(|&n| n == 0) && self.unnamed == 0
+    }
+
+    /// One `speech.say` body: remember which turn this output answers.
+    ///
+    /// Newest wins for a reused `say_id`, the same way `Confirmations::asked`
+    /// replaces a reused `request_id`: an id asked again is a new output, and
+    /// ending the old one would name the wrong turn.
+    pub fn said(&mut self, body: &rmpv::Value) {
+        let (Some(say_id), Some(utterance)) = (
+            get_str(body, "say_id").filter(|s| !s.is_empty()),
+            get_str(body, "in_reply_to_utterance").filter(|s| !s.is_empty()),
+        ) else {
+            return;
+        };
+        self.said.retain(|s| s.say_id != say_id);
+        while self.said.len() >= self.cap {
+            self.said.pop_front();
+        }
+        self.said.push_back(Said { say_id, utterance });
+    }
+
+    /// One `speech.state` body, and the line it is worth when it ends a reply
+    /// this tap saw requested.
+    ///
+    /// Every field is read here rather than at the call site so that all
+    /// three refusals are in the tested unit: `bin/jv.rs` passes the body
+    /// through and prints whatever comes back, and cannot hold an opinion
+    /// about what an ending is.
+    pub fn observe(&mut self, body: &rmpv::Value) -> Option<String> {
+        let reason = get_str(body, "reason").filter(|s| !s.is_empty())?;
+        let say_id = get_str(body, "say_id").filter(|s| !s.is_empty())?;
+        let i = self.said.iter().position(|s| s.say_id == say_id)?;
+        let utterance = self.said[i].utterance.clone();
+        self.said.retain(|s| s.utterance != utterance);
+        let id = short_id(&utterance);
+        Some(match ending_reason(&reason) {
+            Some(r) => {
+                let (word, gloss) = ENDING_TABLE[ending_slot(r)];
+                self.counts[ending_slot(r)] += 1;
+                format!("turn {id}: reply ended {word} ({gloss})")
+            }
+            None => {
+                self.unnamed += 1;
+                format!("turn {id}: reply ended {} (not in the frozen enum)", clip(&reason, ENDING_WORD_COLUMNS))
+            }
+        })
+    }
+
+    /// The endings table, and the sentence the turn table above it cannot
+    /// say.
+    ///
+    /// `turns_reported` is used for one thing only: a tap that reported turns
+    /// and never saw one of them end has a gap worth naming, and silence
+    /// there would read as "they all finished". It is not printed as a
+    /// fraction of the endings, because the two counts are over different
+    /// sets — a reply whose input boundaries this tap never heard is an
+    /// ending here and no turn there.
+    pub fn summary(&self, turns_reported: usize) -> String {
+        if self.is_empty() {
+            if turns_reported == 0 {
+                return String::new();
+            }
+            let plural = if turns_reported == 1 { "" } else { "s" };
+            return format!(
+                "--- no turn ending: no `speech.state` carried a `reason` for an output this\n    tap saw requested, so nothing above says whether the {turns_reported} reported\n    turn{plural} finished or were cut off mid-sentence. jv-voice publishes exactly\n    one such frame per reply, on the way out of `speaking`.\n"
+            );
+        }
+        let total: usize = self.counts.iter().sum::<usize>() + self.unnamed;
+        let mut out = format!("--- turn endings: {total}, as jv-voice reported them leaving `speaking`\n");
+        for (i, (word, gloss)) in ENDING_TABLE.iter().enumerate() {
+            if self.counts[i] == 0 {
+                continue;
+            }
+            out.push_str(&format!("{word:<12} {:>4}  {gloss}\n", self.counts[i]));
+        }
+        if self.unnamed > 0 {
+            let plural = if self.unnamed == 1 { "" } else { "s" };
+            out.push_str(&format!(
+                "--- {} ending{plural} named a reason outside schemas/speech.state.json's enum\n    and {} in no row above.\n",
+                self.unnamed,
+                if self.unnamed == 1 { "is" } else { "are" },
+            ));
+        }
+        out.push_str(
+            "--- a turn is reported at its FIRST word and timed to it, so a reply cut off\n    mid-sentence prints the same `respond` and `total` above as one spoken in\n    full.",
+        );
+        let unfinished = total - self.counts[0];
+        if unfinished == 0 {
+            out.push_str(&format!(" all {total} of them completed.\n"));
+        } else {
+            out.push_str(&format!(" {unfinished} of these {total} did not complete.\n"));
+        }
+        out
+    }
+}
+
+// ---------------------------------------------------------------- confirmations
+
+/// How many open confirmation questions one tap remembers at a time.
+///
+/// jv-act keeps a single outstanding slot today and this is not the thing
+/// that enforces that — the same reason `core/ConfirmState.qml` closes only
+/// on an answer naming the question it holds. Bounded because `jv tap` is
+/// meant to be left running for hours and an open question is forgotten by
+/// nothing but its own answer: a jv-act that died mid-window leaves one
+/// here forever. Past the cap the OLDEST is dropped, because the newest is
+/// the one somebody is still waiting on.
+pub const CONFIRMS_OPEN: usize = 16;
+
+/// The widest a tool name prints inside a confirmation line.
+///
+/// 22, which is the column `act_log_line` already gives a tool name, so the
+/// same tool is the same width in both places a human reads it.
+pub const CONFIRM_TOOL_COLUMNS: usize = 22;
+
+/// The question half of one `action.confirm` exchange, held until its answer.
+struct Asked {
+    request_id: String,
+    /// The tool the question named, or None: `tool` is request-only AND
+    /// optional in the frozen schema, so a question that named none is a
+    /// real case and not a parse failure.
+    tool: Option<String>,
+    /// The frame's own `ts`, so the wait is measured between two moments on
+    /// the bus rather than between two moments this process got round to.
+    ts: f64,
+}
+
+/// The `action.confirm` exchanges `jv tap` has seen the question half of,
+/// and the one line each of them is worth when it ends.
+///
+/// A confirmation is TWO frames on one topic threaded by `request_id` — the
+/// question (which alone carries `tool` and `summary`) and the answer (which
+/// alone carries `granted` and `answered_by`) — with a human's silence in
+/// between. Read as raw frames that is two records a reader has to correlate
+/// by hand, and under `--latency` it is two hop lines carrying neither. This
+/// holds the question until the answer lands and writes the sentence they
+/// make together (PLAN B79).
+///
+/// **It decides nothing.** What a denial IS is argued in
+/// `shell/jv-hud/core/ConfirmState.qml` and this reader may not disagree
+/// with it, so it keeps the same three refusals:
+///
+///   * only about a question this tap SAW asked. An answer whose
+///     `request_id` we never heard opened is a verdict out of nowhere — and
+///     it could not name a tool anyway, since the answer frame carries none.
+///   * only from an answer FRAME. Nothing here times a window out: a
+///     question whose answer never comes is dropped by the cap, silently,
+///     and never reported as an ending the machine did not state.
+///   * `granted` decides and nothing else does. An answer without a usable
+///     `granted` is `unknown` even when the route is `timeout` — the
+///     schema's prose does say a timeout is a denial and jv-act publishes
+///     `granted: false` when it times out, which is exactly why inferring it
+///     off the route here would be a second copy of a rule the frame already
+///     states (A14).
+///
+/// What it does NOT print, deliberately: the `summary`, jv-act's spoken
+/// words. Eighty columns holds the tool or the sentence and not both, and
+/// the tool is the name the same event goes by in `intent.action`, in the
+/// audit, and in `jv act-log`, so it is the one a reader can follow between
+/// them. The words are verbatim on the request frame this tap printed.
+pub struct Confirmations {
+    open: VecDeque<Asked>,
+    cap: usize,
+}
+
+impl Default for Confirmations {
+    fn default() -> Self {
+        Self::with_capacity(CONFIRMS_OPEN)
+    }
+}
+
+impl Confirmations {
+    /// A reader holding at most `cap` open questions. A cap of zero would be
+    /// a reader that cannot report anything, so one is the floor.
+    pub fn with_capacity(cap: usize) -> Self {
+        Confirmations { open: VecDeque::new(), cap: cap.max(1) }
+    }
+
+    /// How many questions are open — the memory this holds, for a test that
+    /// wants to prove it is bounded.
+    pub fn open(&self) -> usize {
+        self.open.len()
+    }
+
+    /// One `action.confirm` body, and the line it completes if it ends an
+    /// exchange this tap was following.
+    ///
+    /// Every field is read here rather than at the call site so that all
+    /// three refusals are in the tested unit: `bin/jv.rs` passes the body
+    /// through and prints whatever comes back, and cannot hold an opinion
+    /// about what a denial is.
+    pub fn observe(&mut self, body: &rmpv::Value, ts: f64) -> Option<String> {
+        let rid = get_str(body, "request_id").filter(|s| !s.is_empty())?;
+        match get_str(body, "kind").as_deref() {
+            Some("request") => {
+                self.asked(rid, get_str(body, "tool"), ts);
+                None
+            }
+            // `granted` and `answered_by` are read as Options and stay that
+            // way: absent and false are different facts about a destructive
+            // tool, and this is the last place that could confuse them.
+            Some("answer") => self.answered(&rid, get_bool(body, "granted"), get_str(body, "answered_by").as_deref(), ts),
+            _ => None,
+        }
+    }
+
+    /// Remember a question. Newest wins for a reused id, the same way
+    /// `ConfirmState` replaces its latch: an id asked again is a new
+    /// question, and answering the old one would name the wrong tool.
+    fn asked(&mut self, request_id: String, tool: Option<String>, ts: f64) {
+        self.open.retain(|a| a.request_id != request_id);
+        while self.open.len() >= self.cap {
+            self.open.pop_front();
+        }
+        self.open.push_back(Asked { request_id, tool, ts });
+    }
+
+    /// Close a question and say how it went, or nothing at all for an answer
+    /// to a question this tap never saw — including the second copy of one
+    /// it has already reported, which is what jv-act's echo of the answer it
+    /// acted on looks like from here.
+    fn answered(&mut self, request_id: &str, granted: Option<bool>, answered_by: Option<&str>, ts: f64) -> Option<String> {
+        let i = self.open.iter().position(|a| a.request_id == request_id)?;
+        let asked = self.open.remove(i)?;
+        Some(confirm_exchange_line(&asked, granted, answered_by, ts))
+    }
+}
+
+/// One finished confirmation as `jv tap` prints it:
+///
+/// ```text
+/// >>> confirm req-4c81: fs.delete -> granted (voice, 4.1s)
+/// ```
+///
+/// Seconds, not the milliseconds every turn line uses, and the difference is
+/// the point: the turn ladder decomposes one latency and its terms have to
+/// be comparable with each other, while this number is a person deciding.
+/// It is the same span `Turn::confirm_line` calls `you=`, and the reason
+/// that one is in milliseconds is that it is a share of a millisecond whole.
+///
+/// Unknowns print `?` — the tool nobody named, the wait two timestamps could
+/// not agree on — and never a plausible zero, the rule `ms` and `health_line`
+/// already follow. A route this binary does not recognise prints as no route
+/// rather than being read aloud: the enum is frozen
+/// (`schemas/action.confirm.json`), a word outside it is not a diagnosis, and
+/// losing it must not take the verdict with it.
+fn confirm_exchange_line(asked: &Asked, granted: Option<bool>, answered_by: Option<&str>, ts: f64) -> String {
+    let tool = match asked.tool.as_deref().filter(|t| !t.is_empty()) {
+        Some(t) => clip(t, CONFIRM_TOOL_COLUMNS),
+        None => "?".to_string(),
+    };
+    let verdict = match granted {
+        Some(true) => "granted",
+        Some(false) => "denied",
+        None => "unknown",
+    };
+    let waited = match ts - asked.ts {
+        d if d.is_finite() && d >= 0.0 => format!("{d:.1}s"),
+        _ => "?".to_string(),
+    };
+    let route = match answered_by {
+        Some(by @ ("voice" | "cli" | "timeout")) => format!("{by}, "),
+        _ => String::new(),
+    };
+    format!("confirm {}: {tool} -> {verdict} ({route}{waited})", short_id(&asked.request_id))
+}
+
+// ---------------------------------------------------------------- restarts
+
+/// How many services one tap keeps a process history for.
+///
+/// Bounded for the reason every memory in this file is: `jv tap` is meant to
+/// be left running for hours and `src` is a string off the wire. Past the cap
+/// a new name is simply NOT ADMITTED, which is the opposite of what
+/// `Confirmations` does with its oldest — and the difference is the argument.
+/// There the newest question is the one somebody is still waiting on; here the
+/// oldest service is the one whose history is worth the most, and evicting it
+/// would silently restart its tally at zero. A count that quietly begins again
+/// is worse than one that never begins.
+///
+/// 64 is far past the nine services `modules/jarvis-services.nix` declares.
+pub const LIVES_ROSTER: usize = 64;
+
+/// The widest a service name prints inside a restart line — the same 22
+/// columns `CONFIRM_TOOL_COLUMNS` gives a tool name, so the two identifiers
+/// this tap clips are clipped alike in the one stream a human reads them in.
+pub const RESTART_SERVICE_COLUMNS: usize = 22;
+
+/// What one tap has seen of one service's process history.
+struct Life {
+    /// The last `uptime_s` read from it. Only ever rises while one process
+    /// lives, which is the whole of the evidence below.
+    uptime: f64,
+    /// How many times that number has been seen to go BACKWARDS since this
+    /// tap connected.
+    restarts: u32,
+}
+
+/// The processes behind the heartbeats — `jv tap`'s answer to "did that
+/// service die and come back while I was watching?" (PLAN B78).
+///
+/// Nothing on the bus publishes "I was restarted", and a service that could
+/// would be the one least able to, having just lost the memory. `uptime_s`
+/// gives it away instead: it counts from one process's own start, so it only
+/// rises while that process lives, and a heartbeat carrying LESS of it than
+/// the last one from the same service was written by a different process.
+///
+/// `jv health` cannot do this. Without `--check` it prints one line per frame
+/// and remembers nothing, so the beat that would prove a restart is gone by
+/// the time the next one lands — however long it runs. A tap already holds
+/// state across frames, and "jv-ears restarted, twice" is the line that
+/// explains a turn which lost its ASR mid-sentence.
+///
+/// **It decides nothing.** What a restart IS is argued in
+/// `shell/jv-hud/core/HealthState.qml` (`observe` / `restartsOf`) and this
+/// reader may not disagree with it, so it keeps the same rules:
+///
+///   * only off a heartbeat this binary is entitled to read. The gate is
+///     literally `trust_health`, the one `jv health --check` uses, so the two
+///     commands cannot come to believe different frames. It is STRICTER than
+///     the HUD's in one place — a `state` word outside the frozen enum refuses
+///     the whole frame here and only the word there. Refusing can lose a death
+///     and can never invent one: a smaller `uptime_s` is the only evidence
+///     there is, and a frame never read cannot make a number go backwards.
+///   * a first sighting claims nothing. With nothing remembered there is no
+///     direction for the number to have moved in, and a small `uptime_s` on
+///     the first beat is what every service looks like on a machine that just
+///     booted. The boot crash loop is therefore the one case this cannot see
+///     (PLAN A82), in the terminal exactly as on screen.
+///   * an unreadable `uptime_s` is SKIPPED, not forgotten, so the next good
+///     frame is compared against the last good one — the comparison that means
+///     something.
+///
+/// What it does not keep is the HUD's freshness window. `restartsOf` draws its
+/// row only while the replacement process is still young, because a plate
+/// asserts its claim continuously and a standing `RESTARTED 3x` over a service
+/// that has been up for a week is a stale sentence. A tap prints once, at the
+/// moment of observation, into a stream whose position is itself the
+/// timestamp; there is no duration for a window to bound. That is a difference
+/// about how long a claim is DISPLAYED, not about what a restart is.
+///
+/// Nothing here forgets on a link drop, because `jv tap` has no link to come
+/// back from: the broker closing ends the process. A tap that ever learns to
+/// reconnect must empty this on the way, exactly as `HealthState.onKnownChanged`
+/// does — a tally that silently spans a gap of unknown length is a number that
+/// means something other than what it says.
+pub struct Lives {
+    seen: HashMap<String, Life>,
+    cap: usize,
+}
+
+impl Default for Lives {
+    fn default() -> Self {
+        Self::with_capacity(LIVES_ROSTER)
+    }
+}
+
+impl Lives {
+    /// A reader keeping at most `cap` service histories. A cap of zero would
+    /// be a reader that can never report anything, so one is the floor.
+    pub fn with_capacity(cap: usize) -> Self {
+        Lives { seen: HashMap::new(), cap: cap.max(1) }
+    }
+
+    /// How many services are remembered — the memory this holds, for a test
+    /// that wants to prove it is bounded.
+    pub fn watching(&self) -> usize {
+        self.seen.len()
+    }
+
+    /// One `sys.health` frame, and the line it is worth when it is the first
+    /// heartbeat of a process that replaced one this tap was watching.
+    ///
+    /// Keyed by the envelope's `src`, because that is who the broker saw
+    /// publish it; the body's own `service` is a claim, and a claim that
+    /// disagrees is what `trust_health` refuses.
+    pub fn observe(&mut self, frame: &rmpv::Value) -> Option<String> {
+        let src = get_str(frame, "src").filter(|s| !s.is_empty())?;
+        let up = trust_health(frame, &src)?.uptime_s?;
+        match self.seen.get_mut(&src) {
+            Some(life) => {
+                let was = std::mem::replace(&mut life.uptime, up);
+                // `<` and not `<=`: two beats a coarse clock stamped with the
+                // same number are one process, not two.
+                if !(up < was) {
+                    return None;
+                }
+                life.restarts += 1;
+                Some(restart_line(&src, life.restarts, was))
+            }
+            None => {
+                if self.seen.len() < self.cap {
+                    self.seen.insert(src, Life { uptime: up, restarts: 0 });
+                }
+                None
+            }
+        }
+    }
+}
+
+/// One observed restart as `jv tap` prints it:
+///
+/// ```text
+/// >>> restart jv-ears: 3x (was up >=8.2s)
+/// ```
+///
+/// `3x` is the notation `HealthPlate` already draws this same fact in
+/// (`jv-ears RESTARTED 3x`), so the corner and the terminal do not spell one
+/// number two ways. It counts since this tap connected and no further back,
+/// which is why the line says nothing about when the first of the three was.
+///
+/// `>=` is the point of the second number. What died is only known to have
+/// REACHED the last uptime it heartbeated — it may have lived up to a period
+/// longer before it went — and this is the same distinction `SayGauge` draws
+/// between a reading and a bound, for the same reason: 8.2 s is a crash loop
+/// and 418.7 s is one bad afternoon, and a reader deciding which must not be
+/// handed a number that rounds one into the other.
+fn restart_line(service: &str, restarts: u32, was_up: f64) -> String {
+    format!(
+        "restart {}: {restarts}x (was up >={was_up:.1}s)",
+        clip(service, RESTART_SERVICE_COLUMNS)
+    )
 }
 
 // ---------------------------------------------------------------- line formats
@@ -753,6 +1906,58 @@ struct Trusted {
     state: Wellness,
     notes: String,
     metrics: Option<rmpv::Value>,
+    /// Seconds since the publishing process started, or None when the field
+    /// is not one that may be COMPARED — absent, a string, a NaN, an
+    /// infinity, or below the schema's own minimum of 0.
+    ///
+    /// Read here because it belongs to the frame, and refused separately
+    /// from the frame because the two refusals are different sizes: a body
+    /// this reader may not interpret at all is `unknown` and a finding, while
+    /// a broken `uptime_s` leaves the service's own state word perfectly
+    /// readable, and turning a jv-voice that is shouting `error` into
+    /// `unknown` over a field about its age would lose the louder fact. The
+    /// same split `core/HealthState.qml` makes between `trust` and
+    /// `uptimeOf`. Only `Lives` reads it (PLAN B78); `jv health` prints the
+    /// number straight off the body, which needs no comparison.
+    uptime_s: Option<f64>,
+}
+
+/// One `sys.health` frame, or None if it is not one this binary may read.
+///
+/// The gate BOTH readers of this topic pass through — `jv health --check`'s
+/// report and `jv tap`'s restart watch (`Lives`) — so the two commands cannot
+/// come to believe different frames about the same service. Rejected: a body
+/// from a schema version this file was not written against (invariant 2), a
+/// heartbeat hedging its confidence (state topics publish conf 1.0 — anything
+/// less disagrees with itself), no orderable `ts`, a body naming a DIFFERENT
+/// service than the broker saw publish it, no usable `period_s`, and a state
+/// word outside the frozen enum, which is not passed through as itself: a word
+/// this binary does not know is not a diagnosis.
+fn trust_health(frame: &rmpv::Value, src: &str) -> Option<Trusted> {
+    if get(frame, "v").and_then(|v| v.as_u64()) != Some(1) {
+        return None;
+    }
+    if get_f64(frame, "conf") != Some(1.0) {
+        return None;
+    }
+    let ts = get_f64(frame, "ts")?;
+    let body = get(frame, "body").filter(|b| b.is_map())?;
+    if get_str(body, "service").as_deref() != Some(src) {
+        return None;
+    }
+    let period_s = get_f64(body, "period_s").filter(|p| *p > 0.0)?;
+    let state = Wellness::from_word(&get_str(body, "state")?)?;
+    Some(Trusted {
+        ts,
+        period_s,
+        state,
+        notes: get_str(body, "notes").unwrap_or_default(),
+        metrics: get(body, "metrics").filter(|m| m.is_map()).cloned(),
+        // The schema's minimum is 0, and a reading below it is refused by the
+        // same test that refuses a NaN: one comparison rather than two that
+        // could come to disagree about whether -5 is a reading.
+        uptime_s: get_f64(body, "uptime_s").filter(|u| u.is_finite() && *u >= 0.0),
+    })
 }
 
 /// jv-brain's `llm_first_say_ms` as a `--check` window saw it — the number
@@ -881,7 +2086,7 @@ impl HealthCheck {
             // must not be attributed to a service we invent a name for.
             return;
         };
-        let trusted = Self::trust(frame, &src);
+        let trusted = trust_health(frame, &src);
         if let Some(t) = &trusted {
             match first_say(frame, &src) {
                 Some((count, ms)) => {
@@ -901,30 +2106,6 @@ impl HealthCheck {
             }
         }
         self.latest.insert(src, trusted);
-    }
-
-    /// The frame, or None if it is not one this binary may read.
-    fn trust(frame: &rmpv::Value, src: &str) -> Option<Trusted> {
-        if get(frame, "v").and_then(|v| v.as_u64()) != Some(1) {
-            return None;
-        }
-        if get_f64(frame, "conf") != Some(1.0) {
-            return None;
-        }
-        let ts = get_f64(frame, "ts")?;
-        let body = get(frame, "body").filter(|b| b.is_map())?;
-        if get_str(body, "service").as_deref() != Some(src) {
-            return None;
-        }
-        let period_s = get_f64(body, "period_s").filter(|p| *p > 0.0)?;
-        let state = Wellness::from_word(&get_str(body, "state")?)?;
-        Some(Trusted {
-            ts,
-            period_s,
-            state,
-            notes: get_str(body, "notes").unwrap_or_default(),
-            metrics: get(body, "metrics").filter(|m| m.is_map()).cloned(),
-        })
     }
 
     /// Has this heartbeat outlived the two periods the schema grants it?
@@ -1886,7 +3067,7 @@ mod tests {
         about(t.respond_ms, 1200.0);
         assert_eq!(t.hear_ms, None);
         assert_eq!(t.think_ms, None);
-        let line = t.line("utt-1");
+        let line = t.respond_line("utt-1");
         assert!(line.contains("hear=?"), "{line}");
         assert!(line.contains("think=?"), "{line}");
     }
@@ -2057,6 +3238,848 @@ mod tests {
         u.started("t", start);
         u.ended("t", end);
         u.reply("t", say, hold_s).expect("a turn")
+    }
+
+
+    /// Build a turn that ran tools, the way `Utterances` would.
+    ///
+    /// `acts` are `(request_id, sent, done)` — the `intent.action` ts and the
+    /// `action.result` ts answering it. `done: None` is a request still
+    /// outstanding when the first word arrived.
+    fn turn_with_tools(
+        start: f64,
+        end: f64,
+        heard: f64,
+        say: f64,
+        acts: &[(&str, f64, Option<f64>)],
+    ) -> Turn {
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", start);
+        u.ended("t", end);
+        u.heard("t", heard);
+        for (rid, sent, done) in acts {
+            u.acted("t", rid, *sent);
+            if let Some(d) = done {
+                u.act_done(rid, *d);
+            }
+        }
+        u.reply("t", say, None).expect("a turn")
+    }
+
+    #[test]
+    fn a_tool_turns_think_is_divided_by_the_round_trip_to_jv_act() {
+        // `think` is the transcript -> the first word, and for a tool turn
+        // it holds two completions with jv-act's work between them. Both
+        // ends of that work are already on the bus: jv-brain publishes
+        // `intent.action` and jv-act answers `action.result`.
+        let t = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(18.0))]);
+        about(t.think_ms, 6000.0);
+        about(t.tool_ms, 3000.0);
+        assert_eq!(t.tool_calls, 1);
+        // The span is INSIDE think, which is what lets it be read as a share.
+        assert!(t.tool_ms.unwrap() <= t.think_ms.unwrap());
+    }
+
+    #[test]
+    fn a_turn_that_ran_no_tool_has_no_tool_span_rather_than_a_zero() {
+        let t = turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5));
+        assert_eq!(t.tool_ms, None, "a span that did not happen is not 0 ms");
+        assert_eq!(t.tool_calls, 0);
+        assert_eq!(t.tool_line("t"), None);
+    }
+
+    #[test]
+    fn two_tool_calls_are_the_time_jv_act_held_and_not_the_gap_between_them() {
+        // jv-brain runs tool calls serially and thinks between them, so the
+        // bracket from the first request to the last result would charge
+        // jv-act for a completion it never saw.
+        let t = turn_with_tools(
+            10.0,
+            13.0,
+            14.0,
+            30.0,
+            &[("r1", 15.0, Some(17.0)), ("r2", 25.0, Some(26.0))],
+        );
+        about(t.think_ms, 16000.0);
+        about(t.tool_ms, 3000.0);
+        assert_eq!(t.tool_calls, 2);
+    }
+
+    #[test]
+    fn overlapping_tool_calls_are_counted_once() {
+        // The union, not the sum: two requests outstanding at the same
+        // moment are one moment of jv-act's time, and summing them could
+        // produce a `tool` larger than the `think` containing it.
+        let t = turn_with_tools(
+            10.0,
+            13.0,
+            14.0,
+            30.0,
+            &[("r1", 15.0, Some(20.0)), ("r2", 16.0, Some(22.0))],
+        );
+        about(t.tool_ms, 7000.0);
+        assert_eq!(t.tool_calls, 2);
+    }
+
+    #[test]
+    fn a_request_seen_twice_is_one_tool_call_at_its_earliest_ts() {
+        for pair in [[15.0, 15.5], [15.5, 15.0]] {
+            let t = turn_with_tools(
+                10.0,
+                13.0,
+                14.0,
+                20.0,
+                &[("r1", pair[0], None), ("r1", pair[1], Some(18.0))],
+            );
+            assert_eq!(t.tool_calls, 1, "one request_id is one call");
+            about(t.tool_ms, 3000.0);
+        }
+    }
+
+    #[test]
+    fn a_request_still_outstanding_when_the_reply_landed_is_refused() {
+        // A tool whose result this tap never saw ran for an unknown length,
+        // and reporting only the answered calls would understate jv-act's
+        // share while looking like a complete measurement.
+        let t = turn_with_tools(
+            10.0,
+            13.0,
+            14.0,
+            30.0,
+            &[("r1", 15.0, Some(17.0)), ("r2", 25.0, None)],
+        );
+        assert_eq!(t.tool_ms, None);
+        assert_eq!(t.tool_calls, 2, "we still know two tools ran");
+        assert_eq!(t.tool_line("t"), None);
+    }
+
+    #[test]
+    fn a_tool_span_outside_the_think_it_divides_is_refused() {
+        // Same rule as the ASR seam and as jv-brain's own gauge: a sub-span
+        // that does not fit inside the span it is a share of means two
+        // clocks disagree, and two numbers that disagree produce no third.
+        let before = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 13.5, Some(18.0))]);
+        assert_eq!(before.tool_ms, None, "jv-act cannot have run before ears finished");
+        let after = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(20.5))]);
+        assert_eq!(after.tool_ms, None, "nor after the first word answering it");
+        // And a result that precedes its own request.
+        let backwards = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 18.0, Some(15.0))]);
+        assert_eq!(backwards.tool_ms, None);
+    }
+
+    #[test]
+    fn a_tool_turn_whose_seam_is_unknown_has_nothing_to_divide() {
+        // No final transcript, so `think` was never measured. The round trip
+        // is still two frames this tap saw, but a share of an unknown whole
+        // is not a share, and the table indents `tool` under `think`.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.acted("t", "r1", 15.0);
+        u.act_done("r1", 18.0);
+        let t = u.reply("t", 20.0, None).expect("a turn");
+        assert_eq!(t.think_ms, None);
+        assert_eq!(t.tool_ms, None);
+    }
+
+    #[test]
+    fn an_action_that_names_no_utterance_belongs_to_no_turn() {
+        // `utterance_id` is optional on `intent.action` — a tool jv-act ran
+        // for the CLI has no voice turn behind it. And like the ASR seam, an
+        // action never CONJURES an utterance: only `audio.vad` says a turn
+        // happened.
+        let mut u = Utterances::with_capacity(4);
+        u.acted("never-bounded", "r1", 15.0);
+        u.act_done("r1", 18.0);
+        assert!(u.is_empty(), "an action must not conjure an utterance");
+        assert!(u.reply("never-bounded", 20.0, None).is_none());
+    }
+
+    #[test]
+    fn a_frame_that_named_nobody_is_refused_even_where_a_turn_answers_to_it() {
+        // An `intent.action` with no `utterance_id` belongs to no turn. The
+        // caller reads the field as an Option and a missing one never gets
+        // here — but a field PRESENT and empty does, and "" must not become
+        // a key that an equally empty `audio.vad` could have created.
+        let mut u = Utterances::with_capacity(4);
+        u.started("", 10.0);
+        u.ended("", 13.0);
+        u.heard("", 14.0);
+        u.acted("", "r1", 15.0);
+        u.act_done("r1", 18.0);
+        let t = u.reply("", 20.0, None).expect("a turn");
+        assert_eq!(t.tool_calls, 0, "an action naming nobody named nobody");
+        assert_eq!(t.tool_ms, None);
+
+        // And the same for a request nothing can be threaded through.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.acted("t", "", 15.0);
+        assert_eq!(u.pending_requests(), 0);
+        assert_eq!(u.reply("t", 20.0, None).expect("a turn").tool_calls, 0);
+    }
+
+    #[test]
+    fn a_result_for_a_request_this_tap_never_saw_is_dropped() {
+        // `action.result` carries only `request_id`, so the join runs
+        // through the `intent.action` that named the utterance. A tap that
+        // started mid-turn sees the result and not the request, and must not
+        // attach it to whatever turn is open.
+        let t = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[]);
+        assert_eq!(t.tool_calls, 0);
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.act_done("orphan", 18.0);
+        let t = u.reply("t", 20.0, None).expect("a turn");
+        assert_eq!(t.tool_calls, 0);
+        assert_eq!(t.tool_ms, None);
+    }
+
+    #[test]
+    fn the_tool_line_names_the_share_and_who_spent_it() {
+        let t = turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(18.0))]);
+        let line = t.tool_line("utt-7").expect("a tool line");
+        assert!(line.contains("turn utt-7:"), "{line}");
+        assert!(line.contains("think=6000ms"), "{line}");
+        assert!(line.contains("tool=3000ms"), "{line}");
+        assert!(line.contains("(1 jv-act call)"), "{line}");
+        // Neither of the two lines over it grew a number.
+        assert!(!t.line("utt-7").contains("tool="), "{}", t.line("utt-7"));
+        assert!(!t.respond_line("utt-7").contains("tool="), "{}", t.respond_line("utt-7"));
+
+        let two = turn_with_tools(10.0, 13.0, 14.0, 30.0, &[("r1", 15.0, Some(17.0)), ("r2", 25.0, Some(26.0))]);
+        assert!(two.tool_line("utt-7").expect("a tool line").contains("(2 jv-act calls)"));
+    }
+
+    #[test]
+    fn a_turn_that_never_stops_calling_tools_stops_being_measured() {
+        // The runaway tool loop is a real, filed failure mode (optimization
+        // backlog #5), and a tap left running for hours cannot grow a vector
+        // per stuck turn. Past the cap we stop recording, and a measurement
+        // we stopped taking is refused rather than reported short.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        for i in 0..(ACTS_PER_TURN + 5) {
+            let rid = format!("r{i}");
+            u.acted("t", &rid, 15.0 + i as f64 * 1e-3);
+            u.act_done(&rid, 15.0 + i as f64 * 1e-3 + 1e-4);
+        }
+        let t = u.reply("t", 20.0, None).expect("a turn");
+        assert_eq!(t.tool_calls, ACTS_PER_TURN, "counting stopped at the cap");
+        assert_eq!(t.tool_ms, None, "and a count that stopped measures nothing");
+    }
+
+    #[test]
+    fn a_requests_join_dies_with_the_utterance_it_belonged_to() {
+        // The request_id -> utterance map is the one structure here that is
+        // not keyed by utterance, so it has to be swept when an utterance is
+        // evicted or `jv tap` grows one entry per tool call, forever.
+        let mut u = Utterances::with_capacity(2);
+        for i in 0..6 {
+            let utt = format!("utt-{i}");
+            u.started(&utt, i as f64);
+            u.acted(&utt, &format!("r{i}"), i as f64 + 0.1);
+        }
+        assert_eq!(u.len(), 2);
+        assert_eq!(u.pending_requests(), 2, "evicted turns take their requests with them");
+    }
+
+    /// Build a turn that ran ONE confirming tool, the way `Utterances` would.
+    ///
+    /// `sent`/`done` bracket the `intent.action` -> `action.result` round
+    /// trip; `window` is the `action.confirm` request -> answer pair inside
+    /// it, or None for a tool that needed no confirmation.
+    fn turn_with_confirm(
+        say: f64,
+        sent: f64,
+        done: Option<f64>,
+        window: Option<(f64, Option<f64>)>,
+    ) -> Turn {
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.acted("t", "r1", sent);
+        if let Some((asked, answered)) = window {
+            u.confirm_asked("r1", asked);
+            if let Some(a) = answered {
+                u.confirm_answered("r1", a);
+            }
+        }
+        if let Some(d) = done {
+            u.act_done("r1", d);
+        }
+        u.reply("t", say, None).expect("a turn")
+    }
+
+    #[test]
+    fn the_half_of_a_tool_that_was_you_deciding_separates_from_the_half_it_ran() {
+        // `tool` is jv-act's span, and for a destructive tool most of it is
+        // the 15 s window jv-act holds open waiting for an answer. No faster
+        // machine shortens that half, so a number mixing it with execution
+        // cannot be argued about against a budget — the same complaint
+        // `spoke` answers one level up. Both ends are already on the bus:
+        // `action.confirm` kind=request and kind=answer, threaded by the
+        // request_id `intent.action` already named.
+        let t = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2))));
+        about(t.tool_ms, 16000.0);
+        about(t.confirm_ms, 15000.0);
+        about(t.ran_ms(), 1000.0);
+        assert_eq!(t.confirm_waits, 1);
+    }
+
+    #[test]
+    fn a_tool_that_asked_you_nothing_has_no_confirmation_to_subtract() {
+        // Most tools are benign and never confirm. "No window" is not a 0 ms
+        // window, and the split simply is not printed for them.
+        let t = turn_with_confirm(20.0, 15.0, Some(18.0), None);
+        about(t.tool_ms, 3000.0);
+        assert_eq!(t.confirm_ms, None, "a window that did not open is not 0 ms");
+        assert_eq!(t.confirm_waits, 0);
+        assert_eq!(t.ran_ms(), None, "and there is nothing to split");
+        assert_eq!(t.confirm_line("t"), None);
+    }
+
+    #[test]
+    fn a_confirmation_still_open_when_the_reply_landed_is_not_timed() {
+        // Same rule as an unanswered `intent.action`: a window whose close
+        // this tap never saw lasted a length nobody can state. We still know
+        // one was asked for, which is a different fact from none.
+        let t = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, None)));
+        assert_eq!(t.confirm_ms, None);
+        assert_eq!(t.confirm_waits, 1, "we still know you were asked");
+        assert_eq!(t.ran_ms(), None);
+        assert_eq!(t.confirm_line("t"), None);
+    }
+
+    #[test]
+    fn the_answer_that_counts_is_the_first_one_you_gave() {
+        // jv-act ECHOES the answer it acted on (`kind=answer`,
+        // answered_by=voice/cli/timeout) on the same topic the `jv confirm`
+        // CLI publishes its answer on, so one decision can produce two
+        // frames. The user stopped deciding at the FIRST of them; charging
+        // them for jv-act's echo would inflate the half that is theirs.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.acted("t", "r1", 15.0);
+        u.confirm_asked("r1", 15.2);
+        u.confirm_answered("r1", 20.2); // the CLI's answer
+        u.confirm_answered("r1", 20.4); // jv-act's echo of it
+        u.act_done("r1", 21.0);
+        let t = u.reply("t", 40.0, None).expect("a turn");
+        about(t.confirm_ms, 5000.0);
+    }
+
+    #[test]
+    fn a_confirmation_window_outside_its_own_round_trip_is_refused() {
+        // The window is a share of ONE tool call, so it has to sit inside
+        // that call's own brackets. A window opening before jv-brain asked,
+        // or closing after jv-act answered, means two frames disagree about
+        // the order the pipeline ran in — and this nesting is also what
+        // guarantees `confirm` can never exceed the `tool` it is part of.
+        let before = turn_with_confirm(40.0, 15.0, Some(31.0), Some((14.9, Some(30.2))));
+        assert_eq!(before.confirm_ms, None, "asked before jv-brain requested the tool");
+        let after = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(31.1))));
+        assert_eq!(after.confirm_ms, None, "answered after jv-act was done");
+        let backwards = turn_with_confirm(40.0, 15.0, Some(31.0), Some((20.0, Some(16.0))));
+        assert_eq!(backwards.confirm_ms, None, "answered before it was asked");
+    }
+
+    #[test]
+    fn two_confirmations_in_one_turn_are_the_union_like_the_calls_around_them() {
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        for (rid, sent, asked, answered, done) in [
+            ("r1", 15.0, 15.2, 20.2, 21.0),
+            ("r2", 25.0, 25.2, 27.2, 28.0),
+        ] {
+            u.acted("t", rid, sent);
+            u.confirm_asked(rid, asked);
+            u.confirm_answered(rid, answered);
+            u.act_done(rid, done);
+        }
+        let t = u.reply("t", 40.0, None).expect("a turn");
+        about(t.tool_ms, 9000.0);
+        about(t.confirm_ms, 7000.0);
+        about(t.ran_ms(), 2000.0);
+        assert_eq!(t.confirm_waits, 2);
+    }
+
+    #[test]
+    fn two_questions_open_at_once_are_one_moment_of_your_time() {
+        // The UNION and not the sum. jv-act holds one confirmation open at a
+        // time — that is ITS rule, enforced in its own single-outstanding
+        // slot, and not something this reader is entitled to assume. Summing
+        // two overlapping windows could produce a `you` larger than the
+        // `tool` it is supposed to be part of.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        for (rid, sent, asked, answered, done) in [
+            ("r1", 15.0, 15.2, 25.2, 26.0),
+            ("r2", 16.0, 20.2, 30.2, 31.0),
+        ] {
+            u.acted("t", rid, sent);
+            u.confirm_asked(rid, asked);
+            u.confirm_answered(rid, answered);
+            u.act_done(rid, done);
+        }
+        let t = u.reply("t", 40.0, None).expect("a turn");
+        about(t.tool_ms, 16000.0);
+        about(t.confirm_ms, 15000.0);
+        about(t.ran_ms(), 1000.0);
+    }
+
+    #[test]
+    fn a_confirmation_for_a_request_this_tap_never_saw_belongs_to_no_turn() {
+        // `action.confirm` carries a request_id and no utterance_id, so the
+        // join runs through the `intent.action` that named one — exactly as
+        // `action.result` does. A tap that started mid-turn sees the
+        // question and not the request behind it.
+        let mut u = Utterances::with_capacity(4);
+        u.started("t", 10.0);
+        u.ended("t", 13.0);
+        u.heard("t", 14.0);
+        u.confirm_asked("orphan", 15.2);
+        u.confirm_answered("orphan", 30.2);
+        u.acted("t", "r1", 15.0);
+        u.act_done("r1", 18.0);
+        let t = u.reply("t", 20.0, None).expect("a turn");
+        assert_eq!(t.confirm_waits, 0);
+        assert_eq!(t.confirm_ms, None);
+        about(t.tool_ms, 3000.0);
+    }
+
+    #[test]
+    fn a_confirmation_inside_a_tool_span_nobody_could_time_is_not_reported() {
+        // `confirm` is a share of `tool` the way `tool` is a share of
+        // `think`: a share of a whole nobody measured is not a share. Here
+        // the window itself is perfectly well formed and the round trip
+        // around it falls outside the `think` it claims to divide.
+        let t = turn_with_confirm(20.0, 13.5, Some(18.0), Some((14.5, Some(17.0))));
+        assert_eq!(t.tool_ms, None, "the round trip started before jv-ears finished");
+        assert_eq!(t.confirm_ms, None, "so its share is not a share of anything");
+        assert_eq!(t.confirm_waits, 1, "we still know you were asked");
+    }
+
+    #[test]
+    fn the_confirm_line_names_the_half_no_machine_can_shorten() {
+        let t = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2))));
+        let line = t.confirm_line("utt-7").expect("a confirm line");
+        assert!(line.contains("turn utt-7:"), "{line}");
+        assert!(line.contains("you=15000ms"), "{line}");
+        assert!(line.contains("ran=1000ms"), "{line}");
+        assert!(line.contains("(1 confirmation)"), "{line}");
+        // It names `tool` and does not restate it, because the line printed
+        // directly above it gives the number — and `lines()` is what makes
+        // "directly above" true rather than hopeful.
+        assert!(line.contains("tool is you="), "{line}");
+        let all = t.lines("utt-7");
+        assert_eq!(all.len(), 4, "{all:?}");
+        assert_eq!(all[3], line);
+        assert!(all[2].contains("tool=16000ms"), "{:?}", all[2]);
+        // Its own line, like the `tool` split above it: nothing over it grew
+        // a number.
+        assert!(!t.line("utt-7").contains("you="), "{}", t.line("utt-7"));
+        assert!(!t.tool_line("utt-7").expect("a tool line").contains("you="), "{line}");
+
+        let two = turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2))));
+        let mut two = two;
+        two.confirm_waits = 2;
+        assert!(two.confirm_line("utt-7").expect("a line").contains("(2 confirmations)"));
+    }
+
+    /// The worst case every turn line has to survive, built once.
+    ///
+    /// `jv_ears.pipeline` stamps `uuid.uuid4()` on every utterance, so a
+    /// 36-character id is the LIVE case and not a pathological one.
+    fn widest_turn() -> Turn {
+        Turn {
+            total_ms: Some(999_999.0),
+            speech_ms: Some(999_999.0),
+            respond_ms: Some(999_999.0),
+            hold_ms: Some(0.0),
+            hear_ms: Some(999_999.0),
+            think_ms: Some(999_999.0),
+            tool_ms: Some(999_999.0),
+            tool_calls: ACTS_PER_TURN,
+            confirm_ms: Some(999_999.0),
+            confirm_waits: ACTS_PER_TURN,
+        }
+    }
+
+    const WIDEST_ID: &str = "3f2a91c4-6d1e-4b7a-9c05-8ef23a41d9b7";
+
+    /// Every line `jv tap` writes about a turn, at the widest it can be.
+    ///
+    /// Three of the four bounds this rests on are enforced somewhere else
+    /// and one is not, which is the point of writing them down here:
+    ///
+    ///   * **the id** is capped by `short_id` at `ID_COLUMNS`, so no id can
+    ///     break this line however long it is — the test below proves that
+    ///     on an id twenty times too long;
+    ///   * **both counts** are two digits because `ACTS_PER_TURN` stops the
+    ///     recording at 32, and a confirmation cannot exist without an act;
+    ///   * **every span is six digits**, and THIS is the bound that is
+    ///     assumed rather than enforced. 999999 ms is 16.7 minutes — longer
+    ///     than any turn that ends with somebody still listening — and a
+    ///     seventh digit would add a column to four of these five lines.
+    ///     Nothing stops a span that long from being measured; this test is
+    ///     what would notice.
+    #[test]
+    fn every_line_a_turn_prints_fits_eighty_columns() {
+        let t = widest_turn();
+        let mut lines = t.lines(WIDEST_ID);
+        // The `think` split arrives a frame later, off jv-brain's gauge, and
+        // is the fifth line the same turn can produce.
+        let mut stats = TurnStats::default();
+        stats.push(&t, WIDEST_ID);
+        lines.push(stats.brain_split(1.0).expect("a think split"));
+
+        assert_eq!(lines.len(), 5, "the widest turn stopped producing every line: {lines:?}");
+        for line in &lines {
+            let w = line.chars().count() + ">>> ".len();
+            assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+            // The control: if a line came out far under the budget, this
+            // test stopped building the worst case and stopped proving
+            // anything. Every one of these is between 65 and 77 today.
+            assert!(w >= 60, "{w} columns is not a worst case: {line}");
+            // And every one of them carries the abbreviated id, so a line
+            // added later cannot quietly print the raw one.
+            assert!(line.contains("3f2a91c4..."), "the id is not abbreviated: {line}");
+            assert!(!line.contains(WIDEST_ID), "the whole id reached a turn line: {line}");
+        }
+    }
+
+    #[test]
+    fn an_id_no_line_could_carry_is_abbreviated_rather_than_left_to_wrap() {
+        assert_eq!(short_id("utt-7"), "utt-7", "an id that fits is never touched");
+        assert_eq!(short_id(&"x".repeat(ID_COLUMNS)), "x".repeat(ID_COLUMNS));
+        // One character past the cap is where abbreviating starts SAVING
+        // something; abbreviating before that would make the id longer.
+        let over = "x".repeat(ID_COLUMNS + 1);
+        assert_eq!(short_id(&over).chars().count(), ID_COLUMNS);
+        assert!(short_id(&over).ends_with("..."));
+        // Twenty times too long, and a multi-byte id, which `chars` counts
+        // and `len` would not: the cap is columns, not bytes.
+        assert_eq!(short_id(&"é".repeat(220)).chars().count(), ID_COLUMNS);
+        let t = widest_turn();
+        for line in t.lines(&"z".repeat(220)) {
+            assert!(line.chars().count() + 4 <= TAP_COLUMNS, "{line}");
+        }
+    }
+
+    #[test]
+    fn two_ids_that_start_alike_print_alike_and_that_is_the_price() {
+        // The cost of abbreviating, written down where somebody looking for
+        // it will find it: `jv tap` is read by a human watching turns go by,
+        // and the whole id is on the frames printed beside these lines.
+        let a = "3f2a91c4-6d1e-4b7a-9c05-8ef23a41d9b7";
+        let b = "3f2a91c4-0000-0000-0000-000000000000";
+        assert_ne!(a, b);
+        assert_eq!(short_id(a), short_id(b));
+    }
+
+    #[test]
+    fn no_line_names_a_span_whose_value_no_line_printed() {
+        // The ladder's one rule: `tool_line` says `tool=` and `confirm_line`
+        // says `tool` without restating it, so a confirm line printed
+        // without a tool line above it would point at nothing. `reply`
+        // cannot build that turn — `confirm_ms` is gated on `tool_ms` which
+        // is gated on the seam — but the fields are public and this is the
+        // guard that makes it true of the TYPE and not just of one caller.
+        let mut t = widest_turn();
+        t.think_ms = None;
+        assert!(t.tool_line("t").is_none());
+        assert!(t.confirm_line("t").is_none(), "a confirm line with no tool line over it");
+        assert_eq!(t.lines("t").len(), 2, "the two lines every turn prints");
+    }
+
+    #[test]
+    fn the_summary_table_and_the_hop_table_fit_the_same_eighty_columns() {
+        // The turn lines are not the only thing `jv tap` prints as a report,
+        // and a table that wraps is worse than a line that does: its columns
+        // stop lining up with each other, which is the whole of its value.
+        let mut stats = TurnStats::default();
+        stats.push(&widest_turn(), WIDEST_ID);
+        stats.brain_split(1.0);
+        let mut hops = HopStats::default();
+        // The widest real topic on the bus, and a hop that overflows the
+        // column it is formatted into.
+        hops.hop("context.window.changed", 999_999.99);
+        for line in stats.summary().lines().chain(hops.summary().lines()) {
+            let w = line.chars().count();
+            assert!(w <= TAP_COLUMNS, "{w} columns: {line}");
+        }
+    }
+
+    /// The per-frame line `jv tap --latency` writes above those tables, at
+    /// inputs no publisher is stopped from producing.
+    ///
+    /// This is the one report line the CLI wrote from `jv.rs`, where the
+    /// end-to-end width test could not reach it (B23), and the one whose
+    /// width is set by a string a REMOTE process chose. `validate_envelope`
+    /// bounds a topic's alphabet and a src's emptiness and neither one's
+    /// LENGTH, so both are clipped here rather than assumed — the two rows
+    /// below are `audio.transcript` (the longest topic any schema declares)
+    /// and a topic and a src from a service that does not exist yet.
+    ///
+    /// What is assumed rather than enforced, said out loud: `seq` is eight
+    /// digits and the hop is eight columns, which leaves this line 16 short
+    /// of the budget. A 4.2-billion seq (ten digits) and a 99-second hop
+    /// still fit; a hop wide enough to break this is a publisher stamping
+    /// wall-clock `ts` on a monotonic bus, and printing that number whole is
+    /// the report, not a formatting fault.
+    #[test]
+    fn the_streamed_hop_line_fits_eighty_columns_whatever_a_publisher_is_called() {
+        let rows = [
+            ("audio.transcript", "jv-ears", 12_345_678i64, 999_999.99f64),
+            ("jv-hud-bridge is the longest src today", "jv-hud-bridge", 0, 0.0),
+            (&"a.".repeat(60), &"s".repeat(120)[..], i64::MAX, -1.0),
+        ];
+        for (topic, src, seq, ms) in rows {
+            let line = hop_line(topic, src, seq, ms);
+            let w = line.chars().count();
+            assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+            // The control: a line far under the budget would mean this test
+            // stopped building the worst case. Every one of these is 64+.
+            assert!(w >= 60, "{w} columns is not a worst case: {line}");
+        }
+        // A topic too long to print is clipped and SAYS it was, with the same
+        // `...` short_id uses; one that fits is never touched.
+        let long = hop_line(&"a.".repeat(60), "jv-ears", 1, 1.0);
+        assert!(long.starts_with("a.a.a.a.a.a.a.a.a.a..."), "the clip is not marked: {long}");
+        assert!(hop_line("audio.vad", "jv-ears", 1, 1.0).starts_with("audio.vad  "));
+        // All three views of a topic — the stream, the table's header and its
+        // rows — end that column in the same place, which is the one cap
+        // `TOPIC_COLUMNS` exists to serve and what lets a reader trace a
+        // topic out of one view into the other. True for every topic set this
+        // bus can produce; the table takes more columns when it needs them to
+        // tell two rows apart, which is B24's own test.
+        //
+        // Each is checked at the first character PAST the column rather than
+        // against a padded copy of the topic: the table's next field is right
+        // aligned, so a narrower column and a wider pad are the same string
+        // and only what follows them tells the two apart.
+        let mut hops = HopStats::default();
+        for _ in 0..3 {
+            hops.hop("audio.transcript", 2.0);
+        }
+        let table = hops.summary();
+        let head = table.lines().nth(1).expect("the table header");
+        let row = table.lines().nth(2).expect("the table's one row");
+        let stream = hop_line("audio.transcript", "jv-ears", 1, 2.0);
+        let n_at = TOPIC_COLUMNS + 1 + 4; // `{:>5}`, so the value's last digit
+        assert_eq!(head.as_bytes()[n_at], b'n', "the header's count column moved:\n{head}");
+        assert_eq!(row.as_bytes()[n_at], b'3', "the row's count column moved:\n{row}");
+        assert_eq!(stream.as_bytes()[TOPIC_COLUMNS], b' ', "no gap after the topic: {stream}");
+        assert_eq!(stream.as_bytes()[TOPIC_COLUMNS + 1], b'j', "the src does not start there: {stream}");
+    }
+
+    /// Two topics, one label, two rows of numbers under it — the one thing a
+    /// measurement table may not do (B24).
+    ///
+    /// `TOPIC_COLUMNS` buys alignment by clipping, and a clip is a promise
+    /// that what it hid is one `jv sub '*'` away. That promise holds for the
+    /// per-frame STREAM, where each line is about a frame that named itself.
+    /// It does not hold for the table, where a row is about a topic and the
+    /// label is the only thing that says WHICH — so here identity outranks
+    /// alignment, and the column grows until every row carries its own name.
+    #[test]
+    fn two_topics_that_clip_alike_never_become_one_row_of_numbers() {
+        let a = "context.window.changed.alpha";
+        let b = "context.window.changed.beta";
+        // The control: without it this test would pass on a pair the fixed
+        // column already told apart, and prove nothing.
+        assert_eq!(clip(a, TOPIC_COLUMNS), clip(b, TOPIC_COLUMNS), "not the case this is about");
+
+        let mut hops = HopStats::default();
+        hops.hop(a, 1.0);
+        hops.hop(b, 2.0);
+        let table = hops.summary();
+        let rows: Vec<&str> = table.lines().skip(2).collect();
+        assert_eq!(rows.len(), 2, "two topics are not two rows:\n{table}");
+
+        let w = table_topic_columns(&[a, b]);
+        let label = |line: &str| line.chars().take(w).collect::<String>();
+        assert_ne!(label(rows[0]), label(rows[1]), "two topics, one label:\n{table}");
+
+        // And the table is still a table: the header moved with the rows, so
+        // every number is still under the heading that names it. Checked at
+        // the first character PAST the column, for the reason the stream test
+        // gives — the next field is right aligned, so a narrow column and a
+        // wide pad are the same string.
+        let n_at = w + 1 + 4;
+        let head = table.lines().nth(1).expect("the table header");
+        assert_eq!(head.as_bytes()[n_at], b'n', "the header did not move with the rows:\n{table}");
+        for row in &rows {
+            assert_eq!(row.as_bytes()[n_at], b'1', "a row's count column moved:\n{table}");
+        }
+    }
+
+    /// The column grows as far as identity needs and not one column further.
+    #[test]
+    fn the_topic_column_grows_only_as_far_as_telling_the_rows_apart_needs() {
+        // Nothing a schema declares reaches the cap, so a real bus never
+        // moves this column at all — which is what keeps the table and the
+        // stream above it lined up in every case that exists today.
+        assert_eq!(
+            table_topic_columns(&["audio.transcript", "sys.health", "speech.say", "action.confirm"]),
+            TOPIC_COLUMNS,
+        );
+        // One column past the first character that tells the two apart.
+        // `...alpha` / `...beta` diverge at index 23, and a clip keeps
+        // `columns - 3` of them, so 27 is the first width that separates
+        // them and 26 is not.
+        let pair = ["context.window.changed.alpha", "context.window.changed.beta"];
+        assert_eq!(table_topic_columns(&pair), 27);
+        assert_eq!(clip(pair[0], 26), clip(pair[1], 26), "26 columns would have done");
+
+        // A CLIPPED label and a whole one can collide too, so it is the
+        // printed labels that are compared and never "the long ones". This
+        // pair is a string pair and not a topic pair — `validate_envelope`
+        // refuses an empty segment, so nothing ending in two dots reaches a
+        // live tap — and it is covered because nothing else in this width
+        // code assumes the topic alphabet.
+        let dotted = format!("{}...", "a".repeat(19));
+        let longer = format!("{}bcdef", "a".repeat(19));
+        assert_eq!(clip(&longer, TOPIC_COLUMNS), dotted, "not the collision this is about");
+        assert_eq!(table_topic_columns(&[&dotted, &longer]), 23);
+    }
+
+    /// The order of the two rules, pinned where it costs something.
+    ///
+    /// Every other report line this CLI writes fits `TAP_COLUMNS` at its
+    /// worst input (B22/B23). This one does not, deliberately: when telling
+    /// two rows apart needs more columns than the budget has, the table
+    /// takes them. A wrapped row is a row a reader can still resolve; two
+    /// identical labels over different numbers is a table that lies.
+    ///
+    /// Nothing on this bus can trigger it — `audio.transcript` is 16 of the
+    /// 22 and the widest topic any schema declares — so this is a
+    /// consequence pinned before it can bite, not a defect.
+    #[test]
+    fn the_table_goes_wider_than_the_budget_rather_than_collapse_two_rows() {
+        let a = format!("{}alpha", "z.".repeat(25));
+        let b = format!("{}beta", "z.".repeat(25));
+        let mut hops = HopStats::default();
+        hops.hop(&a, 1.0);
+        hops.hop(&b, 2.0);
+        let table = hops.summary();
+        let rows: Vec<&str> = table.lines().skip(2).collect();
+
+        let w = table_topic_columns(&[&a, &b]);
+        assert!(w + 39 > TAP_COLUMNS, "{w} columns still fits the budget; no trade was made");
+        assert!(
+            rows.iter().all(|r| r.chars().count() > TAP_COLUMNS),
+            "the rows fit, so nothing was traded:\n{table}",
+        );
+        let label = |line: &str| line.chars().take(w).collect::<String>();
+        assert_ne!(label(rows[0]), label(rows[1]), "and it bought nothing:\n{table}");
+    }
+
+    #[test]
+    fn turn_summary_splits_a_confirming_tool_into_you_and_jv_act() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2)))), "t");
+        let out = s.summary();
+        let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("no {w} row in\n{out}"));
+        assert!(at("  tool") < at("    you"), "the halves sit under their whole:\n{out}");
+        assert!(at("    you") < at("    ran"), "{out}");
+        assert!(at("    ran") < at("respond"), "{out}");
+        assert!(out.contains("15000ms"), "{out}");
+        assert!(out.contains("action.confirm"), "and say where the number came from:\n{out}");
+    }
+
+    #[test]
+    fn a_confirmation_nobody_could_time_leaves_neither_half_of_it() {
+        // A `ran` row standing on turns a `you` row does not would be an
+        // average over turns measured two different ways. It cannot happen
+        // here — `ran_ms` is the subtraction and refuses without both — and
+        // this is the turn that would expose it if it ever did: a question
+        // this tap saw opened and never saw closed, inside a `tool` that was
+        // measured perfectly well.
+        let mut s = TurnStats::default();
+        s.push(&turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, None))), "t");
+        let out = s.summary();
+        assert!(!out.contains("\n    you"), "{out}");
+        assert!(!out.contains("\n    ran"), "{out}");
+        assert!(out.contains("\n  tool"), "tool is still measured:\n{out}");
+    }
+
+    #[test]
+    fn a_summary_with_no_confirmation_in_it_has_no_confirmation_rows() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_confirm(20.0, 15.0, Some(18.0), None), "t");
+        let out = s.summary();
+        assert!(!out.contains("\n    you"), "{out}");
+        assert!(!out.contains("\n    ran"), "{out}");
+        assert!(!out.contains("action.confirm"), "{out}");
+    }
+
+    #[test]
+    fn turn_summary_shows_jv_acts_share_of_a_tool_turn() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(18.0))]), "t");
+        let out = s.summary();
+        let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("no {w} row in\n{out}"));
+        assert!(at("think") < at("tool"), "a share is listed under its whole:\n{out}");
+        assert!(at("tool") < at("respond"), "{out}");
+        assert!(out.contains("3000ms"), "{out}");
+        assert!(out.contains("jv-act"), "{out}");
+        // A turn that ran tools publishes no first-say gauge, so the row it
+        // would have filled must not appear instead.
+        assert!(!out.contains("\n  model"), "{out}");
+    }
+
+    #[test]
+    fn every_summary_row_stays_inside_the_columns_it_is_printed_in() {
+        // The table is read in a terminal, and a `whose time it is` longer
+        // than its column silently shoves the three numbers beside it out of
+        // line for that row only — which reads as a broken number rather
+        // than as a long label. This is the check the `tool` row's first
+        // label failed, and it belongs to every row after it.
+        let mut s = TurnStats::default();
+        s.push(&turn_with_tools(10.0, 13.0, 14.0, 20.0, &[("r1", 15.0, Some(18.0))]), "a");
+        s.push(&turn_with_seam(20.0, 23.0, 24.0, 24.3, Some(1.5)), "b");
+        s.brain_split(210.0);
+        s.push(&turn_with_confirm(40.0, 15.0, Some(31.0), Some((15.2, Some(30.2)))), "c");
+        let out = s.summary();
+        // The header and every row under it, stopping at the first footnote.
+        // NOT "every line that is not indented": the deepest rows ARE
+        // indented, by the same four spaces a footnote's continuation lines
+        // use, and a filter that skipped them would exempt the rows most
+        // likely to overflow from the check written for them.
+        let rows: Vec<&str> = out
+            .lines()
+            .skip_while(|l| !l.starts_with("span "))
+            .take_while(|l| !l.starts_with("---"))
+            .collect();
+        assert!(rows.len() > 8, "not every row is here:\n{out}");
+        let header = rows[0].len();
+        for r in &rows {
+            assert_eq!(r.len(), header, "row is not the header's width:\n{out}");
+        }
+    }
+
+    #[test]
+    fn a_summary_with_no_tool_turn_in_it_has_no_tool_row() {
+        let mut s = TurnStats::default();
+        s.push(&turn_with_seam(10.0, 13.0, 14.0, 14.2, Some(1.5)), "t");
+        let out = s.summary();
+        assert!(!out.contains("\n  tool"), "{out}");
+        assert!(!out.contains("jv-act"), "{out}");
     }
 
     #[test]
@@ -2827,5 +4850,740 @@ mod tests {
         let line = act_log_line(&e);
         assert!(line.contains("fs.read"), "{line}");
         assert!(line.contains('?'), "{line}");
+    }
+
+    // ---------------------------------------------------------- confirmations
+
+    /// One `action.confirm` body, as jv-act and the CLI put it on the bus.
+    fn ask(rid: &str, tool: Option<&str>) -> rmpv::Value {
+        let mut pairs = vec![("kind", rmpv::Value::from("request")), ("request_id", rid.into())];
+        if let Some(t) = tool {
+            pairs.push(("tool", t.into()));
+        }
+        // `summary` and `window_s` ride along on the real frame and this
+        // reader is required not to care about either.
+        pairs.push(("summary", "Delete 3 files from Downloads - yes or no?".into()));
+        pairs.push(("window_s", rmpv::Value::from(15.0)));
+        map(&pairs)
+    }
+
+    fn answer(rid: &str, granted: Option<bool>, by: Option<&str>) -> rmpv::Value {
+        let mut pairs = vec![("kind", rmpv::Value::from("answer")), ("request_id", rid.into())];
+        if let Some(g) = granted {
+            pairs.push(("granted", g.into()));
+        }
+        if let Some(b) = by {
+            pairs.push(("answered_by", b.into()));
+        }
+        map(&pairs)
+    }
+
+    #[test]
+    fn a_question_and_its_answer_come_out_as_one_line() {
+        let mut c = Confirmations::default();
+        // The question alone says nothing: the tap prints the frame, and an
+        // exchange with no ending is not an exchange.
+        assert_eq!(c.observe(&ask("req-1", Some("fs.delete")), 100.0), None);
+        assert_eq!(c.open(), 1);
+        let line = c.observe(&answer("req-1", Some(true), Some("voice")), 104.1).expect("one line");
+        assert!(line.starts_with("confirm req-1: "), "{line}");
+        assert!(line.contains("fs.delete"), "{line}");
+        assert!(line.contains("granted"), "{line}");
+        assert!(line.contains("voice"), "{line}");
+        // Your own time, in the unit a person answers in.
+        assert!(line.contains("4.1s"), "{line}");
+        // And the question is gone: an exchange is reported once.
+        assert_eq!(c.open(), 0);
+    }
+
+    #[test]
+    fn an_answer_to_a_question_this_tap_never_saw_is_not_a_verdict() {
+        // The rule `core/ConfirmState.qml` keeps for the HUD, for the same
+        // reason: a verdict out of nowhere names a tool nobody can read off
+        // the answer frame (`tool` is request-only in the frozen schema),
+        // and a tap that joined mid-window never heard the question.
+        let mut c = Confirmations::default();
+        assert_eq!(c.observe(&answer("req-9", Some(true), Some("voice")), 5.0), None);
+        assert_eq!(c.open(), 0);
+    }
+
+    #[test]
+    fn an_exchange_is_reported_once_however_many_times_it_is_answered() {
+        // Not hypothetical: jv-act ECHOES the answer it acted on, on the
+        // same topic (`services/jv-act/src/service.rs`), so every confirmed
+        // tool puts two answer frames on the wire.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        assert!(c.observe(&answer("req-1", Some(true), Some("cli")), 1.0).is_some());
+        assert_eq!(c.observe(&answer("req-1", Some(true), Some("cli")), 1.0), None, "the echo");
+    }
+
+    #[test]
+    fn granted_decides_the_verdict_and_the_route_never_does() {
+        // The argument is `core/ConfirmState.qml`'s and this reader may not
+        // disagree with it: the schema's prose says a timeout is a denial
+        // and jv-act publishes `granted: false` when it times out, which is
+        // exactly why inferring the denial off the ROUTE here would be a
+        // second copy of a rule the frame already states (A14).
+        let rows = [
+            (Some(true), "granted"),
+            (Some(false), "denied"),
+            (None, "unknown"),
+        ];
+        for (granted, word) in rows {
+            let mut c = Confirmations::default();
+            c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+            let line = c.observe(&answer("req-1", granted, Some("timeout")), 15.0).expect("a line");
+            assert!(line.contains(word), "{granted:?} did not read as {word}: {line}");
+            // The route is printed and is never the verdict.
+            assert!(line.contains("timeout"), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_granted_that_is_not_a_boolean_grants_nothing() {
+        // The floor `granted` decides on. A producer writing 1, or "true",
+        // is writing a different schema, and reading either as a yes would
+        // be this CLI reporting an authorization nobody gave.
+        for g in [rmpv::Value::from(1), rmpv::Value::from("true"), rmpv::Value::Nil] {
+            let mut c = Confirmations::default();
+            c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+            let body = map(&[
+                ("kind", "answer".into()),
+                ("request_id", "req-1".into()),
+                ("granted", g.clone()),
+                ("answered_by", "voice".into()),
+            ]);
+            let line = c.observe(&body, 1.0).expect("a line");
+            assert!(line.contains("unknown"), "{g:?} read as a verdict: {line}");
+            assert!(!line.contains("granted"), "{g:?} granted something: {line}");
+        }
+        assert_eq!(get_bool(&map(&[("g", rmpv::Value::from(1))]), "g"), None);
+        assert_eq!(get_bool(&map(&[("g", false.into())]), "g"), Some(false));
+        assert_eq!(get_bool(&rmpv::Value::Nil, "g"), None);
+    }
+
+    #[test]
+    fn a_route_the_frozen_schema_does_not_have_loses_the_route_and_not_the_verdict() {
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        let line = c.observe(&answer("req-1", Some(false), Some("hud")), 2.0).expect("a line");
+        assert!(line.contains("denied"), "{line}");
+        assert!(!line.contains("hud"), "a word off the enum was read aloud: {line}");
+        assert!(line.contains("(2.0s)"), "{line}");
+        // The same for an answer that names no route at all.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-2", Some("fs.delete")), 0.0);
+        let line = c.observe(&answer("req-2", Some(true), None), 2.0).expect("a line");
+        assert!(line.contains("granted") && line.contains("(2.0s)"), "{line}");
+    }
+
+    #[test]
+    fn a_frame_that_is_neither_a_question_nor_an_answer_is_no_news() {
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        for junk in [
+            map(&[("kind", "request".into())]),                       // no request_id
+            map(&[("kind", "request".into()), ("request_id", "".into())]),
+            map(&[("request_id", "req-1".into())]),                   // no kind
+            map(&[("kind", "cancel".into()), ("request_id", "req-1".into())]),
+            map(&[("kind", rmpv::Value::from(7)), ("request_id", "req-1".into())]),
+            rmpv::Value::Nil,
+        ] {
+            assert_eq!(c.observe(&junk, 1.0), None, "{junk:?}");
+        }
+        // And none of it disturbed the question that was open.
+        assert_eq!(c.open(), 1);
+        assert!(c.observe(&answer("req-1", Some(true), Some("cli")), 3.0).is_some());
+    }
+
+    #[test]
+    fn a_second_question_under_the_same_id_is_the_one_that_gets_answered() {
+        // Newest wins, the same way `ConfirmState` replaces its latch: an id
+        // reused is a new question, and answering the old one would name the
+        // wrong tool.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        c.observe(&ask("req-1", Some("net.disable")), 10.0);
+        assert_eq!(c.open(), 1, "the same id is one question, not two");
+        let line = c.observe(&answer("req-1", Some(true), Some("voice")), 12.0).expect("a line");
+        assert!(line.contains("net.disable") && !line.contains("fs.delete"), "{line}");
+        assert!(line.contains("voice, 2.0s)"), "the wait is the live question's: {line}");
+    }
+
+    #[test]
+    fn a_request_that_named_no_tool_says_so_rather_than_inventing_one() {
+        // `tool` is optional in the frozen schema, and a name nobody stated
+        // is not one this may supply. `?` is what every unknown prints here.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", None), 0.0);
+        let line = c.observe(&answer("req-1", Some(true), Some("cli")), 1.0).expect("a line");
+        assert!(line.contains("? -> granted"), "{line}");
+    }
+
+    #[test]
+    fn two_timestamps_that_disagree_produce_no_third_number() {
+        // The same rule `Turn::spoke_ms` follows. Frames arrive in order on
+        // this bus, and the tap reads `ts` defensively anyway — a negative
+        // wait is a clock, not a fast user.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-1", Some("fs.delete")), 100.0);
+        let line = c.observe(&answer("req-1", Some(true), Some("cli")), 99.0).expect("a line");
+        assert!(line.contains("granted (cli, ?)"), "{line}");
+        assert!(!line.contains("-1.0s"), "a negative wait was printed as a number: {line}");
+        // A ts that is not a number at all reads as 0.0 at the call site in
+        // `bin/jv.rs`, and an unreadable clock is the same non-answer.
+        let mut c = Confirmations::default();
+        c.observe(&ask("req-2", Some("fs.delete")), f64::NAN);
+        let line = c.observe(&answer("req-2", Some(true), Some("cli")), 1.0).expect("a line");
+        assert!(line.contains('?'), "{line}");
+    }
+
+    #[test]
+    fn the_open_questions_are_bounded_so_a_tap_left_running_cannot_grow() {
+        // jv-act keeps ONE outstanding slot today and this is not the thing
+        // that enforces that; a question whose answer never comes (a jv-act
+        // that died mid-window) is never forgotten by an answer, and `jv
+        // tap` is meant to be left running for hours.
+        let mut c = Confirmations::with_capacity(4);
+        for n in 0..64 {
+            c.observe(&ask(&format!("req-{n}"), Some("fs.delete")), n as f64);
+        }
+        assert_eq!(c.open(), 4);
+        // The oldest were dropped, so their answers are strangers' answers.
+        assert_eq!(c.observe(&answer("req-0", Some(true), Some("cli")), 70.0), None);
+        assert_eq!(c.observe(&answer("req-59", Some(true), Some("cli")), 70.0), None);
+        // The newest four are still answerable.
+        for n in 60..64 {
+            assert!(c.observe(&answer(&format!("req-{n}"), Some(true), Some("cli")), 70.0).is_some(), "req-{n}");
+        }
+        assert_eq!(c.open(), 0);
+        // A cap of nothing is still a working reader, not a spin.
+        let mut c = Confirmations::with_capacity(0);
+        c.observe(&ask("req-1", Some("fs.delete")), 0.0);
+        assert!(c.observe(&answer("req-1", Some(true), Some("cli")), 1.0).is_some());
+    }
+
+    /// The confirmation line at the widest every part of it can be.
+    ///
+    /// What is enforced elsewhere: the id is capped by `short_id`, the tool
+    /// by `CONFIRM_TOOL_COLUMNS`, the verdict and the route are both closed
+    /// word lists. What is ASSUMED, said out loud: the wait is five digits
+    /// and a decimal, which puts the worst case at 79 of the 80 columns.
+    /// 99999.9 s is 27 hours of one question staying open — jv-act's real
+    /// window is 15 s and its own timeout answer closes it long before — so
+    /// a sixth digit (80 columns, still fitting) is already absurd and a
+    /// seventh would be the first thing to wrap. This test is what notices.
+    #[test]
+    fn the_confirmation_line_fits_eighty_columns() {
+        let mut c = Confirmations::default();
+        c.observe(&ask(WIDEST_ID, Some(&"t".repeat(120))), 0.0);
+        let line = c
+            .observe(&answer(WIDEST_ID, None, Some("timeout")), 99_999.9)
+            .expect("a line");
+        let w = line.chars().count() + ">>> ".len();
+        assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+        // The control: a line far under the budget would mean this stopped
+        // building the worst case.
+        assert!(w >= 60, "{w} columns is not a worst case: {line}");
+        // Both long strings were cut down, and both say they were.
+        assert!(line.contains("3f2a91c4..."), "the id is not abbreviated: {line}");
+        assert!(!line.contains(WIDEST_ID), "the whole id reached the line: {line}");
+        assert!(line.contains(&("t".repeat(CONFIRM_TOOL_COLUMNS - 3) + "...")), "the tool is not clipped: {line}");
+        // A tool that already fits is never made longer by being clipped.
+        let mut c = Confirmations::default();
+        c.observe(&ask("r", Some("fs.delete")), 0.0);
+        let short = c.observe(&answer("r", Some(true), Some("cli")), 0.0).expect("a line");
+        assert!(short.contains(" fs.delete ->"), "{short}");
+    }
+
+
+
+    // -------------------------------------------------------- turn endings
+
+    /// One `speech.say` body, as jv-brain puts a sentence of a reply on the
+    /// bus. `in_reply_to_utterance` is required and NULLABLE, and a null one
+    /// is a real frame: an announcement nobody asked for.
+    fn say(say_id: &str, in_reply_to: Option<&str>) -> rmpv::Value {
+        map(&[
+            ("text", "Right away.".into()),
+            ("say_id", say_id.into()),
+            (
+                "in_reply_to_utterance",
+                match in_reply_to {
+                    Some(u) => u.into(),
+                    None => rmpv::Value::Nil,
+                },
+            ),
+            // Rides along on every streamed sentence; this reader is
+            // required not to need it.
+            ("reply_group", "grp-1".into()),
+        ])
+    }
+
+    /// One `speech.state` body, as jv-voice publishes it on every transition.
+    fn spoke(state: &str, say_id: Option<&str>, reason: Option<&str>) -> rmpv::Value {
+        let mut pairs = vec![("state", rmpv::Value::from(state))];
+        if let Some(s) = say_id {
+            pairs.push(("say_id", s.into()));
+        }
+        if let Some(r) = reason {
+            pairs.push(("reason", r.into()));
+        }
+        map(&pairs)
+    }
+
+    #[test]
+    fn a_reply_spoken_in_full_and_one_cut_off_are_told_apart() {
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        // Starting to speak is not an ending, and neither is anything
+        // without a reason on it.
+        assert_eq!(e.observe(&spoke("speaking", Some("s-1"), None)), None);
+        let line = e.observe(&spoke("idle", Some("s-1"), Some("completed"))).expect("a line");
+        assert!(line.starts_with("turn utt-1: "), "{line}");
+        assert!(line.contains("completed"), "{line}");
+        assert!(line.contains("spoken in full"), "{line}");
+
+        let mut e = Endings::default();
+        e.said(&say("s-2", Some("utt-2")));
+        let line = e.observe(&spoke("interrupted", Some("s-2"), Some("wake"))).expect("a line");
+        assert!(line.contains("wake"), "{line}");
+        assert!(line.contains("you cut it off"), "{line}");
+        // The two numbers `jv tap --latency` printed for these turns are
+        // identical, which is the whole reason this reader exists.
+    }
+
+    #[test]
+    fn an_ending_for_an_output_this_tap_never_saw_requested_says_nothing() {
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        // A reason naming an output we never heard asked for belongs to a
+        // turn this tap cannot name. It is dropped, not attached to the one
+        // turn it does know.
+        assert_eq!(e.observe(&spoke("idle", Some("s-other"), Some("completed"))), None);
+        assert_eq!(e.summary(1).lines().filter(|l| l.starts_with("completed")).count(), 0);
+        // And the turn it does know is untouched, so the real ending still
+        // lands.
+        assert!(e.observe(&spoke("idle", Some("s-1"), Some("error"))).is_some());
+    }
+
+    #[test]
+    fn a_transition_that_is_not_an_ending_says_nothing() {
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        // jv-voice's queue draining, and its very first frame at startup.
+        assert_eq!(e.observe(&spoke("idle", None, None)), None);
+        assert_eq!(e.observe(&spoke("idle", Some("s-1"), None)), None);
+        assert_eq!(e.observe(&spoke("speaking", Some("s-1"), None)), None);
+        // An empty reason is an absent one.
+        assert_eq!(e.observe(&spoke("idle", Some("s-1"), Some(""))), None);
+        assert!(e.is_empty(), "nothing above was an ending");
+        // Nothing here times a reply out: a turn whose ending never comes is
+        // forgotten by the cap, silently, and is never reported as an ending
+        // the machine did not state.
+        assert_eq!(e.remembered(), 1);
+    }
+
+    #[test]
+    fn an_announcement_belongs_to_no_turn_and_ends_without_a_line() {
+        let mut e = Endings::default();
+        // Real speech with a real ending — and no turn was reported for it,
+        // so there is no number here for its ending to qualify.
+        e.said(&say("s-1", None));
+        assert_eq!(e.remembered(), 0);
+        assert_eq!(e.observe(&spoke("idle", Some("s-1"), Some("completed"))), None);
+        assert!(e.is_empty());
+    }
+
+    #[test]
+    fn a_turn_of_many_sentences_ends_exactly_once() {
+        let mut e = Endings::default();
+        // One streamed reply: three sentences, three say_ids, one utterance.
+        for s in ["s-1", "s-2", "s-3"] {
+            e.said(&say(s, Some("utt-1")));
+        }
+        assert_eq!(e.remembered(), 3);
+        // jv-voice reports the turn's ending against the LAST sentence it
+        // spoke, because _speak_turn leaves the loop holding that item.
+        let line = e.observe(&spoke("idle", Some("s-3"), Some("completed"))).expect("a line");
+        assert!(line.starts_with("turn utt-1: "), "{line}");
+        // And the turn is gone whole: a second reason naming a sentence of
+        // an ended reply cannot report the same turn ending twice.
+        assert_eq!(e.remembered(), 0);
+        assert_eq!(e.observe(&spoke("interrupted", Some("s-1"), Some("wake"))), None);
+        assert!(e.summary(1).contains("endings: 1"), "{}", e.summary(1));
+    }
+
+    #[test]
+    fn a_reason_outside_the_frozen_enum_is_printed_and_tallied_nowhere() {
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        let line = e.observe(&spoke("idle", Some("s-1"), Some("evaporated"))).expect("a line");
+        // The word is on the frame, so it is on the line — and it is in no
+        // row, because a word this binary does not know is not a diagnosis
+        // and guessing its tally would put a number under a name it does not
+        // stand for.
+        assert!(line.contains("evaporated"), "{line}");
+        assert!(line.contains("not in the frozen enum"), "{line}");
+        let s = e.summary(1);
+        assert!(!s.contains("completed"), "{s}");
+        assert!(s.contains("outside"), "the refusal is not said out loud: {s}");
+        assert!(!e.is_empty(), "an ending happened; only its word was unusable");
+    }
+
+    #[test]
+    fn the_ending_line_fits_eighty_columns() {
+        // The widest of everything: a full-length uuid utterance and the
+        // longest shape the line takes — a reason word this binary cannot
+        // name, clipped to its own column.
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some(WIDEST_ID)));
+        let line = e.observe(&spoke("idle", Some("s-1"), Some(&"w".repeat(120)))).expect("a line");
+        let w = line.chars().count() + ">>> ".len();
+        assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+        assert!(w >= 60, "{w} columns is not a worst case: {line}");
+        assert!(line.contains("3f2a91c4..."), "the id is not abbreviated: {line}");
+        assert!(!line.contains(WIDEST_ID), "the whole id reached the line: {line}");
+        assert!(line.contains(&("w".repeat(ENDING_WORD_COLUMNS - 3) + "...")), "the word is not clipped: {line}");
+        // A word that already fits is never made longer by being clipped.
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        let short = e.observe(&spoke("idle", Some("s-1"), Some("gone"))).expect("a line");
+        assert!(short.contains(" gone ("), "{short}");
+        // And every named ending fits too, at the widest id.
+        for (word, _) in ENDING_TABLE {
+            let mut e = Endings::default();
+            e.said(&say("s-1", Some(WIDEST_ID)));
+            let line = e.observe(&spoke("idle", Some("s-1"), Some(word))).expect("a line");
+            let w = line.chars().count() + ">>> ".len();
+            assert!(w <= TAP_COLUMNS, "{w} columns: {line}");
+        }
+    }
+
+    #[test]
+    fn the_says_remembered_are_bounded_and_the_oldest_goes_first() {
+        let mut e = Endings::with_capacity(3);
+        for i in 0..10 {
+            e.said(&say(&format!("s-{i}"), Some(&format!("utt-{i}"))));
+        }
+        assert_eq!(e.remembered(), 3);
+        // The oldest went, because the newest output is the one still being
+        // spoken and its ending is the one still to come.
+        assert_eq!(e.observe(&spoke("idle", Some("s-0"), Some("completed"))), None);
+        assert!(e.observe(&spoke("idle", Some("s-9"), Some("completed"))).is_some());
+        // A say_id repeated is one output, not two.
+        let mut e = Endings::with_capacity(3);
+        e.said(&say("s-1", Some("utt-1")));
+        e.said(&say("s-1", Some("utt-2")));
+        assert_eq!(e.remembered(), 1);
+        let line = e.observe(&spoke("idle", Some("s-1"), Some("completed"))).expect("a line");
+        assert!(line.starts_with("turn utt-2: "), "newest did not win: {line}");
+        // A capacity of zero would be a reader that can report nothing.
+        let mut e = Endings::with_capacity(0);
+        e.said(&say("s-1", Some("utt-1")));
+        assert_eq!(e.remembered(), 1);
+    }
+
+    #[test]
+    fn the_summary_counts_the_words_and_says_what_the_turn_table_cannot() {
+        let mut e = Endings::default();
+        for (i, reason) in ["completed", "completed", "wake", "preempted", "error"].iter().enumerate() {
+            let sid = format!("s-{i}");
+            e.said(&say(&sid, Some(&format!("utt-{i}"))));
+            assert!(e.observe(&spoke("idle", Some(&sid), Some(reason))).is_some());
+        }
+        let s = e.summary(5);
+        assert!(s.contains("endings: 5"), "{s}");
+        assert!(s.contains("completed"), "{s}");
+        // Every row that has a count is present, with its count.
+        for (word, gloss) in ENDING_TABLE {
+            let row = s.lines().find(|l| l.starts_with(word)).unwrap_or_else(|| panic!("no {word} row:\n{s}"));
+            assert!(row.contains(gloss), "{row}");
+        }
+        assert!(s.lines().any(|l| l.starts_with("completed") && l.contains('2')), "{s}");
+        // The sentence the turn table above cannot say.
+        assert!(s.contains("FIRST word"), "{s}");
+        assert!(s.contains("3 of these 5"), "the unfinished are not counted: {s}");
+
+        // A row with no count is not printed at all — the same rule the turn
+        // table follows for a span nobody measured.
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        e.observe(&spoke("idle", Some("s-1"), Some("completed")));
+        let s = e.summary(1);
+        assert!(!s.contains("wake"), "an empty row was printed: {s}");
+        assert!(s.contains("all 1 of them completed"), "{s}");
+    }
+
+    #[test]
+    fn turns_reported_with_no_ending_at_all_are_said_out_loud() {
+        let e = Endings::default();
+        // No turns, nothing to qualify, nothing to say.
+        assert_eq!(e.summary(0), "");
+        // Turns reported and not one of them seen to end: silence here would
+        // read as "they all finished".
+        let s = e.summary(7);
+        assert!(s.contains("no turn ending"), "{s}");
+        assert!(s.contains('7'), "{s}");
+    }
+
+    #[test]
+    fn the_gloss_table_and_the_generated_schema_agree_on_the_words() {
+        // Every word this reader prints is a word the frozen schema freezes,
+        // and it lands in the row it is printed in. The other direction — a
+        // FIFTH word added to schemas/speech.state.json — is enforced by
+        // `ending_slot` being an exhaustive match over the generated enum:
+        // this file stops compiling, which no runtime test can promise.
+        for (i, (word, gloss)) in ENDING_TABLE.iter().enumerate() {
+            let reason = ending_reason(word).unwrap_or_else(|| panic!("`{word}` is not in schemas/speech.state.json's reason enum"));
+            assert_eq!(ending_slot(reason), i, "`{word}` is tallied in the wrong row");
+            assert!(!gloss.is_empty());
+        }
+        assert_eq!(ending_reason("Completed"), None, "the wire spelling is snake_case");
+        assert_eq!(ending_reason("finished"), None);
+    }
+
+    #[test]
+    fn the_endings_summary_fits_eighty_columns() {
+        let mut e = Endings::default();
+        for (i, word) in ENDING_TABLE.iter().map(|(w, _)| *w).chain(["evaporated"]).enumerate() {
+            let sid = format!("s-{i}");
+            e.said(&say(&sid, Some(&format!("utt-{i}"))));
+            e.observe(&spoke("idle", Some(&sid), Some(word)));
+        }
+        for line in e.summary(9).lines().chain(Endings::default().summary(9999).lines()) {
+            let w = line.chars().count();
+            assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+        }
+    }
+
+    // ------------------------------------------------------------ restarts
+
+    /// A heartbeat carrying whatever the caller wants to call an uptime, in
+    /// the shape a real service publishes one.
+    fn beat_up(src: &str, uptime: rmpv::Value) -> rmpv::Value {
+        beat_body(
+            src,
+            100.0,
+            1.0,
+            1,
+            map(&[
+                ("service", rmpv::Value::from(src)),
+                ("state", rmpv::Value::from("ok")),
+                ("uptime_s", uptime),
+                ("period_s", rmpv::Value::from(5.0)),
+            ]),
+        )
+    }
+
+    fn up(src: &str, uptime: f64) -> rmpv::Value {
+        beat_up(src, rmpv::Value::from(uptime))
+    }
+
+    #[test]
+    fn a_process_that_died_and_came_back_is_one_line() {
+        // Nothing on the bus publishes "I was restarted" — `uptime_s` counts
+        // from one process's own start, so a heartbeat carrying LESS of it
+        // than the last one from the same service was written by a different
+        // process. The rule is `core/HealthState.qml`'s and this reader keeps
+        // it rather than arguing it again.
+        let mut l = Lives::default();
+        assert_eq!(l.observe(&up("jv-ears", 418.7)), None, "a first sighting claims nothing");
+        assert_eq!(l.observe(&up("jv-ears", 423.7)), None, "a rising uptime is one process");
+        let line = l.observe(&up("jv-ears", 2.1)).expect("a line");
+        assert_eq!(line, "restart jv-ears: 1x (was up >=423.7s)");
+        // And it is reported once: the beats of the new process are a rising
+        // uptime like any other.
+        assert_eq!(l.observe(&up("jv-ears", 7.1)), None);
+    }
+
+    #[test]
+    fn the_first_heartbeat_a_tap_ever_hears_is_not_a_death() {
+        // A small `uptime_s` on a first sighting is what EVERY service looks
+        // like on a machine that just booted, and with nothing remembered
+        // there is no direction for the number to have moved in. The boot
+        // crash loop is therefore the one case this cannot see (PLAN A82),
+        // in the terminal exactly as on screen.
+        let mut l = Lives::default();
+        assert_eq!(l.observe(&up("jv-ears", 0.4)), None);
+        assert_eq!(l.watching(), 1, "it is remembered, it is simply not news");
+    }
+
+    #[test]
+    fn the_tally_rises_with_every_death_and_names_the_life_that_ended() {
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 30.0));
+        for n in 1..=4u32 {
+            let line = l.observe(&up("jv-ears", 0.5)).expect("a line");
+            assert!(line.contains(&format!(" {n}x ")), "death {n} counted as: {line}");
+            // Eight seconds of life, over and over, is what a crash loop is.
+            assert!(l.observe(&up("jv-ears", 8.2)).is_none(), "a rising uptime is not a death");
+        }
+        let line = l.observe(&up("jv-ears", 0.5)).expect("a line");
+        assert!(line.contains("was up >=8.2s"), "the life that ended is the one reported: {line}");
+    }
+
+    #[test]
+    fn one_services_uptime_is_never_compared_against_anothers() {
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 400.0));
+        assert_eq!(l.observe(&up("jv-voice", 3.0)), None, "a lower number from a stranger");
+        assert_eq!(l.observe(&up("jv-voice", 4.0)), None);
+        let line = l.observe(&up("jv-ears", 5.0)).expect("a line");
+        assert!(line.starts_with("restart jv-ears: 1x"), "{line}");
+        assert!(line.contains(">=400.0s"), "jv-voice's history reached jv-ears' line: {line}");
+    }
+
+    #[test]
+    fn an_uptime_that_did_not_move_is_one_process_and_not_two() {
+        // `<` and not `<=`, the comparison `HealthState.observe` makes: two
+        // beats a coarse clock stamped identically are not a death.
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 12.0));
+        assert_eq!(l.observe(&up("jv-ears", 12.0)), None);
+    }
+
+    #[test]
+    fn an_uptime_this_reader_may_not_compare_is_skipped_and_not_forgotten() {
+        // The HUD's rule: an unreadable `uptime_s` refuses the restart claim
+        // only, and being SKIPPED rather than forgotten is what makes the
+        // next good frame compare against the last good one — the comparison
+        // that means something. `"5" < 400` is true in JavaScript and a
+        // string would have manufactured a death there; here `get_f64`
+        // refuses it, and this is the test that says so out loud.
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 400.0));
+        for bad in [
+            rmpv::Value::from("5"),
+            rmpv::Value::from(f64::NAN),
+            rmpv::Value::from(f64::INFINITY),
+            rmpv::Value::from(-1.0),
+            rmpv::Value::Nil,
+        ] {
+            assert_eq!(l.observe(&beat_up("jv-ears", bad.clone())), None, "{bad:?}");
+        }
+        let line = l.observe(&up("jv-ears", 2.0)).expect("a line");
+        assert!(line.contains("1x (was up >=400.0s)"), "the last GOOD frame is the one compared: {line}");
+    }
+
+    #[test]
+    fn a_heartbeat_this_binary_may_not_read_moves_nothing() {
+        // The gate is `trust_health`, the one `jv health --check` uses, so
+        // the two commands cannot come to believe different frames. Every
+        // refusal here can only LOSE a death and can never invent one: a
+        // smaller `uptime_s` is the only evidence there is, and a frame
+        // never read cannot make a number go backwards.
+        let good = map(&[
+            ("service", rmpv::Value::from("jv-ears")),
+            ("state", rmpv::Value::from("ok")),
+            ("uptime_s", rmpv::Value::from(1.0)),
+            ("period_s", rmpv::Value::from(5.0)),
+        ]);
+        let named = |service: &str, state: &str, period: rmpv::Value| {
+            map(&[
+                ("service", rmpv::Value::from(service)),
+                ("state", rmpv::Value::from(state)),
+                ("uptime_s", rmpv::Value::from(1.0)),
+                ("period_s", period),
+            ])
+        };
+        let mut l = Lives::default();
+        l.observe(&up("jv-ears", 400.0));
+        for junk in [
+            beat_body("jv-ears", 100.0, 0.9, 1, good.clone()),                   // a hedged heartbeat
+            beat_body("jv-ears", 100.0, 1.0, 2, good.clone()),                   // a schema we were not written against
+            beat_body("jv-ears", 100.0, 1.0, 1, named("jv-voice", "ok", 5.0.into())), // a body naming someone else
+            beat_body("jv-ears", 100.0, 1.0, 1, named("jv-ears", "ok", "5".into())),  // a period that is not a number
+            beat_body("jv-ears", 100.0, 1.0, 1, named("jv-ears", "restarted", 5.0.into())), // a word off the frozen enum
+            beat_body("jv-ears", 100.0, 1.0, 1, rmpv::Value::Nil),               // no body at all
+        ] {
+            assert_eq!(l.observe(&junk), None, "{junk:?}");
+        }
+        let line = l.observe(&up("jv-ears", 3.0)).expect("a line");
+        assert!(line.contains(">=400.0s"), "a refused frame became the remembered life: {line}");
+    }
+
+    #[test]
+    fn a_frame_the_broker_could_not_attribute_belongs_to_no_service() {
+        let mut l = Lives::default();
+        let body = map(&[
+            ("service", rmpv::Value::from("jv-ears")),
+            ("state", rmpv::Value::from("ok")),
+            ("uptime_s", rmpv::Value::from(1.0)),
+            ("period_s", rmpv::Value::from(5.0)),
+        ]);
+        assert_eq!(l.observe(&beat_body("", 100.0, 1.0, 1, body)), None);
+        assert_eq!(l.observe(&rmpv::Value::Nil), None);
+        // And a frame that agrees with itself that it came from nobody, which
+        // `trust_health` would otherwise let straight through: the broker
+        // refuses an envelope with no `src`, so this is unreachable from a
+        // real bus — and a frame that cannot be attributed must not be
+        // attributed to a service whose name this reader made up.
+        let anonymous = map(&[
+            ("service", rmpv::Value::from("")),
+            ("state", rmpv::Value::from("ok")),
+            ("uptime_s", rmpv::Value::from(1.0)),
+            ("period_s", rmpv::Value::from(5.0)),
+        ]);
+        assert_eq!(l.observe(&beat_body("", 100.0, 1.0, 1, anonymous)), None);
+        assert_eq!(l.watching(), 0, "a service name was invented for an unattributable frame");
+    }
+
+    #[test]
+    fn the_roster_is_bounded_so_a_tap_left_running_cannot_grow() {
+        // Bounded because `src` is a string off the wire and `jv tap` is
+        // meant to be left running for hours. Past the cap a new name is not
+        // ADMITTED — the opposite of what `Confirmations` does with its
+        // oldest, and for a reason: there the newest question is the one
+        // somebody is waiting on, here the oldest service is the one whose
+        // history is worth the most, and evicting it would silently restart
+        // its tally at zero.
+        let mut l = Lives::with_capacity(4);
+        for n in 0..64 {
+            assert_eq!(l.observe(&up(&format!("svc-{n}"), 100.0)), None);
+        }
+        assert_eq!(l.watching(), 4);
+        for n in 0..4 {
+            let line = l.observe(&up(&format!("svc-{n}"), 1.0)).expect("the admitted still report");
+            assert!(line.contains(&format!("svc-{n}")), "{line}");
+        }
+        assert_eq!(l.observe(&up("svc-9", 1.0)), None, "a name never admitted says nothing");
+        assert_eq!(l.watching(), 4, "and still does not get in");
+        // A cap of nothing is a working reader, not a spin.
+        let mut l = Lives::with_capacity(0);
+        l.observe(&up("jv-ears", 9.0));
+        assert!(l.observe(&up("jv-ears", 1.0)).is_some());
+    }
+
+    /// The restart line at the widest every part of it can be.
+    ///
+    /// What is enforced: the service name is capped by
+    /// `RESTART_SERVICE_COLUMNS`. What is ASSUMED, said out loud: six digits
+    /// of tally and eight of uptime. A service crashing every 8 s reaches six
+    /// figures after nine days of one tap running, and 99999999.9 s is three
+    /// years of uptime — both are past absurd, and this test is what notices
+    /// if the line ever stops fitting.
+    #[test]
+    fn the_restart_line_fits_eighty_columns() {
+        let line = restart_line(&"s".repeat(120), 999_999, 99_999_999.9);
+        let w = line.chars().count() + ">>> ".len();
+        assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+        assert!(w >= 50, "{w} columns is not a worst case: {line}");
+        assert!(line.contains(&("s".repeat(RESTART_SERVICE_COLUMNS - 3) + "...")), "the name is not clipped: {line}");
+        // A name that already fits is never made longer by being clipped.
+        assert!(restart_line("jv-ears", 1, 8.2).contains("restart jv-ears: 1x"));
+    }
+
+    #[test]
+    fn the_tally_is_spelled_the_way_the_hud_spells_the_same_fact() {
+        // `HealthPlate` draws `jv-ears RESTARTED 3x`. One fact, one notation,
+        // whichever of the two a human is looking at.
+        assert!(restart_line("jv-ears", 3, 8.2).contains("3x"));
+        // And `>=`, because what died is only known to have REACHED the last
+        // uptime it heartbeated — it may have lived up to a period longer
+        // before it went. The same distinction `SayGauge` draws between a
+        // reading and a bound.
+        assert!(restart_line("jv-ears", 3, 8.2).contains(">=8.2s"));
     }
 }

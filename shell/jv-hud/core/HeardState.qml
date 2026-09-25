@@ -14,6 +14,12 @@
 //
 //   audio.transcript  (jv-ears)  ASR output, partial and final.
 //
+// and it reads one more only to know WHEN the turn it belongs to began:
+//
+//   audio.vad  (jv-ears)  speech_end — the end of the utterance being
+//                         transcribed. Never rendered, never a reason to
+//                         show or hide the line; see the backstop below.
+//
 // FINALS ONLY, and that is the whole editorial policy. The schema says it
 // in its own words: "Partials are provisional and may be rewritten; only
 // finals are acted on." A partial that gets rewritten a breath later would
@@ -48,6 +54,33 @@
 //     "thinking" for, because it is the same claim — a question is in
 //     flight — and a tools gate fails the build if the two ever drift.
 //
+// Equal lengths were not enough, and A57 is why. SpeechState times its
+// "thinking" window off the utterance's `audio.vad speech_end` — the frame
+// that says a question is in flight — while this element only ever saw the
+// transcript, which lands however long faster-whisper took AFTER that
+// boundary. Two equal windows measured from different instants are not one
+// window: the state plate let go first and the words sat on screen alone
+// for the length of the ASR, a transcript with nothing above it saying why
+// it was still there. So the hold is anchored to the boundary of the
+// utterance these words belong to — `utterance_id` is minted at
+// speech_start and threaded through both topics, which is what makes the
+// two frames matchable at all — and falls back to the transcript's own
+// `ts` when that boundary is not something we saw. The fallback is the old
+// behaviour and errs the way it always did: too long rather than too
+// short. Nothing about this decides WHETHER the line is shown; a missing,
+// mismatched or unreadable boundary costs the reader nothing.
+//
+// None of the committed recordings COULD show this, and that is why it
+// survived five suites: the fixture generator stamped each final at the
+// same `ts` as the speech_end before it, so in every replay the ASR was
+// instantaneous and both anchors were the same number. A58 closed that —
+// the generator now stamps a final at the sample clock plus the ASR
+// measured on ares, so the three recordings that contain one put 2.2 s
+// between the boundary and the words, and tst_sessionreplay reads the
+// anchor off a real recording. A live recording of a real utterance
+// (A28) would still be better; this is the part that needed no human at
+// the machine.
+//
 // On confidence (invariant 4). A numeric envelope `conf` is required and
 // nothing else is done with it, which is a decision and not an oversight.
 // The three real finals in harness/fixtures/sessions/ carry 0.886 (quiet
@@ -76,12 +109,14 @@ QtObject {
   property var bus: null
 
   // How long a transcript keeps meaning "Jarvis is working on this" when
-  // nothing ever answers it. Mirrors no service's configuration: like
-  // SpeechState's `thinkWindowS`, it is a policy about how long the HUD is
-  // willing to assert a question whose end it may have missed. The two are
-  // the same claim about the same turn and are pinned equal by a tools
-  // test — a line that outlived the "THINKING" beside it would be words
-  // with nothing left saying they are still in flight.
+  // nothing ever answers it, measured from the end of the utterance rather
+  // than from the moment the words reached us (see the note above).
+  // Mirrors no service's configuration: like SpeechState's `thinkWindowS`,
+  // it is a policy about how long the HUD is willing to assert a question
+  // whose end it may have missed. The two are the same claim about the same
+  // turn and are pinned equal by a tools test — a line that outlived the
+  // "THINKING" beside it would be words with nothing left saying they are
+  // still in flight.
   property real holdS: 30.0
 
   // The language this machine expects to be spoken to in (the locked
@@ -128,8 +163,10 @@ QtObject {
   readonly property bool linked: !!root.bus && root.bus.linkUp === true
 
   onLinkedChanged: {
-    if (!root.linked)
+    if (!root.linked) {
       root.transcript = null;
+      root.boundary = null;
+    }
   }
 
   // The newest audio.transcript we are willing to read, or null. Null
@@ -201,6 +238,48 @@ QtObject {
 
   // --- the backstop ----------------------------------------------------
 
+  // The newest utterance boundary jv-ears has published, or null. Only
+  // `speech_end`: a `speech_start` is the beginning of the NEXT thing being
+  // said and has no bearing on words already held. `conf` is fixed at 1.0
+  // by the schema for this topic, so a frame claiming less is one that
+  // disagrees with itself. Nothing here checks for an `utterance_id` —
+  // `anchor` below has to COMPARE ids anyway, and a boundary carrying none
+  // fails that comparison, so a guard here would be a second mechanism for
+  // one rule and no test could tell it from the first.
+  readonly property var boundaryFrame: {
+    const env = root.frameOn("audio.vad");
+    if (!root.wellFormed(env) || env.conf < 1)
+      return null;
+    return env.body.event === "speech_end" ? env : null;
+  }
+
+  // Latched, for the reason everything else in this file is latched: the
+  // boundary arrives BEFORE the transcript that follows it, and
+  // `bus.latest()` holds one frame per topic — ears' VAD runs continuously
+  // (A4), so the next sound in the room replaces it. Derived, the anchor
+  // would vanish the moment anybody spoke again.
+  property var boundary: null
+
+  onBoundaryFrameChanged: {
+    if (root.boundaryFrame !== null)
+      root.boundary = root.boundaryFrame;
+  }
+
+  // The frame whose age the hold is measured from: the end of the utterance
+  // these words belong to, when we saw it, and the words themselves
+  // otherwise. Never a boundary stamped AFTER the final it supposedly
+  // preceded — such a pair cannot be ordered, and anchoring to the later of
+  // the two would LENGTHEN the hold, which is the one direction this window
+  // may not err in.
+  readonly property var anchor: {
+    if (root.transcript === null)
+      return null;
+    const b = root.boundary;
+    if (b === null || b.ts > root.transcript.ts)
+      return root.transcript;
+    return root.stringOf(b, "utterance_id") === root.stringOf(root.transcript, "utterance_id") ? b : root.transcript;
+  }
+
   // Set by the timer below, cleared whenever a new line arrives. A plain
   // property rather than a computed one because time passing is not a
   // property change: no binding re-evaluates just because a clock moved.
@@ -219,6 +298,12 @@ QtObject {
     root.armHold();
   }
   onHoldSChanged: root.armHold()
+  // A boundary that arrives out of order, after the transcript it precedes,
+  // still gets to shorten the hold: by the rule above it can only ever be
+  // older than the words, so re-arming here cannot extend anything and
+  // cannot bring an expired line back (`armHold` recomputes what is left
+  // and expires on the spot when that is nothing).
+  onAnchorChanged: root.armHold()
 
   // One shot, armed only while a line is actually held, so a HUD nobody is
   // talking to runs no timer at all (§06: 0 fps when nothing is
@@ -234,12 +319,12 @@ QtObject {
       root.hold.running = false;
       return;
     }
-    // Whatever is LEFT of the window, not the whole of it: a frame that
-    // spent time in flight is already partway through its own. `ageOf` is
+    // Whatever is LEFT of the window, not the whole of it: a turn that
+    // spent time in the ASR is already partway through its own. `ageOf` is
     // Infinity when the age is not knowable (no clock, no ts), which lands
     // here as "already over" — a line the HUD cannot time is one it must
     // not hold open forever.
-    const left = root.holdS - root.ageOf(root.transcript);
+    const left = root.holdS - root.ageOf(root.anchor);
     if (!(left > 0)) {
       root.hold.running = false;
       root.expired = true;

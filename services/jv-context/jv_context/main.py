@@ -1,4 +1,5 @@
-"""jv-context entrypoint (niri backend + wpctl probe on the machine)."""
+"""jv-context entrypoint (niri backend + wpctl/nvidia-smi probes on the
+machine)."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from jarvis_bus import BusClient
 
 from .compositor import NiriBackend
 from .service import ContextService
-from .system import WpctlProbe
+from .system import NvidiaSmiProbe, WpctlProbe
 
 
 async def amain(argv: Optional[list[str]] = None) -> int:
@@ -20,7 +21,9 @@ async def amain(argv: Optional[list[str]] = None) -> int:
 
     bus = await BusClient.connect(args.bus, src="jv-context")
     try:
-        await ContextService(bus, NiriBackend(), WpctlProbe()).run()
+        await ContextService(
+            bus, NiriBackend(), WpctlProbe(), gpu=NvidiaSmiProbe()
+        ).run()
     finally:
         await bus.close()
     return 0

@@ -118,8 +118,16 @@ install day; anything needing real hardware is mocked and tagged
   `think` into `model` (the completion request -> the first `speech.say`:
   prefill + generation to the first sentence) and `wait` (the rest: bus
   hops, the input queue, jv-brain's own work), as two more rows in the
-  table and a second line per turn — the `>>> turn` line itself is
-  deliberately no wider, because nothing has yet read it on a real turn.
+  table and a second line per turn.
+
+  **What a turn prints is a LADDER of lines, and every one of them fits 80
+  columns.** One line carrying six numbers and a live utterance id came to
+  133 columns and wrapped, which is worse than the one number it replaced;
+  each rung now divides a span the rung above it gave a value for (the turn,
+  then `respond`, then jv-act's share of `think`, then your share of
+  jv-act's), and the utterance id — a `uuid4` from jv-ears, 36 characters —
+  prints as an 8-character prefix and `...`. The width is a test at the
+  widest input that can reach those lines, not a hope.
 
   Two honesty rules, both enforced by tests. (1) A turn that ran TOOLS
   publishes no gauge at all: tool round-trips — including a confirm window —

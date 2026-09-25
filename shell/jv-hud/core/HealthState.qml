@@ -6,7 +6,7 @@
 // short list of what is NOT well — and into the llm rung, which is the
 // single number that explains why Jarvis got slow.
 //
-// Three rules hold it to the truth:
+// Four rules hold it to the truth:
 //
 //   · **The roster is who has spoken.** Nothing on the bus announces which
 //     services are supposed to be running, and inventing that list here
@@ -22,6 +22,18 @@
 //     other than the one that published it, a state word outside the
 //     frozen enum: all `unknown`, all reported. The failure that matters
 //     is the quiet one — a green corner over a machine that is broken.
+//   · **A service that keeps dying does not get to say it is fine** (A78).
+//     Every unit in `modules/jarvis-services.nix` is `Restart=on-failure`,
+//     so a service that crashes is replaced by a new process that
+//     heartbeats `starting`, then `ok` — and until this rule the corner
+//     over a jv-ears dying every eight seconds was EMPTY. `uptime_s` is
+//     the field that gives it away: it counts from one process's own
+//     start, so it only ever rises while that process lives, and a
+//     heartbeat carrying LESS of it than the last one from the same
+//     service was written by a different process. That is observed here
+//     and nowhere else on the bus — nothing publishes "I was restarted",
+//     and a service that could would be the one least able to, having
+//     just lost the memory.
 //
 // §06 earns the empty corner the other way round: when every service
 // heard from is `ok`, there are no findings and the plate draws nothing.
@@ -47,11 +59,34 @@ QtObject {
   // all-clear.
   readonly property bool known: root.bus ? root.bus.linkUp === true : false
 
+  // The link went down: forget how many processes there have been (A78).
+  //
+  // Here and not in `observe()` below, which is the pass every frame
+  // drives: core/BusModel.qml's `applyLink` empties its caches BEFORE it
+  // lowers `linkUp`, so the pass a drop triggers still sees a live link
+  // with nothing on it, and the flag falls afterwards with no frame left
+  // to notice it. The falling edge of the link is the event, so it is what
+  // this listens to — and a bus that keeps its frames through a drop
+  // (which a `BusModel` never does, and a test therefore has to be written
+  // by hand) is forgotten by the same line.
+  onKnownChanged: {
+    if (!root.known)
+      root.lives = ({});
+  }
+
   // Every service heard from, sorted by name:
-  //   { service, state, severity, notes }
+  //   { service, state, severity, notes, restarts }
   // `state` is one of the schema's five words, plus `lost` (heartbeats
-  // stopped) and `unknown` (heard, unreadable). Never a word off the wire
-  // that the schema does not define.
+  // stopped), `unknown` (heard, unreadable) and `restarted` (its uptime
+  // went backwards). Never a word off the wire that the schema does not
+  // define — including those three: a heartbeat that SAYS `restarted` is
+  // outside the frozen enum and comes out `unknown`, like any other word
+  // this file did not derive itself.
+  //
+  // `restarts` is how many times this service's uptime has been seen to go
+  // backwards since the link came up, and it is carried whether or not the
+  // word is `restarted`: a service with something worse to say keeps its
+  // own word (below), and the count is still the truth about its process.
   readonly property var roster: {
     const beats = root.beats;
     let out = [];
@@ -70,11 +105,22 @@ QtObject {
             notes = env.body.notes;
         }
       }
+      // A process that died and came back is not `ok`, whatever its newest
+      // heartbeat says — that heartbeat was written by the replacement. It
+      // overrides only the words that are not themselves trouble (`ok`,
+      // `starting`, `stopping`), and the tie with `degraded` goes to the
+      // SERVICE: a service reporting on itself knows something this file
+      // inferred from a number, and `restarts` stays on the entry either
+      // way for whoever wants both.
+      const restarts = root.restartsOf(service, env);
+      if (restarts > 0 && root.rank(state) < root.rank("restarted"))
+        state = "restarted";
       out.push({
         "service": service,
         "state": state,
         "severity": root.rank(state),
-        "notes": notes
+        "notes": notes,
+        "restarts": restarts
       });
     }
     out.sort((a, b) => root.byName(a.service, b.service));
@@ -116,6 +162,29 @@ QtObject {
 
   readonly property bool llmOnCpu: root.llmBackend === "cpu"
 
+  // The least free VRAM at which jv-brain's ladder would still land on the
+  // card, in whole MiB — or -1 when the brain is not saying. jv-brain
+  // computes it off its own ladder (`launcher.gpu_floor_mb`) and publishes
+  // it only while something is waiting on it: never while the model is
+  // already on the GPU, and never on a machine with no card, where a
+  // floor would send a reader hunting VRAM that machine has never had.
+  // So its mere PRESENCE is meaningful, and this reads it exactly as
+  // published rather than deriving a floor for a brain that did not offer
+  // one (invariant 1: the ladder is jv-brain's configuration, not the
+  // HUD's to guess at).
+  //
+  // Refused: anything that is not a positive, finite number. `metrics` is
+  // free-form by schema, so a string, a NaN, or the Infinity `1e999`
+  // parses to would otherwise reach a screen as a requirement — and 0 is
+  // not a floor either, it is a ladder that asks for nothing.
+  readonly property real llmGpuFloorMb: {
+    const m = root.brainMetrics;
+    if (m === null)
+      return -1;
+    const mb = m.llm_gpu_floor_mb;
+    return typeof mb === "number" && isFinite(mb) && mb > 0 ? mb : -1;
+  }
+
   // jv-brain's free-form gauges, or null. Same expiry as everything else:
   // a rung read off a three-minute-old heartbeat describes a process that
   // may not be running.
@@ -154,7 +223,17 @@ QtObject {
   function trust(env: var, service: string): var {
     if (!env || env.v !== 1 || typeof env.ts !== "number" || env.conf !== 1 || !env.body)
       return null;
-    if (env.body.service !== service || !(env.body.period_s > 0))
+    if (env.body.service !== service)
+      return null;
+    // A NUMBER, and not merely something that compares greater than zero:
+    // `"5" > 0` is true in JavaScript, so a period arriving as a string used
+    // to be believed and then multiplied — by `lost`, by `rearm`'s timer
+    // interval, and now by the freshness window `restartsOf` reads. It was
+    // harmless while every use was multiplication of a coercible string;
+    // it is not the kind of thing to leave standing once one of the uses is
+    // a window inside which the HUD calls a service unwell. (core/
+    // DropState.qml writes the same test, and said so about this one.)
+    if (typeof env.body.period_s !== "number" || !isFinite(env.body.period_s) || env.body.period_s <= 0)
       return null;
     return env;
   }
@@ -177,6 +256,13 @@ QtObject {
   // state that is not a finding. `lost` and `unknown` rank above
   // `degraded` on purpose: a service that told us it is impaired is in
   // better shape than one we cannot hear at all.
+  //
+  // `restarted` ties with `degraded` rather than outranking it, and the tie
+  // is the claim: the service is running and answering — it is alive and
+  // impaired, which is the bracket `degraded` names. Ranking a completed
+  // death above a live impairment would also put it above every degraded
+  // service in a list only three lines deep, so one crash at boot would
+  // push a jv-voice that cannot reach the speakers off the plate.
   function rank(state: string): int {
     switch (state) {
     case "error":
@@ -185,6 +271,7 @@ QtObject {
       return 4;
     case "unknown":
       return 3;
+    case "restarted":
     case "degraded":
       return 2;
     case "starting":
@@ -197,6 +284,103 @@ QtObject {
 
   function byName(a: string, b: string): int {
     return a < b ? -1 : (a > b ? 1 : 0);
+  }
+
+  // --- the process behind the heartbeat (A78) --------------------------
+
+  // service -> { uptime, restarts }: the last `uptime_s` this file read for
+  // that service, and how many times it has been seen to go BACKWARDS.
+  //
+  // A plain property, written by `observe()` below, because this is a
+  // MEMORY and not a reading: `bus.latestFrom` keeps one frame per
+  // publisher, so the beat that would prove a restart is gone by the time
+  // the next one lands. Nothing else in this file remembers anything, and
+  // that is the point — it is why a restart is the one fact here that
+  // cannot be recomputed from what is currently on the bus.
+  //
+  // Forgotten the moment the link drops, and not kept across it. A HUD that
+  // could not see the bus does not know how many processes came and went
+  // while it was blind, and a count that silently spans a gap of unknown
+  // length is a number that means something different from what it says.
+  // Coming back it is a first sighting again, which claims nothing.
+  property var lives: ({})
+
+  // How many restarts are worth SAYING about this service right now: the
+  // remembered count, but only while the process that is heartbeating is
+  // still young enough for its own arrival to be the news.
+  //
+  // Young enough is `period_s * 2` — the same span this file already grants
+  // one heartbeat, and deliberately not a new constant. It reads off the
+  // frame's own body, so nothing here needs a clock or a timer: every
+  // heartbeat carries a larger `uptime_s` than the last, and the row leaves
+  // on the beat that carries one too large. A service crash-looping inside
+  // that window never stops reporting, which is the case this exists for;
+  // a service that restarted once an hour ago says nothing until it does it
+  // again, and then says 2.
+  function restartsOf(service: string, env: var): int {
+    const life = root.lives[service];
+    if (life === undefined || !(life.restarts > 0) || env === null)
+      return 0;
+    const up = root.uptimeOf(env);
+    return up >= 0 && up < env.body.period_s * 2 ? life.restarts : 0;
+  }
+
+  // `uptime_s` as a number, or NEGATIVE when this file may not read it.
+  // Required by the schema and still checked, because the whole claim is a
+  // comparison: `"5" < 120` is true in JavaScript, so a string uptime would
+  // manufacture a restart out of a service that had merely published its
+  // number in quotes.
+  //
+  // The schema's own minimum is 0, and a reading below it is refused by the
+  // SAME `< 0` its callers recognise a refusal by — one comparison rather
+  // than two that could come to disagree about whether -5 is a reading.
+  // Hence "negative" and not "-1": a negative on the wire arrives as its
+  // own refusal.
+  //
+  // An unreadable one refuses the restart claim ONLY — not the heartbeat.
+  // `trust()` rejects the fields this file needs in order to interpret a
+  // frame at all; a broken `uptime_s` leaves the service's own state word
+  // perfectly readable, and turning a jv-voice that is shouting `error`
+  // into `unknown` over a field about its age would lose the louder fact.
+  function uptimeOf(env: var): real {
+    if (env === null)
+      return -1;
+    const up = env.body.uptime_s;
+    return typeof up === "number" && isFinite(up) ? up : -1;
+  }
+
+  // Take note of every uptime currently on the bus, and of every one that
+  // went backwards since the last look. Called from `onBeatKeyChanged`, so
+  // it runs exactly once per frame and once more whenever a service joins
+  // or the link moves.
+  //
+  // Nothing here needs to ask whether the link is up: `beats` is empty
+  // while it is down, so this pass has nothing to read, and the forgetting
+  // is `onKnownChanged`'s (above).
+  //
+  // A service whose newest frame is unreadable is SKIPPED rather than
+  // forgotten: the next good frame is then compared against the last good
+  // one, which is the comparison that means something. Being skipped is
+  // also why a first sighting claims nothing — with nothing remembered
+  // there is no direction for the number to have moved in, and a small
+  // `uptime_s` on the first beat the HUD ever hears is what every service
+  // looks like on a machine that just booted.
+  function observe(): void {
+    const beats = root.beats;
+    let out = ({});
+    for (const service in root.lives)
+      out[service] = root.lives[service];
+    for (const service in beats) {
+      const up = root.uptimeOf(beats[service]);
+      if (up < 0)
+        continue;
+      const seen = out[service];
+      out[service] = ({
+        "uptime": up,
+        "restarts": seen === undefined ? 0 : (up < seen.uptime ? seen.restarts + 1 : seen.restarts)
+      });
+    }
+    root.lives = out;
   }
 
   // --- letting go, on a schedule ---------------------------------------
@@ -223,7 +407,16 @@ QtObject {
   // that have run out; nobody else has.
   property var dueNext: []
 
-  onBeatKeyChanged: root.reassess()
+  onBeatKeyChanged: {
+    // Before `reassess`, and the order is not arbitrary: `observe` reads
+    // the uptimes off the frames, and `reassess` is about the timer that
+    // decides which of them are still believed. Neither reads the other's
+    // output, and running them in the other order would work — but the
+    // memory is written from the frame that just arrived, so it belongs
+    // first, next to the arrival.
+    root.observe();
+    root.reassess();
+  }
 
   // ONE timer for the whole roster, armed for the SOONEST deadline among
   // the services still believed. Not one timer per service: the roster is

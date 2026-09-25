@@ -38,10 +38,21 @@
 // interrupted; `OutputPlate` (A40) — that the sink Jarvis is speaking into
 // is muted, which is the one way every service can report `ok` while you
 // hear nothing; `HeardPlate` (A26) — the words jv-ears took down, for as
-// long as Jarvis has not started answering them; `MicPlate` (A4) —
-// whether the microphone is open, from
+// long as Jarvis has not started answering them; `ReplyPlate` (A71) —
+// that the answer you just heard was cut off by the context limit, which
+// is the one outcome of a turn nothing else on this machine reports;
+// `ActionPlate` (A37) —
+// what jv-act tried to do to this machine and could not; `GuardPlate`
+// (A51) — the Windows binary jv-guard refused to let onto it, which is
+// the one time JarvisOS says no to something you asked for;
+// `InstallPlate` (A52) — the app jv-compat let through and then could not
+// finish installing, which is the one thing on this bus that takes
+// minutes and the one the user walks away from; `MicPlate`
+// (A4) — whether the microphone is open, from
 // jv-ears' own capture counters; and `HealthPlate` (A6) — the services
-// that are not well, and the llm rung when the brain is on the CPU floor.
+// that are not well, the llm rung when the brain is on the CPU floor, and
+// (B40) how much VRAM is free under it, which is the one thing that tells
+// that rung apart from a fault.
 // Each one's mapping lives in a tested file under core/, and each draws
 // nothing until a real frame gives it something to say, so the ordinary
 // state of this surface is unmapped. No element in this shell can display
@@ -115,8 +126,60 @@ ShellRoot {
       // three 13 px lines the confirmation does, and which DOES share the
       // surface routinely: the words are up for exactly the stretch
       // `StatePlate` is saying THINKING.
+      // And again for GuardPlate (A51) — two lines, 11 px over 13 px —
+      // which CAN genuinely share the surface with everything under it: a
+      // refused install says nothing about whether a service is unwell or
+      // the microphone is open, so this growth is about co-occurrence
+      // rather than about margin. Three other files carry this number —
+      // both shot harnesses and the sheet's README — and
+      // tools/tests/test_hudscreens.py pins the measuring one to this
+      // binding, so a box that grows here and nowhere else fails a test
+      // rather than quietly cropping a photograph.
+      // And again for InstallPlate (A52) — the same two lines GuardPlate
+      // draws, and the same argument for the growth: an install that
+      // failed says nothing about whether a service is unwell, so the two
+      // can genuinely be up together. This is the pair jv-compat can put
+      // on screen at once (a refused binary, then a different install
+      // that failed), which is exactly the case a box sized by "they
+      // never co-occur" would crop.
+      //
+      // AND THEN SOMETHING MEASURED IT (A63). Every growth above is an
+      // ARGUMENT about co-occurrence, written in this comment and checked
+      // by nothing: the only fit check that existed ran over the contact
+      // sheet, whose tallest picture lights three plates and cleared 688 px
+      // by more than five hundred. tools/hudshots/scene/tst_fit.qml builds
+      // the case these paragraphs are about — every plate but `link`, each
+      // drawing the widest thing its own cap allows, over a health list as
+      // long as this machine has services — and that corner was 713 px
+      // tall. It did not fit. A layer-shell panel floating over every
+      // window was cutting its BOTTOM plate in half, and the bottom plate
+      // is `HealthPlate`: the thing that says what is wrong, cropped
+      // exactly when everything is.
+      //
+      // So the height is no longer an argument. It is 2 x insetPx + the
+      // measured corner — the same edge gap §06 gives the top and the
+      // right, now given to the bottom as well, because a plate ending
+      // flush with the edge of a floating panel reads as a crop whether or
+      // not it is one. Grow a plate, add a plate, or add a service to this
+      // machine and that suite fails with the number of pixels it is over.
+      //
+      // Which is what ReplyPlate (A71) did: the crowd measured 775 px, 62
+      // px more than before — two 11 px rows and the gap above them — so
+      // this was 807. The growth is not free and is worth writing down
+      // where A70 can read it: the crowded corner is now more than half a
+      // 1440p screen, and whether a corner that tall should exist at all
+      // is the open question A70 asks, unchanged by this except that the
+      // number in it is bigger.
+      //
+      // And again for the drop row (A75), which is not a new plate: it is
+      // one 11 px row and its gap inside `HealthPlate`, so the crowd went
+      // 775 -> 794 and this is 826. Worth noting how the growth arrived,
+      // because it is the first one that did not come with a plate — a row
+      // added to a plate that already exists costs the box exactly as much
+      // per line as a plate would, and the suite is what said so rather
+      // than a paragraph here guessing.
       implicitWidth: 300
-      implicitHeight: 560
+      implicitHeight: 826
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
@@ -191,13 +254,47 @@ ShellRoot {
           anchors.right: parent.right
         }
 
+        // How the last answer ENDED, from jv-brain's own brain.response —
+        // and only when the context or token limit cut it off. Directly
+        // under the heard line because it closes the sentence those two
+        // start: Jarvis is thinking, this is what you asked, and the
+        // answer you just heard stops early because it ran out of room.
+        // It is the one outcome of a turn with no other route to a
+        // screen — a finished reply is its own report, and a brain that
+        // could not answer at all already arrives as a degraded
+        // heartbeat on the plate at the bottom of this stack.
+        ReplyPlate {
+          anchors.right: parent.right
+        }
+
         // What came of the last thing Jarvis did to this machine, from
         // jv-act's own action.result — and only when it did not work.
-        // Directly under the heard line because it is the end of the same
-        // story the three plates above tell: Jarvis is doing something,
-        // this is what you asked for, and this is why nothing happened.
-        // On a machine whose actions all worked it is never here at all.
+        // Directly under the reply line because it is the end of the same
+        // story the plates above tell: Jarvis is doing something, this is
+        // what you asked for, and this is why nothing happened. On a
+        // machine whose actions all worked it is never here at all.
         ActionPlate {
+          anchors.right: parent.right
+        }
+
+        // The Windows binary this machine refused to run, from jv-guard's
+        // own verdict — and only when it was refused. Directly under the
+        // failed action because the two are the same kind of news said by
+        // different processes: that one is Jarvis trying to change your
+        // machine and failing, this one is Jarvis declining to change it at
+        // all. On a machine nobody hands .exe files to it is never here.
+        GuardPlate {
+          anchors.right: parent.right
+        }
+
+        // The Windows app jv-compat could not finish installing, from its
+        // own compat.install lifecycle — and only when it failed. Directly
+        // under the refused binary because the two are the two halves of
+        // invariant 8 said by the two processes that enforce it: that one
+        // is a binary that never got to run, this one is a binary that ran
+        // inside its prefix and did not work. An install nobody started,
+        // or one that worked, draws nothing at all.
+        InstallPlate {
           anchors.right: parent.right
         }
 

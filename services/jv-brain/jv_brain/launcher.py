@@ -12,6 +12,8 @@ margin; rung 4 (CPU) always fits by construction — slow but alive.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import math
 import os
 import subprocess
 import sys
@@ -28,8 +30,64 @@ from .config import (
 )
 
 
+# How the free-VRAM number was arrived at. It is not decoration: the
+# ladder lands on the same CPU rung for all three, and only this word
+# says whether that was a measurement, a fact about the machine, or a
+# guess nobody could check.
+MEASURED = "measured"
+ABSENT = "absent"
+UNREADABLE = "unreadable"
+
+
+class VramUnreadable(RuntimeError):
+    """There is an NVIDIA driver on this machine and it would not answer.
+
+    Raised, never returned as `None`. `pick_rung` reads `None` as "no
+    usable GPU" and drops Jarvis to the CPU rung for the life of that
+    llama-server, so folding a timeout, a non-zero exit and an `[N/A]`
+    into the same `None` made a driver hiccup at launch indistinguishable
+    from a machine with no card — a permanent, invisible downgrade.
+
+    The floor is the same either way (you cannot allocate VRAM you could
+    not count). What differs is what anyone is allowed to conclude, so
+    this travels as far as the heartbeat.
+    """
+
+
+def parse_nvidia_smi_vram_mb(text: str) -> float:
+    """`nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits`
+    stdout -> free MiB.
+
+    One line per GPU; ares has one and the first line is it. `[N/A]` and
+    `[Not Supported]` are what nvidia-smi prints when a device cannot
+    answer the query, and NVML's own initialisation errors arrive on
+    stdout. None of those is a number — and neither is `nan`, which
+    float() accepts happily and which would walk the ladder comparing
+    false to every rung budget, i.e. exactly like a full card.
+    """
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    if not lines:
+        raise VramUnreadable("nvidia-smi printed nothing")
+    try:
+        mb = float(lines[0])
+    except ValueError as exc:
+        raise VramUnreadable(f"nvidia-smi said {lines[0]!r}") from exc
+    if not math.isfinite(mb) or mb < 0:
+        raise VramUnreadable(f"nvidia-smi VRAM {mb!r} is out of range")
+    return mb
+
+
 def probe_free_vram_bytes() -> Optional[int]:
-    """Free VRAM right now, via nvidia-smi. None = no usable GPU."""
+    """Free VRAM right now, via nvidia-smi.
+
+    None means one specific thing: there is no nvidia-smi here, so there
+    is no NVIDIA driver and no GPU rung to want. Every other way this can
+    go wrong raises VramUnreadable.
+
+    This runs ONCE per llama-server launch, so the fork costs nothing
+    worth counting (unlike jv-context's 1 Hz probe, backlog 14) and there
+    is nothing to latch.
+    """
     try:
         out = subprocess.run(
             [
@@ -41,18 +99,84 @@ def probe_free_vram_bytes() -> Optional[int]:
             text=True,
             timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except FileNotFoundError:
         return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise VramUnreadable(f"nvidia-smi did not run: {exc}") from exc
     if out.returncode != 0:
-        return None
+        # A number on stdout alongside a failure exit is still a failure.
+        raise VramUnreadable(f"nvidia-smi exited {out.returncode}")
+    return int(parse_nvidia_smi_vram_mb(out.stdout)) * 1024 * 1024
+
+
+@dataclasses.dataclass(frozen=True)
+class VramReading:
+    """A free-VRAM answer, plus how it was come by and (when it went
+    wrong) nvidia-smi's own words for why."""
+
+    free_bytes: Optional[int] = None
+    source: str = ABSENT
+    detail: Optional[str] = None
+
+    @property
+    def free_mb(self) -> int:
+        """-1 when there is no number. Both silences write -1, which is
+        why `source` has to be written down separately."""
+        return -1 if self.free_bytes is None else self.free_bytes // (1024 * 1024)
+
+
+def read_vram(probe: Callable[[], Optional[int]] = probe_free_vram_bytes) -> VramReading:
+    """Run the probe seam and classify its three outcomes."""
     try:
-        return int(out.stdout.strip().splitlines()[0]) * 1024 * 1024
-    except (ValueError, IndexError):
-        return None
+        free = probe()
+    except VramUnreadable as exc:
+        return VramReading(None, UNREADABLE, str(exc))
+    if free is None:
+        return VramReading(None, ABSENT)
+    return VramReading(free, MEASURED)
 
 
 def rung_budget_bytes(rung: Rung) -> int:
     return WEIGHT_BYTES[rung.model_file] + rung.kv_bytes() + COMPUTE_OVERHEAD_BYTES
+
+
+def gpu_floor_bytes(ladder: tuple[Rung, ...] = LADDER) -> Optional[int]:
+    """The least free VRAM at which `pick_rung` would still put Jarvis on
+    the card — the floor under the whole GPU half of the ladder.
+
+    None when the ladder has no GPU rung at all: there is then no figure
+    that would buy a GPU brain, and 0 would read as "any card will do".
+
+    A min() rather than "the last GPU rung", even though a test pins the
+    budgets as strictly decreasing: this number is a threshold someone
+    will act on, and a reordered ladder must not be able to publish a
+    figure that is not the floor.
+
+    This is a statement about the NEXT launch, not about the one that is
+    running — which is why it may be quoted even though `describe_rung`
+    refuses to re-derive the label of a rung another process chose. The
+    label is a fact about a choice already made (and only the launcher
+    that made it may word it); the floor is what jv-llm-launch would
+    require if it were started again now, and it is this ladder — the
+    one in the closure the unit will exec — that would require it.
+    """
+    budgets = [rung_budget_bytes(rung) for rung in ladder if rung.gpu]
+    return min(budgets) + SAFETY_MARGIN_BYTES if budgets else None
+
+
+def gpu_floor_mb(ladder: tuple[Rung, ...] = LADDER) -> Optional[int]:
+    """`gpu_floor_bytes` in whole MiB, rounded UP.
+
+    Whole MiB because that is the unit everything else on the bus counts
+    free VRAM in (`context.system.gpu_vram_free_mb`, nvidia-smi's own),
+    and a threshold in different units from the reading it is compared
+    against is a comparison nobody can make. Up rather than nearest,
+    because rounding down publishes a floor a launch would fall through
+    — a HUD saying "it fits now" about a brain that would land back on
+    the CPU.
+    """
+    floor = gpu_floor_bytes(ladder)
+    return None if floor is None else -(-floor // (1024 * 1024))
 
 
 def pick_rung(free_vram: Optional[int], ladder: tuple[Rung, ...] = LADDER) -> Rung:
@@ -94,13 +218,138 @@ def llama_args(cfg: BrainConfig, rung: Rung, port: int) -> list[str]:
     return args
 
 
-def write_rung_file(path: Path, rung: Rung, free_vram: Optional[int]) -> None:
+@dataclasses.dataclass(frozen=True)
+class RungRecord:
+    """The rung file, parsed. This file is the launcher's ONLY channel:
+    it execs into llama-server and is gone, so anything it learned that
+    nobody else can re-derive has to be written here or be lost."""
+
+    index: Optional[int]
+    backend: str
+    vram: VramReading
+    #: The ladder's own words for this rung, as the launcher wrote them.
+    #: Empty when the file predates `label=` or was torn mid-write — an
+    #: empty label is said as an empty label, never guessed back from the
+    #: index (a reader that re-derived it would be quoting THIS process's
+    #: ladder about a choice made by a different one).
+    label: str = ""
+
+
+def describe_rung(rec: RungRecord) -> str:
+    """The rung in words: `rung 4 (CPU fallback)`.
+
+    `llm_rung=4.0` on the bus is decodable only by a reader who has
+    Ofek's ladder memorised, and the launcher is the one process that
+    knows which rung it picked AND what that rung is called. Falls back
+    to the backend word when the file carried no label, and says nothing
+    at all about a rung it never read — an empty string, so a caller
+    cannot splice "rung ?" into a sentence and have it read as a fact.
+    A negative index is one of those: it is this parser's sentinel for a
+    file with no `rung=` line, never a rung the launcher wrote.
+    """
+    if rec.index is None or rec.index < 0:
+        return ""
+    return f"rung {rec.index} ({rec.label or rec.backend})"
+
+
+#: The rung file's mode, set explicitly rather than left to the umask.
+#: jv-llm writes this file and jv-brain reads it — two users, one group
+#: (`jarvis`), inside a 0750 runtime directory — so the group read bit is
+#: the whole of the reader's access, and a launcher that inherited a
+#: tighter umask would hand jv-brain a file it cannot open. That failure
+#: is silent by construction: an unreadable file reads as "no rung", and
+#: since B41 "no rung" is a heartbeat that says `ok` about a brain on the
+#: CPU. Nobody but jv-llm ever writes it, and the directory is already
+#: closed to everyone outside the group, so the other bits buy nothing.
+RUNG_FILE_MODE = 0o640
+
+
+def write_rung_file(path: Path, rung: Rung, vram: VramReading) -> None:
+    """Write the rung file in one move: a temp file beside it, then a
+    rename.
+
+    The launcher writes this file once and execs into llama-server, so
+    there is no process left to repair a bad write — and jv-brain
+    re-reads it on every heartbeat, where since B39/B41 it decides a
+    published STATE and not just a gauge. A torn `write_text` reads as
+    "llama-server has told me nothing", which is a heartbeat saying `ok`
+    about a brain that may be crawling on the CPU. `os.replace` leaves a
+    reader the last whole record or this one, never the seam between.
+
+    No fsync: /run is tmpfs, and a record that outlived the reboot which
+    emptied it would be a claim about an llama-server that no longer
+    exists. Durability is not the property this file wants.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    free_mb = -1 if free_vram is None else free_vram // (1024 * 1024)
-    path.write_text(
-        f"rung={rung.index}\nlabel={rung.label}\nbackend={'gpu' if rung.gpu else 'cpu'}\n"
-        f"free_vram_mb={free_mb}\n",
-        encoding="utf-8",
+    lines = [
+        f"rung={rung.index}",
+        f"label={rung.label}",
+        f"backend={'gpu' if rung.gpu else 'cpu'}",
+        f"free_vram_mb={vram.free_mb}",
+        f"vram={vram.source}",
+    ]
+    if vram.detail:
+        # nvidia-smi's own words, flattened: the reader is line-oriented.
+        lines.append(f"vram_note={' '.join(vram.detail.split())}")
+    body = ("\n".join(lines) + "\n").encode("utf-8")
+
+    # Beside the target, so the rename stays inside one filesystem, and
+    # pid-stamped, so a restart overlapping the process it replaces
+    # cannot have two launchers writing one temp file.
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, RUNG_FILE_MODE)
+        with os.fdopen(fd, "wb") as fh:
+            os.fchmod(fh.fileno(), RUNG_FILE_MODE)  # O_CREAT's mode is umask'd
+            fh.write(body)
+        os.replace(tmp, path)
+    except BaseException:
+        # An exec into llama-server is the next thing that happens here;
+        # nobody comes back to sweep up.
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def read_rung_file(path: Path) -> RungRecord:
+    """Parse the rung file, or say so. Unreadable/absent file -> index
+    None, which is how jv-brain has always spelled "llama-server has not
+    told me anything yet"."""
+    try:
+        # Keys and values are stripped, not taken raw: `backend` now
+        # decides a STATE (jv-brain's rung finding), and `backend = cpu`
+        # — which is what a hand-edited file looks like — would otherwise
+        # read as a word equal to neither "cpu" nor "gpu", quietly
+        # answering "no" to both questions. (Line endings need no such
+        # care: read_text() translates CRLF on the way in.)
+        data = {
+            k.strip(): v.strip()
+            for k, sep, v in (
+                line.partition("=")
+                for line in path.read_text(encoding="utf-8").splitlines()
+            )
+            if sep and k.strip()
+        }
+        index: Optional[int] = int(data.get("rung", -1))
+    except (OSError, ValueError):
+        return RungRecord(None, "gpu", VramReading())
+    try:
+        free_mb = int(data.get("free_vram_mb", -1))
+    except ValueError:
+        free_mb = -1
+    # A file written before `vram=` existed says only -1 or a number, and
+    # must not be able to invent a fault nobody observed.
+    source = data.get("vram") or (MEASURED if free_mb >= 0 else ABSENT)
+    if source not in (MEASURED, ABSENT, UNREADABLE):
+        source = ABSENT
+    return RungRecord(
+        index,
+        data.get("backend", "gpu"),
+        VramReading(
+            free_bytes=free_mb * 1024 * 1024 if free_mb >= 0 else None,
+            source=source,
+            detail=data.get("vram_note") if source == UNREADABLE else None,
+        ),
+        label=" ".join(data.get("label", "").split()),
     )
 
 
@@ -110,12 +359,13 @@ def launch(
     probe: Callable[[], Optional[int]] = probe_free_vram_bytes,
     exec_fn: Callable[[list[str]], None] | None = None,
 ) -> Rung:
-    free = probe()
-    rung = pick_rung(free)
-    write_rung_file(cfg.rung_file, rung, free)
+    vram = read_vram(probe)
+    rung = pick_rung(vram.free_bytes)
+    write_rung_file(cfg.rung_file, rung, vram)
+    said = f"{vram.free_mb}MB" if vram.source == MEASURED else vram.source
     print(
-        f"jv-llm-launch: free_vram={'-' if free is None else free // 2**20}MB "
-        f"-> rung {rung.index} ({rung.label})",
+        f"jv-llm-launch: free_vram={said} -> rung {rung.index} ({rung.label})"
+        + (f" [{vram.detail}]" if vram.detail else ""),
         file=sys.stderr,
     )
     args = llama_args(cfg, rung, port)

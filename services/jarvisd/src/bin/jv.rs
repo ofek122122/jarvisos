@@ -10,7 +10,7 @@
 
 use clap::{Parser, Subcommand};
 use jarvisd::broker::BusAddr;
-use jarvisd::cli::{self, HopStats, Outcome, TurnStats, Utterances};
+use jarvisd::cli::{self, Confirmations, Endings, HopStats, Lives, Outcome, TurnStats, Utterances};
 use jarvisd::client::BusClient;
 use jarvisd::proto::ServerMsg;
 use jarvisd::time::mono_now;
@@ -71,6 +71,21 @@ enum Cmd {
     /// voice), hold (its endpoint wait), respond (ASR + brain + bus) — so
     /// the machine's share can be read apart from your own speaking time.
     /// Spans that were not measured print as `?`, never as a zero.
+    ///
+    /// A turn that ran a TOOL gets a second line saying how much of its
+    /// think jv-act held — the tool's execution and, for a confirming tool,
+    /// the window it waited for your answer in.
+    ///
+    /// A confirmation gets a line of its own when it ends: the tool that was
+    /// asked about, what was decided, by which route, and how long you took.
+    /// The two frames that say all that are minutes apart on the wire and
+    /// share only a request_id.
+    ///
+    /// A service whose heartbeat says it has been up LESS long than it said
+    /// last time is a service that died and was replaced, and gets a line
+    /// saying so and how long the process that ended had lasted. Nothing on
+    /// the bus publishes that, and only a reader holding state across frames
+    /// can see it.
     Tap {
         #[arg(long)]
         latency: bool,
@@ -211,6 +226,23 @@ async fn main() -> anyhow::Result<()> {
             let mut stats = HopStats::default();
             let mut turns = TurnStats::default();
             let mut utts = Utterances::with_capacity(UTTERANCE_MEMORY);
+            // The confirmation exchanges, held question-half-first so each
+            // one can be reported as the single sentence it is. Independent
+            // of the turn bookkeeping above on purpose: `action.confirm`
+            // names no utterance, so a destructive tool nobody spoke for is
+            // still an exchange worth a line (cli::Confirmations).
+            let mut confirms = Confirmations::default();
+            // The process behind each service's heartbeat. Nothing on the bus
+            // announces a restart, and only a reader that holds state across
+            // frames can see one — which is why `jv health`, a snapshot, never
+            // will, however long it runs (cli::Lives).
+            let mut lives = Lives::default();
+            // How each reported turn's reply ENDED. A turn is reported at
+            // its first word, so `respond` says the same thing about a reply
+            // that died mid-synthesis as about one spoken in full; the frame
+            // that tells them apart lands later and names a `say_id`
+            // (cli::Endings, PLAN B85).
+            let mut endings = Endings::default();
             // jv-ears' endpoint hold, once it has said what it is. No
             // fallback: a turn measured before the first heartbeat lands
             // reports `?` for the spans that need it (cli::Turn).
@@ -232,12 +264,20 @@ async fn main() -> anyhow::Result<()> {
                     let src = cli::get_str(&frame, "src").unwrap_or_default();
                     let seq = cli::get_f64(&frame, "seq").unwrap_or(-1.0) as i64;
                     let hop_ms = (now - ts) * 1e3;
-                    println!("{topic:<20} {src:<12} seq={seq:<8} hop={hop_ms:8.2}ms");
+                    println!("{}", cli::hop_line(&topic, &src, seq, hop_ms));
                     stats.hop(&topic, hop_ms);
                 } else {
                     println!("{}", cli::to_json(&frame));
                 }
                 if topic == "sys.health" {
+                    // A service that died and came back, which `uptime_s`
+                    // going BACKWARDS is the only evidence of. Every refusal
+                    // about what a restart IS lives in `Lives`, which keeps
+                    // the rules `core/HealthState.qml` argues, so there is
+                    // nothing to decide here (PLAN B78).
+                    if let Some(line) = lives.observe(&frame) {
+                        println!(">>> {line}");
+                    }
                     if let Some(h) = cli::ears_endpoint_hold_s(&frame) {
                         hold_s = Some(h);
                     }
@@ -275,7 +315,58 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
                     }
+                    // jv-brain asking jv-act for a tool, and jv-act's
+                    // answer. Both sit INSIDE `think`, threaded by
+                    // request_id, and together they are the one part of a
+                    // tool turn's think that is not jv-brain's
+                    // (cli::Utterances::tool_span). No new publisher and no
+                    // schema change — the same free seam hear/think had.
+                    "intent.action" => {
+                        let (Some(utt), Some(rid)) = (
+                            cli::get_str(body, "utterance_id"),
+                            cli::get_str(body, "request_id"),
+                        ) else {
+                            // `utterance_id` is optional: an action with no
+                            // voice turn behind it belongs to no turn here.
+                            return;
+                        };
+                        utts.acted(&utt, &rid, ts);
+                    }
+                    "action.result" => {
+                        if let Some(rid) = cli::get_str(body, "request_id") {
+                            utts.act_done(&rid, ts);
+                        }
+                    }
+                    // jv-act stopping to ask YOU, and the answer closing the
+                    // question. The window between them is the part of the
+                    // round trip above that no faster machine shortens — 15 s
+                    // by design — so it is subtracted out of `tool` and named
+                    // (cli::Utterances::confirm_span). Threaded by the same
+                    // request_id, because `action.confirm` names no utterance
+                    // either. Still no new publisher and no schema change.
+                    "action.confirm" => {
+                        // The exchange as one line, when the answer closes a
+                        // question this tap saw opened. Every refusal about
+                        // what an ending IS lives in `Confirmations`, which
+                        // keeps the three `core/ConfirmState.qml` argues, so
+                        // there is nothing to decide here (PLAN B79).
+                        if let Some(line) = confirms.observe(body, ts) {
+                            println!(">>> {line}");
+                        }
+                        let Some(rid) = cli::get_str(body, "request_id") else { return };
+                        match cli::get_str(body, "kind").as_deref() {
+                            Some("request") => utts.confirm_asked(&rid, ts),
+                            Some("answer") => utts.confirm_answered(&rid, ts),
+                            _ => {}
+                        }
+                    }
                     "speech.say" => {
+                        // EVERY sentence of a streamed reply, not just the
+                        // first: jv-voice reports the turn's ending against
+                        // whichever say_id it was holding when the turn
+                        // ended, which for a reply spoken in full is the
+                        // last one.
+                        endings.said(body);
                         if let Some(id) = cli::get_str(body, "in_reply_to_utterance") {
                             // Only the FIRST reply frame: a streamed reply is
                             // many speech.say frames for one utterance, and
@@ -285,9 +376,28 @@ async fn main() -> anyhow::Result<()> {
                             // frame ts, and a busy tap must not inflate the
                             // number it exists to report.
                             if let Some(turn) = utts.reply(&id, ts, hold_s) {
-                                println!(">>> {}", turn.line(&id));
+                                // A ladder, each rung naming a span the rung
+                                // above it valued: the turn, the machine's
+                                // half of it, jv-act's share of that, and
+                                // your own share of jv-act's. `Turn::lines`
+                                // decides which rungs exist and in what
+                                // order, so none of them can be printed
+                                // pointing at a name nobody printed — and so
+                                // that every one of them fits a terminal.
+                                for line in turn.lines(&id) {
+                                    println!(">>> {line}");
+                                }
                                 turns.push(&turn, &id);
                             }
+                        }
+                    }
+                    // jv-voice leaving `speaking`, which is the only place
+                    // on this bus that says how an utterance ended. Every
+                    // refusal about what an ending IS lives in `Endings`, so
+                    // there is nothing to decide here (PLAN B85).
+                    "speech.state" => {
+                        if let Some(line) = endings.observe(body) {
+                            println!(">>> {line}");
                         }
                     }
                     _ => {}
@@ -297,6 +407,7 @@ async fn main() -> anyhow::Result<()> {
             if latency {
                 print!("{}", stats.summary());
                 print!("{}", turns.summary());
+                print!("{}", endings.summary(turns.reported()));
             }
             cli::exit_code(run.outcome, count, run.seen)
         }

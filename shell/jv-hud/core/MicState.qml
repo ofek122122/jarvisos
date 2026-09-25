@@ -22,6 +22,12 @@
 //   capture_stall_s  how long ears itself lets a device go quiet before
 //                  calling its own heartbeat degraded. A budget, not a
 //                  measurement: MicPlate feeds it in as `stallS` (A14).
+//   capture_loss_age_s  seconds since a chunk of the room was discarded —
+//                  by ears' own queue, or by the device before ears ran.
+//                  ABSENT means none ever was.
+//   capture_loss_window_s  how long a discard keeps meaning "this
+//                  microphone is losing audio". The other budget, fed in
+//                  as `lossWindowS` the same way (A84).
 //
 // Which is why the process being alive is not the test. The 2026-09-15
 // field bug was exactly that: PortAudio opened nothing, jv-ears stayed up
@@ -52,27 +58,69 @@ QtObject {
   // binding: this element decides one thing and takes its inputs.
   property real stallS: 1.0
 
+  // How long a discarded chunk keeps meaning "losing audio". Same shape,
+  // same source, same pinned fallback (`CaptureMeter.LOSS_S`) — and a
+  // deliberately separate number from the one above, because they bound
+  // different things: that one is how long silence is still a slow
+  // stream, this one is how long a hole in the recording is still news.
+  property real lossWindowS: 1.0
+
   // "unknown" — nothing trustworthy to say (no link, no heartbeat, a
   //             heartbeat too old to describe now, or a jv-ears that does
   //             not report the gauges at all).
   // "off"     — jv-ears is here and has no microphone open (a --wav run).
-  // "live"    — the device is open AND delivering audio.
+  // "live"    — the device is open, delivering, and losing nothing.
+  // "losing"  — the device is open and delivering, and chunks of the room
+  //             are going missing anyway: ears' hand-off queue overflowed,
+  //             or the device discarded input before ears ran. Every gauge
+  //             `live` is built on stays fresh through this, which is why
+  //             it needed a word of its own — without one the indicator
+  //             reads "fine" over a recording with holes in it, and that
+  //             is the not-fakeable half of invariant 10 over-claiming.
   // "stalled" — the device is open and has gone quiet: still recording as
   //             far as the OS is concerned, but Jarvis is deaf.
+  //
+  // The last two are both degraded and only one can be on screen, so the
+  // order is a decision, and it is jv-ears' own: a stall outranks a loss,
+  // because "no audio at all" is the bigger fact. Drawing the other order
+  // would put the plate and the heartbeat it came from in disagreement.
   readonly property string state: {
     const m = root.metrics;
     if (m === null)
       return "unknown";
     if (m.mic_open !== 1)
       return "off";
-    return typeof m.capture_age_s === "number" && m.capture_age_s <= root.stallS ? "live" : "stalled";
+    if (!(typeof m.capture_age_s === "number" && m.capture_age_s <= root.stallS))
+      return "stalled";
+    return root.recentLoss(m) ? "losing" : "live";
   }
 
   readonly property bool known: root.state !== "unknown"
-  // The one claim that matters: audio is being captured in this room.
-  readonly property bool capturing: root.state === "live"
+  // The one claim that matters: audio is being captured in this room. A
+  // microphone losing chunks is still recording the ones it keeps, so the
+  // privacy light stays on — the hole is a second fact, not a reprieve.
+  readonly property bool capturing: root.state === "live" || root.state === "losing"
   // Open but silent. Worth saying — it is the failure that hid for a day.
   readonly property bool stalled: root.state === "stalled"
+  // Open, delivering, and dropping some of it on the floor.
+  readonly property bool losing: root.state === "losing"
+
+  // Is there a hole in the recording recent enough to still be news?
+  //
+  // jv-ears publishes the age only once something HAS been discarded, so
+  // the absence of the gauge is the answer "nothing was lost" and not a
+  // jv-ears that forgot to say. Which is also why an age that is present
+  // but unreadable comes out true: the presence is the evidence, the
+  // value only dates it, and a loss we cannot date is not a loss we may
+  // call old. `<=` matches CaptureMeter.health() — including a negative
+  // age, which is a stamp taken on PortAudio's thread and subtracted on
+  // the asyncio loop, not a loss from the future.
+  function recentLoss(m: var): bool {
+    const age = m.capture_loss_age_s;
+    if (age === undefined)
+      return false;
+    return typeof age !== "number" || age <= root.lossWindowS;
+  }
 
   // --- the heartbeat we are willing to believe -------------------------
 

@@ -14,7 +14,7 @@ import pytest
 from jarvis_bus import BusClient
 from jv_voice.config import VoiceConfig
 from jv_voice.player import FakePlayer
-from jv_voice.service import TURN_GAP_S, VoiceService
+from jv_voice.service import HEALTH_PERIOD_S, TURN_GAP_S, VoiceService
 from jv_voice.tts import Synthesizer
 
 REPO = Path(__file__).resolve().parents[3]
@@ -65,9 +65,9 @@ async def bus_addr():
     proc.wait(timeout=10)
 
 
-async def start_service(bus_addr, synth, player):
+async def start_service(bus_addr, synth, player, **kw):
     svc_bus = await BusClient.connect(bus_addr, src="jv-voice")
-    svc = VoiceService(svc_bus, synth, player)
+    svc = VoiceService(svc_bus, synth, player, **kw)
     task = asyncio.create_task(svc.run())
     return svc_bus, task
 
@@ -476,6 +476,107 @@ async def test_a_degraded_heartbeat_carries_it_too(bus_addr, synth):
     assert degraded, f"no degraded heartbeat: {beats}"
     assert degraded[0]["metrics"] == {"output_device_pinned": 1.0}
     assert "no such device" in degraded[0]["notes"]
+
+    task.cancel()
+    await watcher.close()
+    await svc_bus.close()
+
+
+# --- B50: the gap itself, and not only what it is longer or shorter than ---
+
+
+def test_the_inter_sentence_gap_is_bounded_by_the_thing_it_bridges():
+    """The two live claims about this constant are `< TURN_GAP_S / 2`.
+
+    Both say a turn ended sooner than the budget, and both are spelled with
+    the budget, so widening it widens the thing they are measured against
+    and they stay green — measured, not argued: TURN_GAP_S was mutated from
+    0.5 to 2.0 against this suite and survived (PLAN B50). Two seconds of
+    silence in the middle of a spoken reply is a turn every listener would
+    call over, and nothing here would have noticed.
+
+    The bounds are the constant's own docstring, made checkable. It bridges
+    THE BUS — the sentence jv-brain published as the previous one ended and
+    that is still in flight — and deliberately not the brain:
+
+    - below ~50 ms it stops bridging even that, and a reply still streaming
+      gets declared finished mid-answer;
+    - past ~0.75 s it is no longer a bus hop, it is waiting on the model,
+      which is the job this constant says it does not do — and the user
+      hears it as dead air with `speech.state` still claiming `speaking`.
+
+    Deliberately looser than the shipped 0.5 s in both directions: this is
+    the promise, not a second copy of the tuning.
+    """
+    assert 0.05 <= TURN_GAP_S <= 0.75
+
+
+# --------------------------------------- the period an off-schedule beat owns
+
+
+async def next_health(watcher, timeout=10.0, state=None):
+    """The next sys.health frame (of `state`, if given), and the moment it
+    arrived."""
+
+    async def inner():
+        while True:
+            frame = await watcher.next_frame()
+            assert frame is not None
+            if frame["topic"] == "sys.health":
+                if state is None or frame["body"].get("state") == state:
+                    return frame, asyncio.get_running_loop().time()
+
+    return await asyncio.wait_for(inner(), timeout)
+
+
+async def test_the_degraded_beat_owns_the_period_it_lands_in(bus_addr):
+    """jv-voice beats `degraded` the instant synthesis or playback fails,
+    and then left its period timer alone — so the `ok` that erases the
+    report went out with whatever was left of the period the fault
+    interrupted, which near the boundary is nothing at all. `bus.latest()`
+    keeps one frame per publisher, so the HUD's HealthPlate and `jv health
+    --check` both read the newest: the one heartbeat that ever says the
+    room heard nothing could be overwritten before either could show it.
+
+    The fault beat IS this period's beat now. Asserted as a gap rather
+    than as a silence, because a heartbeat that simply stopped would pass
+    a silence.
+    """
+
+    class BoomSynth:
+        """Raises where the real one would return audio — the failure that
+        reaches the same handler as a dead sound card, without waiting on
+        Piper to make the timing of this test a guess."""
+
+        def synth(self, text):
+            raise RuntimeError("piper fell over")
+
+    period = 1.2
+    assert period < HEALTH_PERIOD_S  # the test drives a shorter clock, on purpose
+    watcher = await BusClient.connect(bus_addr, src="t-watch")
+    await watcher.subscribe(["sys.health"])
+    svc_bus, task = await start_service(
+        bus_addr, BoomSynth(), FakePlayer(0.1), health_period_s=period
+    )
+
+    first, at_first = await next_health(watcher)
+    assert first["body"]["period_s"] == period  # the body declares what is enforced
+    assert first["body"]["state"] == "ok"
+
+    await asyncio.sleep(period * 0.7)
+    await say(watcher, "Anything at all.")
+    fault, at_fault = await next_health(watcher, state="degraded")
+    assert "piper fell over" in fault["body"]["notes"]
+    # A fault that arrived after the beat it was supposed to interrupt would
+    # make the rest of this test measure nothing and still pass.
+    assert at_fault - at_first < period, "the failure outran the period it was to land in"
+
+    nxt, at_next = await next_health(watcher, timeout=period * 3)
+    assert nxt["body"]["state"] == "ok"  # it does come back: this is not a latch
+    assert at_next - at_fault >= period * 0.6, (
+        f"the beat after the fault came {at_next - at_fault:.3f}s later, "
+        f"on the schedule the fault should have taken over"
+    )
 
     task.cancel()
     await watcher.close()

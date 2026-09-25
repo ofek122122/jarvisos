@@ -15,18 +15,51 @@
 // own state is developer information and lives in the self-test marker in
 // shell.qml, where it cannot be mistaken for a fact about the machine.)
 //
-// What it draws, worst first:
+// What it draws, top to bottom — the list worst first, with one line above
+// it that is about the list:
+//   · `bus 41 DROPPED` first, when jarvisd says the bus threw frames away
+//     in the interval its last heartbeat covers (A75). Above the findings
+//     rather than in them, because it is a claim ABOUT the list and not an
+//     item in it: every line below is drawn from the frames that arrived,
+//     and dropped heartbeats are one of the ways a service comes to look
+//     `lost`. Named `bus` and not `jarvisd` — the count is summed across
+//     every subscriber connection, so the broker is the witness and not the
+//     culprit, and `bus` is the word LinkPlate already uses.
 //   · one line per unwell service — `jv-brain DEGRADED` — in the service's
 //     own name, and the schema's own word for its state. Never a
 //     friendlier paraphrase, and never a state word the schema does not
 //     define; core/HealthState.qml turns anything it cannot read into
 //     `unknown` rather than passing it through to a screen.
+//   · `jv-ears RESTARTED 3x` among them, for a service whose process has
+//     been replaced while the HUD was watching (A78). Every unit is
+//     `Restart=on-failure`, so this is the line that used to be an EMPTY
+//     corner: the new process heartbeats `ok` and the old one is not on
+//     the bus to be mourned. The count is what separates one crash at
+//     boot from a service dying every eight seconds, so it is on the line
+//     rather than left to `jv health` — the only number in this plate that
+//     is a tally over time rather than a reading.
 //   · `+N MORE` when there are more findings than fit. Truncation that
 //     does not say it truncated reads as a complete list.
 //   · `llm CPU RUNG 4` when the brain is on the CPU floor (invariant 6).
 //     No service calls that a fault, so it is not coloured as one — but
 //     it is the only thing on this machine that explains a Jarvis which
 //     takes thirty seconds to answer.
+//   · `vram 943 MiB FREE` under it, when there is a live figure to put
+//     there (B40). It is the WHY of the line above, and it only ever
+//     appears with it: on ares the card is healthy and 943 MiB of its
+//     6 GB is free, which is the whole reason the brain is on the floor,
+//     and a rung line with no number under it reads as a fault instead of
+//     as the ladder working. Dimmer than the line it explains, because it
+//     is not itself news — and never on screen on its own account, which
+//     is what would make it the all-day gauge §06 refuses.
+//   · `llm NEEDS 5424 MiB` under THAT, when jv-brain says what its ladder
+//     would take (B46). Two numbers, two publishers, one row each: the
+//     card as jv-context measured it, and the requirement as jv-brain
+//     computed it off a ladder the HUD may not read (invariant 1). Side
+//     by side they turn "943 MiB free" from a figure a reader has to know
+//     this machine to judge into one they can judge on the spot — and
+//     into the moment a closed game makes them equal, which is the whole
+//     reason to look. Never without the reading above it.
 //
 // Colour is the severity and nothing else. Ember never appears: ember
 // means Jarvis is doing something (§06), and a service falling over is
@@ -48,13 +81,45 @@ Item {
     bus: Bus
   }
 
+  // How much of the card is left, and whether that is worth saying — which
+  // is only while the brain is on the CPU floor, the one thing on this
+  // machine that is being paid for a full GPU. `HealthState` owns the rung
+  // (it owns jv-brain's heartbeat and its expiry), so the gate is handed
+  // over rather than worked out twice off the same topic.
+  readonly property VramState vram: VramState {
+    bus: Bus
+    brainOnCpu: root.health.llmOnCpu
+    // And what the card would have to give back. Off the same heartbeat
+    // as the rung, through the same reader, because a floor and a rung
+    // that disagreed about which brain they describe would be worse than
+    // neither.
+    gpuFloorMb: root.health.llmGpuFloorMb
+  }
+
+  // Did the bus throw frames away? Off jarvisd's own heartbeat, which
+  // `HealthState` also reads — but through a second element rather than a
+  // property on the first, because this is a different field with a
+  // different lifetime (one period, not two) and the two would have to
+  // disagree about expiry to share a reader.
+  readonly property DropState drops: DropState {
+    bus: Bus
+  }
+
   // How many findings fit before the list becomes a wall. Past this the
   // count is more useful than the names — and the machine has bigger
   // problems than the HUD's typography.
   property int maxLines: 3
 
-  // On screen exactly while there is something to report.
-  readonly property bool shown: root.health.reporting
+  // Which plate this is, in one word (A53). The stack collects these
+  // so that "something arrived in the corner" can become "THIS plate
+  // arrived" — see `litNames` in core/PlateStack.qml.
+  readonly property string plateName: "health"
+
+  // On screen exactly while there is something to report. The drop count
+  // is its own reason to appear: on a machine where every service says
+  // `ok` and the brain is on the card, a bus shedding frames is the only
+  // finding there is, and `HealthState` cannot see it.
+  readonly property bool shown: root.health.reporting || root.drops.reporting
 
   // True while anything is still drawn, including the fade out, so
   // shell.qml can keep the surface mapped until the plate is really gone.
@@ -66,10 +131,20 @@ Item {
   readonly property var lines: {
     const health = root.health;
     let out = [];
+    // First, because it qualifies everything under it. `warn` and not
+    // `risk`: frames were lost, which is an impairment and not a machine
+    // that has stopped — and ember is never spent here (ember means Jarvis
+    // is doing something).
+    if (root.drops.reporting)
+      out.push({
+        "name": "bus",
+        "detail": root.drops.line,
+        "tone": Theme.warn
+      });
     for (const finding of health.findings.slice(0, root.maxLines))
       out.push({
         "name": finding.service,
-        "detail": finding.state.toUpperCase(),
+        "detail": root.detailOf(finding),
         "tone": root.toneOf(finding.severity)
       });
     const hidden = health.findingCount - root.maxLines;
@@ -85,7 +160,48 @@ Item {
         "detail": health.llmRung >= 0 ? "CPU RUNG " + health.llmRung : "CPU",
         "tone": Theme.warn
       });
+    // The reason the line above is not a fault, when jv-context can see the
+    // card. Absent on a machine with no GPU and on one whose jv-context has
+    // gone quiet — in both of which the rung line stands alone, exactly as
+    // it did before this row existed.
+    if (root.vram.reporting)
+      out.push({
+        "name": "vram",
+        "detail": root.vram.line,
+        "tone": Theme.text3
+      });
+    // And what the brain would need before the card were an option again
+    // (B46). Named `llm` and not `vram` because it is jv-brain's number
+    // about jv-brain's ladder, where the row above is jv-context's
+    // measurement of the card — one row per publisher, and the reader
+    // does the comparing. Never on its own: `VramState` only offers this
+    // line under a reading to compare it with.
+    if (root.vram.needKnown)
+      out.push({
+        "name": "llm",
+        "detail": root.vram.needLine,
+        "tone": Theme.text3
+      });
     return out;
+  }
+
+  // The state word, and — for a restart — how many there have been. The
+  // count rides the `restarted` word only: under `DEGRADED` or `LOST` a bare
+  // number beside a different word would be a tally of nothing a reader can
+  // name, and the service's own word is the one that earned the line.
+  //
+  // Capped, and it says it is capped. Not cosmetic: this plate has no
+  // `maxTextPx`, so it is the one whose width is exactly its longest string,
+  // and the surface is a fixed 300 px box (shell.qml). Every other line here
+  // is bounded by a service name and a word from an enum; a tally is the
+  // only thing on this plate that could grow without limit. Past 99 the
+  // exact figure has stopped being the point — the service is not coming
+  // back on its own — and `jv health` has the uptime to the second.
+  function detailOf(finding: var): string {
+    const word = finding.state.toUpperCase();
+    if (finding.state !== "restarted" || finding.restarts < 2)
+      return word;
+    return word + " " + (finding.restarts > 99 ? "99+" : String(finding.restarts)) + "x";
   }
 
   // Severity, as colour. The theme spends `risk` only where something is

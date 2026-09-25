@@ -9,25 +9,28 @@ fakes sensor state (invariant 10).
 `shell.qml` maps one layer-shell surface per connected monitor, and that
 surface is **unmapped unless an element has something true to draw** — the
 default state of the screen is your work and nothing else, and an unmapped
-surface renders at 0 fps. Today it stacks eight plates in the top-right
+surface renders at 0 fps. Today it stacks eleven plates in the top-right
 corner, in this order:
 
 | plate | draws while | topic |
 |---|---|---|
 | `LinkPlate` (A23) | the HUD cannot see the bus at all | (the pipe itself) |
 | `ConfirmPlate` (A20) | jv-act is waiting on your yes or no | `action.confirm` |
-| `StatePlate` (A3) | Jarvis is listening, thinking, speaking or was interrupted | `speech.state` + `audio.wake` + `brain.*` |
+| `StatePlate` (A3) | Jarvis is listening, thinking, speaking, was interrupted, or preempted itself | `speech.state` + `audio.wake` + `brain.*` |
 | `OutputPlate` (A40/A41) | Jarvis is speaking into a sink you cannot hear | `speech.state` + `context.system` + `sys.health` (jv-voice) |
-| `HeardPlate` (A26) | your words are still the live question | `audio.transcript` |
+| `HeardPlate` (A26) | your words are still the live question | `audio.transcript` (+ `audio.vad` for the window, A57) |
+| `ReplyPlate` (A71) | the answer you just heard ran out of room | `brain.response` (+ `audio.wake` / `brain.request` for the exit) |
 | `ActionPlate` (A37) | the last thing Jarvis did to the machine failed | `intent.action` + `action.result` |
+| `GuardPlate` (A51) | this machine refused to run a program | `guard.verdict` |
+| `InstallPlate` (A52) | an app jv-compat let through did not install | `compat.install` |
 | `MicPlate` (A4) | the microphone is actually open | `sys.health` (jv-ears) |
-| `HealthPlate` (A6) | some service is not well | `sys.health` |
+| `HealthPlate` (A6/B40) | some service is not well — and, under a brain on the CPU floor, how much of the card is left | `sys.health` + `context.system` |
 
 Every one of them reads the bus and nothing else, several take jv-ears' own
 tuning from `core/EarsBudgets.qml` (A14) rather than mirroring it, and every
 one of them draws NOTHING until it has something true to say — which is why
 the ordinary state of this HUD is an unmapped surface. `docs/hud/` is a
-contact sheet of all eight, at the surface's real size.
+contact sheet of all eleven, at the surface's real size.
 
 The skeleton pins the properties that make the HUD safe by construction,
 and `tools/tests/test_gen_theme_qml.py` fails the build if any of them is
@@ -226,7 +229,11 @@ of what the **real** pipeline published while listening to the fixture WAVs
 | `speech-no-wake` | real speech nobody addressed to Jarvis — `unknown` throughout, start to finish |
 
 Those seconds are facts about the recordings, so a flicker or an early
-blank shows up as an extra transition rather than as a judgement call. Two
+blank shows up as an extra transition rather than as a judgement call.
+The words land LATER than the `thinking` above them — 2.2 s later, the
+ASR jv-ears runs after the boundary (A58) — which is why the two elements
+that a turn puts on screen are timed from the same frame and not each from
+its own (A57), and why that is now something a replay can check. Two
 of the assertions are about the coupling to jv-ears rather than about the
 HUD: the real wake frames must clear SpeechState's "a frame that disagrees
 with itself is not a detection" bar (they carry openWakeWord's own `score`
@@ -314,7 +321,8 @@ topics, and is where the tests are.
 | `idle` | `speech.state` = idle — **draws nothing** | — |
 | `listening` | `audio.wake` fired and the window is still open | teal — the open mic is *yours* |
 | `speaking` | `speech.state` = speaking | ember — Jarvis is doing something |
-| `interrupted` | `speech.state` = interrupted | quiet; a fact, not an alarm |
+| `interrupted` | `speech.state` = interrupted, and it was *you* (`reason` = wake, or no reason we can read) | quiet; a fact, not an alarm |
+| `preempted` | `speech.state` = interrupted with `reason` = preempted — Jarvis stopped its own sentence for something urgent | quiet, exactly like `interrupted` |
 
 `listening` is the claim that costs the most if it is wrong, because it is a
 claim about the microphone. jv-ears publishes when a window *opens* and
@@ -328,6 +336,8 @@ stop saying it too early rather than too late:
   disarms there for a wake-gated utterance.
 - `interrupted` never closes it: jv-voice publishes that *because* of the
   wake, and blanking the plate there would blank it while you are talking.
+  (Neither does `preempted`, which is the same frame under a different
+  `reason` — see below.)
 - otherwise it expires after `wakeWindowS` — jv-ears' own `wake_timeout_s`,
   read off its heartbeat (see *How jv-ears is tuned* below). This used to be
   a constant typed into the QML under a comment asking the next reader to
@@ -358,8 +368,15 @@ talking. `core/MicState.qml` decides, and is where the tests are.
 |---|---|---|
 | `unknown` | no link, no heartbeat, a heartbeat too old, or gauges we cannot read — **draws nothing** | — |
 | `off` | jv-ears is here and has no microphone open (a `--wav` run) — **draws nothing** | — |
-| `live` | the device is open **and** delivering audio | teal dot · `MIC` |
+| `live` | the device is open, delivering, and losing nothing | teal dot · `MIC` |
+| `losing` | the device is open and delivering, and chunks are going missing anyway | warn dot · `MIC LOSING AUDIO` |
 | `stalled` | the device is open and has gone silent | warn dot · `MIC NO AUDIO` |
+
+`losing` and `stalled` are both degraded and only one word fits on the
+plate, so the order is jv-ears' own: a stall outranks a loss, because "no
+audio at all" is the bigger fact. `capturing` stays true through `losing` —
+a microphone dropping chunks is still recording the ones it keeps, and the
+privacy light is not a quality light.
 
 It is a different question from `listening` and is never derived from it:
 jv-ears runs its VAD continuously, so `listening` answers *is Jarvis
@@ -380,6 +397,15 @@ service-local — no schema change, nothing frozen touched:
 | `capture_age_s` | seconds since the device last delivered audio — **absent** until it ever has |
 | `captured_s` | total audio delivered since start |
 | `capture_stall_s` | the stall budget ears judges by — a budget, not a measurement, so it is there from the first heartbeat |
+| `capture_loss_age_s` | seconds since a chunk of the room was discarded — by ears' queue or by the device — **absent** until one ever was |
+| `capture_loss_window_s` | how long a discard keeps meaning "losing audio" — the other budget, there from the first heartbeat |
+
+How much was lost is deliberately **not** a gauge. Half of it can never be
+a number — the device reports an overrun without its length — so a total
+would read zero through a run that lost audio only that way. The amounts
+go out in `notes` instead, named by culprit, because jv-ears dropping
+chunks (this process is too slow) and the device dropping them (the
+machine or the driver) send you to different places.
 
 A live microphone that has delivered nothing for longer than
 `capture_stall_s` also turns the heartbeat itself `degraded`, so `jv
@@ -407,11 +433,12 @@ bash ops/ralph/runtests.sh jv-ears  # CaptureMeter + the heartbeat body
 
 ## How jv-ears is tuned (A14)
 
-Two of the claims above are only true for as long as jv-ears is tuned to
-make them true: how long a wake word means `listening`, and how long an open
-microphone may go quiet and still read as `live`. Both were typed into the
-QML by hand, under comments asking whoever retuned the service to remember
-the HUD. So jv-ears states the budgets it enforces on its own heartbeat —
+Three of the claims above are only true for as long as jv-ears is tuned to
+make them true: how long a wake word means `listening`, how long an open
+microphone may go quiet and still read as `live`, and how long a discarded
+chunk keeps it reading `losing`. The first two were typed into the QML by
+hand, under comments asking whoever retuned the service to remember the
+HUD. So jv-ears states the budgets it enforces on its own heartbeat —
 `metrics` again, still no schema change — and `core/EarsBudgets.qml` is the
 one place that reads them:
 
@@ -419,10 +446,11 @@ one place that reads them:
 |---|---|---|
 | `wake_timeout_s` | `EarsPipeline.budgets()`, off the sample-clock count the code compares against, not off `cfg` | `wakeWindowDefaultS` |
 | `capture_stall_s` | `CaptureMeter.STALL_S` | `stallDefaultS` |
+| `capture_loss_window_s` | `CaptureMeter.LOSS_S` | `lossWindowDefaultS` |
 
 The fallbacks cannot be deleted — the HUD has to say something before the
 first heartbeat lands — so they are pinned instead: `tools/tests` fails the
-build if either drifts from the Python that enforces it, and if a plate
+build if any of them drifts from the Python that enforces it, and if a plate
 stops binding the reported value and quietly runs on the fallback.
 
 A reported budget is refused unless it is a number, positive, and under a

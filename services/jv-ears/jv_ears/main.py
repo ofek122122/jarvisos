@@ -19,6 +19,22 @@ from .config import EarsConfig
 from .pipeline import EarsPipeline
 
 HEALTH_PERIOD_S = 5.0
+# How often the heartbeat re-reads the state it is about to report.
+# CaptureMeter's answer is a function of a clock — a stream stalls by a
+# chunk NOT arriving — so there is no writer to signal the change the way
+# jv-context's system pump signals its own (PLAN B35). A state nobody
+# announces has to be watched. One property read and two comparisons,
+# four times a second, publishing nothing unless the answer moved.
+HEALTH_WATCH_S = 0.25
+# ...and the fastest two heartbeats may follow each other. A microphone
+# delivering a chunk just either side of STALL_S flaps between ok and
+# degraded, and every flap is a genuine state change: without a floor the
+# watch would put sys.health at 4 Hz for as long as the device misbehaved
+# (invariant 5 — nothing blocks the bus, and a quiet topic stays quiet).
+# One second is STALL_S itself, so the news is at most a second late on a
+# fault that was already a second old when it became one — comfortably
+# inside the 6 s window `jv health --check` reads.
+HEALTH_MIN_GAP_S = 1.0
 
 
 def health_body(meter: CaptureMeter, uptime_s: float, budgets: dict) -> dict:
@@ -50,6 +66,53 @@ def health_body(meter: CaptureMeter, uptime_s: float, budgets: dict) -> dict:
     return body
 
 
+async def pump_health(
+    beat,
+    state_of,
+    *,
+    said,
+    done,
+    period_s: float = HEALTH_PERIOD_S,
+    watch_s: float = HEALTH_WATCH_S,
+    min_gap_s: float = HEALTH_MIN_GAP_S,
+    now=time.monotonic,
+    sleep=asyncio.sleep,
+) -> None:
+    """Beat every `period_s`, and as soon as the state stops matching what
+    the bus was last told.
+
+    `schemas/sys.health.json` asks for both ("every fixed period, and
+    immediately on state change") and jv-ears only ever did the first, so
+    a microphone that stopped delivering audio was up to a full period of
+    silence about itself — on a check that reads a 6 s window, a change
+    landing just after a beat is a change nobody sees.
+
+    Three callables and no state of its own: `beat()` publishes a
+    heartbeat, `state_of()` is the meter's answer NOW, `said()` is the
+    state the last published frame carried. Comparing against what went
+    out — rather than against a variable this loop keeps — is what makes
+    the answer un-driftable: a chunk arriving between the body being built
+    and this loop's next read cannot leave the pump believing it published
+    something it did not.
+
+    Only the `state` enum is watched. jv-ears' degraded note embeds the
+    age of the last chunk, so waking on the note would beat on every
+    tick for as long as the fault lasted; the growing note rides out on
+    the periodic beat, where a number that changes belongs.
+    """
+    at = now()
+    while not done.is_set():
+        await sleep(watch_s)
+        since = now() - at
+        if since >= period_s or (state_of() != said() and since >= min_gap_s):
+            # Before the publish, not after: the period is the beat's, not
+            # the bus's, and a change beat is this period's beat — leaving
+            # the timer alone would double-publish a change that happened
+            # to land near a boundary.
+            at = now()
+            await beat()
+
+
 async def amain(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="jv-ears")
     ap.add_argument("--bus", default=None, help="bus address (default: $JARVIS_BUS)")
@@ -64,7 +127,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
 
     cfg = EarsConfig()
     bus = await BusClient.connect(args.bus, src="jv-ears")
-    await bus.subscribe(["speech.state"])
+    await bus.subscribe(["speech.state", "dialog.listen"])
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     started = time.monotonic()
@@ -102,28 +165,48 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     worker = threading.Thread(target=run_pipeline, name="ears-pipeline", daemon=True)
     worker.start()
 
-    async def follow_speech_state() -> None:
-        """Half-duplex: close the pipeline's utterance gate while jv-voice
-        speaks — Jarvis must not hear Jarvis (see pipeline.set_suppressed)."""
+    async def follow_bus() -> None:
+        """The two things another service can say to the ears.
+
+        `speech.state` — half-duplex: close the pipeline's utterance gate
+        while jv-voice speaks, because Jarvis must not hear Jarvis (see
+        pipeline.set_suppressed).
+
+        `dialog.listen` — the bounded no-wake window jv-act and jv-brain
+        ask for when they need an answer (see pipeline.request_listen).
+        The whole frame goes down, envelope and all: `conf` and `v` are
+        grounds for refusing to open a microphone, and this loop is not
+        where that is decided.
+        """
         while True:
             frame = await bus.next_frame()
             if frame is None:
                 return
-            if frame["topic"] != "speech.state":
-                continue
-            state = frame["body"].get("state")
-            if state == "speaking":
-                pipeline.set_suppressed(True)
-            elif state in ("idle", "interrupted"):
-                pipeline.set_suppressed(False)
+            topic = frame["topic"]
+            if topic == "speech.state":
+                state = frame["body"].get("state")
+                if state == "speaking":
+                    pipeline.set_suppressed(True)
+                elif state in ("idle", "interrupted"):
+                    pipeline.set_suppressed(False)
+            elif topic == "dialog.listen":
+                pipeline.request_listen(
+                    frame.get("body"), conf=frame.get("conf"), v=frame.get("v")
+                )
 
-    state_task = asyncio.create_task(follow_speech_state())
+    bus_task = asyncio.create_task(follow_bus())
+
+    # The state of the last heartbeat that actually went out, so the watch
+    # below compares against the bus's word rather than its own. Written
+    # only here, where the frame is built, and never before the hello beat
+    # runs — so the empty string is never read.
+    said = ""
 
     async def beat() -> None:
-        await bus.publish(
-            "sys.health",
-            health_body(meter, time.monotonic() - started, pipeline.budgets()),
-        )
+        nonlocal said
+        body = health_body(meter, time.monotonic() - started, pipeline.budgets())
+        said = body["state"]
+        await bus.publish("sys.health", body)
 
     # Say hello BEFORE the frame loop, not on the loop's first yield: a
     # pipeline that ends immediately (--wav with nothing to read) used to
@@ -131,12 +214,14 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     # came and went without the bus — and the HUD — ever hearing of it.
     await beat()
 
-    async def health() -> None:
-        while not done.is_set():
-            await asyncio.sleep(HEALTH_PERIOD_S)
-            await beat()
-
-    health_task = asyncio.create_task(health())
+    health_task = asyncio.create_task(
+        pump_health(
+            beat,
+            lambda: meter.health()[0],
+            said=lambda: said,
+            done=done,
+        )
+    )
     try:
         while True:
             item = await queue.get()
@@ -146,7 +231,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
             await bus.publish(topic, body, conf=conf, v=v)
     finally:
         health_task.cancel()
-        state_task.cancel()
+        bus_task.cancel()
         await bus.close()
     return 1 if pipeline_failed.is_set() else 0
 

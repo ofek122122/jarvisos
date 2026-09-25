@@ -21,10 +21,19 @@ from typing import Optional
 
 import httpx
 
-from jarvis_bus import BusClient
+from jarvis_bus import BusClient, HealthBeat
 
 from . import onboarding
 from .config import BrainConfig
+from .launcher import (
+    ABSENT,
+    MEASURED,
+    UNREADABLE,
+    RungRecord,
+    describe_rung,
+    gpu_floor_mb,
+    read_rung_file,
+)
 from .profile import Profile
 from .tools import load_tools, openai_tool_defs
 
@@ -55,6 +64,58 @@ _INTERRUPTED_SILENT = "[interrupted by the user before any of this was said]"
 def interrupted_record(said: str) -> str:
     said = said.strip()
     return f"{said} {_INTERRUPTED_NOTE}" if said else _INTERRUPTED_SILENT
+
+
+def rung_finding(rec: RungRecord) -> Optional[str]:
+    """What this heartbeat has to SAY about the rung llama-server was
+    launched on — or None when there is nothing a reader should act on.
+
+    Two cases are findings, and a human can act on both the same way:
+    free some VRAM and restart jv-llm.
+
+    * The brain is on the CPU rung while this machine HAS a card.
+      `sys.health`'s own schema uses that as its worked example of
+      `degraded` ("brain fell back to CPU"), invariant 6 exists to keep
+      the 8B Q4 brain resident, and an 8B on this i5 answers in the time
+      a GPU rung takes to finish. It is also what ares does on an
+      ordinary day, with the desktop and a browser holding the 6 GB —
+      which is exactly why it must be said out loud rather than left as
+      `llm_rung=4.0` in a gauge nobody decodes.
+    * The ladder was walked blind (B39): nvidia-smi was there and would
+      not answer, so the rung underneath is the floor holding, not a
+      choice anyone made.
+
+    Everything else is quiet. A machine with no card at all is a machine
+    with no card, not an impairment (B39), and rungs 1-3 gave something
+    up deliberately while staying on the GPU — a note every 5 s for a
+    ladder working as designed teaches a reader to skip the field the
+    real fault will one day appear in.
+    """
+    blind = rec.vram.source == UNREADABLE
+    fell = rec.backend == "cpu" and rec.vram.source in (MEASURED, UNREADABLE)
+    if not (blind or fell):
+        return None
+    # Never "rung ?": a rung the file did not record is said as an
+    # unrecorded rung, and the finding stands on the rest of the sentence.
+    where = describe_rung(rec) or "an unrecorded rung"
+    if blind:
+        why = "VRAM unreadable at launch" + (
+            f": {rec.vram.detail}" if rec.vram.detail else ""
+        )
+    else:
+        # Both halves of the comparison, because `jv health` prints notes
+        # and not metrics: a reader who is told only "943 MiB free" still
+        # has to know Ofek's ladder to tell a busy card from a free one
+        # nobody has restarted jv-llm against. The requirement is quoted
+        # only here, where there is a reading to put it beside — next to
+        # a blind launch it would be a number with nothing to compare it
+        # with. Unit said once; both figures are MiB.
+        why = f"{rec.vram.free_mb} MiB VRAM free at launch"
+        if (floor := gpu_floor_mb()) is not None:
+            why += f", {floor} needed"
+    if fell:
+        return f"llm on {where} — no GPU layers, replies will be slow; {why}"
+    return f"llm on {where}, chosen blind — {why}"
 
 
 def _is_number(value: object) -> bool:
@@ -265,9 +326,20 @@ class Conversation:
 
 
 class BrainService:
-    def __init__(self, bus: BusClient, cfg: BrainConfig) -> None:
+    def __init__(
+        self,
+        bus: BusClient,
+        cfg: BrainConfig,
+        health_period_s: float = HEALTH_PERIOD_S,
+    ) -> None:
         self.bus = bus
         self.cfg = cfg
+        # Every beat goes through this — the periodic one, the `degraded` an
+        # LLM error raises, and the gauge one the first word of a turn
+        # publishes — so an off-schedule beat gets a whole period on the bus
+        # instead of whatever was left of the one it interrupted, and costs
+        # a frame instead of adding one. See jarvis_bus.health.
+        self._beats = HealthBeat(health_period_s)
         self.profile = Profile.load()
         self.system_template = self._load_system_template()
         self.conversations: dict[str, Conversation] = {}
@@ -312,17 +384,12 @@ class BrainService:
             f"{self.profile.render_about_user()}"
         )
 
-    def _rung(self) -> tuple[Optional[int], str]:
-        """(rung index, backend) as recorded by jv-llm-launch."""
-        try:
-            data = dict(
-                line.split("=", 1)
-                for line in self.cfg.rung_file.read_text(encoding="utf-8").splitlines()
-                if "=" in line
-            )
-            return int(data.get("rung", -1)), data.get("backend", "gpu")
-        except (OSError, ValueError):
-            return None, "gpu"
+    def _rung(self) -> RungRecord:
+        """What jv-llm-launch recorded: the rung, the backend, and how
+        sure it was of the VRAM number it picked them with. That process
+        execs into llama-server and cannot reach the bus, so this file is
+        the whole of what it got to say."""
+        return read_rung_file(self.cfg.rung_file)
 
     def _payload(self, messages: list[dict], max_tokens: Optional[int] = None) -> dict:
         payload = {
@@ -724,7 +791,7 @@ class BrainService:
         conv = self.conversations.setdefault(conversation_id, Conversation(self.cfg))
         conv.add("user", text, time.monotonic())
         t0 = time.monotonic()
-        rung, backend = self._rung()
+        rec = self._rung()
         try:
             # streams the reply, speaking each sentence as it closes
             reply, finish = await self._stream_reply(conv, utterance_id, speak)
@@ -758,7 +825,7 @@ class BrainService:
             "conversation_id": conversation_id,
             "in_reply_to": in_reply_to,
             "model": self.cfg.model_name,
-            "backend": backend,
+            "backend": rec.backend,
             "latency_ms": (time.monotonic() - t0) * 1e3,
         }
         if utterance_id:
@@ -804,17 +871,40 @@ class BrainService:
         await self._health()
 
     async def _health(self, state: str = "ok", notes: Optional[str] = None) -> None:
-        rung, backend = self._rung()
+        self._beats.beat()  # before the publish, not after
+        rec = self._rung()
+        if (finding := rung_finding(rec)) is not None:
+            # The rung, in words, and only when the words are a finding.
+            # A worse note keeps its place at the front and its state:
+            # this appends detail, it never overwrites a report.
+            notes = finding if not notes else f"{notes}; {finding}"
+            if state == "ok":
+                state = "degraded"
         body: dict = {
             "service": "jv-brain",
             "state": state,
             "uptime_s": time.monotonic() - self._started,
-            "period_s": HEALTH_PERIOD_S,
+            "period_s": self._beats.period_s,
         }
         metrics: dict = {}
-        if rung is not None:
-            metrics["llm_rung"] = float(rung)  # Ofek: rung visible in jv health
-            metrics["llm_gpu"] = 1.0 if backend == "gpu" else 0.0
+        if rec.index is not None:
+            metrics["llm_rung"] = float(rec.index)  # Ofek: rung visible in jv health
+            on_gpu = rec.backend == "gpu"
+            metrics["llm_gpu"] = 1.0 if on_gpu else 0.0
+            # What it would take to get the brain back onto the card (B45).
+            # The HUD can quote free VRAM (B40) and may not know this
+            # ladder (invariant 1), so without this gauge "5 GiB free and
+            # still on the CPU" is a conclusion a reader draws and cannot
+            # check — and on this ladder it is the wrong one, because the
+            # cheapest GPU rung wants 5424 MiB of a 6144 MiB card.
+            # Published only while something is waiting on it: a brain
+            # already on the GPU has met the requirement, and a machine
+            # with no card at all (vram=absent) has no card to free, so a
+            # floor there would send a reader hunting VRAM this machine
+            # has never had.
+            if not on_gpu and rec.vram.source != ABSENT:
+                if (floor := gpu_floor_mb()) is not None:
+                    metrics["llm_gpu_floor_mb"] = float(floor)
         if self._hallucinated_calls:
             metrics["hallucinated_tool_calls"] = float(self._hallucinated_calls)
         if self._barge_ins:
@@ -850,11 +940,9 @@ class BrainService:
         warmup = asyncio.create_task(self._warmup())
         inputs: asyncio.Queue = asyncio.Queue()
         worker = asyncio.create_task(self._input_worker(inputs))
-        health_at = time.monotonic()
         try:
             while True:
-                if time.monotonic() - health_at >= HEALTH_PERIOD_S:
-                    health_at = time.monotonic()
+                if self._beats.due:
                     await self._health()
                 try:
                     frame = await asyncio.wait_for(self.bus.next_frame(), timeout=0.1)

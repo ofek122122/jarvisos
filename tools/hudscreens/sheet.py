@@ -7,7 +7,7 @@ are stated once — and anything the harness MEASURES with lives here too,
 where a test with no compositor can still run it.
 
 The difference between this sheet and the contact sheet in `docs/hud`
-(A29) is the whole point of it: A29 renders the plates into a 300x560
+(A29) is the whole point of it: A29 renders the plates into a 300x826
 rectangle with a plain QML engine, which is the HUD's CONTENT and nothing
 else. This one runs the REAL `jv-hud` — quickshell, layer-shell, the real
 bridge, the real jarvisd — on a real wlroots compositor with ares' three
@@ -17,7 +17,11 @@ it docks to, and the emptiness it leaves behind when it has nothing to
 say.
 """
 
+import contextlib
 import re
+import subprocess
+import time
+from pathlib import Path
 
 # ares' monitors, as CLAUDE.md declares them: one 2560x1440 primary and
 # two 1920x1080 at its side. The refresh rates are real on ares and
@@ -56,8 +60,123 @@ BACKDROP = "#31353B"
 # silently stopped working, and it would look perfectly fine in a picture
 # nobody measured.
 SURFACE_W = 300
-SURFACE_H = 560
+SURFACE_H = 826
 INSET = 16
+
+
+# ----------------------------------- the floor under the compositor (B74)
+#
+# These screens are the one sheet in this repo that cannot be byte-compared.
+# `hudshots.sh` renders its plates with an offscreen QML engine and gets the
+# same bytes every time (A45), so it can hold itself against the sheet
+# committed at HEAD and say what moved. This harness photographs a REAL
+# compositor, and two runs of an untouched HUD do not agree to the byte: the
+# glyph edges inside a plate land a fraction of a pixel over and round the
+# other way.
+#
+# For thirty iterations that meant the screens could only be WRITTEN. Nothing
+# ever checked that they still showed the HUD this repo draws, and a stale
+# screen is exactly as convincing as a current one.
+#
+# So: a floor, measured rather than guessed. Four renders of an unchanged HUD
+# (three back to back, plus the sheet committed at HEAD), compared six ways,
+# over seven files:
+#
+#   01-quiet and 04-unheard   identical, every time, in all six comparisons
+#   02-heard, 03-confirm      3..111 px, always inside the plate, on glyph
+#                             edges and the plate's own rounded corner
+#   the largest channel move  3, and 1 between renders taken back to back
+#
+# `NOISE_PIXELS` is a little over twice the largest count measured, which is
+# 0.003% of the desk shot. It cannot be set below the smallest change a plate
+# can make — A34's 4x4 ember square is 16 px, and the noise is already past
+# that — so it is NOT the bound that discriminates. `NOISE_CHANNEL` is: the
+# theme's text sits ~180 away from the glass it is drawn on, so every word,
+# colour and box a plate can change moves a channel by a hundred or more,
+# and antialiasing moves it by one to three. The count is the backstop for
+# the change that is faint AND enormous — a plate opacity of 0.86 -> 0.855
+# moves every pixel of the glass by one, and 256 px catches it.
+#
+# Re-measure when the HUD grows: the noise is proportional to how many glyph
+# edges are on screen. Being wrong in that direction is loud (the harness
+# reports a sheet that did not change as changed) and not silent, which is
+# the right way round.
+NOISE_PIXELS = 256
+NOISE_CHANNEL = 3
+
+
+# ------------------------------------- the box the committed pictures were taken at
+#
+# Everything else here describes the HUD the harness would photograph
+# TODAY. The PNGs in docs/hud/screens are the one thing in this repo that a
+# machine without a compositor cannot re-make, so they are older than that
+# by however long it has been since a human ran the harness — and the box
+# has grown several times while they sat there.
+#
+# The older box is read back out of git rather than written down beside
+# this one. A literal would be a fifth number to remember on a day nobody
+# is thinking about it, and the PLAN item that asked for this had already
+# got it wrong by two growths. What git knows and no author has to: the
+# commit that last WROTE one of these pictures, and what this file said at
+# that commit.
+SURFACE_BOX_RE = re.compile(r"^SURFACE_([WH])\s*=\s*(\d+)\s*$", re.M)
+
+
+def parse_surface_box(text):
+    """The surface box declared by a copy of this file — including an old
+    copy, out of git, which is why it is parsed rather than imported."""
+    found = dict(SURFACE_BOX_RE.findall(text))
+    if set(found) != {"W", "H"}:
+        raise ValueError(
+            "no SURFACE_W/SURFACE_H pair in that copy of sheet.py: found "
+            f"{sorted(found)}"
+        )
+    return int(found["W"]), int(found["H"])
+
+
+# This file's own path inside a repo: the three components that follow any
+# root. Written this way rather than against a known root because the tests
+# ask the same question of a synthetic repo — and if the file is ever moved,
+# `git show` fails on a path that is not there rather than answering about
+# some other file.
+SELF_REL = Path(*Path(__file__).resolve().parts[-3:]).as_posix()
+
+
+# The instrument the prose gate reads with (A73). It lives here, beside the
+# numbers it is looking for, because a regex nothing can run is a gate that
+# grades itself: one that quietly stopped matching would report a clean
+# document forever. Both separators, because prose written by hand uses
+# either; three or four digits, because the smallest box here is a 300 px
+# surface and the largest a 6400 px desk, and a looser pattern starts
+# reading pixel counts and durations as geometry.
+BOX_IN_PROSE = re.compile(r"\b(\d{3,4})\s*[x×]\s*(\d{3,4})\b")
+
+
+def boxes_in_prose(text):
+    """Every WxH a document quotes, as a set of (width, height)."""
+    return {(int(w), int(h)) for w, h in BOX_IN_PROSE.findall(text)}
+
+
+def _git(root, *args):
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def shot_surface_box(root, screens_rel):
+    """The surface box in force when the committed screens were last
+    written. Raises if there are no pictures there or if this file did not
+    exist yet at that commit — an answer of "today's box" would read as
+    "the pictures are current", which is the one wrong answer nobody would
+    think to question.
+    """
+    sha = _git(root, "log", "-1", "--format=%H", "--", f"{screens_rel}/*.png").strip()
+    if not sha:
+        raise ValueError(f"no committed PNG under {screens_rel}")
+    return parse_surface_box(_git(root, "show", f"{sha}:{SELF_REL}"))
 
 
 # --------------------------------------------------- counting frames (A34)
@@ -121,6 +240,22 @@ def grew_downwards(before, after):
     It lives here, with the frame counter and the compositor config,
     because a rule the harness measures with is one a test with no
     compositor should be able to run.
+
+    WHAT IT DOES NOT SAY (PLAN A47). It proves that something arrived under
+    the thing above it, and it can never say WHAT. A `HealthPlate` reporting
+    a lost service grows this stack downwards by a similar number of pixels
+    from the same pinned corner as the plate any given caller is waiting
+    for, and that is not hypothetical — it is exactly what the idle probe
+    hit when a heartbeat lapsed mid-window. The sheet's captions are read by
+    a person, which is fine for a sheet; a caller that treats a True here as
+    proof of an identity is claiming more than the geometry knows.
+
+    The HUD can now answer the identity question itself — every plate
+    declares `plateName` and `core/PlateStack.qml` collects `litNames`
+    (A53) — and the contact sheet in tools/hudshots asserts exactly that,
+    because its scene is built by a QML test. Nothing here can: this harness
+    runs the real `.#jv-hud` binary under a real compositor and measures it
+    with `grim`, so there is no engine to ask. A47 holds the open decision.
     """
     if before is None or after is None:
         return False
@@ -187,13 +322,27 @@ def _beat(service, state="ok", metrics=None, notes=None, uptime_s=1847.0, period
 # decide the recording light. Without it the mic plate says nothing, which
 # is correct and also means the sheet would never photograph the one
 # indicator invariant 10 says must not be fakeable.
+#
+# Faithful to `CaptureMeter.metrics()` rather than merely legal (A87), and
+# it did not start that way: it used to carry a `capture_stall_s` of 2.0,
+# which is not a number jv-ears can send — that gauge is the CONSTANT
+# `CaptureMeter.STALL_S`, shipped verbatim from the first heartbeat — and
+# it was missing `capture_loss_window_s`, which ships the same way. Both
+# are gated below against the Python that enforces them.
+#
+# What is NOT here is `capture_loss_age_s`, and its absence is the whole
+# design of A43's idle window: a device that has never lost a chunk really
+# does omit it, and adding one would move MicPlate from `MIC` to
+# `MIC LOSING AUDIO` — a wider plate, in a window measured on plates
+# ARRIVING. The faithful body for this device is the one without it.
 MIC_OPEN = _beat(
     "jv-ears",
     metrics={
         "mic_open": 1,
         "capture_age_s": 0.02,
         "captured_s": 1846.4,
-        "capture_stall_s": 2.0,
+        "capture_stall_s": 1.0,
+        "capture_loss_window_s": 1.0,
     },
 )
 
@@ -212,6 +361,14 @@ MIC_OPEN = _beat(
 # `capture_age_s` would climb. That is deliberate: the window's question is
 # what a frame ARRIVING costs when nothing it says has changed, so the only
 # things that move are the ones the HUD cannot help — `seq` and `ts`.
+#
+# Faithful for the same reasons MIC_OPEN now is (A87), and it had one more
+# fault of its own: `notes` read "capture stalled", a summary nobody wrote
+# — `CaptureMeter.health()` sends the AGE, `microphone open but no audio
+# for 9.4s`, and the number is the reason a reader can tell a device that
+# just went quiet from one that has been deaf for a minute. Nothing draws
+# `notes` (HealthPlate draws the service and the word), so no picture was
+# ever wrong, which is exactly why it sat here since A43.
 MIC_DEAF = _beat(
     "jv-ears",
     state="degraded",
@@ -219,9 +376,53 @@ MIC_DEAF = _beat(
         "mic_open": 1,
         "capture_age_s": 9.4,
         "captured_s": 1846.4,
-        "capture_stall_s": 2.0,
+        "capture_stall_s": 1.0,
+        "capture_loss_window_s": 1.0,
     },
-    notes="capture stalled",
+    notes="microphone open but no audio for 9.4s",
+)
+
+
+# The same jv-ears ONE FAULT ALONG, and the reason that fault needed a word
+# of its own (A84): the device is open, audio is arriving on time, and
+# chunks of the room are going missing anyway — ears' hand-off queue
+# overflowed, or the device discarded input before ears ran. Every gauge
+# the `live` reading is built on stays fresh through this, so a HUD that
+# could not see `capture_loss_age_s` would draw a confident bare `MIC` over
+# a recording with holes in it.
+#
+# ONE frame, two plates, exactly like MIC_DEAF above: MicPlate says
+# MIC LOSING AUDIO and jv-ears' own heartbeat says `degraded`, which is a
+# HealthPlate line. `CaptureMeter.health()` is what welds them — a losing
+# device IS degraded, by the same publisher, in the same beat — so the two
+# lines cannot be photographed apart and 06-lossy is a picture of both.
+#
+# Faithful to the service rather than merely legal, and gated: the gauges
+# are the whole set `CaptureMeter.metrics()` writes for a device that is
+# open, delivering and losing, and `notes` is the sentence `loss_note()`
+# composes — both culprits named separately, both totals since start.
+# A87 brought the two fixtures above up to the same standard, so the only
+# gauge that still separates this body from theirs is `capture_loss_age_s`
+# — which is the difference the pictures are OF, and the absence A43's
+# idle window is measured on.
+MIC_LOSSY = _beat(
+    "jv-ears",
+    state="degraded",
+    metrics={
+        "mic_open": 1,
+        # MIC_OPEN's reading, unmoved: this device is not slow, it is lossy.
+        "capture_age_s": 0.02,
+        "captured_s": 1846.4,
+        "capture_stall_s": 1.0,
+        # Inside the loss window, which is what makes the hole still news.
+        # The window is `CaptureMeter.LOSS_S` itself.
+        "capture_loss_age_s": 0.3,
+        "capture_loss_window_s": 1.0,
+    },
+    notes=(
+        "microphone losing audio: jv-ears dropped 0.4s and "
+        "1 device overrun (length unknown) since start"
+    ),
 )
 
 
@@ -301,6 +502,49 @@ VOICE_SPEAKING = {
         "topic": "speech.state",
         "src": "jv-voice",
         "body": {"state": "speaking", "say_id": "say-6c1d0f42"},
+    }
+}
+
+
+# --------------------- the word that is true for about a millisecond (B93)
+#
+# The same publisher and the same topic, one transition later: jv-voice
+# stopping its own sentence because something urgent arrived. `state` is
+# `interrupted` — the schema's enum has three words and this is one of them
+# — and `reason` is what B91 taught core/SpeechState.qml to read, so the
+# plate says PREEMPTED rather than INTERRUPTED and the user can tell the
+# turn they cut short from the one Jarvis cut short itself.
+#
+# COMPOSED, and the composition is one frame of a real sequence rather
+# than an invented state. `services/jv-voice/jv_voice/service.py` publishes
+# exactly this body when an `urgent` utterance preempts an interruptible
+# one (`_enqueue` -> `_interrupt("preempted")` -> `_speak_one`), and its
+# own test asserts the body verbatim.
+#
+# WHAT THE PICTURE LEAVES OUT, and it is the interesting half. On a real
+# machine this frame is followed IMMEDIATELY by `idle` — the two publishes
+# are adjacent statements in `_speak_one`, with nothing awaited between
+# them — and `idle` draws nothing at all. So PREEMPTED is on screen for as
+# long as it takes one frame to follow another over a Unix socket, and a
+# photograph of it is a photograph of an instant, not of a state anybody
+# can sit and look at. That is true of INTERRUPTED too and has been since
+# A3; nothing in this repo said so until this shot was taken, which is
+# most of what taking it was for (PLAN B94).
+#
+# It needs no `hold`: `bus.latest()` keeps the newest frame per topic and
+# nothing here publishes a second one, so the frame this shot is OF stays
+# the newest for as long as the camera takes. And it lights exactly one
+# plate — no heartbeat, no snapshot, nothing else in the corner reads a
+# `reason` — which is why the shot is a single capture.
+VOICE_PREEMPTED = {
+    "publish": {
+        "topic": "speech.state",
+        "src": "jv-voice",
+        "body": {
+            "state": "interrupted",
+            "say_id": "say-6c1d0f42",
+            "reason": "preempted",
+        },
     }
 }
 
@@ -601,6 +845,52 @@ SHOTS = [
         # first and insists the real shot GREW DOWNWARDS from it.
         "grows_from": [VOICE_DEFAULT_SINK, SINK_OK],
     },
+    {
+        "file": "05-preempted",
+        "lit": True,
+        # The primary alone, and one plate on it. The corner is asked the
+        # same three-screen question twice above; what this shot adds is a
+        # WORD — the one B91 taught the HUD to tell apart from the word
+        # beside it — and a word is legible at one size, on one monitor,
+        # with nothing else in the frame to read it against.
+        "captures": ["primary"],
+        "source": (
+            "composed (nothing committed has recorded jv-voice preempting "
+            "its own sentence)"
+        ),
+        # One frame, and deliberately no `hold`. Every other lit shot here
+        # is either a reading that expires (04-unheard) or a stack of
+        # several plates; this is a single `speech.state` sitting in
+        # `bus.latest()`, which nothing replaces until jv-voice speaks
+        # again. The whole shot is one plate saying one word.
+        "frames": [VOICE_PREEMPTED],
+    },
+    {
+        "file": "06-lossy",
+        "lit": True,
+        # The primary alone, and the first photograph in this repo of the
+        # recording light saying anything but a bare `MIC`. Every committed
+        # picture of an open microphone is of one that is keeping all of it
+        # (02-heard, 03-confirm); the two ways it can stop being that —
+        # silent, and holed — have only ever existed as prose.
+        "captures": ["primary"],
+        "source": (
+            "composed (nothing committed has recorded a microphone "
+            "dropping chunks)"
+        ),
+        # One heartbeat, and deliberately no `hold`: jv-ears declares
+        # `period_s: 5`, both elements that read it believe a beat for two
+        # of its own periods, and the whole shot is over about four seconds
+        # after the publish. 04-unheard needs a feed because a
+        # context.system snapshot expires in three SECONDS; this does not.
+        #
+        # It is also the sheet's only TWO-plate shot off a single frame.
+        # Everywhere else in this corner a second line means a second
+        # publisher agreeing; here MicPlate and HealthPlate are welded by
+        # CaptureMeter.health(), and a picture is the only place that
+        # coincidence is visible rather than argued.
+        "frames": [MIC_LOSSY],
+    },
 ]
 
 
@@ -621,3 +911,165 @@ def output_by_role(role):
         if o["role"] == role:
             return o
     raise KeyError(role)
+
+
+# ------------------------------------------- where a run's seconds go (B75)
+#
+# `ops/ralph/verify.sh` names this gate and does not run it. B72 gave two
+# reasons, B74 measured one of them away, and what was left standing was a
+# single number: minutes, and photographs rather than a verdict. B75
+# asks the obvious next question — is there a CHEAPER HALF? The probes (the
+# corner, the exclusive zone, the click, the idle frames) are verdicts a gate
+# could collect; the screens are not. Nobody could answer it, because that
+# number had no parts in it.
+#
+# So the run books its own time, phase by phase, and every phase is one of:
+#
+#   PROBE — a run that wrote no PNG and compared nothing would still pay it.
+#           The flake, the compositor, a jarvisd and a jv-hud per shot, the
+#           settles a plate needs before anything can be measured on it, and
+#           the `grim` exposures the corner and growth checks READ — a
+#           picture nobody keeps still has to be taken.
+#   SHEET — only the pictures need it: the PNG encodes, and reading them
+#           back against the sheet committed at HEAD.
+#
+# The split is written down HERE, once, rather than at the ten call sites, so
+# B75's answer is a table and not a sentence per phase — and
+# `tools/tests/test_hudscreens.py` holds both of its ends: every phase the
+# harness books is classified here, and every phase classified here is booked
+# by the harness. A phase in neither half would be charged to neither, so the
+# shares would be fractions of a total the rows never covered.
+PROBE = "probe"
+SHEET = "sheet"
+
+PHASES = {
+    "realize": (PROBE, "sway, grim, Qt and the two binaries, out of the flake"),
+    "compositor": (PROBE, "the compositor and the backdrop, up and answering"),
+    "processes": (PROBE, "a jarvisd and a jv-hud per shot, started and stopped"),
+    "settle": (PROBE, "the frames published, and the waits a settled plate needs"),
+    "capture": (PROBE, "grim, and the ppm read back into numpy"),
+    "checks": (PROBE, "the monitors, the corner, the zone, the focus, the growth"),
+    "idle": (PROBE, "five idle windows and the control for each"),
+    "click": (PROBE, "one click over a plate, onto the window underneath"),
+    "encode": (SHEET, "the PNGs, written"),
+    "compare": (SHEET, "them read back against the sheet committed at HEAD"),
+}
+
+# The name of the book, inside the run's own scratch stage.
+COST_FILE = "cost.tsv"
+
+# How far the phases may over-book the clock before the table is a lie rather
+# than arithmetic. Two clocks write it — bash's `date` for the phases either
+# side of the driver, `time.monotonic` for the ones inside it — so tenths are
+# rounding. Seconds are a phase opened INSIDE another one, which is the one
+# bookkeeping error this table cannot survive: it charges a stretch twice and
+# reports a cheaper SHEET half than the run really has, which is a gate bound
+# on a fiction.
+COST_SLACK_S = 0.5
+
+
+class Cost:
+    """The book a run writes its seconds into, one open phase at a time.
+
+    A file rather than an accumulator, because half the phases belong to the
+    shell (the flake, the compositor, the comparison) and half to the driver
+    it runs, and an appended file is the only thing both halves can write.
+
+    Nesting RAISES. `capture()` is called by the shot loop and again from
+    inside both probes, so a `phase` in the wrong place is a live hazard and
+    not a hypothetical one — and double counting is invisible in the table,
+    which is why it has to be loud here.
+    """
+
+    def __init__(self, path, clock=None):
+        self._path = Path(path)
+        self._clock = clock or time.monotonic
+        self._open = None
+
+    @contextlib.contextmanager
+    def phase(self, name):
+        if name not in PHASES:
+            raise ValueError(f"nothing classifies the phase {name!r}")
+        if self._open is not None:
+            raise RuntimeError(
+                f"{name!r} was opened inside {self._open!r} — the same seconds "
+                "would be charged to both, and the table cannot see it"
+            )
+        self._open = name
+        started = self._clock()
+        try:
+            yield
+        finally:
+            # A run that died in a check has still spent the seconds, and the
+            # stretch it died in is the one worth reading.
+            took = self._clock() - started
+            self._open = None
+            with self._path.open("a") as fh:
+                fh.write(f"{name}\t{took:.3f}\n")
+
+
+def read_cost(text):
+    """`<phase>\\t<seconds>` lines, in the order the two halves appended them."""
+    out = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        name, tab, secs = line.partition("\t")
+        if not tab:
+            raise ValueError(f"not a <phase>, a tab and its seconds: {line!r}")
+        out.append((name.strip(), float(secs)))
+    return out
+
+
+def cost_table(records, total):
+    """The table that answers B75: the run's seconds, by phase, then the two
+    halves as shares of it.
+
+    `total` is the whole run measured from outside every phase — so the
+    seconds nobody booked are PRINTED as `unaccounted` rather than dropped.
+    A table that quietly summed to less than the run took would invite the
+    next reader to divide a half by a total its rows never covered.
+    """
+    if total <= 0:
+        raise ValueError("a run that took no time has no shares to report")
+    booked = {}
+    for name, secs in records:
+        if name not in PHASES:
+            raise ValueError(
+                f"nothing classifies the phase {name!r}, so its seconds belong "
+                "to neither half of the question B75 asks"
+            )
+        booked[name] = booked.get(name, 0.0) + secs
+    spent = sum(booked.values())
+    if spent > total + COST_SLACK_S:
+        raise ValueError(
+            f"the phases book {spent:.1f} s of a run that took {total:.1f} s, so "
+            "some stretch of it was charged twice — a phase opened inside "
+            "another one, which understates the half this table is read for"
+        )
+
+    width = max(len(n) for n in (*PHASES, "unaccounted"))
+    lines = [
+        f"hudscreens: the run took {total:.1f} s, and this is where it went "
+        "(PLAN B75)",
+        "",
+    ]
+    for name, (kind, what) in PHASES.items():
+        if name in booked:
+            lines.append(
+                f"  {kind:<7}{booked[name]:7.1f} s  {name.ljust(width)}  {what}"
+            )
+    lines += [
+        f"  {'':<7}{total - spent:7.1f} s  {'unaccounted'.ljust(width)}  "
+        "the run, minus every phase that booked itself",
+        "",
+    ]
+    for kind, meaning in (
+        (PROBE, "a run that kept no pictures would still pay this"),
+        (SHEET, "only the pictures need this"),
+    ):
+        share = sum(s for n, s in booked.items() if PHASES[n][0] == kind)
+        lines.append(
+            f"  {kind:<7}{share:7.1f} s  {share / total * 100:5.1f}%  {meaning}"
+        )
+    return lines + [""]
