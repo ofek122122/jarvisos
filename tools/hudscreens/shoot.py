@@ -388,6 +388,29 @@ def drawn_box(region: np.ndarray, background: np.ndarray):
     return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
 
 
+def drawn_bands(region: np.ndarray, background: np.ndarray):
+    """`drawn_box`, once per PLATE, top to bottom.
+
+    The stack puts `Theme.gapPx` of untouched desktop between its plates
+    and every plate is a filled rectangle of glass, so the drawn rows come
+    in contiguous runs and each run is one plate. `sheet.row_bands` does
+    the cutting — it is the part a test with no compositor can run — and
+    this measures how far left each band reaches.
+
+    Why a band and not the box (PLAN A86): the box is the union, and a
+    plate that stays put and says a LONGER word does not move it. That is
+    not a worry, it is a photograph: `deaf -> lossy` was measured before
+    this existed and the union was the same four numbers under both.
+    """
+    drawn = (region != background).any(axis=2)
+    rows = np.nonzero(drawn.any(axis=1))[0]
+    bands = []
+    for top, bottom in sheet.row_bands(int(r) for r in rows):
+        cols = np.nonzero(drawn[top : bottom + 1].any(axis=0))[0]
+        bands.append((int(cols.min()), top, int(cols.max()), bottom))
+    return bands
+
+
 def check_desk_is_bare(ppm: Path, background: np.ndarray, why: str) -> None:
     """Photograph all three monitors and insist every one of them is the
     flat backdrop and nothing else. Used for two different claims — the
@@ -1684,6 +1707,36 @@ def main() -> int:
                     shorter = drawn_box(smaller, background)
                 log(f"  one plate shorter: drawn at {shorter}")
 
+            # And a shot that declares `widens_from` is photographed twice
+            # for the OTHER growth (PLAN A86). `grows_from` asks whether a
+            # plate arrived; this asks whether a plate that was already
+            # there is saying a longer thing — which is what `06-lossy` is
+            # a picture of, and which the union of the plates cannot see.
+            # That is measured, not assumed: the pair below was
+            # photographed before this code existed and the box around the
+            # two plates was the same four numbers under both readings,
+            # because `MIC LOSING AUDIO` and `jv-ears DEGRADED` are the
+            # same sixteen characters wide.
+            narrow = None
+            if shot.get("widens_from"):
+                with cost.phase("settle"):
+                    settle(SETTLE_S, shot["widens_from"], bus_addr)
+                before = stage / f"{shot['file']}-narrow.ppm"
+                with cost.phase("capture"):
+                    capture("primary", before)
+                    narrower = read_ppm(before)
+                with cost.phase("checks"):
+                    narrow = drawn_bands(narrower, background)
+                log(f"  one word shorter: plates at {narrow}")
+                # And the shot's own frames back on the bus. `grows_from`'s
+                # shot declares a `hold`, so the settle below re-feeds it;
+                # this one deliberately declares none (a heartbeat is
+                # believed for two of its own periods), so without this the
+                # settle would SLEEP and the picture would be of the
+                # narrower reading with the wider one's caption under it.
+                with cost.phase("settle"):
+                    publish_shot(shot, bus_addr)
+
             with cost.phase("settle"):
                 settle(SETTLE_S, hold, bus_addr)
 
@@ -1740,6 +1793,52 @@ def main() -> int:
                             f"  and {grown[3] - shorter[3]} px taller with "
                             f"it: {grown}"
                         )
+                    if target == "primary" and shot.get("widens_from"):
+                        # Before the PNG is written, for `grows_from`'s
+                        # reason: a failed run that had already saved the
+                        # picture leaves the wrong one sitting in
+                        # docs/hud/screens looking as finished as the rest.
+                        wide = drawn_bands(img, background)
+                        which = shot["widens_band"]
+                        if len(wide) != len(narrow):
+                            raise Fail(
+                                f"{shot['file']}: the corner held "
+                                f"{len(narrow)} plates without the frame "
+                                f"this shot is OF and {len(wide)} with it "
+                                f"({narrow} -> {wide}) — a plate arrived or "
+                                "left, which is not the growth this shot "
+                                "measures and means the band counted below "
+                                "is not the same plate twice"
+                            )
+                        moved = [
+                            i
+                            for i in range(len(wide))
+                            if i != which and wide[i] != narrow[i]
+                        ]
+                        if moved:
+                            raise Fail(
+                                f"{shot['file']}: band(s) {moved} moved "
+                                f"between the two exposures ({narrow} -> "
+                                f"{wide}), so the pair does not isolate the "
+                                f"plate at band {which} and its widening is "
+                                "not evidence about the word this picture "
+                                "is of"
+                            )
+                        if not sheet.widened(narrow[which], wide[which]):
+                            raise Fail(
+                                f"{shot['file']}: band {which} was "
+                                f"{narrow[which]} without the frame this "
+                                f"shot is OF and {wide[which]} with it, "
+                                "which is not the same plate at the same "
+                                "top-right corner reaching further left. "
+                                "The picture about to be written is of a "
+                                "plate saying a word no longer than the one "
+                                "its caption is about"
+                            )
+                        log(
+                            f"  and {narrow[which][0] - wide[which][0]} px "
+                            f"wider with it: band {which} at {wide[which]}"
+                        )
                 name = f"{shot['file']}-{target}.png"
                 with cost.phase("encode"):
                     write_png(outdir / name, img)
@@ -1755,6 +1854,13 @@ def main() -> int:
                     f"{shot['file']} grows from a shorter exposure of the "
                     "primary and never photographed the primary, so nothing "
                     "measured whether the plate it is OF ever arrived"
+                )
+            if shot.get("widens_from") and "primary" not in shot["captures"]:
+                raise Fail(
+                    f"{shot['file']} widens from a narrower exposure of the "
+                    "primary and never photographed the primary, so nothing "
+                    "measured whether the plate it is OF ever said the "
+                    "longer word"
                 )
         finally:
             with cost.phase("processes"):
