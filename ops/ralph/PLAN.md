@@ -3764,7 +3764,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the shape SpeechState already forces. Neither is obviously right.
       Discovered while building B89.
 
-- [ ] B91. **Two readers of `speech.state`, and only one of them reads the
+- [x] B91. **Two readers of `speech.state`, and only one of them reads the
       whole frame.** `jv tap` now tells `wake` from `preempted` — "you
       stopped me" from "I stopped myself to say something more urgent" —
       and `shell/jv-hud/core/SpeechState.qml` still draws INTERRUPTED for
@@ -3779,6 +3779,25 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       a fifth word out of `SpeechState`, which is B89's gate territory (the
       plate must NAME it), and A62's corner is already crowded. Raised
       while building B85's tap half.
+
+      **Done — 4c2dead.** Built as one word, as the item asked.
+      `interrupted` + `reason: preempted` is PREEMPTED; `wake`, a missing
+      `reason`, a non-string one, a word a later schema adds, and one that
+      contradicts its own state are all INTERRUPTED, which stays true of
+      every one of them. Three things the item did not know. (1) The plate
+      cannot GROW: `preempted` is 9 characters against `interrupted`'s 11,
+      so the crowded-corner objection does not apply to this word and this
+      is not an A85. (2) The test helper was already lying — `speech(voice,
+      state, over)` put its third argument on the ENVELOPE, and four call
+      sites passed `{"reason": "completed"}` into it, so a body field was
+      landing where nothing reads one; the helper now takes `(voice, state,
+      body, over)` like `wake`/`ask`/`reply` beside it, and those four
+      fixtures say what they meant. (3) `reason` rides transitions other
+      than `interrupted` — `completed` and `error` land on the following
+      `idle` — and reading it there would have put a word on a plate that
+      must keep drawing nothing, so the check is nested under the
+      `interrupted` branch rather than standing beside `listening`. What it
+      does NOT do is put the word on a photograph, which is B93.
 
 - [ ] B92. **The endings table counts them and the percentiles still mix
       them.** `--- turn endings: 9 ... 4 of these 9 did not complete` is a
@@ -3801,6 +3820,22 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       distribution would have to refuse the unmatched turns rather than
       quietly bin them as completed — which is the whole rule, and the one
       a naive implementation breaks. Raised while building B85's tap half.
+
+- [ ] B93. **The new word is on no photograph, and this time it is cheap.**
+      `docs/hud/screens/` has no StatePlate shot of PREEMPTED (B91), the
+      same gap A85 records for `MIC LOSING AUDIO` — but without A85's two
+      difficulties. The word needs exactly ONE composed frame (`speech.state`
+      with `state: interrupted, reason: preempted`, src `jv-voice`), no
+      heartbeat behind it, and no second plate welded to it: nothing else in
+      the corner reacts to a `reason`, so the window isolates one plate
+      saying one word. And it cannot be a growth assertion — `preempted` is
+      SHORTER than `interrupted`, so the box does not move and the
+      assertion is the ordinary one this harness already has (a plate
+      arrived, with this caption). The objection is the only one that
+      matters here and it is A85's: the probe is already most of the gate's
+      3 minutes and every window is another idle hold. Worth pairing with
+      A85 in one iteration if anybody ever pays that cost, since they buy
+      two words for one hold. Raised while building B91.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD

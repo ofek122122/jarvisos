@@ -10872,3 +10872,107 @@ survived a further round and has its own case now.
   written-down rules, and B87 just got cheaper to argue for: this commit
   is what avoiding one looks like. A62/A70 — the corner with two plates
   for one event — are still a human's call.
+
+## 2026-09-25 — iteration 110 · which of the two of you stopped the sentence
+
+- found: **a dirty worktree, and this is the first thing this entry should
+  say.** Iteration 110 opened on five modified files nobody had committed —
+  the B91 change, written and finished but never verified, plus five
+  screens off HEAD by a byte or two. So this iteration did not start a
+  thing; it FINISHED one, and the honest account is that the code below was
+  written by the iteration that did not get to commit it. What this one
+  added is the part that was missing, which is the part that matters: a
+  gate, three mutations, a sheet, a build, and a hash.
+
+  The screens went back to HEAD first. Two of them are `02-heard` and one
+  is `03-confirm` — plates with nothing to do with this word — and the byte
+  deltas were 1 to 3, which is B74's floor talking, not news. The later
+  `hudscreens.sh` run confirmed it: 5 of 7 differed by rounding alone
+  (worst 102 px inside a 256 px floor), all 7 restored, all 7 match HEAD.
+
+- what: **B91.** `core/SpeechState.qml` reads the whole `speech.state`
+  frame, not just its `state` word. `interrupted` + `reason: preempted` is
+  PREEMPTED — Jarvis cutting its own sentence short for something more
+  urgent — and everything else stays INTERRUPTED.
+
+  **Everything else**, and that is the design rather than a gap: a `wake`,
+  no `reason` at all, one that is not a string, a word a later schema adds,
+  one that contradicts its own state. INTERRUPTED is true of every one of
+  them. Only `preempted` earns a word of its own, because only `preempted`
+  is a thing the user did not do and otherwise cannot tell from the thing
+  they did.
+
+  **Three things B91 did not know when it was raised.**
+
+  (1) *The plate cannot grow.* `preempted` is 9 characters against
+  `interrupted`'s 11, so the crowded-corner objection the item inherited
+  from A62/A85 does not apply to this word — the box SHRINKS. That is not
+  an argument, it is a measurement: all 7 screens and all 16 shots match
+  HEAD to the byte.
+
+  (2) *The test helper was already lying.* `speech(voice, state, over)` put
+  its third argument on the ENVELOPE, and four call sites passed a `reason`
+  into it — a body field landing where nothing reads one. A new reader
+  would have looked tested by fixtures that never carried what they
+  claimed. It takes `(voice, state, body, over)` now, like `wake`/`ask`/
+  `reply` beside it. This was found by the change, not by a test, which is
+  worth noticing: a field nothing reads is a field nothing can catch.
+
+  (3) *`reason` rides transitions other than `interrupted`.* jv-voice
+  stamps `completed` on the idle after a finished utterance (service.py:171)
+  and `error` on the idle after a failed one (service.py:200). So the check
+  is nested UNDER the `interrupted` branch rather than standing beside
+  `listening`: a level up, it would put a word on a plate that must keep
+  drawing nothing, and a reply that FAILED is HealthPlate's sentence (A6),
+  not a fifth word in this corner.
+
+- checked, because committing another iteration's unverified code is
+  exactly when you check: the test table's `idle` fixtures were read back
+  against the publisher. They match — jv-voice's post-interruption idle
+  carries no `reason` at all, and the two that do carry one (`completed`,
+  `error`) are the two the table stages. No fixture asserts a frame this
+  machine cannot produce.
+
+  Nothing else in the HUD broke, and the reason is structural: `ActionState`,
+  `HeardState` and `OutputState` all read the RAW topic's `state` field, not
+  this element's derived word, and that field still says `interrupted`. The
+  new word exists in exactly one place and is drawn by exactly one plate.
+
+- why: B85's tap half made the HUD the less legible of two readers of one
+  topic — the CLI told `wake` from `preempted` and the screen told neither.
+  Invariant 10 is about not FAKING state; this is the quieter failure beside
+  it, a true word that is less true than the frame it came from.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over 5 paths, 121.2 s
+  (tools 39.0, qmltest 14.8, hudshots 67.4), and again as
+  `--since HEAD~1` after the commit, GREEN over what the commit actually
+  took. 8 new QML tests (74 in tst_speechstate, was 66; 721 in the suite).
+  Three mutations, three caught: an element that never says the word (2
+  red), one that attributes every interruption it cannot explain to Jarvis
+  (7 red), one that reads the reason beside the state instead of under it
+  (1 red — the `speaking` frame that carries one). Also
+  `bash ops/ralph/hudscreens.sh` GREEN (178.8 s) because the gate named it:
+  7 screens, all matching HEAD, which is the right outcome — no staged
+  frame in that sheet carries a `reason`, so nothing should have moved.
+  The `tools` gate is the one that would have caught a plate refusing to
+  name the new word (B89's rule); StatePlate names it in the dotColor
+  comment.
+- build: `nixos-rebuild build --flake .#ares` green (new closure
+  9b5gamgwmlplz7isgnjabh3zwqy3dn5c). No schema change — `preempted` has
+  been in `schemas/speech.state.json` since it was frozen; this commit
+  only starts reading it. No jv-act, no boot path, no pins.
+- files: shell/jv-hud/core/SpeechState.qml, shell/jv-hud/StatePlate.qml,
+  shell/jv-hud/tests/tst_speechstate.qml, shell/jv-hud/README.md
+- commits: 4c2dead (the word, the helper, and the nesting)
+- next: **B93** is the direct follow-up and it got cheaper again — the word
+  is on no photograph, and this commit proved the box does not grow, so the
+  shot is an ordinary "a plate arrived saying this" with no growth
+  assertion and no second plate welded to it. Its one real cost is A85's:
+  another idle hold in a probe that already spends 97 s of its 179 on idle
+  windows. **Pair it with A85 in one iteration** — two words for one hold
+  is the only way either of them is worth the seconds. **B92** is still the
+  larger one: `respond` p50 mixes turns that finished with turns that were
+  talked over, with the warning printed under the very rows it warns about,
+  and the trap is the unmatched turns, which must be refused rather than
+  binned as completed. B87/B88 are the gate's own rules and unchanged.
+  A62/A70 — one corner, two plates, one event — are still a human's call.
