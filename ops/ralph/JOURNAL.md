@@ -9182,3 +9182,74 @@ file to derive a relation from and nothing here will ever name
   **B62** is B61's two decisions; **B67** is B66's sibling-of-the-home half;
   and **B10/A28** — one live recording of one spoken turn on ares — remains
   the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 92 — A73 (the loop's half): the box in the prose
+
+`docs/hud/screens/README.md` said `300x560` three times. It was right when
+A30 wrote it and wrong four growths later — 560 -> 624 -> 688 -> 745 -> 807
+— and the reason it survived all four is the reason worth writing down:
+every measurement in that document is derived (shoot.py checks the corner
+against `sheet.SURFACE_*`, and `test_the_surface_box_is_the_one_shell_qml_
+declares` checks THAT against `shell.qml`), and the sentence a reader
+actually reads was the one number nothing held.
+
+It is held now, and by the same rule as everywhere else here: a WxH in that
+README must be a box the harness declares — the surface, one of ares'
+monitors, the whole desk, or the older surface the committed pictures were
+photographed against. The scanner is `sheet.boxes_in_prose`, in `sheet.py`
+beside the frame counter and the sway config, because a regex nothing can
+run is a gate that grades itself; one that quietly stopped matching would
+report a clean document forever, which is precisely the silence the 560
+lived in.
+
+The part worth reading twice: pinning prose to `sheet.py` makes the sheet
+MORE wrong on its own. The box in the text becomes today's and the pictures
+stay yesterday's, so a reader measures an old HUD against a current
+sentence and catches the document lying. So the difference is stated — and
+both numbers are derived. `shot_surface_box` asks git which commit last
+WROTE a PNG in that directory and what `sheet.py` declared AT that commit.
+No literal anywhere, because a literal is a fifth number to remember on a
+day nobody is thinking about it: **PLAN A73 says the pictures were taken at
+745, and git says 688.** That item was written last night, by this loop,
+about a number it could have looked up. The notice cannot go stale, and the
+half of A73 that needs a compositor — re-shooting on ares — deletes it
+rather than editing it.
+
+- tests: `bash ops/ralph/runtests.sh tools` **330 (was 321)**, all green.
+  The dependents notice named one more gate for the README — `bash
+  ops/ralph/hudshots.sh` — and it was run: 23 passed, 14 shots match
+  HEAD:docs/hud, tree clean afterwards.
+- graded with **10 mutations, 10 caught**: the prose back to 560; the
+  pictures' box set to the number PLAN A73 had; the notice stripped of that
+  number; the notice stripped of its claim; `shot_surface_box` reading the
+  WORKING COPY instead of git (which makes then == now, so the gate then
+  demands the notice be deleted — that is the one that matters); the
+  pathspec widened from `*.png` to the whole directory; `SELF_REL` losing
+  its top directory; the parser accepting half a box; the scanner blinded
+  to three-digit widths; the scanner reading a comma as a separator.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: docs/hud/screens/README.md, tools/hudscreens/sheet.py,
+  tools/tests/test_hudscreens.py
+- commit: c8099c2
+- two notes on the harness, both cheap and both cost time here. `mutate.sh`
+  matches the spec's `-` line against the file BYTE for byte, so a source
+  line written `[x×]` cannot be mutated by a spec written `[x×]`; the
+  literal is in the source now and it reads better anyway. And an abort on
+  a bad spec happens AFTER the runs before it, so the first nine gradings
+  were thrown away — worth writing the spec against `grep`'d lines.
+- next: **A74**, raised here: `docs/hud/README.md` opens with "300 × 807
+  px, the box" — the same unpinned sentence one directory up, correct today
+  only because A71 happened to update it, and now five lines from being
+  gated since `boxes_in_prose` exists. Then **B70**, unchanged and now
+  fully priced by B68/B69: a HUD change names `tools` (5 s), `qmltest.sh`
+  (~14 s) and `hudshots.sh` (~53 s), which is the shape (b) was invented
+  for. Also unchanged: **B71** (`mutate.sh` leaves the mutation applied
+  when it is killed — bitten twice now); **Track A is one human look at
+  `docs/hud/` away from unblocking** A47, A55, A62, A70/A72 and the
+  A21/A22/A25 cluster; **A56** asks whether the shot suites belong in the
+  build gate; **B27/B28** are one decision about a jv-ears state topic;
+  **B43/B47/B54** are one question asked three times; **B62** is B61's two
+  decisions; **B67** is B66's sibling-of-the-home half; and **B10/A28** —
+  one live recording of one spoken turn on ares — remains the biggest thing
+  a human can hand this loop.

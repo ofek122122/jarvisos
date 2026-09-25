@@ -2884,6 +2884,35 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `shell.qml`. The second is the loop's and is worth doing first:
       a stale number nobody checks is how the first one survived three
       growths. Raised by A71.
+      **THE LOOP'S HALF IS DONE** — c8099c2. Every WxH the README quotes
+      is now pinned to a box this harness declares (the surface, a monitor,
+      the desk, or the box the pictures were taken against), with the
+      scanner in `sheet.py` where a test can run it. The pictures' own box
+      is DERIVED, not written down: `sheet.shot_surface_box` asks git which
+      commit last wrote a PNG here and what `sheet.py` declared at it — and
+      the first thing that derivation did was correct this item, which says
+      745 where git says **688**. The prose now says so in a paragraph that
+      cannot go stale and that a re-shoot deletes rather than edits. What
+      is left is the half that needs a compositor: **re-shoot the directory
+      on ares**, which is the same seat A47, A55 and B10/A28 are waiting
+      for. Ten mutations, ten caught.
+
+- [ ] A74. **The sibling sheet quotes the same box and nothing holds it
+      either.** `docs/hud/README.md` opens with "300 × 807 px, the box" —
+      the same sentence A73 just pinned one directory down, unpinned, and
+      correct today only because A71 happened to update it. `test_hudsheet.py`
+      already derives that box from `tools/hudshots/scene/tst_shots.qml` to
+      check every committed PNG's size, so the gate is `sheet.boxes_in_prose`
+      over that README against that box — five lines, and the same argument
+      A73 made. Two small decisions for whoever takes it: the contact sheet
+      deliberately disclaims everything a compositor owns, so a monitor size
+      appearing in its prose is probably wrong rather than allowed (the
+      screens sheet is where monitors are quoted); and unlike A73's, this
+      sheet's PNGs are re-rendered by `hudshots.sh` on every HUD iteration,
+      so there is no "older than the box" case to state — the pictures are
+      never stale. NOT taken in A73's iteration to keep one finished thing;
+      the cost is one `runtests.sh tools` and one `hudshots.sh`. Raised by
+      A73.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD
