@@ -3689,7 +3689,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       say so, or the next author to add a file will read it as a mysterious
       veto. Discovered while fixing B86.
 
-- [ ] A85. **The new word is on no photograph.** `docs/hud/screens/` has
+- [x] A85. **The new word is on no photograph.** `docs/hud/screens/` has
       a mic-and-health window (A43) precisely because ONE jv-ears
       heartbeat can light two plates at once — and the A84 word is the
       same coincidence one fault along: a device that is open, delivering
@@ -3735,6 +3735,37 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       for a widening its own paragraph above computes at about a pixel.
       Split it: take the picture, and leave the assertion to whoever wants
       to measure the pixel first.
+
+      **Done, the photograph half — and only that half — 61a326e.**
+      `sheet.MIC_LOSSY` and `06-lossy`, one primary-only shot of one
+      heartbeat, with seven tests in `tools/tests/test_hudscreens.py`
+      and a caption. The growth
+      assertion this item LEADS with is NOT done and is now A86: it was
+      split off rather than dropped, and the pixel it would measure has
+      still never been measured.
+
+      Four things the item did not know. (1) The fixture is the first one
+      in this sheet held to what the service actually sends: its gauges
+      are the exact set `CaptureMeter.metrics()` writes for an open,
+      delivering, losing device, and its `notes` is the sentence
+      `loss_note()` composes. MIC_OPEN and MIC_DEAF are NOT — they carry
+      a narrower pre-A84 gauge set and a hand-waved note — and MIC_OPEN's
+      narrowness is load-bearing, because A43's window is measured on the
+      absence of the loss pair. MIC_DEAF's note is not load-bearing and is
+      simply wrong; see A87. (2) The method is `metrics()`, not
+      `gauges()` — the test asserting the fixture against it was written
+      against the wrong name and went red immediately, which is the gate
+      working. (3) "Which plates does this frame light" could not be
+      answered by grepping plate files for the element names: every plate
+      NAMES the others in prose, and `MicState|HealthState` matched
+      LinkPlate and StatePlate. It has to be the declaration
+      (`MicState {`), and the fifth reader — EarsBudgets, which StatePlate
+      also takes — lights nothing on its own and needed saying separately.
+      (4) The shot needs no `hold`: jv-ears declares `period_s: 5` and
+      both readers believe a beat for two periods, so ten seconds against
+      a shot that is over in about four. 04-unheard needs a feed because a
+      `context.system` snapshot expires in three SECONDS, which is a
+      different number than the one that paragraph implies.
 
 - [x] B89. **A plate can silently stop drawing a word its state element
       can produce.** MicState now has five readings and MicPlate draws
@@ -3921,6 +3952,49 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       do with a confirmation that ENDED) and A62/A70: all of them are "the
       HUD has something true and momentary to say, and nobody has decided
       how long it says it for." Raised while building B93.
+
+- [ ] A86. **The half of A85 deliberately left undone: nobody has ever
+      measured the plate getting WIDER.** Every growth assertion this
+      harness has (`grew_downwards`, A44/A47, A42's live-lit window)
+      proves a plate ARRIVED — same top, same right edge, a taller box.
+      The one thing it cannot see is a plate that stayed put and got
+      longer, which is exactly what a second word on `MicPlate` does, and
+      it is the reason `06-lossy` is a photograph with no measurement
+      under it: the picture says `MIC LOSING AUDIO`, and nothing in the
+      run would notice if it said `MIC`.
+
+      A85's own arithmetic says the widening may be worth about a pixel,
+      because `MIC LOSING AUDIO` (≈165 px) and `jv-ears DEGRADED` (≈165
+      px) are in the same right-docked column and `drawn_box` takes the
+      wider of them. So the FIRST piece of work is a measurement and not a
+      gate: photograph `deaf → lossy` (the only pair where the health line
+      is identical under both, so the mic line is isolated) and print the
+      two boxes. If the answer is a pixel or zero, this item is wrong in
+      shape and should become something else — a crop of the plate's own
+      row compared against a rendered reference, or nothing at all. Do not
+      design the assertion before the number exists. Split out of A85.
+
+- [ ] A87. **`MIC_DEAF`'s note is not a sentence jv-ears can send.** The
+      fixture says `notes: "capture stalled"`; `CaptureMeter.health()`
+      sends `f"microphone open but no audio for {age:.1f}s"`. Nothing
+      draws `notes` — HealthPlate shows the service and the word — so no
+      picture is wrong today, which is precisely why it sat there. A85
+      made MIC_LOSSY faithful to `metrics()` and `loss_note()` and put a
+      gate on it, and the gate stops at the one fixture it was written
+      for; the two older ones are still hand-waved, and MIC_OPEN is also
+      missing `capture_loss_window_s`, which real jv-ears ships from the
+      first beat.
+
+      The fix is not "make all three faithful and gate all three": A43's
+      idle window is MEASURED on MIC_OPEN's narrow gauge set (a loss gauge
+      added to it changes what MicPlate draws, and a test says so), so
+      MIC_OPEN's body cannot simply be completed without re-reading that
+      window. `capture_loss_window_s` alone is provably inert — it moves
+      `lossWindowS` from the pinned fallback 1.0 to the reported 1.0, and
+      no plate reads `lossWindowReported` — so that half is safe and the
+      note is safe, and the gauge that is NOT safe is the one nobody
+      should add. Worth doing as one small commit that says which is
+      which. Discovered while building A85.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD

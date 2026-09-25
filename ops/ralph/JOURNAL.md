@@ -11070,3 +11070,108 @@ survived a further round and has its own case now.
   than binned as completed. B87/B88/B90 are the gate's own rules and
   unchanged. A62/A70 — one corner, two plates, one event — are still a
   human's call, and B94 is the same shape with a clock on it.
+
+## 2026-09-25 — iteration 112 · the recording with holes in it
+
+- built: **PLAN A85, the photograph half** — `sheet.MIC_LOSSY` and
+  `docs/hud/screens/06-lossy-primary.png`. One composed jv-ears heartbeat
+  on the primary, and the first picture in this repo of the recording
+  light saying anything but a bare `MIC`: **MIC LOSING AUDIO** on a `warn`
+  dot, with **jv-ears DEGRADED** under it. The device is open and audio is
+  arriving on time; what is wrong is that some of it never got here.
+
+- and the reason it is two plates rather than one, which is the half worth
+  having: **both lines come off a single frame.** `CaptureMeter.health()`
+  calls a losing device `degraded` in the same beat that reports the loss,
+  so MicPlate and HealthPlate are welded and cannot be photographed apart.
+  Every other two-plate picture in this sheet is two publishers agreeing.
+  A43's idle window has exploited that coincidence for the *stalled* fault
+  since it was built; this is the first time anyone can SEE it.
+
+- A85 is marked done for the picture and **A86 carries the rest**, which
+  is what the item actually led with: nobody has ever measured the plate
+  getting WIDER. Every growth assertion this harness has proves a plate
+  ARRIVED (same top, same right edge, taller box); a second word on an
+  existing plate is invisible to all of them, so `06-lossy` is a
+  photograph with no measurement under it — nothing in the run would
+  notice if it said `MIC`. A86 says to take the measurement (`deaf →
+  lossy`, the only pair that isolates the mic line) BEFORE designing the
+  assertion, because A85's own arithmetic puts the widening at about a
+  pixel and the new picture agrees: `jv-ears DEGRADED` is the wider plate,
+  so it, not the mic line, is what `drawn_box`'s left edge is measuring.
+
+- four things A85 did not know, all found by writing its tests:
+
+  (1) *The fixture is the first one here held to what the service really
+  sends.* Its gauges are the exact set `CaptureMeter.metrics()` writes for
+  an open, delivering, losing device, and its `notes` is the sentence
+  `loss_note()` composes. `MIC_OPEN` and `MIC_DEAF` are not: MIC_DEAF's
+  note (`"capture stalled"`) is a sentence jv-ears cannot send, and
+  MIC_OPEN is missing `capture_loss_window_s`, which real ears ships from
+  the first beat. Raised as **A87**, with the trap written down — MIC_OPEN's
+  narrow gauge set is LOAD-BEARING, because A43's window is measured on the
+  absence of the loss pair, so the one gauge that would complete it is the
+  one that must not be added.
+
+  (2) *The method is `metrics()`, not `gauges()`.* The test asserting the
+  fixture against jv-ears was written against the wrong name and went red
+  on the first run, which is the gate doing its job rather than a mishap.
+
+  (3) *"Which plates does this frame light" cannot be answered by grep.*
+  Every plate NAMES the others in prose, so `MicState|HealthState` matched
+  LinkPlate and StatePlate as well. It has to be the declaration
+  (`MicState {`) — and the fifth reader of `sys.health`, `EarsBudgets`,
+  which StatePlate also takes, lights nothing on its own and needed saying
+  separately rather than being lumped in.
+
+  (4) *A caption cannot link to another picture by its file name.* The
+  sheet's own gate requires every PNG to appear in exactly ONE `###`
+  section, and the first draft's link to `03-confirm-primary.png` broke
+  it. The caption points at the healthy-mic picture by anchor now, and the
+  test that requires the pointer says why it is an anchor.
+
+- **a shot costs about 4 s, not 0.2 s** — and this corrects the number
+  B93 recorded, which A85 then reasoned from. This run: 192.5 s against
+  iteration 111's 184.0 s. The phases a new shot really adds are one
+  jarvisd/jv-hud pair and two settles (`settle` booked 21.7 s over six
+  shots, ≈3.2 s each) plus an encode and a read-back — about 4 s. The rest
+  of the 8.5 s is variance: the idle probe alone is 97.6 s of the run.
+  B93's +0.2 s was inside that noise. A shot is still far cheaper than an
+  idle window, which is the conclusion both items drew, so nothing about
+  their advice changes — only the figure.
+
+- also: the harness's own prose counted its pictures, and the count had
+  been wrong since the eighth shot. Six files said "seven pictures" about
+  a run that takes nine. They are count-free now rather than renumbered,
+  so the next shot cannot make them wrong again — except where the number
+  is a RECORD of a measurement (`sheet.py`'s B74 floor, measured over the
+  seven files that existed then), which is left exactly as it was.
+
+- tests: `bash ops/ralph/verify.sh` GREEN. 7 new tests in
+  `tools/tests/test_hudscreens.py` (453 in the suite, was 446): the body is
+  legal against the frozen `sys.health` schema, the gauges are the whole
+  set `CaptureMeter.metrics()` writes, the note is `loss_note()`'s
+  sentence, the frame reads as `losing` and not as the `stalled` that
+  outranks it, this is the ONLY shot photographing a microphone in
+  trouble (asserted over the other shots, not stated), the shot lights
+  exactly two plates, and the caption names both words, says one heartbeat
+  put them there, and points at the healthy picture.
+  `bash ops/ralph/hudscreens.sh` run once, 192.5 s, 9 screens — 6 restored
+  to committed bytes by the B74 floor, `06-lossy-primary.png` new.
+- build: `nixos-rebuild build --flake .#ares` green, closure
+  9b5gamgwmlplz7isgnjabh3zwqy3dn5c — unchanged from iterations 110 and
+  111, which is right: a harness, a document and a picture, nothing that
+  ships. No schema change, no jv-act, no boot path, no pins.
+- files: tools/hudscreens/sheet.py, tools/tests/test_hudscreens.py,
+  docs/hud/screens/README.md, docs/hud/screens/06-lossy-primary.png,
+  ops/ralph/hudscreens.sh, tools/verify.py, tools/tests/test_verify.py,
+  tools/dependents.py
+- commits: 61a326e (the fixture, the shot, its seven tests and the caption)
+- next: **A86** is the one this iteration hands over deliberately — take
+  the `deaf → lossy` measurement before designing anything. **A87** is a
+  small, well-scoped commit with its one trap already written down.
+  **B94** is still the one for a human, and it is the oldest question in
+  this corner: the HUD draws two words nobody can read. **B92** stays the
+  larger loop task: `respond` p50 mixes finished turns with talked-over
+  ones, and the unmatched turns must be refused rather than binned.
+  A62/A70 — one corner, two plates, one event — remain a human's call.
