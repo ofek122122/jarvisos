@@ -289,6 +289,27 @@ TestCase {
     verify(!suite.byId(m, 3).urgent);
   }
 
+  function test_urgency_already_true_in_the_snapshot_is_carried_in() {
+    // Found by mutation, once PLAN D11 let this suite be graded at all:
+    // every fixture here sends `is_urgent: false`, so `raw.is_urgent === true`
+    // could be the literal `false` and the whole suite stayed green. It is
+    // not a hypothetical branch — the snapshot is what the bar gets when it
+    // STARTS, and `WorkspacesChanged` arrives again whenever the set of
+    // workspaces changes, so a window that went urgent before either moment
+    // is only ever announced this way. Drawn calm, it is a message missed.
+    const m = suite.live();
+    m.ingest(JSON.stringify({
+      "WorkspacesChanged": {
+        "workspaces": [
+          { "id": 1, "idx": 1, "name": null, "output": "HDMI-A-1", "is_urgent": false, "is_active": true, "is_focused": true, "active_window_id": 2 },
+          { "id": 3, "idx": 1, "name": null, "output": "DP-2", "is_urgent": true, "is_active": true, "is_focused": false, "active_window_id": null }
+        ]
+      }
+    }));
+    verify(suite.byId(m, 3).urgent, "it was already asking when we connected");
+    verify(!suite.byId(m, 1).urgent, "and the one that was not, is not");
+  }
+
   function test_urgency_for_an_unknown_workspace_is_dropped() {
     const m = suite.live();
     const before = JSON.stringify(m.workspaces);

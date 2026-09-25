@@ -22,14 +22,24 @@
 //     screen" are genuinely different facts about a workspace.
 //
 // The data arrives as a property rather than being read off the `Niri`
-// singleton, so this file imports nothing but QtQuick and the generated
-// Theme — the same split the HUD's plates keep, and what makes a future
-// render harness for the bar possible without a compositor (PLAN D13).
+// singleton, so this file names nothing of the compositor: QtQuick, the
+// generated Theme, and the generated Ease. That is exactly the shape of a
+// HUD plate — and Ease reaches `Motion`, which is a Quickshell singleton, so
+// a render harness for the bar (PLAN D13) stages a stub over it the way
+// `tools/hudshots` already does for the HUD. One stub, not a compositor.
 //
-// Nothing here moves. The bar has no `Ease`/`Motion` pair of its own yet,
-// and a colour that eased in one element while three others snapped would
-// be worse than a bar that is simply still — still is also 0 fps, which is
-// what §06 asks of an idle surface. PLAN D14.
+// The ONE thing that moves here is the colour, and it moves the way §06 says
+// a value moves: eased toward the target rather than snapped to it, through
+// the shared `Ease` — so the whole of "may this bar animate at all" is the
+// same decision the HUD and the notifier ask (PLAN D18), and
+// JV_REDUCED_MOTION=1 stills this strip with the rest of the desktop. It
+// earns the frames because the colour IS the signal: your keyboard moving to
+// another workspace is a fact about you, and a 200 ms settle is what makes it
+// read as a move rather than as a repaint. Nothing else animates — a
+// workspace appearing or vanishing still snaps, which is honest (there is no
+// intermediate state between "niri has this workspace" and "it does not")
+// and is 0 fps while the desk is unchanged, which is what §06 asks of an
+// idle surface.
 import QtQuick
 import "."
 
@@ -58,6 +68,11 @@ Row {
       font.family: Theme.familyMono
       font.pixelSize: Theme.labelPx
       font.letterSpacing: Theme.labelPx * Theme.labelTrackingEm
+
+      // §06's one gated Behavior. `enabled` is false whenever motion is
+      // suppressed, so with the preference set the colour is assigned
+      // straight through and this strip renders no frame at all.
+      Ease on color {}
     }
   }
 }

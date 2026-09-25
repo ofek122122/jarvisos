@@ -30,6 +30,8 @@ it calls them. One per language the repo actually has:
 bash ops/ralph/runtests.sh jv-voice   # Python services (+ pylib, tools, harness)
 bash ops/ralph/cargotest.sh jarvisd   # Rust crates
 bash ops/ralph/qmltest.sh             # the HUD's QML, headless
+bash ops/ralph/bartest.sh             # the bar's QML, headless
+bash ops/ralph/notifytest.sh          # the notifier's QML, headless
 bash ops/ralph/nixtest.sh             # the flake's own options -> the units ares gets
 bash ops/ralph/hudscreens.sh          # the HUD photographed through a real compositor
 ```
@@ -118,21 +120,37 @@ only whether a source is newer than what it built — so an equal-length edit is
 otherwise graded without ever running. Exit 0 all caught, 1 a survivor, 2 the
 harness will not make a claim. See `tools/mutate.py`.
 
-Four runners (B49, B51), each with its own canary:
+Four runners (B49, B51), each with its own canary, and one of them is three
+suites — the QML shells, picked by the target (D11):
 ```
 bash ops/ralph/mutate.sh <service>              # .py   via runtests.sh
-bash ops/ralph/mutate.sh --runner qml hud       # .qml  via qmltest.sh   (core/)
+bash ops/ralph/mutate.sh --runner qml hud       # .qml  via qmltest.sh     (core/)
+bash ops/ralph/mutate.sh --runner qml bar       # .qml  via bartest.sh     (core/)
+bash ops/ralph/mutate.sh --runner qml notify    # .qml  via notifytest.sh  (core/)
 bash ops/ralph/mutate.sh --runner cargo jarvisd # .rs   via cargotest.sh
-bash ops/ralph/mutate.sh --runner shots hud     # .qml  via hudshots.sh  (plates)
+bash ops/ralph/mutate.sh --runner shots hud     # .qml  via hudshots.sh    (plates)
 ```
-`--runner qml` grades `shell/jv-hud/core/` only — measured, not assumed: the
-canary LIVES on every top-level plate, because `qmltest.sh` imports `"../core"`
-and never a plate. The harness refuses those and names the runner that can:
+Three scripts and not one with an argument, for the reason the gate has:
+`verify.sh` runs a gate by its command string, so one runner pointed at three
+trees would send a toast's change to the HUD's tests. Until D11 the harness had
+only the HUD's, so a canary in `shell/jv-bar/core` lived, the file was refused,
+and the hint blamed the plates — the bar's and the notifier's mutations could
+only be driven by hand. A mutation in a shell the chosen suite is not pointed
+at is now refused before any suite runs, naming the one that would grade it.
+The first bar mutation ever graded found a real hole: nothing asserted that a
+workspace already urgent in niri's opening snapshot is drawn urgent.
+
+`--runner qml <shell>` grades that shell's `core/` only — measured, not assumed:
+the canary LIVES on every top-level element, because every driver in every
+`tests/` imports `"../core"` and nothing else. The HUD's are refused with the
+runner that can take them:
 `--runner shots` stages the whole shell the way `hudshots.sh` does and drives
 the real plates, writing its PNGs into the run's own scratch so the committed
 contact sheet in `docs/hud/` is never touched. It costs ~53 s a suite run
 against qmltest.sh's ~14 s, so the run count (baseline + one canary per file +
-one per mutation + baseline) is printed before the first one starts.
+one per mutation + baseline) is printed before the first one starts. The bar's
+and the notifier's top-level elements have no such runner (PLAN D13, D20), and
+each shell's abort says so rather than offering one that would not work.
 The Rust canary is the weakest of the four and says so in its docstring: a
 `compile_error!` proves the file is compiled into the crate, not that a test
 exercises it. The `shots` canary shares that limit for a different reason —

@@ -95,7 +95,7 @@ Item {
 
     opacity: root.arrived ? Theme.plateOpacity : 0
 
-    Fade on opacity {
+    Ease on opacity {
       base: Theme.fadeInMs
     }
 

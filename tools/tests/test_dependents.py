@@ -874,6 +874,14 @@ def test_the_qml_gate_reaches_every_file_of_the_bar_that_a_test_can_load():
         "shell/jv-bar/shell.qml",  # Quickshell: gated by `nix build .#jv-bar`
         "shell/jv-bar/Niri.qml",  # Quickshell: the niri child process
         "shell/jv-bar/Theme.qml",  # generated; `--check` in the same build
+        "shell/jv-bar/Motion.qml",  # Quickshell: the session override (D18)
+        "shell/jv-bar/Ease.qml",  # generated; the HUD's copy IS gated (D13)
+        # Generated, and reached in the HUD only because the shots harness
+        # stages a stub Motion that NAMES the type. Nothing the bar's one gate
+        # loads names it, so the walk stops — which is honest: the file is
+        # byte-identical to the HUD's (test_gen_theme_qml.py) and the HUD's
+        # tst_motionpolicy.qml is the suite that reads it (PLAN D18).
+        "shell/jv-bar/core/MotionPolicy.qml",
         "shell/jv-bar/Workspaces.qml",  # no render gate for the bar yet (D13)
         "shell/jv-bar/Clock.qml",  # likewise
     }, sorted(ours - seen)
@@ -909,8 +917,10 @@ def test_the_qml_gate_reaches_every_file_of_the_notifier_that_a_test_can_load():
         "shell/jv-notify/shell.qml",  # Quickshell: gated by `nix build .#jv-notify`
         "shell/jv-notify/Notifications.qml",  # Quickshell: the D-Bus server
         "shell/jv-notify/Theme.qml",  # generated; `--check` in the same build
+        "shell/jv-notify/Motion.qml",  # Quickshell: the session override (D18)
+        "shell/jv-notify/Ease.qml",  # generated; the HUD's copy IS gated (D20)
+        "shell/jv-notify/core/MotionPolicy.qml",  # generated; see the bar's
         "shell/jv-notify/Toast.qml",  # no render gate for the corner yet (D20)
-        "shell/jv-notify/Fade.qml",  # likewise
     }, sorted(ours - seen)
 
 

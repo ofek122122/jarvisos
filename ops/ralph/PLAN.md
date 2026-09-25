@@ -70,6 +70,9 @@ human-reviewed step.
       · **The box is derived**, not declared, so the A63 crop cannot happen
         here. Reduced motion is honoured through `Theme.reducedMotion` in one
         `Fade` component rather than a hand-copied MotionPolicy (**D18**).
+        (D18 has since landed: `Fade` is gone, this shell has the generated
+        `Ease`/`Motion`/`MotionPolicy`, and the fade now obeys the session
+        override and the machine as well as the token.)
       New gate `ops/ralph/notifytest.sh`, wired into `dependents.QML_GATES`.
       Tests: `bash ops/ralph/verify.sh` GREEN; `nixos-rebuild build` green
       with `unit-jv-notify.service` in the closure. Never tested, never
@@ -186,13 +189,41 @@ human-reviewed step.
       one that is doable today and D4 is what unblocks the first. Found while
       doing D8: the render is 2560x1440 because the primary is, and nothing in
       the repo says what the other two get.
-- [ ] D11. **`tools/mutate.py` cannot grade the bar.** Its QML language entry
-      is `script="qmltest.sh"`, `targets=("hud",)`, so a canary planted in
-      `shell/jv-bar/core` is graded by the HUD's runner — which does not
-      import the bar at all, so every canary there "lives" and the grade is a
-      silent 0%. The 9 mutations D1 ran were driven by hand for that reason.
-      Small: a second `Language` (or a target on the existing one) pointing at
-      `bartest.sh`. Found while finishing D1.
+- [x] D11. **`tools/mutate.py` cannot grade the bar.** Its QML language entry
+      was `script="qmltest.sh"`, `targets=("hud",)`, so a canary planted in
+      `shell/jv-bar/core` was graded by the HUD's runner — which does not
+      import the bar at all, so every canary there lived, the harness refused
+      the file (which is honest) and the abort's hint sent the reader to
+      `--runner shots`, which cannot see the bar either. The 9 mutations D1
+      ran and the 12 D2 ran were driven by hand for that reason.
+      (Done: `--runner qml` is now a LANGUAGE and the target names the SUITE —
+      `mutate.SHELLS` holds the three (`hud`/`bar`/`notify` →
+      `qmltest.sh`/`bartest.sh`/`notifytest.sh`), and `Language.for_target`
+      turns the choice into a suite before anything runs. Three scripts rather
+      than one with an argument is not this harness's decision to revisit: the
+      gate runs a gate by its COMMAND STRING, so one runner pointed at three
+      trees would be one gate. The un-resolved QML language has no script at
+      all and `command()` refuses it, because defaulting to the HUD's runner
+      is precisely the bug. Two things beyond the routing:
+      · **A mutation in another shell is refused before a suite runs**
+        (`misrouted`) — which shell a file is in is a fact about its path, and
+        the old answer cost two suite runs and then explained somebody else's
+        plates. Each shell's canary hint is now its own, and the bar's and the
+        notifier's do NOT offer a `--runner shots` regrade, because neither
+        has one (D13, D20).
+      · **The shells this harness grades are the shells that have a gate** —
+        `tools/dependents.py` already holds that table (it is what decides
+        which suite `verify.sh` runs for a changed file), so a test holds the
+        two equal. A fourth shell lands there first; without this, D11 simply
+        happens again.
+      And the payoff, the first time a bar mutation was ever graded: **the
+      snapshot's `is_urgent` was asserted by nothing.** Every fixture in
+      `tst_nirimodel.qml` sends `is_urgent: false`, so `raw.is_urgent === true`
+      could be the literal `false` with the suite still green — urgency was
+      only ever tested arriving by DELTA. That is the one path a window that
+      went urgent before the bar started takes, and it was drawn calm. Closed
+      here with the test that catches it. `active` and `focused` were mutated
+      the same way and both were caught, so it was one hole and not four.)
 - [ ] D12. **Record the niri deltas, with a human at the keyboard.**
       `harness/fixtures/niri/ares-desk.jsonl` is the connect snapshot only —
       every event the bar ACTS on (`WorkspaceActivated`,
@@ -216,13 +247,17 @@ human-reviewed step.
       .#jv-bar` and the Python sweeps over `shell/**`, which is why
       `test_dependents.py` writes that gap down instead of letting it be
       invisible. `Workspaces.qml` names this item.
-- [ ] D14. **The bar does not move.** No `Ease`/`Motion` pair exists for it,
-      so a workspace's colour snaps. That is correct-and-still (0 fps when
-      idle, §06) rather than wrong, and the reason it is an item and not a
-      bug: the moment ONE element eases, the other three snapping becomes the
-      defect. If it lands it wants the HUD's shape — a gated `Behavior` whose
-      gate is `prefers-reduced-motion` — not a Behavior per binding.
-      `Workspaces.qml` names this item.
+- [x] D14. **The bar moves, once, and only where a signal moved.** Closed by
+      **D18**: the bar has the generated `Ease`/`Motion`/`MotionPolicy`, and
+      `Workspaces.qml` eases exactly one property — the label colour, which IS
+      the signal (your keyboard arriving on a workspace). Nothing else
+      animates: a workspace appearing or vanishing snaps, because there is no
+      intermediate state between "niri has this workspace" and "it does not",
+      and the strip is 0 fps whenever the desk is unchanged. It took the
+      HUD's shape, as the item asked — one gated `Behavior`, not a Behavior
+      per binding — and the gate is now the whole §06 question (declared
+      preference, `JV_REDUCED_MOTION`, battery, fullscreen) rather than the
+      preference alone.
 - [ ] D15. **Clicking a workspace to switch to it** — `mask: Region {}` means
       the bar receives no pointer input at all, and opening the mask is NOT
       the way to add this: switching a workspace is changing the state of this
@@ -247,19 +282,35 @@ human-reviewed step.
       battery should simply never appear on a desktop rather than showing
       100%. Until then the strip's right half stays empty, which §06 calls
       earned.
-- [ ] D18. **The motion trio is the HUD's alone, and now three shells want
-      it.** `Ease.qml` + `Motion.qml` + `core/MotionPolicy.qml` is the one
-      place §06's stillness rule is decidable (declared preference, session
-      override, battery, fullscreen) — and it exists only in `shell/jv-hud`,
-      because `import "."` resolves inside ONE store copy. The bar therefore
-      does not move at all (**D14**) and jv-notify gates its one fade on
-      `Theme.reducedMotion` directly, which honours the versioned preference
-      and nothing else. Hand-copying the trio into two more shells is two more
-      copies of a decision with nothing holding them equal, so the fix is the
-      mechanism that already solved exactly this for Theme.qml:
+- [x] D18. **The motion trio is generated into every shell.**
+      `Ease.qml` + `Motion.qml` + `core/MotionPolicy.qml` is the one place
+      §06's stillness rule is decidable (declared preference, session
+      override, battery, fullscreen), and it existed only in `shell/jv-hud`
+      because `import "."` resolves inside ONE store copy. The fix was the
+      mechanism that already keeps three `Theme.qml` files byte-identical:
       `tools/gen_theme_qml.py` renders the three files per shell from one
-      renderer, and the byte-for-byte test it already has covers them. That
-      closes D14 and D2's fade in one change. `Fade.qml` names this item.
+      renderer, and a test asserts all three copies are the same bytes — so
+      one suite (`shell/jv-hud/tests/tst_motionpolicy.qml`) is the test for
+      all of them. What it changed:
+      · **The bar can move at all** (**D14**), and does, in one place.
+      · **jv-notify's hand-rolled `Fade` is gone.** Its toast fade was gated
+        on `Theme.reducedMotion` — the versioned preference and nothing else
+        — and now asks the same question the HUD's plates ask. `Toast.qml`
+        says `Ease on opacity`.
+      · **One env var for the whole desktop**: `JV_HUD_REDUCED_MOTION` became
+        `JV_REDUCED_MOTION`, because three shells draw one desktop and a
+        session override that stilled the corner while the bar and the toasts
+        kept moving is a preference half-obeyed.
+      · **The generated types are registered without any shell naming them.**
+        `Theme`/`Motion`/`Ease`/`MotionPolicy` are in `GENERATED_*` tables,
+        not in the per-shell ones, so a fourth shell gets the trio by
+        existing — the only way to end up with a private `Motion` was to copy
+        one, and there is nothing left to copy.
+      · **`Motion` derives its durations from the tokens**: one gated
+        property per `*_ms` key in `[motion]`, so a new duration in
+        theme.toml reaches every shell gated with no edit to the generator.
+        `[motion] reduced_motion` is now REQUIRED — the generated wiring
+        reads it, so a theme without it would generate a broken shell.
 - [ ] D19. **A notification's actions cannot be offered, and are not
       claimed.** freedesktop lets a sender attach buttons; `mask: Region {}`
       means this surface receives no pointer input at all, so `jv-notify`
@@ -331,6 +382,59 @@ human-reviewed step.
       `{ token; face; num; }` from one `fromTOML` would be read by all three;
       the gate that discovers painters (`_bearing_files`) already works by
       finding `token "x"` calls, so it would keep working unchanged.
+- [ ] D27. **The bar's and the notifier's `core/` have never had a mutation
+      sweep, and now they can.** D11 graded four lines of `NiriModel.qml` and
+      one of `NotifyModel.qml` — five of perhaps forty — and one of the five
+      found a real hole on the first try. Everything either model does
+      (`workspacesOn`'s per-output sort, the activation-across-outputs rule,
+      the dwell clamp, the three-plate queue, the withdraw path) is graded by
+      nobody so far. ~15 mutations over the two is ~20 suite runs at ~14 s, so
+      under five minutes — the cheapest evidence in the repo, and the only
+      kind that says what these two suites are worth.
+- [x] D29. **`tools/hudshots/stub/Motion.qml` is now a hand copy of a
+      GENERATED file.** The stub exists for one real reason — the shots
+      harness cannot import Quickshell, so `Quickshell.env` has to go — and
+      everything else in it is meant to be the real file. That was a copy of
+      a hand-written file before D18 and is a copy of a generated one now,
+      which is the exact failure mode D18 just closed one level up.
+      `test_hudshots.py` catches a MISSING member (the stub must offer
+      everything the real one does), so a new duration token cannot slip; it
+      cannot catch the stub answering the question differently. The fix is the
+      generator rendering the stub too, from the same body with one line
+      swapped — at which point "the shots animate for the reason the running
+      HUD would" stops being a claim in a comment. Found while finishing D18.
+      DONE (iteration 121): both renderings come out of one body through a
+      `MotionTarget` naming the only three lines that cannot be shared (the
+      Quickshell import, the root type, the `envOverride:` binding), held to
+      exactly that difference by a test in both directions. `--out-dir` runs
+      are guarded — pkgs/jv-hud's checkPhase renders one shell inside a sandbox
+      with no `tools/` at all. 7 mutations, 7 caught; the sweep found one real
+      hole first (`STUB_SHELL` pointed at another shell survived, because a
+      repo-root `--check` names all three and rendered the stand-in anyway),
+      and closing it is what pins WHICH shell the stand-in rides out with.
+- [ ] D30. **The bar and the notifier now have an `Ease`, and no gate loads
+      either one.** `shell/jv-bar/Ease.qml`, `Motion.qml`, `Workspaces.qml`
+      and `shell/jv-notify/Ease.qml`, `Motion.qml`, `Toast.qml` are reached by
+      no QML gate at all (`test_dependents.py` writes it down); only qmllint
+      inside their nix builds and the Python sweeps see them. The HUD's copies
+      ARE driven, by `hudshots.sh`, so the trio itself is exercised — what is
+      not is the bar easing a colour and a toast fading in, which is precisely
+      what **D13** and **D20** are for. Raised here because D18 moved both
+      from "nothing to photograph" to "something that moves and is not
+      photographed", and A11 (`Motion.onBattery`/`fullscreen` have no source)
+      is now unsourced in three shells rather than one. Cheaper since D29:
+      `render_motion_qml` takes a target now, so a bar shot harness needs a
+      `MotionTarget`, not a second hand-written stand-in.
+- [ ] D28. **The refusal D11 added is about PATHS, and the question it stands
+      in for is about READS.** `tools/dependents.py` already walks the real
+      QML imports and can say that `shell/jv-bar/Workspaces.qml` is read by NO
+      gate at all — which is the thing a lived canary discovers after two
+      suite runs. Asking it first would turn every "this file is ungradeable"
+      into an instant answer rather than an expensive one. Not done with D11
+      on purpose: a derived refusal that mis-resolves one import turns a
+      working tool into a blocked one, and the canary is the honest backstop
+      either way. It wants the import resolution to be trusted first, which is
+      a measurement nobody has taken.
 - [ ] D9. **Boot path onto §06** — blocked on human review (**R9**). Four
       files: `modules/grub-theme/{theme.txt,background.svg,default.nix}` and
       `modules/plymouth-theme/default.nix`. The real design in it is

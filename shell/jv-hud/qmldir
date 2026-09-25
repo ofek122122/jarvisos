@@ -4,12 +4,14 @@
 # that off for this one, which is what makes the singleton resolvable to
 # qmllint as well as to the engine. No `module` line: a shell is imported
 # by directory (`import "."`), and claiming a module name Quickshell did
-# not assign only invites a collision. New singletons go in
+# not assign only invites a collision. The first lines are the files the
+# generator writes into EVERY shell (the tokens and the motion trio);
+# new hand-written singletons go in
 # SINGLETONS in tools/gen_theme_qml.py — and other types in
 # COMPONENTS — which is what writes this.
 singleton Theme 1.0 Theme.qml
-singleton Bus 1.0 Bus.qml
 singleton Motion 1.0 Motion.qml
+singleton Bus 1.0 Bus.qml
 Ease 1.0 Ease.qml
 StatePlate 1.0 StatePlate.qml
 MicPlate 1.0 MicPlate.qml

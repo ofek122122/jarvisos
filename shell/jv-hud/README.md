@@ -78,13 +78,16 @@ border.color: Theme.ember
 ```
 
 ```sh
-python tools/gen_theme_qml.py          # regenerate Theme.qml + qmldir
+python tools/gen_theme_qml.py          # regenerate Theme.qml, the motion trio, qmldir
 python tools/gen_theme_qml.py --check  # exit 1 if they drifted
 bash ops/ralph/runtests.sh tools       # generator + drift + blueprint tests
 ```
 
-`Theme.qml` and `qmldir` are generated and checked in — **never hand-edit
-them.** Three gates keep the story honest: `nix build .#jv-hud` runs
+`Theme.qml`, `Ease.qml`, `Motion.qml`, `core/MotionPolicy.qml` and both
+`qmldir`s are generated and checked in — **never hand-edit them.** The last
+three are generated for the same reason the tokens are: all three shells get
+the same file, byte for byte, so §06's stillness rule is one decision rather
+than three copies of one (PLAN D18). Three gates keep the story honest: `nix build .#jv-hud` runs
 `--check` before qmllint (a drifted Theme.qml cannot reach a build), qmllint
 type-checks every token access (`Theme.emberr` is a build failure, not a
 transparent rectangle at runtime), and a test asserts no QML file outside
@@ -279,7 +282,7 @@ NumberAnimation { duration: Motion.easeMs; running: Motion.animate }
 
 | member | meaning |
 |---|---|
-| `Motion.animate` | may the HUD move at all — gate `Behavior.enabled` / `running` on it |
+| `Motion.animate` | may this shell move at all — gate `Behavior.enabled` / `running` on it |
 | `Motion.suppressedBy` | `""`, or `reduced-motion` / `battery` / `fullscreen` |
 | `Motion.easeMs` … `pulseMs` | the `[motion]` tokens, already **0** when suppressed |
 | `Motion.ms(base)` | gate any other duration through this |
@@ -295,7 +298,7 @@ Sources, and which are real today:
 | input | source |
 |---|---|
 | declared preference | `personality/theme.toml` → `[motion] reduced_motion` |
-| session override | `JV_HUD_REDUCED_MOTION=1` (stop) / `=0` (force on); nothing else counts |
+| session override | `JV_REDUCED_MOTION=1` (stop) / `=0` (force on); nothing else counts |
 | `onBattery` | **none yet** — `context.system.battery_pct` says nothing about discharging |
 | `fullscreen` | **none yet** — `context.window` has no fullscreen field |
 
@@ -305,9 +308,15 @@ with no battery), and whatever feeds them must feed them a real signal.
 
 The decision itself is `core/MotionPolicy.qml` — pure QtQuick, so it is
 tested (`qmltest.sh`); `Motion.qml` is only the binding to real sources. And
-a `tools/` test fails the build if any QML file in the HUD declares an
+a `tools/` test fails the build if any QML file in ANY shell declares an
 animation type without consulting `Motion`, so the off switch cannot be
 quietly bypassed by the next element someone writes.
+
+All three of these files are written by `tools/gen_theme_qml.py` into every
+shell (PLAN D18), so the bar and the notification corner ask exactly this
+question, with these inputs, and `JV_REDUCED_MOTION=1` stills the whole
+desktop rather than one surface of it. `tst_motionpolicy.qml` lives here and
+tests all three, because a byte-for-byte check says they are one file.
 
 ## Jarvis's state (A3)
 
