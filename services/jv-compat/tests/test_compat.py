@@ -177,6 +177,69 @@ def test_a_grant_pointing_at_a_broken_symlink_is_absent_like_bwrap_reads_it(home
     assert str(home / "Documents" / "AppSaves") in problems[0]
 
 
+def test_a_grant_that_resolves_onto_the_real_home_is_refused(home):
+    """PLAN B66. `grant_dest` bounds the recipe's WORDS and bwrap resolves
+    the source, so `["Documents"]` on a home where `~/Documents` is a link
+    to the home itself IS `["."]` — the user's whole home, read-write, back
+    over the private one the confinement just put there. Same bug, arriving
+    through the user's filesystem instead of through the TOML.
+
+    `test_sandbox.py` runs this one for real; this line is what makes the
+    refusal itself testable, and what a `resolve()` deleted from the check
+    would have to survive."""
+    (home / "Documents").symlink_to(home)
+    problems = grant_problems(_r(home_paths=["Documents"]))
+    assert len(problems) == 1
+    assert str(home / "Documents") in problems[0]  # the grant, as this machine spells it
+    assert str(home.resolve()) in problems[0]      # ...and where it actually lands
+
+
+def test_a_grant_that_resolves_above_the_real_home_is_refused(home):
+    """The `["../.."]` half of the same thing: a link to a parent of the
+    home grants more than the home, up to and including the machine."""
+    (home / "Documents").symlink_to(home.parent)
+    assert len(grant_problems(_r(home_paths=["Documents"]))) == 1
+    (home / "Root").symlink_to("/")
+    assert len(grant_problems(_r(home_paths=["Root"]))) == 1
+
+
+def test_a_home_folder_that_lives_on_another_disk_is_NOT_refused(home, tmp_path):
+    """The reason B66 is a decision and not a patch, pinned as a test so the
+    strong reading cannot be added by accident. A user whose `~/Documents`
+    is a link to another disk is an ordinary setup — the grant is as wide as
+    what it points at, which is documented in `recipes/README.md` and is not
+    a refusal. The refusal is drawn at the home itself and above, where no
+    judgement is needed."""
+    elsewhere = tmp_path / "disk2" / "Documents"
+    elsewhere.mkdir(parents=True)
+    (home / "Documents").symlink_to(elsewhere)
+    assert grant_problems(_r(home_paths=["Documents"])) == []
+
+
+def test_a_home_that_is_itself_a_symlink_does_not_reopen_the_escape(
+    home, tmp_path, monkeypatch
+):
+    """BOTH sides of the comparison are resolved, and the home side is the
+    half that is easy to leave out — a first draft of this check resolved
+    the grant only, and no test could see the difference.
+
+    On a machine where `$HOME` is itself a link (`/home/user` ->
+    `/data/user`, an ordinary way to move a home onto another disk), a
+    grant landing on `/data/user` IS the home. Compare the UNRESOLVED
+    `$HOME` against it and they are two different strings, so the whole
+    home goes through — and the ordinary grant beside it still passes, so
+    nothing else complains either."""
+    real = tmp_path / "data" / "user"
+    (real / "Documents").mkdir(parents=True)
+    link = tmp_path / "link-home"
+    link.symlink_to(real)
+    monkeypatch.setenv("HOME", str(link))
+    assert grant_problems(_r(home_paths=["Documents"])) == []
+
+    (link / "TheHome").symlink_to(real)  # ...the same home, by its other name
+    assert len(grant_problems(_r(home_paths=["TheHome"]))) == 1
+
+
 # ------------------------------------------------------ pipeline e2e
 
 

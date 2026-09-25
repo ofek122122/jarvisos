@@ -46,6 +46,7 @@ from jv_compat.prefix import (
     SANDBOX_PREFIX,
     bwrap_args,
     create_prefix_layout,
+    grant_problems,
     sandbox_installer_path,
 )
 from jv_compat.recipes import Recipe
@@ -261,6 +262,76 @@ def test_a_grant_may_name_a_single_file_and_the_app_can_read_it(home):
     )
     assert r.returncode == 0, f"{r.stdout.strip()} {r.stderr.strip()}"
     assert r.stdout.split() == ["theme=dark", "sibling-hidden"]
+
+
+def test_a_grant_is_exactly_as_wide_as_the_link_it_points_at(home, tmp_path):
+    """PLAN B66, and the reason it is a decision rather than a patch.
+
+    `grant_dest` refuses `..` and `.` by reading the recipe's words, which
+    reads like a promise that a grant stays inside the home. It is not one:
+    `--bind` resolves its source, so the grant is as wide as whatever the
+    path points at on this machine. Here `~/Documents` lives on another
+    disk — an ordinary setup — and the app gets that disk's folder.
+
+    This is EXECUTED because it must not be argued: the same mechanism is
+    the escape the next test runs, and the two differ only in where the
+    link lands."""
+    elsewhere = tmp_path / "disk2" / "Documents"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / "save.dat").write_text("level-9")
+    (home / "Documents").symlink_to(elsewhere)
+    assert grant_problems(recipe(home_paths=["Documents"])) == [], (
+        "a relocated home folder is a real setup and must not be refused"
+    )
+    p = create_prefix_layout("demo")
+    r = sh(
+        'read line < "$HOME/Documents/save.dat"; echo "$line"',
+        recipe(home_paths=["Documents"]),
+        p,
+    )
+    assert r.returncode == 0, f"{r.stdout.strip()} {r.stderr.strip()}"
+    assert r.stdout.strip() == "level-9"
+
+
+def test_a_grant_linked_onto_the_home_hands_back_the_whole_home(home):
+    """The escape, run rather than reasoned about: a home where
+    `~/Documents` is a link to the home itself turns `home_paths =
+    ["Documents"]` into `home_paths = ["."]` — the user's entire home,
+    read-write, mounted back over the private one that was supposed to
+    hide it. Every word of the recipe is legal.
+
+    So the argv is built (`bwrap_args` takes no view on this machine, PLAN
+    B65), run, and shown to leak; and `grant_problems` — which is what the
+    pipeline actually asks — refuses it before any of that. If the check is
+    ever deleted, the leak here is what says so."""
+    (home / "tax-return.pdf").write_text("secret")
+    (home / "Documents").symlink_to(home)
+    p = create_prefix_layout("demo")
+    leaky = recipe(home_paths=["Documents"])
+
+    r = sh('cat "$HOME/Documents/tax-return.pdf"', leaky, p)
+    assert r.returncode == 0 and r.stdout.strip() == "secret", (
+        "the premise failed: bwrap did not follow the link, so this "
+        "refusal is standing in front of nothing"
+    )
+
+    problems = grant_problems(leaky)
+    assert len(problems) == 1, "the pipeline would have built that argv"
+    assert str(home.resolve()) in problems[0]
+
+
+def test_a_grant_linked_to_the_root_of_the_machine_is_refused(home):
+    """The same link one step further out. `/` is an ancestor of the home,
+    so the whole machine is writable inside an untrusted Wine prefix — the
+    `["../.."]` grant, spelled as a symlink."""
+    (home / "Root").symlink_to("/")
+    p = create_prefix_layout("demo")
+    r = sh('[ -e /etc/passwd ] && [ -d "$HOME/Root/nix" ] && echo WHOLE-MACHINE',
+           recipe(home_paths=["Root"]), p)
+    assert r.stdout.strip() == "WHOLE-MACHINE", (
+        f"the premise failed: {r.stdout.strip()} {r.stderr.strip()}"
+    )
+    assert len(grant_problems(recipe(home_paths=["Root"]))) == 1
 
 
 # --------------------------------------------- the network

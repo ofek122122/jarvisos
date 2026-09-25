@@ -97,14 +97,23 @@ def sandbox_installer_path(installer: Path) -> PurePosixPath:
 
 
 def grant_dest(home: Path, rel: str) -> Path:
-    """Resolve one `home_paths` grant, refusing anything that leaves the
-    private home.
+    """Join one `home_paths` grant onto the home, refusing a grant whose
+    WORDS leave the private home.
 
     `home / rel` was taken on trust. `home_paths = ["."]` therefore mounted
     the user's whole home over the app's private one — invariant 8 inverted
     by one line of TOML — and `["../.."]` reached past it entirely. Recipes
     are reviewed like code, which is a reason to catch a mistake, not a
-    reason to assume there will not be one."""
+    reason to assume there will not be one.
+
+    WHAT THIS DOES NOT BOUND (PLAN B66). It reads the recipe's words and
+    nothing else — it is pure, it is asked by `bwrap_args` on a machine it
+    knows nothing about, and the path it returns is under `home` by
+    construction. What that path RESOLVES to is a fact about the user's
+    home, not about the recipe, and `--bind` resolves its source for real:
+    if `~/Documents` is a symlink, the grant is exactly as wide as whatever
+    it points at. That question belongs to `grant_problems`, which is where
+    a recipe meets a machine, and it is asked there."""
     p = PurePosixPath(rel)
     if p.is_absolute() or ".." in p.parts or not p.parts:
         raise ValueError(
@@ -154,8 +163,33 @@ def grant_problems(recipe: Recipe) -> list[str]:
     nothing here closes the window between this answer and the exec: a folder
     deleted inside it is a raw bwrap error again, which is a race worth a
     sentence and not machinery.
+
+    A GRANT IS AS WIDE AS WHAT IT RESOLVES TO (PLAN B66), and following the
+    links in B65 is what made that sayable. `grant_dest` bounds the recipe's
+    WORDS; bwrap resolves the source. So `home_paths = ["Documents"]` on a
+    home where `~/Documents` is a symlink to `/` binds the whole machine,
+    read-write, into an untrusted Wine prefix — executed in
+    `tests/test_sandbox.py`, not argued.
+
+    The obvious fix is WRONG and that is the whole difficulty: a user whose
+    `~/Documents` genuinely lives on another disk is an ordinary setup, and
+    refusing every grant that resolves outside the home refuses it. So the
+    refusal here is drawn at the only line that needs no judgement — a grant
+    resolving to the real home ITSELF, or to an ancestor of it. That is not a
+    new policy, it is the EXISTING one arriving by a different road: `["."]`
+    and `["../.."]` are refused as words, and a symlink says the same two
+    things on this machine. Nothing legitimate needs to grant an app the home
+    the confinement just covered.
+
+    What is deliberately still ACCEPTED is a grant resolving to a sibling of
+    the home (another disk, `/etc`, another app's prefix). Refusing those
+    means choosing a property — "the user owns it", say — and every candidate
+    refuses some real setup, so it is a decision with a human in it and not a
+    patch. Until then the width is documented in `recipes/README.md` and a
+    reviewer of a recipe is reviewing the user's symlinks with it.
     """
     home = Path.home()
+    home_real = home.resolve()
     problems: list[str] = []
     for rel in recipe.home_paths:
         try:
@@ -168,6 +202,16 @@ def grant_problems(recipe: Recipe) -> list[str]:
                 f"grant {rel!r} names {dest}, which is not on this machine — "
                 "create it, or have the recipe grant one that exists, noting "
                 "that a parent grants more than the folder asked for"
+            )
+            continue
+        dest_real = dest.resolve()
+        if home_real == dest_real or home_real.is_relative_to(dest_real):
+            problems.append(
+                f"grant {rel!r} names {dest}, which resolves to {dest_real} — "
+                "the user's real home, or a parent of it, so binding it would "
+                "put the whole home back over the app's private one. That is "
+                "the grant '.' refuses, reaching the same place through a "
+                "symlink instead of through the recipe's words"
             )
     return problems
 

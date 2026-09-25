@@ -34,7 +34,20 @@ first is the better answer whenever an app just needs a directory of its
 own. A grant may also name a single FILE, which is narrower than the
 folder around it.
 
-Both refusals are `jv_compat.prefix.grant_problems`, asked once per
+**A grant is exactly as wide as what the path RESOLVES to.** bwrap
+resolves a bind's source for real, so if `~/Documents` is a symlink, the
+app gets whatever it points at — another disk, most often, which is an
+ordinary way to keep a home folder and is honoured as written. Reviewing
+a recipe's `home_paths` is therefore reviewing two things: the words here
+and the user's own layout. The one case that is refused is a grant
+resolving to the home ITSELF or to a parent of it: that is `home_paths =
+["."]` reaching the same place through a symlink, and it would mount the
+whole home back over the private one the confinement just put there. A
+grant resolving to a SIBLING of the home (`/etc`, another app's prefix)
+is currently accepted and is the open question — refusing it means
+choosing a property that also refuses some legitimate setup.
+
+All three refusals are `jv_compat.prefix.grant_problems`, asked once per
 install before a prefix exists, and every bad grant in a recipe is named
 at once so one fix covers them all.
 
