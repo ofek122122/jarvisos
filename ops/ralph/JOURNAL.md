@@ -9500,3 +9500,84 @@ the pair it is asserting instead of inheriting whatever ran it.
   live recording of one spoken turn on ares, still the biggest thing a human
   can hand this loop. Track A needs one look at `docs/hud/` to unblock A47,
   A55, A62, A70/A72, the A21/A22/A25 cluster and A73's remaining half.
+
+## 2026-09-25 — iteration 96 — B72: the two gates that are a nix evaluation
+
+Track A is still one human look at `docs/hud/` away from nearly everything it
+has left, so this is the B track and it is the hole B70 left behind. `verify.sh`
+plans Python, QML and Rust. `ops/ralph/nixtest.sh` and `ops/ralph/hudscreens.sh`
+are none of those: what they read is a nix EVALUATION — `.#nixosConfigurations.ares`
+and `.#jv-hud` — and a flake attribute names no path that any syntax tree can
+be walked for. So a change to `modules/` or `hosts/ares/` named `tools`, which
+reads those files as TEXT for the fonts check, and never the gate built to
+evaluate them.
+
+Both are declared now, in `DECLARED_GATES`, with the rule the QML staging
+already follows: written once, and checked against the script it describes.
+Each script carries a `# reads:` header about itself and `test_dependents.py`
+holds the two lists equal in both directions, so a subject that moves cannot
+leave the table behind. A gate also reads its own SCRIPT, implicitly — that is
+not in the header, because a header that names itself is stating a rule rather
+than a subject, and this commit is the case in point: it rewrote the header of
+`nixtest.sh`, and without that line nothing in the plan would have run the file
+it had just edited.
+
+`nixtest.sh` becomes an ordinary step. 22 s, and it is the only thing in this
+repo that asserts what a module OPTION does to the unit text ares is handed.
+Deliberately not bound to `services/`: a service's source moves a store path
+inside an ExecStart and nothing that gate asserts, and 22 s on every Python
+edit to learn that is the noise that gets a gate switched off.
+
+**The half B72 got wrong, and it took two runs to find out.** B72 said
+`hudscreens.sh` "cannot run in this sandbox and must not become a step that
+always fails". It runs here fine — twice this iteration, 2m25s each, green,
+seven screens, both into a scratch directory so the tree stayed clean. What
+actually disqualifies it is two things, and the second one is a measurement
+nobody had: its product is pictures a human looks at, and THEY ARE NOT
+REPRODUCIBLE. The two runs differ from each other, and from the sheet
+committed at HEAD, in five of the seven files — `02-heard` on all three
+monitors and `03-confirm` on two. Decoded and counted: 4 pixels of 3 686 400 in
+one, 3 in the other, one channel, by exactly one. Compositor rounding, not
+content. The plain-QML sheet `hudshots.sh` renders is byte-identical run to
+run, which is why that gate can compare itself against HEAD and this one
+cannot. So binding `hudscreens.sh` would dirty the tree the plan was computed
+from, every time, with churn no eye can tell from a real change. It is NAMED
+instead, on every verdict, green or red, ABOVE the verdict rather than under
+it, beside the paths that asked for it — because a list headed "the gates that
+read what you changed" which quietly drops one reads as coverage, and that is
+the exact failure the whole of B68–B70 exists to prevent. `runtests.sh`'s
+notice prints the same block.
+
+That measurement is now B74: nothing checks that `docs/hud/screens/` still
+shows the HUD this repo draws, and unlike the shots it cannot be made to,
+without a tolerant comparator whose threshold is measured rather than guessed.
+B73 is the same self-reading hole in the QML gates, left alone here rather
+than folded into an iteration whose subject was the table.
+
+- tests: `bash ops/ralph/verify.sh` green, and it planned itself correctly —
+  `runtests.sh tools` **385** (was 372) and `nixtest.sh` 7/7, with
+  `hudscreens.sh` named as not-run because this commit edits it. 7 mutations,
+  7 caught on the first pass, including the two that make the REPORTED set and
+  the RUN set disagree (a skipped gate promoted to a command, a bound gate
+  demoted to a note) and the one that matches a declared prefix as a string
+  instead of a path segment. `bash ops/ralph/hudscreens.sh <scratch>` twice:
+  7 screens, every window and probe green — run as the measurement, and not
+  committed, because the only difference is the ±1 noise above.
+  `verify.sh --since HEAD~1` re-asked about the commit: green over the same
+  8 paths.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py, tools/verify.py, tools/tests/test_dependents.py,
+  tools/tests/test_verify.py, ops/ralph/nixtest.sh, ops/ralph/hudscreens.sh,
+  ops/ralph/PROMPT.md, ops/ralph/README.md
+- commit: caffd09
+- next: **B74** is the one this iteration earned and it is worth taking — a
+  tolerant comparator would let `hudscreens.sh` say "the committed sheet is
+  stale" instead of silently overwriting it, and would reopen B72's decision.
+  Also doable by the loop: **B73** (the QML gates reading their own scripts),
+  **A56** (whether the shot suites belong in the build gate), **B62**, **B67**.
+  Waiting on one human sentence each: **B27/B28**, **B43/B47/B54**, and
+  **B10/A28** — one live recording of one spoken turn on ares is still the
+  biggest thing a human can hand this loop. Track A needs one look at
+  `docs/hud/` to unblock A47, A55, A62, A70/A72, the A21/A22/A25 cluster and
+  A73's remaining half.

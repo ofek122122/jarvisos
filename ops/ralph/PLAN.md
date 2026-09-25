@@ -1736,24 +1736,29 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       could not run" and "no verdict at all". Re-graded 1/1. Raised while
       doing it: **B72**.)
 
-- [ ] B72. `verify.sh` plans Python, QML and Rust, and cannot plan the two
-      gates that are neither. `ops/ralph/nixtest.sh` asserts what a module
-      OPTION does to the unit text ares gets — a change to `modules/*.nix`
-      or `hosts/ares/*` today names only `tools` (which reads them as text
-      for the fonts check) and never the gate built to read them, because a
-      NixOS evaluation is not a file naming a path and there is no syntax to
-      derive from. `ops/ralph/hudscreens.sh` is the same shape one level
-      further out: it photographs the REAL `.#jv-hud` through a real
-      compositor, so what it reads is a nix derivation and not a set of QML
-      imports, and it needs a compositor to run at all. Two honest shapes:
-      write them down as `QML_GATES` is written down (a small table of
-      path prefixes per script, checked against the script itself by a test,
-      which is what `test_dependents.py` already does for the hudshots
-      staging), or leave them out and say so where the plan is printed —
-      which is what it does today, badly, by saying nothing. The first is
-      cheap for `nixtest.sh` and wrong for `hudscreens.sh`, which cannot run
-      in this sandbox and must not become a step that always fails.
-      Discovered in B70.
+- [x] B72. `verify.sh` plans the two gates that are a nix evaluation, and
+      says so about the one it will not run. — caffd09
+      (Shape (a) for `nixtest.sh` and shape (b) for `hudscreens.sh`, which is
+      what B72 proposed — but the reason given for (b) was wrong and the
+      measurement is the point. `hudscreens.sh` RUNS here: twice this
+      iteration, 2m25s each, green, seven screens, into a scratch directory
+      so the tree stayed clean. What disqualifies it is that its product is
+      pictures a human looks at, and that they are NOT reproducible — the two
+      runs differ from each other and from HEAD in five of the seven files,
+      by 3 and 4 pixels of 3.7 M, one channel, by one. A bound run would
+      dirty the tree the plan was computed from, every time, with churn no
+      eye can tell from a real change. So it is named on every verdict,
+      green or red, ABOVE the verdict rather than under it, beside the paths
+      that asked for it. `nixtest.sh` is an ordinary step now (22 s) and is
+      deliberately not bound to `services/`: a service's source moves a store
+      path inside an ExecStart and nothing that gate asserts, and a gate that
+      is mostly noise is one somebody switches off. Both declarations are
+      checked against a `# reads:` header each script carries about itself,
+      the way `test_dependents.py` already checks the staging `hudshots.sh`
+      performs — and a gate reads its own script implicitly, which is not in
+      the header because a header that names itself is stating a rule and not
+      a subject. Tests: `runtests.sh tools` 385 (was 372), 7 mutations, 7
+      caught on the first pass.)
 
 - [x] B71. `mutate.sh` no longer leaves the mutation applied when it is
       killed. — c007204
@@ -1785,6 +1790,38 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       orderings look identical once the run is over; it is a method
       (`InFlight.swap_in`) now, asserted at the moment of the write, and
       caught on the re-grade.)
+
+- [ ] B73. The QML gates have the hole B72 just closed for the declared
+      ones: editing `ops/ralph/qmltest.sh` or `ops/ralph/hudshots.sh` names
+      `tools` — which reads them as text — and never the gate that was
+      edited, because `qml_readers` walks from the entry directory outward
+      and the script itself is not in that walk. Same one-line argument as
+      the declared case ("the change most likely to break a gate is a change
+      to the gate"), a different code path, and it was left alone here
+      rather than folded into an iteration whose subject was the table.
+      `cargotest.sh` and `runtests.sh` have it too, and for them it is
+      argued rather than obvious: those scripts take a target, so editing
+      one affects every suite and the honest plan is arguably all of them.
+      Discovered in B72.
+
+- [ ] B74. Nothing checks that `docs/hud/screens/` still shows the HUD this
+      repo draws. `hudshots.sh` compares every PNG it renders against the one
+      committed at HEAD (B52) and so cannot go stale; `hudscreens.sh` only
+      writes, and B72 measured why it cannot do the same — two runs on an
+      unchanged tree differ in five of seven files, 3 and 4 pixels of 3.7 M,
+      one channel, by one, which is compositor rounding and not content. So
+      the committed screens are accurate only for as long as somebody keeps
+      re-running it by hand, and a stale screen looks exactly as convincing
+      as a current one (A34's argument about orphans, one level up). The
+      cheap answer is a tolerant comparator — a sheet that differs in under
+      ~100 pixels by at most 1 is the same sheet — which would give the
+      screens the HEAD comparison the shots have, let the harness say "the
+      committed sheet is stale" instead of silently overwriting it, and
+      make the run idempotent enough that B72's decision could be revisited.
+      The number needs measuring rather than guessing: three runs, the
+      distribution of the noise, and a threshold under the smallest real
+      change any plate can make (a 4 px ember square was A34's smallest, and
+      it is 16 pixels). Discovered in B72.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
