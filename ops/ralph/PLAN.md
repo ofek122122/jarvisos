@@ -530,7 +530,7 @@ human-reviewed step.
       D27 asks for is over `core/`, and the toast is the file whose content a
       stranger chooses. `tools/mutate.py`'s notify hint names this item.
 
-- [ ] D32. **The bar's workspaces row has no width of its own, and D13
+- [x] D32. **The bar's workspaces row has no width of its own, and D13
       measured how much room is left: 274 px.** The row is a `Row`, which takes
       its width from its children; the clock is centred on the SCREEN, so it
       cannot move; and the HUD's corner is reserved by a number. Six
@@ -546,7 +546,63 @@ human-reviewed step.
       Discovered by D13, which prints the margin on every run so it stays a
       number somebody has seen. The fix wants a shot at the point of collision,
       which today would fail the sheet's own assertion — which is the right way
-      round.
+      round. — 8cdfca9
+      · **The rule is `shell/jv-bar/core/RowFit.qml`**, pure arithmetic over
+        numbers with no font in it, tested at round widths in
+        `tests/tst_rowfit.qml`: as many whole labels as fit, then `+N` where
+        the row was cut, and the workspace the OUTPUT IS SHOWING never among
+        the dropped. "Showing" rather than "focused" because a monitor your
+        keyboard is not on has no focused workspace and still has one it is
+        displaying — and `NiriModel` will not let a workspace be focused
+        without being active, so it is one property.
+      · **The marker is a thing on screen, so it has a reading and a colour.**
+        `warn` when one of the workspaces you cannot see is urgent, `text_3`
+        otherwise — a row that hid a window's call for attention and said
+        nothing would be doing the exact thing the marker exists to prevent.
+        It is in `drew`, so the sheet's caption asserts it like any label.
+      · **The widths are MEASURED.** `bench` is one invisible copy of each
+        label in the row's own type; RowFit is handed what the words measure,
+        not `length * advance`, which would be right about JetBrains Mono and
+        wrong about the first name with an emoji in it — wrong in the
+        direction that paints into another process's corner. Before every
+        label is weighed the row is given no budget and draws everything.
+      · **`roomPx` is the SURFACE's arithmetic**, in shell.qml and in the
+        staged strip, because only the surface knows the monitor's width, the
+        clock's centre and the HUD's corner. A tools gate compares the two
+        expressions with the id normalised away, like `fits` before it.
+      · **Two shots, and the nine that existed are byte-identical.**
+        `docs/bar/10-collapsed.png` (keyboard on the first workspace: the run
+        stops, the number is last) and `11-collapsed-focus-last.png` (keyboard
+        on the last: "these, then some, then you", `+2` in warn). Both end
+        clear of the clock — 63 px and 88 px — and 0 px into the HUD's corner.
+
+- [ ] D34. **The one animation in this shell may never run, and the shot that
+      is named for it would look the same either way.** `Workspaces.qml` puts
+      `Ease on color` on its labels and `03-focus-moved.png` waits
+      `fadeInMs + easeMs` for it — but the Repeater's model is a JS array that
+      `NiriModel` REPLACES wholesale on every delta (it must: a list mutated in
+      place is a list no binding hears about). A Repeater given a new array
+      rebuilds its delegates, and a Behavior does not animate an initial
+      assignment — so the teal may be arriving snapped, in a new Text, with the
+      ease attached to nothing. Not measured, which is the point: nothing in
+      this repo can tell the two apart, because the shot is taken after the
+      ease would have finished either way. What would answer it is a driver
+      that grabs DURING the settle (A31's shape — "the sheet cannot photograph
+      time"), or a model keyed by workspace id so the delegate survives its own
+      desk changing. Raised by D32, which measured the labels and had to think
+      about when they are built.
+
+- [ ] D35. **A monitor narrower than the corner the HUD reserves gets an
+      unbounded row.** `roomPx` negative means "nobody has said" — the right
+      default, since a row that hid labels before its surface had a width would
+      hide them in the first frame of every session — but the surfaces compute
+      `(clock or width - hudReserve) - inset - gap`, which goes negative on an
+      output under ~340 px and reads as the same "nobody has said". There is no
+      such display; the 640 px shot is the narrowest thing anyone has asked
+      about. The fix is a sentinel that is not a number (or a clamp in the
+      surface, which is where the arithmetic is), and the reason it is not done
+      is that both answers want the one shot nobody can take: a picture of a
+      bar on a monitor that does not exist to photograph. Raised by D32.
 
 - [ ] D33. **Two copies of the HUD's box survive D16, and both are outside a
       shell.** The corner's width is one token now and both shells read it —

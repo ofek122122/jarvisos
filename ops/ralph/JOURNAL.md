@@ -12419,3 +12419,78 @@ is not worth chasing.)
   the first Track D item that needs a real SOURCE rather than a token (audio
   via the bus, net via the link, battery never on a desktop), and **D32** is
   still the open §06 question a picture asked.
+
+## 2026-09-26 — iteration 125: the row gives up whole words, and says how many
+
+- **what**: `shell/jv-bar/core/RowFit.qml` and the row that uses it. The bar's
+  workspaces row now drops labels it has no room for — as many WHOLE labels as
+  fit, then a `+N` standing where the row was cut, and the workspace the output
+  is SHOWING never among the dropped. Two new shots
+  (`docs/bar/10-collapsed.png`, `11-collapsed-focus-last.png`). PLAN **D32**,
+  raised by D13 when it printed the margin.
+- **why**: the row is a `Row` — as wide as its children — and its children are
+  strings the USER chose the length of, because niri lets a workspace be NAMED.
+  D13 photographed six long names on a 1920 px monitor and printed what was
+  left: 274 px, about three more names. Nothing stopped the seventh, and what
+  it would hit is the clock (centred on the SCREEN, so it cannot move out of
+  the way) and then the corner a DIFFERENT PROCESS draws its plates over —
+  which is the one collision nothing on this machine can report, and the reason
+  `hudOverflowPx` exists at all.
+- **THE RULE IS A DECISION, NOT A CLAMP**, and the three alternatives are each
+  wrong in a nameable way. Clipping cuts a glyph in half — a surface that looks
+  broken rather than one that has less to say. Eliding every label to a share
+  of the room makes the one you are ON unreadable, which is the one thing this
+  strip exists to say. Dropping labels silently is the failure the notifier's
+  `+N EARLIER` line was written to prevent: a surface that has hidden something
+  from you has to say that it has, and how much. So: whole words, a count, and
+  the label you are reading is reserved BEFORE the run is filled and drawn
+  AFTER the marker — `w0 w1 +2 scratch` — which is why the rule needed a shot
+  of its own at each of the two shapes.
+- **THE MARKER IS A THING ON SCREEN, so it has a reading and a colour.** `warn`
+  when one of the workspaces you cannot see is urgent, the quietest grey
+  otherwise. A row that collapsed a window's call for attention into a number
+  and painted that number grey would be doing precisely what the marker exists
+  to prevent. It goes through `drew` like every label, so the sheet's caption
+  asserts it (`+2:urgent`) instead of the picture having something in it the
+  caption never mentions.
+- **THE WIDTHS ARE MEASURED, NOT COMPUTED**, and that is the half that could
+  have been quietly wrong. `bench` is one invisible copy of each label in the
+  row's own type; `RowFit` is handed what the words MEASURE. The tempting
+  version multiplies character count by an advance — the row is mono, after all
+  — and it is right about JetBrains Mono and wrong about the first workspace
+  somebody names with an emoji in it, wrong in the direction that paints into
+  another process's corner. Until every label is weighed the row is given no
+  budget at all and draws everything, which is what it did before this rule and
+  is the right thing to do in the first frame of a session.
+- **`roomPx` IS THE SURFACE'S ARITHMETIC**, not the row's: only the surface
+  knows how wide this monitor is, where the clock is centred and how much of
+  the right end the HUD draws over. So it is written twice — shell.qml and the
+  staged strip — and a tools gate compares the two with the id normalised away,
+  exactly as `fits` has been compared since D13. A staged strip with a
+  different budget would photograph a collapse at a width the real bar does not
+  collapse at.
+- **THE NINE EXISTING SHOTS ARE BYTE-IDENTICAL.** The rule changed nothing that
+  fits, which is the claim worth having pictures behind: `hudsheet: all 9 shots
+  match the sheet committed at HEAD`, before and after. The two new ones end 63
+  px and 88 px clear of the clock and 0 px into the HUD's corner.
+- one thing worth knowing about the loop itself: `nixos-rebuild build` failed
+  first with "RowFit.qml is listed as component in core/qmldir but does not
+  exist" — a flake copies GIT-TRACKED files, and the new file was untracked.
+  `git add` is part of building here, not part of committing.
+- tests: `bash ops/ralph/verify.sh --since HEAD~1` GREEN — 3 gates over 12
+  paths (tools **575 pass**, bartest, barshots), 72 s. The new `RowFit` suite
+  is 12 cases at round widths with no font in them.
+  build: `nixos-rebuild build --flake .#ares` green, which is where qmllint
+  `-W 0` and the bar's headless QML tests actually run. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: shell/jv-bar/{Workspaces.qml,shell.qml,core/RowFit.qml,core/qmldir,
+  tests/tst_rowfit.qml}, tools/gen_theme_qml.py, tools/barshots/scene/
+  {Strip.qml,tst_shots.qml}, tools/tests/test_barshots.py, docs/bar/
+  {README.md,10-collapsed.png,11-collapsed-focus-last.png}, ops/ralph/PLAN.md
+- next: **D34** is the uncomfortable one this raised and it is free to ask:
+  `Ease on color` is the bar's only animation, and the Repeater's model is a
+  fresh array on every niri delta — a rebuilt delegate does not animate its
+  first colour, so the teal may be snapping in a shot named for the ease. Then
+  **D33** (the last two copies of the HUD's box, a half-decision) and **D17**
+  (the strip's empty right half, the first Track D item needing a real SOURCE
+  rather than a token).
