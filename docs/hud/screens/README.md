@@ -28,21 +28,19 @@ and `DP-1`/`DP-2`. Nothing here can tell you whether an 11 px label is
 comfortable from where you actually sit — only how much of the screen it
 takes and where.
 
-Also not real, and this one is about time rather than hardware: the
-pictures are **older than the box**. Every PNG here was photographed
-against a `300x688` surface, and `shell.qml` now declares `300x826` — the
-box grew three times after these were taken: once to stop cropping the
-bottom plate of a full corner (A63), once for a plate that did not exist yet
-(A71), and once for a row inside a plate that did (A75). Nothing in a shot is wrong; each was true of the HUD on the day it
-was taken, and the measurements below were made against the box of that
-day. But the HUD you would photograph today is taller than the one in
-these pictures, and the newest plate is in none of them. Re-shooting needs
-a compositor and therefore a human at ares (PLAN A73 — the same seat A47
-and A55 are waiting for). Both numbers in this paragraph are derived by
-`tools/tests/test_hudscreens.py`: today's from `tools/hudscreens/sheet.py`,
-the pictures' from the commit that last wrote a PNG here. So this
-paragraph cannot itself go stale, and a re-shoot deletes it rather than
-updating it.
+One thing that used to be not real here is **age**. The surface these
+plates are drawn into grew five times over five plates while the PNGs sat
+still, and for most of a hundred iterations a paragraph in this spot
+existed to say so, with both numbers derived rather than typed so that it
+could not itself go stale. It is gone because what it described is gone:
+every screen below is the HUD the harness photographs today, and the
+notice was written to be **retired** by that rather than updated.
+
+What keeps it that way is not a promise. Every run re-takes all of these
+and compares each one against the bytes committed here, under the measured
+floor described below; a picture that had stopped being the HUD would end
+the run nonzero and name itself, rather than sitting in this directory
+looking as finished as the others (B74).
 
 The desktop behind the HUD is flat `#31353B`, deliberately **not** a
 `personality/theme.toml` colour, so the paper can never be mistaken for
@@ -459,3 +457,31 @@ confident statement about the wrong mixer.
 The mic plate is absent, and that is the honest picture: nothing on this
 bus published `jv-ears`' counters, and invariant 10's recording light is
 not drawn on a guess.
+
+### 05-preempted-primary.png
+
+![PREEMPTED, alone in the corner of the 1440p monitor](05-preempted-primary.png)
+
+**Composed** — nothing committed has recorded jv-voice preempting its own
+sentence. One frame, one plate, one word, on the primary: `speech.state`
+with `state: interrupted` and `reason: preempted`, which is the body
+`services/jv-voice` publishes when an **urgent** utterance arrives while an
+interruptible one is being spoken. The rest of that turn is dropped, not
+resumed.
+
+The word is the whole picture. Until B91 every stopped sentence reached
+this plate as **INTERRUPTED**, which is true of both of the ways a sentence
+can stop and tells you nothing about which one happened — you talking over
+Jarvis, or Jarvis talking over itself. **PREEMPTED** is the second one, and
+it is the one you did not do: the only evidence that something you never
+asked for took the floor. Everything else in the corner is dark, because
+nothing else in this HUD reads a `reason`.
+
+**And you would never catch it.** jv-voice publishes `idle` in the
+statement straight after this one, with nothing awaited in between, and
+`idle` draws nothing at all — so what is photographed here is on screen for
+as long as it takes one frame to follow another over a Unix socket. That is
+true of INTERRUPTED too, and has been since the plate was built; this is
+the first place in the repo that says so. Whether a word nobody can read is
+worth drawing is a question for a human (PLAN B94), and it is a better
+question with a picture attached.

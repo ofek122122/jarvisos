@@ -1476,6 +1476,186 @@ def test_the_growth_rule_is_stated_once():
     )
 
 
+# ------------------------------------ one plate, one word, one instant (B93)
+
+
+def preempted() -> dict:
+    for shot in sheet.SHOTS:
+        if shot["file"] == "05-preempted":
+            return shot
+    raise AssertionError(
+        "the sheet no longer takes 05-preempted — the only picture of the "
+        "word B91 taught the HUD to tell apart from INTERRUPTED"
+    )
+
+
+def test_the_preempted_body_is_a_legal_speech_state():
+    """invariant 2: schemas are law, and a harness publishing an illegal
+    body is photographing a machine that cannot exist. Hand-written, so
+    checked rather than trusted — and the `reason` is checked against the
+    frozen enum rather than against the one word this shot needs, because
+    a `reason` outside it is the case core/SpeechState.qml deliberately
+    draws as plain INTERRUPTED.
+    """
+    schema = json.loads((ROOT / "schemas" / "speech.state.json").read_text("utf-8"))
+    body = preempted()["frames"][0]["publish"]["body"]
+    missing = set(schema["required"]) - set(body)
+    assert not missing, f"speech.state: body is missing {sorted(missing)}"
+    extra = set(body) - set(schema["properties"])
+    assert not extra, f"speech.state: body has unknown keys {sorted(extra)}"
+    assert body["state"] in schema["properties"]["state"]["enum"], (
+        f"speech.state: {body['state']} is not one of the three words the "
+        "frozen enum allows, and core/SpeechState.qml draws nothing for a "
+        "state it does not recognise"
+    )
+    assert body["reason"] in schema["properties"]["reason"]["enum"], (
+        f"speech.state: {body['reason']} is not a reason jv-voice can send"
+    )
+
+
+def test_the_preempted_frame_is_the_one_jv_voice_actually_publishes():
+    """The shot's whole claim is that this body happens on this machine.
+    jv-voice's own test asserts the frame verbatim — an urgent utterance
+    preempting an interruptible one — so that assertion is the source, and
+    a sheet that drifted from it would be a picture of a transition no
+    service makes.
+    """
+    body = preempted()["frames"][0]["publish"]["body"]
+    voice = (
+        ROOT / "services" / "jv-voice" / "tests" / "test_voice_service.py"
+    ).read_text("utf-8")
+    asserted = re.search(
+        r'==\s*\{"state": "interrupted", "say_id": \w+, "reason": "preempted"\}',
+        voice,
+    )
+    assert asserted, (
+        "services/jv-voice no longer asserts the body this shot composes, so "
+        "nothing outside docs/hud/screens says this frame is one jv-voice sends"
+    )
+    assert body["state"] == "interrupted" and body["reason"] == "preempted", (
+        f"the shot composes {body}, and jv-voice's own test says the "
+        "preemption frame is state=interrupted with reason=preempted"
+    )
+    assert set(body) == {"state", "say_id", "reason"}, (
+        f"the shot composes {sorted(body)} and jv-voice publishes exactly "
+        "state, say_id and reason for this transition"
+    )
+
+
+def test_the_preempted_frame_is_the_speaking_one_a_transition_later():
+    """The two composed jv-voice frames in this sheet are ONE utterance:
+    04-unheard photographs it being spoken and this one photographs it
+    being cut short. A second say_id would be two unrelated turns wearing
+    the same publisher, and `say_id` is the only thing in either body that
+    could say so.
+    """
+    speaking = sheet.VOICE_SPEAKING["publish"]
+    stopped = preempted()["frames"][0]["publish"]
+    assert speaking["src"] == stopped["src"] == "jv-voice", (
+        "core/SpeechState.qml reads speech.state from jv-voice; a frame "
+        "under another name is one this HUD would refuse"
+    )
+    assert speaking["body"]["say_id"] == stopped["body"]["say_id"], (
+        f"the sheet's speaking frame is {speaking['body']['say_id']} and the "
+        f"preempted one is {stopped['body']['say_id']} — two turns, "
+        "photographed as if they were one"
+    )
+
+
+def test_the_preempted_shot_lights_exactly_the_plate_it_claims():
+    """One plate, and the caption says so. Two elements in `core/` read
+    `speech.state` — SpeechState, which draws the word, and OutputState,
+    which needs a `context.system` snapshot as well before it can say
+    anything — so a snapshot added to these frames would put a second line
+    under a caption describing one.
+    """
+    shot = preempted()
+    assert "hold" not in shot and "grows_from" not in shot, (
+        "05-preempted now feeds or grows from something, so it is no longer "
+        "the one-frame shot its caption describes"
+    )
+    topics = {f["publish"]["topic"] for f in shot["frames"]}
+    assert topics == {"speech.state"}, (
+        f"05-preempted publishes {sorted(topics)} — the shot is of one word "
+        "on one plate, and every other topic here is another plate"
+    )
+    # FOUR elements read this topic, not one, and only SpeechState draws a
+    # word off it alone. The other three read it as an EXIT from something
+    # else they are already showing — an outcome, a heard line, a sink —
+    # so each of them needs a topic this shot does not publish, and the
+    # picture is one plate because of three separate facts rather than one.
+    # An element that stopped needing its own subject would put a second
+    # line under a caption describing one.
+    core = ROOT / "shell" / "jv-hud" / "core"
+
+    def topics_of(path):
+        return set(re.findall(r'(?:frameOn|bus\.latest)\("([\w.]+)"\)', path.read_text("utf-8")))
+
+    subjects = {
+        "ActionState": "action.result",
+        "HeardState": "audio.transcript",
+        "OutputState": "context.system",
+    }
+    readers = sorted(
+        path.stem for path in core.glob("*.qml") if "speech.state" in topics_of(path)
+    )
+    assert readers == sorted(["SpeechState", *subjects]), (
+        f"{readers} read speech.state now, and this shot was measured "
+        f"against {sorted(['SpeechState', *subjects])} — a new reader may be "
+        "drawing a plate the caption does not mention"
+    )
+    for name, subject in subjects.items():
+        assert subject in topics_of(core / f"{name}.qml"), (
+            f"core/{name}.qml no longer reads {subject}, so jv-voice's frame "
+            "may now be enough to light it on its own and this shot is of "
+            "more than one plate"
+        )
+        assert subject not in topics, (
+            f"05-preempted now publishes {subject}, which is what "
+            f"core/{name}.qml is waiting for — the caption says one plate"
+        )
+
+
+def test_the_readme_says_the_word_in_this_picture_does_not_linger():
+    """The one thing a reader cannot get from the photograph. jv-voice
+    publishes `idle` in the statement after this frame, with nothing
+    awaited between them, and `idle` draws nothing — so PREEMPTED is on
+    screen for one frame's flight over a Unix socket. A caption that left
+    that out would be showing a state nobody can actually see and calling
+    it what the HUD shows.
+    """
+    readme = readme_text()
+    for name in sheet.capture_files(preempted()):
+        assert name in readme, f"docs/hud/screens/README.md never shows {name}"
+    section = [s for s in readme.split("\n### ") if "05-preempted-primary.png" in s]
+    assert len(section) == 1
+    section = section[0]
+    assert "PREEMPTED" in section, (
+        "the caption never names the word the picture is of"
+    )
+    assert "INTERRUPTED" in section, (
+        "the caption never names the word PREEMPTED is worth telling apart "
+        "from, which is the whole of why B91 added it"
+    )
+    assert re.search(r"\bidle\b", section), (
+        "the caption never says jv-voice publishes `idle` immediately after "
+        "this frame — without it the picture reads as a state you could sit "
+        "and look at, and it is an instant"
+    )
+    service = (
+        ROOT / "services" / "jv-voice" / "jv_voice" / "service.py"
+    ).read_text("utf-8")
+    assert re.search(
+        r'_state\("interrupted", say_id, self\._interrupt_reason or "preempted"\)\n'
+        r'\s*await self\._state\("idle"\)',
+        service,
+    ), (
+        "jv-voice no longer publishes `idle` in the statement straight after "
+        "the interruption, so the caption is describing a sequence this "
+        "service has stopped making — re-read it and rewrite it"
+    )
+
+
 def test_the_readme_shows_the_one_picture_of_two_plates_disagreeing():
     """A photograph nobody is told how to read is decoration. This one
     needs its caption more than most: both plates are telling the truth,
@@ -1570,11 +1750,19 @@ def test_the_readme_says_its_pictures_predate_the_box_it_quotes():
     the pictures are still yesterday's, so a reader measures a 688 px HUD
     against an 807 px sentence and finds the sheet lying to them.
 
-    Re-shooting needs a compositor and therefore a human (A73, like A47 and
-    A55). Until then the difference is stated, and both numbers are derived
-    — today's from `tools/hudscreens/sheet.py`, the pictures' from the
-    commit that last wrote a PNG here — so the notice cannot itself go
-    stale, and a re-shoot retires it rather than updating it.
+    Both numbers are derived — today's from `tools/hudscreens/sheet.py`,
+    the pictures' from the commit that last wrote a PNG here — so the
+    notice cannot itself go stale, and a re-shoot retires it rather than
+    updating it.
+
+    It has been retired (B93 added a screen, so the last commit to write
+    one here declared today's box), and this test is now guarding the
+    other edge: the notice must not come BACK while the pictures are
+    current, and it must return the moment the box moves without them. The
+    phrase it keys on is therefore reserved — the paragraph that replaced
+    the notice deliberately does not use it, because prose saying a
+    condition is over reads to a substring search exactly like prose
+    saying it holds.
     """
     then, now = shot_box(), (sheet.SURFACE_W, sheet.SURFACE_H)
     readme = readme_text()
@@ -1636,10 +1824,15 @@ def mkscreens(tmp_path: Path, then: int, now: int) -> Path:
 
 
 def test_the_shot_box_is_the_one_in_force_when_the_pictures_were_written():
-    """Against this repo, where the answer is a fact about its history: the
-    PNGs were last written by the commit that took the box to 688, and
-    everything after it moved the box without moving a picture."""
-    assert shot_box() == (300, 688)
+    """Against this repo, where the answer is a fact about its history. For
+    a long time it was 688 — the PNGs were last written by the commit that
+    took the box there, and five growths after it moved the box without
+    moving a picture. B93 added a screen, so the last commit to write one
+    is a recent one and the answer is today's box; the notice that existed
+    for the gap between the two is retired rather than updated, which is
+    what `test_the_readme_says_its_pictures_predate_the_box_it_quotes`
+    asserts from the other side."""
+    assert shot_box() == (300, 826)
 
 
 def test_the_shot_box_is_read_out_of_git_and_not_the_working_copy(tmp_path):

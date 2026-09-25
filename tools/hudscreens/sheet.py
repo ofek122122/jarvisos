@@ -440,6 +440,49 @@ VOICE_SPEAKING = {
 }
 
 
+# --------------------- the word that is true for about a millisecond (B93)
+#
+# The same publisher and the same topic, one transition later: jv-voice
+# stopping its own sentence because something urgent arrived. `state` is
+# `interrupted` — the schema's enum has three words and this is one of them
+# — and `reason` is what B91 taught core/SpeechState.qml to read, so the
+# plate says PREEMPTED rather than INTERRUPTED and the user can tell the
+# turn they cut short from the one Jarvis cut short itself.
+#
+# COMPOSED, and the composition is one frame of a real sequence rather
+# than an invented state. `services/jv-voice/jv_voice/service.py` publishes
+# exactly this body when an `urgent` utterance preempts an interruptible
+# one (`_enqueue` -> `_interrupt("preempted")` -> `_speak_one`), and its
+# own test asserts the body verbatim.
+#
+# WHAT THE PICTURE LEAVES OUT, and it is the interesting half. On a real
+# machine this frame is followed IMMEDIATELY by `idle` — the two publishes
+# are adjacent statements in `_speak_one`, with nothing awaited between
+# them — and `idle` draws nothing at all. So PREEMPTED is on screen for as
+# long as it takes one frame to follow another over a Unix socket, and a
+# photograph of it is a photograph of an instant, not of a state anybody
+# can sit and look at. That is true of INTERRUPTED too and has been since
+# A3; nothing in this repo said so until this shot was taken, which is
+# most of what taking it was for (PLAN B94).
+#
+# It needs no `hold`: `bus.latest()` keeps the newest frame per topic and
+# nothing here publishes a second one, so the frame this shot is OF stays
+# the newest for as long as the camera takes. And it lights exactly one
+# plate — no heartbeat, no snapshot, nothing else in the corner reads a
+# `reason` — which is why the shot is a single capture.
+VOICE_PREEMPTED = {
+    "publish": {
+        "topic": "speech.state",
+        "src": "jv-voice",
+        "body": {
+            "state": "interrupted",
+            "say_id": "say-6c1d0f42",
+            "reason": "preempted",
+        },
+    }
+}
+
+
 # The id that threads one turn together. `schemas/intent.action.json` says
 # what it is for in as many words — "threads intent.action -> action.confirm
 # -> action.result and the audit log" — so the four frames below carry ONE
@@ -735,6 +778,26 @@ SHOTS = [
         # describing a line that is not in it. The harness photographs this
         # first and insists the real shot GREW DOWNWARDS from it.
         "grows_from": [VOICE_DEFAULT_SINK, SINK_OK],
+    },
+    {
+        "file": "05-preempted",
+        "lit": True,
+        # The primary alone, and one plate on it. The corner is asked the
+        # same three-screen question twice above; what this shot adds is a
+        # WORD — the one B91 taught the HUD to tell apart from the word
+        # beside it — and a word is legible at one size, on one monitor,
+        # with nothing else in the frame to read it against.
+        "captures": ["primary"],
+        "source": (
+            "composed (nothing committed has recorded jv-voice preempting "
+            "its own sentence)"
+        ),
+        # One frame, and deliberately no `hold`. Every other lit shot here
+        # is either a reading that expires (04-unheard) or a stack of
+        # several plates; this is a single `speech.state` sitting in
+        # `bus.latest()`, which nothing replaces until jv-voice speaks
+        # again. The whole shot is one plate saying one word.
+        "frames": [VOICE_PREEMPTED],
     },
 ]
 
