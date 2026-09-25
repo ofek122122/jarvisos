@@ -266,6 +266,75 @@ def grew_downwards(before, after):
     return grown_left <= left and grown_bottom > bottom
 
 
+def row_bands(rows):
+    """The drawn rows of a monitor, cut into the PLATES that made them.
+
+    `rows` is every y at which something was drawn, ascending; the return
+    is one (top, bottom) pair per contiguous run. The stack separates its
+    plates by `Theme.gapPx` of untouched desktop and every plate is a
+    filled rectangle of glass (`plate_opacity = 0.86`), so a run of rows
+    IS a plate and a gap between runs IS the gap between two of them.
+
+    This exists because `drawn_box` — every growth assertion in this
+    harness — measures the UNION, and the union cannot see a plate that
+    stayed where it was and got LONGER (PLAN A86). It was not an
+    optimistic guess that it could not: the `deaf -> lossy` pair was
+    photographed to find out, and the union moved by exactly ZERO pixels.
+    `MIC LOSING AUDIO` and `jv-ears DEGRADED` are both sixteen characters
+    of 11 px mono, so both plates measured 164 px wide, and the box around
+    the two of them is the same four numbers whichever word the
+    microphone line is drawing. The picture would have been just as green
+    saying `MIC`.
+
+    Pure, and here rather than in shoot.py, for `grew_downwards`' reason:
+    a rule the harness measures with is one a test with no compositor
+    should be able to run. The numpy half — which rows were drawn, and how
+    far left each band reaches — stays in shoot.py, which is the only
+    thing holding a screenshot.
+    """
+    bands = []
+    start = previous = None
+    for row in rows:
+        if start is None:
+            start = previous = row
+            continue
+        if row != previous + 1:
+            bands.append((start, previous))
+            start = row
+        previous = row
+    if start is not None:
+        bands.append((start, previous))
+    return bands
+
+
+def widened(before, after):
+    """Did ONE plate say a longer thing, without moving?
+
+    The companion to `grew_downwards`, and the other half of the same
+    geometry. Both take `drawn_box` results — (x0, y0, x1, y1) — but this
+    one is asked about a single BAND rather than the union, and it is
+    strict about the three edges that one plate's growth may never touch:
+    a plate docked to the right that swaps a word for a longer word keeps
+    its top, its bottom and its right edge exactly, and reaches further
+    LEFT. Anything else is a different claim: a taller box is a second
+    line or a different plate, and a moved top is the stack above it
+    changing.
+
+    Strictly further left, so a word of the same length as the one before
+    it fails. That is the whole point of the item that asked for it: the
+    two readings this separates are `MIC NO AUDIO` and `MIC LOSING
+    AUDIO`, and what makes them tellable apart in pixels is four
+    characters and nothing else.
+    """
+    if before is None or after is None:
+        return False
+    left, top, right, bottom = before
+    wide_left, wide_top, wide_right, wide_bottom = after
+    if (wide_top, wide_right, wide_bottom) != (top, right, bottom):
+        return False
+    return wide_left < left
+
+
 def sway_config():
     """The compositor the sheet runs on, as a config file.
 
@@ -890,6 +959,32 @@ SHOTS = [
         # CaptureMeter.health(), and a picture is the only place that
         # coincidence is visible rather than argued.
         "frames": [MIC_LOSSY],
+        # And the one measurement this picture was missing (PLAN A86).
+        # Every other growth claim in this harness watches the UNION of
+        # the plates get taller, which proves a plate ARRIVED; this
+        # picture's subject is a plate that was already there saying a
+        # LONGER WORD, and until this line nothing in the run would have
+        # noticed if it said `MIC`.
+        #
+        # MIC_DEAF is the only fixture it can be measured against. The two
+        # bodies differ in `capture_loss_age_s` alone, both are the same
+        # `degraded` heartbeat from the same jv-ears, so HealthPlate draws
+        # the identical `jv-ears DEGRADED` under both and the microphone
+        # line is the only thing in the corner that can move.
+        #
+        # And it is measured on the BAND rather than the box, because the
+        # box was photographed first and moves by nothing at all: both
+        # lines are sixteen characters, both plates are 164 px, and the
+        # union is (2380, 16, 2543, 93) under either reading. The mic
+        # plate's own band goes from `MIC NO AUDIO` to four characters
+        # more of it.
+        "widens_from": [MIC_DEAF],
+        # Top of the two, because MicPlate sits ABOVE HealthPlate in
+        # shell.qml's stack. Named rather than searched for: the check
+        # under it insists every OTHER band is pixel-identical across the
+        # pair, so a stack that reordered fails here instead of quietly
+        # measuring the wrong plate.
+        "widens_band": 0,
     },
 ]
 

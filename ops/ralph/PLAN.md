@@ -32,8 +32,68 @@ human-reviewed step.
 - [ ] D6. **Login greeter** (CAREFUL): recolor tuigreet first (safe); then a
       graphical greeter (regreet themed) as its own reviewed step — never
       switch the greetd session command untested.
-- [ ] D7. **Boot continuity check**: confirm GRUB + Plymouth share the exact §06
-      tokens the desktop now uses; unify any drift.
+- [~] D7. **Boot continuity check**: confirm GRUB + Plymouth share the exact §06
+      tokens the desktop now uses; unify any drift. — 824444f (the DESKTOP half)
+      (Measured, and the answer was no: the boot path and the desktop were
+      BOTH off §06, consistently, from the same hand-copy. `modules/theme.nix`
+      now reads `personality/theme.toml` with `builtins.fromTOML` — the
+      fonts.nix idiom, `token`/`face` helpers that throw on an unknown name —
+      so the terminal and the launcher moved onto the blueprint's greys
+      (#E4EAEE / #9FADB7 / #6E7E89, from #E6ECF0 / #9BAAB4 / #64747F) and
+      #F79070 left the desktop: §06's three hues + three status colours cover
+      all sixteen ANSI slots, with yellow = `warn` and magenta = `risk`.
+      VERIFIED by reading the BUILT store output, not the source — 9 tokens,
+      0 off-palette colours in `result/etc/xdg/{alacritty,fuzzel}`. Three
+      tools gates, the desktop mirrors of the QML ones (no colour literal
+      under modules/ or pkgs/, every `token "x"` a name [palette] defines,
+      every family from [type]); the colour scan DISCOVERS its subjects, and
+      its exception table is exhaustive both ways. 3 mutations, 3 caught.
+      The boot path is NOT done and is not the loop's: proposal **R9** in
+      `docs/optimization-backlog.md` measures its drift colour-by-colour.
+      Tests: `bash ops/ralph/verify.sh`.)
+- [x] D8. **The wallpaper's colours are its own** (`pkgs/jarvis-wallpaper`) —
+      done, and the answer to the question it was held back for was NO.
+      (Six literals gone; the file reads `personality/theme.toml` with
+      `builtins.fromTOML` and the same throwing `token`/`face` helpers as
+      modules/theme.nix, so `pkgs/jarvis-wallpaper/default.nix` is out of
+      `COLOUR_EXCEPTIONS` and the table has no loop-owned entry left. The
+      vignette was the open design question and LOOKING answered it: its old
+      outer stop #05080B is darker than `ground_deep`, which is the colour a
+      HUD plate is painted in — so every plate read as LIGHTER than the
+      desktop behind it, the exact inversion of why `ground_deep` exists. The
+      field is `ground` settling into `ground_deep` now (one continuous ramp,
+      three levels where there were seven). Rejected by eye, not by argument:
+      `surface` as the lit centre (lifts the whole field and paints the
+      desktop in the plates' own colour), a plateau at 0.72 (a visible banding
+      seam in the upper left), and a white-hot `text` comet head (the
+      brightest pixel on the screen, meaning nothing). The head is `ember` and
+      reads by mass. Also moved: the wordmark to `text`, the subtitle + tick
+      ring to `text_3`, grid/outer rings to `line`, middle ring to
+      `line_soft`. The face is `face "mono"` now too, and resvg's silent
+      substitution — it warns and exits 0 — fails the build instead.
+      VERIFIED in the store PNG the unit hands swaybg, not the source:
+      head/reticle #F0714A, corners #090D12, wordmark #E4EAEE, subtitle
+      #6E7E89, and byte-identical to the render I looked at. 4 mutations,
+      4 caught. Tests: `bash ops/ralph/verify.sh`.)
+- [ ] D10. **The wallpaper is composed for ONE of the three monitors.** It is
+      a single 2560x1440 PNG and `swaybg -m fill` scales it to each output, so
+      on the two 1920x1080 panels the instrument (translate(1880 980), already
+      mostly off-canvas by design) and the bottom-left wordmark are cropped by
+      a different amount than the composition allows for, and the 64 px grid
+      stops being 64 px. Options: render one PNG per output geometry and give
+      swaybg `-o <output> -i <png>` per monitor, or recompose so the
+      instrument's anchor is a fraction of the canvas. Note the first option
+      needs output NAMES, and the flake declares none — the outputs live in
+      the user's own niri config, which is **D4**, so the second option is the
+      one that is doable today and D4 is what unblocks the first. Found while
+      doing D8: the render is 2560x1440 because the primary is, and nothing in
+      the repo says what the other two get.
+- [ ] D9. **Boot path onto §06** — blocked on human review (**R9**). Four
+      files: `modules/grub-theme/{theme.txt,background.svg,default.nix}` and
+      `modules/plymouth-theme/default.nix`. The real design in it is
+      `background.svg`, a checked-in asset with no interpolation, so it needs
+      placeholders or a generator. When it lands, its paths come out of
+      `COLOUR_EXCEPTIONS` (a test fails if an exception outlives its drift).
 
 ## Track A — UI/UX (Quickshell/QML HUD + workspace) — PRIMARY
 The HUD is a bus CONSUMER: it subscribes to real topics and reflects them
@@ -3984,48 +4044,77 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       HUD has something true and momentary to say, and nobody has decided
       how long it says it for." Raised while building B93.
 
-- [ ] A86. **The half of A85 deliberately left undone: nobody has ever
-      measured the plate getting WIDER.** Every growth assertion this
-      harness has (`grew_downwards`, A44/A47, A42's live-lit window)
-      proves a plate ARRIVED — same top, same right edge, a taller box.
-      The one thing it cannot see is a plate that stayed put and got
-      longer, which is exactly what a second word on `MicPlate` does, and
-      it is the reason `06-lossy` is a photograph with no measurement
-      under it: the picture says `MIC LOSING AUDIO`, and nothing in the
-      run would notice if it said `MIC`.
+- [x] A86. Nobody had ever measured the plate getting WIDER. — 0aa0865
+      (The measurement came FIRST, as A86 demanded, and the answer is
+      **zero**: `deaf -> lossy` photographed through the real compositor
+      draws at (2380, 16, 2543, 93) under BOTH readings. `MIC LOSING
+      AUDIO` and `jv-ears DEGRADED` are both sixteen characters of 11 px
+      mono, both plates measure 164 px, and the union of them is the same
+      four numbers whichever word the microphone line is saying — A85's
+      "about a pixel" was generous. So the item was wrong in shape exactly
+      as it said it might be, and became the other thing it named: the
+      rectangle is the plate's OWN BAND.
+      `sheet.row_bands` cuts the drawn rows into plates (the stack leaves
+      `Theme.gapPx` of untouched desktop between them and every plate is a
+      filled rectangle of glass, so a contiguous run IS a plate),
+      `drawn_bands` measures each, and `sheet.widened` is the geometry one
+      plate has: top, bottom and right pinned exactly, left strictly
+      further out. Strictly — the two readings differ by four characters
+      and nothing else. `06-lossy` declares `widens_from: [MIC_DEAF]`, the
+      only fixture it can be measured against (same `degraded`, same
+      service, so HealthPlate is identical and only the mic line can
+      move), and the run refuses a pair whose plate COUNT changed or whose
+      OTHER bands moved. Measured: band 0 goes (2412, 16, 2543, 50) ->
+      (2380, 16, 2543, 50), **32 px wider**, band 1 and the union
+      unchanged. The trap has its own test: this shot declares no `hold`,
+      so without an explicit re-publish the settle SLEEPS and the picture
+      committed is of the exposure that was supposed to be thrown away —
+      passing every check, because the plate really did widen when it was
+      measured. Costs ~2 s. Tests: `bash ops/ralph/runtests.sh tools`,
+      `bash ops/ralph/hudscreens.sh` (199.0 s, 9 screens, all matching
+      HEAD — nothing on screen moved, which was the condition).)
 
-      A85's own arithmetic says the widening may be worth about a pixel,
-      because `MIC LOSING AUDIO` (≈165 px) and `jv-ears DEGRADED` (≈165
-      px) are in the same right-docked column and `drawn_box` takes the
-      wider of them. So the FIRST piece of work is a measurement and not a
-      gate: photograph `deaf → lossy` (the only pair where the health line
-      is identical under both, so the mic line is isolated) and print the
-      two boxes. If the answer is a pixel or zero, this item is wrong in
-      shape and should become something else — a crop of the plate's own
-      row compared against a rendered reference, or nothing at all. Do not
-      design the assertion before the number exists. Split out of A85.
+- [x] A87. `MIC_DEAF`'s note was not a sentence jv-ears can send. — 93605f8
+      (Landed in iteration 113, whose journal and plan commit was never
+      made; marked done here from the commit. It found a third fault A87
+      had not seen: all THREE mic fixtures said `capture_stall_s: 2.0`,
+      and that gauge is `CaptureMeter.STALL_S` shipped verbatim, which is
+      1.0. `notes` became the age `CaptureMeter.health()` really sends,
+      `capture_loss_window_s` was added to both older fixtures, and the
+      gauge A87 said nobody should add — `capture_loss_age_s` on MIC_OPEN,
+      which A43's idle window is measured on the absence of — was not
+      added. Nothing on screen moved and that was the condition for doing
+      it at all.)
 
-- [ ] A87. **`MIC_DEAF`'s note is not a sentence jv-ears can send.** The
-      fixture says `notes: "capture stalled"`; `CaptureMeter.health()`
-      sends `f"microphone open but no audio for {age:.1f}s"`. Nothing
-      draws `notes` — HealthPlate shows the service and the word — so no
-      picture is wrong today, which is precisely why it sat there. A85
-      made MIC_LOSSY faithful to `metrics()` and `loss_note()` and put a
-      gate on it, and the gate stops at the one fixture it was written
-      for; the two older ones are still hand-waved, and MIC_OPEN is also
-      missing `capture_loss_window_s`, which real jv-ears ships from the
-      first beat.
+- [ ] A88. **The other six growth assertions are blind in exactly the way
+      A86 just fixed.** `drawn_bands` exists and is asked by ONE shot.
+      All six `sheet.grew_downwards` callers — the idle probe's five
+      (A49's window asks twice) and `04-unheard`'s `grows_from` in the
+      shot loop — measure `drawn_box`, the union, so a plate that stayed put
+      and said a longer word is invisible to all of them, which is the
+      thing A86 photographed and found to be worth zero pixels of union.
+      This is not "convert them all": each of those six is asking a
+      question the union genuinely answers (did a plate ARRIVE), and a
+      band rule bolted onto them would be a second claim nobody asked for.
+      What is worth doing is naming which of them has a widening it should
+      care about. Discovered in A86.
 
-      The fix is not "make all three faithful and gate all three": A43's
-      idle window is MEASURED on MIC_OPEN's narrow gauge set (a loss gauge
-      added to it changes what MicPlate draws, and a test says so), so
-      MIC_OPEN's body cannot simply be completed without re-reading that
-      window. `capture_loss_window_s` alone is provably inert — it moves
-      `lossWindowS` from the pinned fallback 1.0 to the reported 1.0, and
-      no plate reads `lossWindowReported` — so that half is safe and the
-      note is safe, and the gauge that is NOT safe is the one nobody
-      should add. Worth doing as one small commit that says which is
-      which. Discovered while building A85.
+- [ ] A89. **A band's WIDTH is very nearly the word, and that is the
+      closest anything in this harness has come to A47.** A47 is the open
+      question that `grew_downwards` can prove a plate arrived and never
+      WHICH plate. The bands measured in A86 say the corner's 11 px mono
+      is linear and tight: `MIC` (3 chars) is 59 px, `MIC LOSING AUDIO`
+      and `jv-ears DEGRADED` (16) are 164 px each — 8.08 px per character
+      over 34.8 px of plate — and 02-heard's top band of 99 px lands on 8
+      characters to within a twentieth of one. So a band of width W
+      implies a character count, and a plate that said a DIFFERENT
+      sixteen-character line would still pass A86's gate.
+      Whether that should become an assertion is the open part, and the
+      trap is real: the fit is measured over three points from two shots,
+      on one font at one size, under a software renderer. A width-to-chars
+      rule that drifted would fail pictures that are right. Measure more
+      of the sheet's bands against the words their captions name before
+      writing any rule. Discovered in A86.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD

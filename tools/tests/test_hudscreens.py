@@ -1720,7 +1720,12 @@ def ears_beats(shot: dict) -> list[dict]:
     """Every jv-ears heartbeat body a shot puts on the bus, in any of the
     three places a shot can put frames."""
     out = []
-    for frame in [*shot["frames"], *shot.get("hold", []), *shot.get("grows_from", [])]:
+    for frame in [
+        *shot["frames"],
+        *shot.get("hold", []),
+        *shot.get("grows_from", []),
+        *shot.get("widens_from", []),
+    ]:
         pub = frame.get("publish")
         if pub and pub["topic"] == "sys.health" and pub["src"] == "jv-ears":
             out.append(pub["body"])
@@ -2022,6 +2027,15 @@ def test_the_lossy_shot_lights_exactly_the_two_plates_its_caption_names():
         "06-lossy now feeds or grows from something, so it is no longer the "
         "one-frame shot its caption describes"
     )
+    # `widens_from` (A86) is the one exception, and it is not a second
+    # frame in the picture: it is the SAME heartbeat from the SAME service
+    # with one gauge dropped, photographed and thrown away before the
+    # shot re-publishes its own frame. The picture is still one beat.
+    assert [f["publish"]["src"] for f in shot.get("widens_from", [])] == ["jv-ears"], (
+        "06-lossy's narrower exposure is no longer one jv-ears heartbeat, "
+        "so the plate it measures may have moved for a reason nobody looked "
+        "at"
+    )
     published = {(f["publish"]["topic"], f["publish"]["src"]) for f in shot["frames"]}
     assert published == {("sys.health", "jv-ears")}, (
         f"06-lossy publishes {sorted(published)} — one heartbeat from one "
@@ -2099,6 +2113,188 @@ def test_the_lossy_shot_lights_exactly_the_two_plates_its_caption_names():
         f"core/SpeechState.qml now reads {sorted(subjects & {t for t, _ in published})}, "
         "so StatePlate may light off this heartbeat and the caption names "
         "two plates"
+    )
+
+
+# ------------------------------- the word, and not the box around it (A86)
+#
+# Every growth assertion this harness had proved a plate ARRIVED: same
+# top, same right edge, a taller union. None of them could see a plate
+# that stayed exactly where it was and said a LONGER WORD, which is what
+# `06-lossy` is a picture of — and so, until A86, nothing in a run would
+# have noticed if that picture said `MIC`.
+#
+# The first thing A86 asked for was a MEASUREMENT and not a gate, because
+# the arithmetic said the widening might be worth about a pixel. It is
+# worth ZERO. The `deaf -> lossy` pair was photographed through the real
+# compositor and the union was (2380, 16, 2543, 93) under BOTH readings:
+# `MIC LOSING AUDIO` and `jv-ears DEGRADED` are both sixteen characters of
+# 11 px mono, both plates measure 164 px, and the box around the two of
+# them cannot tell them apart. So the rectangle this is measured on is the
+# plate's own BAND, and these are the gates on that.
+
+
+def test_row_bands_cuts_the_drawn_rows_into_plates():
+    """One contiguous run of drawn rows is one plate, because the stack
+    separates its plates with `Theme.gapPx` of untouched desktop and every
+    plate is a filled rectangle of glass.
+    """
+    assert sheet.row_bands([]) == [], "a bare monitor holds no plates"
+    assert sheet.row_bands([16]) == [(16, 16)], "one row is one band"
+    assert sheet.row_bands(range(16, 51)) == [(16, 50)], "one plate is one band"
+    # The real thing, read off 06-lossy-primary.png: MicPlate at 16-50,
+    # eight rows of desktop, HealthPlate at 59-93.
+    assert sheet.row_bands([*range(16, 51), *range(59, 94)]) == [(16, 50), (59, 93)], (
+        "the gap between two plates is not being read as the end of one"
+    )
+    assert sheet.row_bands([*range(16, 51), *range(51, 94)]) == [(16, 93)], (
+        "two plates with no desktop between them are ONE run and must be "
+        "reported as one — a band rule that invented a boundary would let "
+        "the check below measure a rectangle no plate has"
+    )
+    assert sheet.row_bands(r for r in [16, 17, 30]) == [(16, 17), (30, 30)], (
+        "row_bands must accept the iterator numpy hands it"
+    )
+
+
+def test_the_widening_rule_is_the_geometry_one_plate_actually_has():
+    """A plate docked to the right that swaps a word for a longer word
+    keeps its top, its bottom and its right edge exactly, and reaches
+    further LEFT. Every other edge moving is a different claim, and the
+    one that matters most is the equal-length case: `MIC NO AUDIO` and
+    `MIC LOSING AUDIO` are told apart by four characters and nothing else,
+    so a word the same width as the one before it must fail.
+    """
+    deaf = (2412, 16, 2543, 50)
+    assert sheet.widened(deaf, (2380, 16, 2543, 50)), "four more characters"
+    assert not sheet.widened(deaf, deaf), "the same word"
+    assert not sheet.widened(deaf, (2484, 16, 2543, 50)), (
+        "the plate got SHORTER — this is the `MIC` the whole item is about"
+    )
+    assert not sheet.widened(deaf, (2380, 16, 2543, 93)), (
+        "the bottom moved: a second line, or a different plate entirely"
+    )
+    assert not sheet.widened(deaf, (2380, 24, 2543, 50)), (
+        "the top moved: the stack above this plate changed, so this is not "
+        "the same plate measured twice"
+    )
+    assert not sheet.widened(deaf, (2380, 16, 2500, 50)), (
+        "the right edge moved: the plate is no longer docked where it was"
+    )
+    assert not sheet.widened(None, deaf), "nothing was drawn first"
+    assert not sheet.widened(deaf, None), "nothing is drawn now"
+
+
+def test_the_lossy_shot_measures_its_word_against_the_deaf_reading():
+    """MIC_DEAF is the only fixture the widening can be measured against,
+    and the reason is HealthPlate: both bodies are the same `degraded`
+    from the same jv-ears, so the line under the microphone is identical
+    and the mic plate is the only thing in the corner that can move.
+
+    Checked on the two keys HealthPlate actually draws rather than on the
+    whole body, because the whole body is SUPPOSED to differ — that is
+    what makes the word change.
+    """
+    shot = lossy()
+    narrow = shot["widens_from"]
+    assert len(narrow) == 1 and narrow[0] is sheet.MIC_DEAF, (
+        f"06-lossy widens from {narrow}, and MIC_DEAF is the only heartbeat "
+        "in this sheet that draws the same health line under a different "
+        "microphone line"
+    )
+    before = narrow[0]["publish"]["body"]
+    after = shot["frames"][0]["publish"]["body"]
+    assert (before["service"], before["state"]) == (after["service"], after["state"]), (
+        f"the narrower exposure reports {before['service']} {before['state']} "
+        f"and the picture reports {after['service']} {after['state']} — "
+        "HealthPlate draws exactly those two, so the band under the "
+        "microphone would move too and the measurement would isolate nothing"
+    )
+    moved = sorted(
+        k
+        for k in set(before["metrics"]) | set(after["metrics"])
+        if before["metrics"].get(k) != after["metrics"].get(k)
+    )
+    assert moved == ["capture_age_s", "capture_loss_age_s"], (
+        f"the two exposures differ on {moved} — the gauges that may move "
+        "are the two core/MicState.qml turns into the word, and anything "
+        "else is a second reason the plate changed"
+    )
+
+
+def test_the_widening_is_measured_on_a_band_and_the_box_is_why():
+    """The rectangle is the point of the whole item. `drawn_box` is the
+    union of every plate on the monitor and it does not move between these
+    two exposures — photographed, not argued — so a check written on it
+    would be a permanent, flawless pass over a picture that could say
+    anything.
+    """
+    loop = shot_loop_text()
+    assert "wide = drawn_bands(img, background)" in loop, (
+        "the shot loop no longer measures the widening on the plate's own "
+        "band"
+    )
+    assert "narrow = drawn_bands(narrower, background)" in loop, (
+        "the narrower exposure is no longer cut into bands, so the two "
+        "sides of the comparison are not the same rectangle"
+    )
+    assert "sheet.widened(narrow[which], wide[which])" in loop, (
+        "the shot loop no longer asks sheet.widened — an inline copy of the "
+        "geometry is one the unit tests above do not cover"
+    )
+    assert "drawn_box" not in loop.split('if shot.get("widens_from")')[-1].split(
+        "name = f\""
+    )[0], (
+        "the widening is being measured off drawn_box again, which is the "
+        "union of the plates and is the SAME four numbers under both of "
+        "these readings"
+    )
+
+
+def test_the_lossy_shot_puts_its_own_frame_back_after_the_narrower_one():
+    """The trap this measurement walks into. `grows_from`'s shot declares
+    a `hold`, so the settle after the thrown-away exposure re-feeds the
+    real frames; 06-lossy deliberately declares none, so without an
+    explicit re-publish the settle SLEEPS and the picture committed to the
+    sheet is of the NARROWER reading under the wider one's caption — and
+    every check here would pass, because the plate really did widen at the
+    moment it was measured.
+    """
+    loop = shot_loop_text()
+    after = loop.split('if shot.get("widens_from"):')[1]
+    before_settle = after.split("settle(SETTLE_S, hold, bus_addr)")[0]
+    assert "publish_shot(shot, bus_addr)" in before_settle, (
+        "the shot loop no longer re-publishes a widens_from shot's own "
+        "frames after the narrower exposure, so the picture it writes is of "
+        "the exposure it was supposed to throw away"
+    )
+
+
+def test_the_band_measurement_refuses_a_pair_that_isolates_nothing():
+    """A widening is only evidence about the word if the rest of the
+    corner held still. A second plate arriving, or the health line
+    changing under the microphone, would move the band the check reads or
+    the one beside it — and either would make a pass mean nothing.
+    """
+    loop = shot_loop_text()
+    assert "len(wide) != len(narrow)" in loop, (
+        "the shot loop no longer refuses a pair whose plate COUNT changed, "
+        "so band 0 may not be the same plate in both exposures"
+    )
+    assert "if i != which and wide[i] != narrow[i]" in loop, (
+        "the shot loop no longer insists every OTHER band is pixel-identical "
+        "across the pair, which is the only thing making the widening "
+        "evidence about the microphone line rather than about the corner"
+    )
+    assert lossy()["widens_band"] == 0, (
+        "06-lossy measures a band other than the top one, and MicPlate sits "
+        "ABOVE HealthPlate in shell.qml's stack"
+    )
+    stack = (ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8")
+    order = re.findall(r"^        (\w+Plate) {$", stack, re.M)
+    assert order.index("MicPlate") < order.index("HealthPlate"), (
+        "HealthPlate now sits above MicPlate, so 06-lossy's `widens_band` "
+        "names the wrong plate and the run would measure the health line"
     )
 
 

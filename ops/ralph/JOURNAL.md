@@ -11175,3 +11175,336 @@ survived a further round and has its own case now.
   larger loop task: `respond` p50 mixes finished turns with talked-over
   ones, and the unmatched turns must be refused rather than binned.
   A62/A70 — one corner, two plates, one event — remain a human's call.
+
+## 2026-09-25 — iteration 113 · the three numbers jv-ears never sent
+
+**RECONSTRUCTED by iteration 114, from commit 93605f8 alone.** That
+iteration committed its code and never committed its journal or plan, so
+this is the bookkeeping it owed, written by the next loop from the commit
+message. It is not a record of a run this loop watched: the tests and the
+build below are what that commit says it did, not what was re-verified
+here. What WAS re-verified here is that the fixtures it wrote are the ones
+`tools/tests/test_hudscreens.py` still holds green, and that the sheet
+still matches HEAD.
+
+- **what**: PLAN A87. The screen sheet's two older jv-ears fixtures were
+  legal against `sys.health` and hand-waved against the service. A85 had
+  made `MIC_LOSSY` faithful to `CaptureMeter.metrics()` and `loss_note()`
+  and gated it; this brought `MIC_OPEN` and `MIC_DEAF` up to the same
+  standard. `MIC_DEAF.notes` became the AGE `CaptureMeter.health()` really
+  sends rather than the summary "capture stalled" nobody writes;
+  `capture_loss_window_s` was added to both, because real ears ships it
+  from the first heartbeat; and it found a third fault A87 had not seen —
+  all THREE fixtures said `capture_stall_s: 2.0`, which is not a number
+  jv-ears can send, since that gauge is `CaptureMeter.STALL_S` copied
+  verbatim and STALL_S is 1.0. The gauge A87 said nobody should add was
+  not added: `capture_loss_age_s` on MIC_OPEN would move MicPlate from
+  `MIC` to `MIC LOSING AUDIO`, and A43's idle window is measured on its
+  absence.
+- **why it was safe**: nothing on screen moved, and that was the condition
+  for doing it at all. `notes` reaches no plate, and reporting the loss
+  window only moves `EarsBudgets.lossWindowS` from the pinned fallback 1.0
+  to the reported 1.0 while flipping `lossWindowReported`, which no plate
+  reads — and there is a test that goes red the day one does.
+- tests: per the commit, `hudscreens.sh` re-shot all 9 pictures and they
+  matched the bytes committed at HEAD.
+- build: not recorded by that commit. Iteration 114 built the same tree
+  (`git+file://…?ref=ralph/auto`) and it is green.
+- files: tools/hudscreens/sheet.py, tools/tests/test_hudscreens.py
+- commits: 93605f8
+- next: A86, which is what iteration 114 took.
+
+## 2026-09-25 — iteration 114 · the plate that stayed put and said a longer word
+
+- **what**: PLAN A86, and the thing it asked for first was a MEASUREMENT
+  rather than a gate. Every growth assertion this harness has proves a
+  plate ARRIVED — same top, same right edge, a taller union — and the one
+  thing none of them can see is a plate that stayed exactly where it was
+  and said a LONGER WORD. That is what `06-lossy` is a picture of, so
+  nothing in a run would have noticed if that picture said `MIC`.
+
+- **the number, and it is zero.** A85's arithmetic guessed the widening
+  might be worth about a pixel. It is worth none at all. `deaf -> lossy`
+  was photographed through the real compositor, and the drawn box is
+  **(2380, 16, 2543, 93) under BOTH readings** — identical, to the pixel.
+  `MIC LOSING AUDIO` and `jv-ears DEGRADED` are both sixteen characters of
+  11 px mono, both plates measure 164 px, and the box around the two of
+  them is the same four numbers whichever word the microphone is drawing.
+  The measurement cost one scaffolded run and was thrown away before
+  anything was designed, which is exactly what A86 asked for and the
+  reason the shape below is right.
+
+- **so the rectangle is the plate's own BAND.** The stack leaves
+  `Theme.gapPx` of untouched desktop between its plates and every plate is
+  a filled rectangle of glass at `plate_opacity = 0.86`, so a contiguous
+  run of drawn rows IS a plate and a gap between runs IS the gap between
+  two of them. `sheet.row_bands` does the cutting (pure, so a test with no
+  compositor runs it, for `grew_downwards`' reason); `drawn_bands` in
+  shoot.py measures how far left each band reaches; `sheet.widened` is the
+  geometry one plate has — top, bottom and right pinned exactly, left
+  strictly further out. Strictly, because the two readings this separates
+  differ by four characters and nothing else.
+
+- `06-lossy` declares `widens_from: [MIC_DEAF]`, and MIC_DEAF is the only
+  fixture it can be measured against: both are the same `degraded` from
+  the same jv-ears, so HealthPlate draws the identical line under both and
+  the microphone line is the only thing in the corner that can move. The
+  run refuses a pair whose plate COUNT changed, and one whose OTHER bands
+  moved, so a pass is evidence about the word rather than about the
+  corner. Measured in the gate run: band 0 goes (2412, 16, 2543, 50) ->
+  (2380, 16, 2543, 50) — **32 px wider** — while band 1 and the union do
+  not move at all.
+
+- **the trap, and it has its own test.** `grows_from`'s shot declares a
+  `hold`, so the settle after the thrown-away exposure re-feeds the real
+  frames. `06-lossy` deliberately declares none (a heartbeat is believed
+  for two of its own periods), so without an explicit re-publish the
+  settle SLEEPS and the picture committed to the sheet is of the NARROWER
+  reading under the wider one's caption — and every check would pass,
+  because the plate really did widen at the moment it was measured. The
+  re-publish is there and a test reads the loop for it.
+
+- tests: `bash ops/ralph/verify.sh` GREEN, and again as `--since HEAD~1`
+  over what the commit actually took. 6 new tests in
+  `tools/tests/test_hudscreens.py` (463 in the tools suite): the band cut
+  (including two plates with no desktop between them staying ONE run, and
+  the numpy iterator being accepted), the widening geometry with the
+  equal-width case failing, the pair isolating the microphone line (the
+  two exposures may differ on `capture_age_s` and `capture_loss_age_s` and
+  nothing else, and must report the same service and state), the
+  measurement being taken on a band and not on the box, the re-publish,
+  and the refusals — plus MicPlate's position above HealthPlate read out
+  of shell.qml, so a reordered stack fails here instead of quietly
+  measuring the health line. Two existing tests were edited honestly:
+  `ears_beats` now reads `widens_from` (the new place a shot can put
+  frames), and the one-frame assertion admits the narrower exposure and
+  says why it is not a second frame in the picture.
+  `bash ops/ralph/hudscreens.sh` run three times: twice with the
+  scaffolding, to take the measurement (the first of those had its log
+  thrown away before it was read, which is the whole reason there was a
+  second), and once as the gate — 199.0 s, 9 screens, **all matching the
+  sheet committed at HEAD**, which is the condition this change had to
+  meet. Against a scratch directory both times, deliberately:
+  the HUD did not move, so the committed PNGs are already right and a run
+  pointed at `docs/hud/screens` would only have restored them.
+- the cost: 199.0 s against iteration 112's 192.5 s. About 2 s of that is
+  this (the `settle` phase went 21.7 -> 23.4 s, which is one `SETTLE_S`
+  and one publish); the rest is the read-back's variance — `compare` alone
+  was 35.3 s in one run this session and 43.7 s in the next.
+- build: `nixos-rebuild build --flake .#ares` green, closure
+  w9smk2s4nj1w6d4gamsbw1mq9kqwy2bp. That is NOT the
+  9b5gamgwmlplz7isgnjabh3zwqy3dn5c iterations 110-112 recorded, and the
+  move is not this commit's: building the committed tree at
+  `ralph/auto` with none of this work in it gives the same
+  w9smk2s4…, so it came in with the merge of main at 4b2fd15. This commit
+  touches a harness and its tests, and nothing that ships. No schema
+  change, no jv-act, no boot path, no pins.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  tools/tests/test_hudscreens.py
+- commits: 0aa0865
+- next: **A89** is the one this iteration is most tempted by and most
+  wants measured first: the bands say the corner's 11 px mono is 8.08 px
+  per character over 34.8 px of plate, fitted over three points, which
+  means a band's WIDTH nearly IS the word — and that is the closest
+  anything here has come to A47's question of WHICH plate. Measure more of
+  the sheet's bands against the words their captions name before writing
+  any rule; a width-to-chars rule that drifted would fail pictures that
+  are right. **A88** is the smaller, well-scoped one: six callers still
+  measure the union, and the work is naming which of them has a widening
+  it should care about rather than converting them all. **B94** is still
+  the oldest question in this corner and still a human's: the HUD draws
+  two words nobody can read. **B92** stays the larger loop task —
+  `respond` p50 mixes finished turns with talked-over ones. A62/A70 — one
+  corner, two plates, one event — remain a human's call.
+
+## 2026-09-25 18:05 — the desktop was painting itself in four colours §06 never chose
+- built: **D7's desktop half** — `modules/theme.nix` stops carrying a palette.
+  The file was written by hand yesterday (cf8c0a2) with the §06 tokens copied
+  into a `let` block under the comment "kept in sync with
+  personality/theme.toml", and ONE DAY LATER three of them had drifted:
+  the terminal and the launcher were painting text in #E6ECF0 / #9BAAB4 /
+  #64747F where the blueprint's dark `:root` (and therefore theme.toml, which
+  a test holds against it) says #E4EAEE / #9FADB7 / #6E7E89 — plus #F79070 on
+  five ANSI slots, which is not a token in any form and appears nowhere in
+  `docs/blueprint.html`. Nothing failed, because nothing was asking: the QML
+  side has had `test_no_qml_file_carries_a_literal_colour` since A2 and the
+  desktop side had no gate at all. This is the exact failure `modules/fonts.nix`
+  was written for one level over — the identity does not break, it quietly
+  becomes a lookalike of itself.
+  The palette is now read with `builtins.fromTOML`, the fonts.nix way, through
+  a `token` helper that THROWS on an unknown name (proven: `token "crimson"`
+  is an eval error, not `""` — a colour that silently became empty would paint
+  a surface black and pass every check). Font families the same way, via
+  `face "sans"` / `face "mono"`: a hand-spelled `Archivo` is a name only
+  theme.toml guarantees `modules/fonts.nix` installed.
+  What deliberately STAYS in the file is the binding from a surface to the
+  token it spends, because that is a design decision and belongs in the open:
+  a window's ground is `ground_deep` and `ground` is the panel edge inside it
+  (which is what makes a terminal read as a window lying on the desktop rather
+  than a hole cut in it), and the ANSI mapping, where §06's three hues and
+  three status colours have to cover sixteen slots — green/blue/cyan collapse
+  onto `teal` as they already did, yellow becomes `warn` (caution is what
+  yellow has always meant) and magenta and the bright reds become `risk`.
+  That last part is a real change of hue on three slots, and it is the one
+  that needed a decision rather than a correction: the alternative was adding
+  #F79070 to theme.toml as a 17th token, which would have been an afternoon's
+  work with no risk — and would have enshrined the drift as identity.
+  `test_palette_still_agrees_with_the_blueprint_dark_tokens` exists precisely
+  so the palette cannot become "a lookalike of the blueprint", and four greys
+  §06 never chose, added so a hand-copy need not be corrected, is that. The
+  colours were wrong, not under-documented. Written up as the rejected shape
+  in R9.
+- the gate, three tests, the desktop mirrors of the QML ones: no file under
+  `modules/` or `pkgs/` may carry a colour literal; every `token "x"` in
+  theme.nix must be a name `[palette]` defines; every font family must come
+  from `[type]`. The colour scan **discovers** its subjects (walk `modules/`
+  and `pkgs/`, read anything decodable, skip comment lines) rather than
+  listing them, because the failure it exists for is a NEW file painting a new
+  surface — theme.nix itself was that file a day ago. Its exception table is
+  exhaustive in BOTH directions, and the second direction bit on the first
+  run: `modules/plymouth-theme/jarvis.script` was in it and turned out to
+  carry no colour at all, only a comment naming one, so the entry came out.
+  An excuse that outlives the drift it excuses reads as "known, being handled"
+  and hides the next literal somebody adds to that file.
+- the boot path is untouched and is NOT this loop's: GUARDRAILS makes
+  `modules/boot-*.nix` human-review, and `modules/grub-theme/**` +
+  `modules/plymouth-theme/default.nix` are the content those two modules
+  install — the restriction is about the boot path, not about a filename. A
+  wrong value there is the most expensive kind to find (a broken `theme.txt`
+  degrades GRUB to its built-in menu on the NEXT boot, and the only honest
+  check is a reboot and a photograph, which is what a human did on
+  2026-09-15). Proposal **R9** measures it colour-by-colour: the same three
+  greys, plus #F79070, plus #4A5762 and #0E6A72 — which are the blueprint's
+  **light-mode** `--text-2` and `--teal`, spent on a dark ground. Worth saying
+  plainly: this commit makes the drift WORSE-LOOKING and that is the point.
+  The three greys now live in the boot path and nowhere else on the machine,
+  so Plymouth's last frame and the desktop's first no longer agree — an
+  invisible inconsistency became a visible seam, which is the only form in
+  which a human can act on it.
+- tests: `bash ops/ralph/verify.sh` GREEN (4 gates, 67.1 s: tools 466 pass,
+  jv-compat, jv-hud-bridge, nixtest), and again as `--since HEAD~1` over what
+  the commit actually took. 4 new tests in
+  `tools/tests/test_gen_theme_qml.py` (467 in the tools suite). 3 mutations,
+  3 caught: a raw `"#090D12"` back in the alacritty block, `gtk-font-name=Archivo 11`
+  hand-spelled, and `token "crimson"`.
+- verified where it counts: the built store output, not the source.
+  `result/etc/xdg/alacritty/alacritty.toml` and `.../fuzzel/fuzzel.ini` hold
+  9 palette tokens and **0 off-palette colours** — the source could have been
+  token-only and still emitted something wrong through `rgba`, and reading the
+  derivation is the only thing that answers that.
+- build: `nixos-rebuild build --flake .#ares` green, closure
+  jwwh0cdlzf5479bpjs1mm4r1cxy4ja4f (w9smk2s4… at HEAD~1 — the diff is etc/
+  and nothing else; `etc-xdg-alacritty-alacritty.toml`,
+  `etc-xdg-fuzzel-fuzzel.ini` and `etc.drv` rebuilt). No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: modules/theme.nix, tools/tests/test_gen_theme_qml.py,
+  docs/optimization-backlog.md (R9), ops/ralph/PLAN.md
+- commits: 824444f
+- next: **D8** is the clean one and it is CHECKABLE, which is rare here:
+  `pkgs/jarvis-wallpaper` still carries #E6ECF0 and #64747F — the two greys
+  that as of this commit exist nowhere else on the desktop — plus #F79070,
+  #26323B and #05080B, the last two having no token at all (#26323B sits
+  between `line` and `line_soft`, #05080B below `ground_deep`, so each needs a
+  choice rather than a substitution). It is the one loop-owned entry in
+  `COLOUR_EXCEPTIONS`, and `resvg` runs in this sandbox: render the PNG before
+  and after and LOOK, which is how a two-stop vignette gets to be judged
+  rather than reasoned about. **D9/R9** is the boot path and a human's.
+  **D1** (the top bar) is still the biggest unclaimed piece of Track D and the
+  first new on-screen surface since the HUD — note that the new colour gate
+  covers it from the day its `pkgs/jv-bar` exists. From the old corner:
+  **A89** (a band's width nearly IS the word — measure more of the sheet
+  before writing any rule), **A88** (six callers still measure the union),
+  **B94** and **A62/A70** remain a human's call.
+
+## 2026-09-25 19:20 — the wallpaper's darkest colour was darker than the plates that float on it
+- built: **D8** — `pkgs/jarvis-wallpaper` stops carrying colours of its own.
+  It reads `personality/theme.toml` with `builtins.fromTOML` through the same
+  throwing `token`/`face` helpers `modules/theme.nix` got in D7, so the last
+  loop-owned entry is out of `COLOUR_EXCEPTIONS` and the only excused files
+  left are the four boot-path ones a human owns (R9).
+- this item was HELD BACK from D7 on purpose, because one of its six literals
+  was a design question and not a correction, and the answer turned out to be
+  "the old value was wrong for a reason nobody had named". The ground was a
+  three-stop vignette ending at **#05080B** — a colour theme.toml has no token
+  for, and darker than `ground_deep`. `ground_deep` is the colour a HUD plate
+  is painted in, and theme.toml says it sits BELOW the page ground so that a
+  floating panel reads as nearer. On this wallpaper the page was below the
+  plate: I measured the top-right corner, which is the one region §06 reserves
+  for the HUD, at (7,10,14) against a plate that composites to about (9,13,18).
+  Every plate on this desktop was the LIGHTER, further-away thing. The field is
+  `ground` settling into `ground_deep` now — one continuous two-stop ramp, the
+  same one step the theme already owns, spent as distance instead of elevation.
+  It is a shallower vignette (three levels across the field where there were
+  seven) and that is the whole cost.
+- LOOKED at it, which is what the item was waiting for: `resvg` renders in this
+  sandbox, and a scratch template that reproduces the shipped PNG **byte for
+  byte** meant every difference I saw came from the colour and nothing else.
+  Four candidates, three rejected by eye and not by argument:
+  - `surface` as the lit centre stop (keeps three distinct stops, all tokens):
+    lifts the entire field and paints the desktop in the same value as the
+    plates lying on it. The ember glow stops being the brightest thing.
+  - a plateau — `ground` held to offset 0.72, then falling to `ground_deep`:
+    a visible arc of banding across the upper left where the plateau ends.
+    Mach banding on a 3-level ramp is not subtle.
+  - a white-hot comet head in `text`, replacing #F79070: it becomes the
+    brightest pixel on the whole screen and it means NOTHING. §06 spends
+    brightness on signal. The head is plain `ember` now and still reads as a
+    head, because it has more mass than the arc (r=9 against stroke-width 6) —
+    mass, not a hotter hue, was what made it a head all along.
+- the rest was substitution: wordmark #E6ECF0 → `text`, subtitle and dashed
+  tick ring #64747F → `text_3` (the two greys D7 took off every other surface
+  yesterday), rings/grid #26323B → `line` with the middle ring on `line_soft`
+  — two weights of hairline and no third. That one was a choice, since #26323B
+  sat exactly between the tokens; R9 now records the choice, because the boot
+  screens draw the same instrument and a human has to make it again there.
+- also: the wallpaper hand-spelled its **font family** into the SVG, the same
+  drift one field over, and it is the one surface that bakes a face into a
+  raster where nothing can notice later. It asks `face "mono"` now — and since
+  resvg answers a missing family with a warning, a substitute and **exit 0**,
+  the build greps its stderr and refuses. Proven by making theme.toml name a
+  face nothing provides: the build fails with the family in the message.
+- gates, both of them the desktop mirror of a QML rule that has existed since
+  A2, both DISCOVERING their subjects rather than listing them: every `token
+  "x"` under modules/ + pkgs/ must name a colour [palette] defines, and no
+  file there may spell a font family (`FACE_EXCEPTIONS`, the same table shape
+  as `COLOUR_EXCEPTIONS`, exhaustive in both directions — 5 entries: the two
+  files whose JOB is to name a family, plus the three boot-path ones). New in
+  this pass: `PAINTERS`, a floor on how many tokens each painting surface must
+  still be spending. The literal gate cannot say that — it is satisfied by a
+  file with no colour in it at all, so a surface that stopped asking theme.toml
+  anything would pass it silently.
+- 4 mutations, 4 caught: a raw `#4FB8BF` back in the SVG, `JetBrains Mono`
+  hand-spelled in the `font-family=`, the wallpaper's greys inlined so it stops
+  spending tokens, and a stale `FACE_EXCEPTIONS` entry. Plus the two the nix
+  eval catches: `token "embers"` throws by name, the unresolvable face fails
+  the build.
+- verified where it counts — the PNG the **unit hands swaybg**, not the source
+  (`/nix/store/8pskmbj4…-jarvis-wallpaper/share/backgrounds/jarvisos.png`):
+  comet head and reticle #F0714A, far corners #090D12, wordmark glyph #E4EAEE,
+  subtitle #6E7E89, and byte-identical to the candidate I actually looked at.
+  A token-only source can still emit something wrong through a gradient.
+- tests: `bash ops/ralph/verify.sh` GREEN (4 gates, 66.0 s: tools 469 pass,
+  jv-compat, jv-hud-bridge, nixtest 7/7). build: `nixos-rebuild build
+  --flake .#ares` green, closure 6a9xqrp7q87vmsj47y8h00s9jrg93x2f. No schema
+  change, no jv-act, no boot path, no pins. Never tested, never switched.
+- also corrected `docs/superpowers/specs/2026-09-25-jarvisos-desktop-identity-design.md`:
+  its "do not drift" anchor line spelled out the palette, and the copy it
+  spelled was the DRIFTED one — #E6ECF0 / #9BAAB4 / #64747F, the very greys
+  D7 and D8 have spent two iterations removing. That line is where the
+  hand-copy came from. It now names theme.toml and describes the SHAPE (field
+  is `ground`, a panel one step deeper reads as nearer, one ember accent) —
+  the part of a palette a spec can hold without drifting from it.
+- files: pkgs/jarvis-wallpaper/default.nix, tools/tests/test_gen_theme_qml.py,
+  docs/optimization-backlog.md (R9), docs/superpowers/specs/2026-09-25-jarvisos-desktop-identity-design.md,
+  ops/ralph/PLAN.md
+- next: **D1** (the top bar) is the biggest unclaimed piece of Track D and the
+  first new on-screen surface since the HUD; both new gates cover it from the
+  day `pkgs/jv-bar` exists, and it is real bus data (niri workspaces, clock,
+  net/audio), so it belongs at the top of the ladder. **D10** is new and small
+  and was found by this work: the wallpaper is composed for the 1440p primary
+  and `swaybg -m fill` scales that one PNG onto two 1080p panels, so the
+  instrument and the wordmark are cropped by an amount nobody chose —
+  recomposing on fractions is doable today, per-output renders need the output
+  names, which is **D4**. **D9/R9** is still the boot path and a human's, and
+  it now has one more thing waiting in it: those files spell the font family
+  too. From the old corner: **A89**, **A88**, **B94** and **A62/A70**.

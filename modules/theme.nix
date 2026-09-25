@@ -1,20 +1,75 @@
 # JarvisOS system theming — the desktop's look, declaratively (blueprint §06).
 # Fonts live in modules/fonts.nix; this module owns everything else that makes
 # ordinary apps and the session read as JarvisOS: GTK + Qt dark/ember, cursor
-# and icon themes, the terminal + launcher palettes, and the wallpaper.
+# and icon themes, and the terminal + launcher palettes. The wallpaper's own
+# service is here; its colours are in pkgs/jarvis-wallpaper.
+#
+# The PALETTE IS NOT WRITTEN HERE. It is read out of `personality/theme.toml`
+# with `builtins.fromTOML`, the way modules/fonts.nix reads the font families
+# and `tools/gen_theme_qml.py` reads the whole file for the HUD. theme.toml
+# says it is "the ONLY place a colour exists", and until this module that was
+# true of the HUD and false of the desktop: this file carried a hand-copied
+# palette under a "kept in sync" comment, and it had already drifted — the
+# terminal and the launcher were painting text in #E6ECF0 / #9BAAB4 / #64747F,
+# three colours that appear nowhere in blueprint §06 (#E4EAEE / #9FADB7 /
+# #6E7E89), plus #F79070, which is not a token at all. That is the exact shape
+# modules/fonts.nix was written to prevent for faces: nothing fails, the
+# identity just quietly becomes a lookalike of itself. A tools gate now fails
+# if any file under modules/ or pkgs/ grows a colour literal again.
+#
+# What lives here instead is the BINDING from a surface to the token it
+# spends — which is a design decision, and belongs in the open.
 { config, lib, pkgs, self, ... }:
 let
   wallpaper = self.packages.x86_64-linux.jarvis-wallpaper;
 
-  # Blueprint §06 tokens (kept in sync with personality/theme.toml).
-  ground = "#090D12";
-  panel = "#0C1116";
-  ember = "#F0714A";
-  ember2 = "#F79070";
-  teal = "#4FB8BF";
-  text = "#E6ECF0";
-  muted = "#9BAAB4";
-  faint = "#64747F";
+  theme = builtins.fromTOML (builtins.readFile ../personality/theme.toml);
+
+  # Ask theme.toml for a token, and throw if it does not have it. A colour
+  # that silently became "" would paint a surface black and pass every check.
+  token =
+    name:
+    theme.palette.${name} or (throw ''
+      modules/theme.nix spends the colour "${name}", and [palette] in
+      personality/theme.toml does not have it. Either the token was renamed
+      there (rename it here too — this is the desktop half of the same
+      identity) or this module is asking for a colour §06 does not define.'');
+
+  face =
+    role:
+    theme.type."family_${role}" or (throw ''
+      modules/theme.nix sets a font for the role "${role}", and [type] in
+      personality/theme.toml names no family_${role}. A face is identity
+      (invariant 9): it is named there, bound to a package in
+      modules/fonts.nix, and spent here.'');
+
+  # --- the tokens this module spends, and what each one is for ------------
+  #
+  # §06's ground is the desktop's ground, and the wallpaper is painted in it.
+  # `ground_deep` sits one step BELOW it — theme.toml calls it the HUD's own
+  # plate — which is what makes a terminal read as a window lying on the
+  # desktop rather than a hole cut in it. So: window grounds are deep, and
+  # `ground` is the colour of the panel edges inside them.
+  groundDeep = token "ground_deep";
+  ground = token "ground";
+  ember = token "ember";
+  teal = token "teal";
+  text = token "text";
+  text2 = token "text_2";
+  text3 = token "text_3";
+  # §06 gives three hues and three status colours; ANSI wants sixteen slots.
+  # The terminal therefore collapses (green, blue, cyan) onto teal, spends
+  # `warn` on yellow — where caution is what yellow has always meant — and
+  # `risk` on magenta and the bright reds. Every slot is a token; none of
+  # them is a colour invented for the terminal.
+  warn = token "warn";
+  risk = token "risk";
+
+  sansFamily = face "sans";
+  monoFamily = face "mono";
+
+  # fuzzel wants RRGGBBAA with no '#'.
+  rgba = colour: alpha: (lib.removePrefix "#" colour) + alpha;
 
   gtkSettings = ''
     [Settings]
@@ -23,7 +78,7 @@ let
     gtk-icon-theme-name=Papirus-Dark
     gtk-cursor-theme-name=Bibata-Modern-Ice
     gtk-cursor-theme-size=24
-    gtk-font-name=Archivo 11
+    gtk-font-name=${sansFamily} 11
   '';
 in
 {
@@ -68,10 +123,10 @@ in
   };
 
   # Alacritty — the terminal in JarvisOS colours (Archivo has no mono; the
-  # terminal stays JetBrains Mono, which the palette is designed around).
+  # terminal is family_mono, which the palette is designed around).
   environment.etc."xdg/alacritty/alacritty.toml".text = ''
     [font]
-    normal = { family = "JetBrains Mono", style = "Regular" }
+    normal = { family = "${monoFamily}", style = "Regular" }
     size = 11.0
 
     [window]
@@ -79,30 +134,30 @@ in
     padding = { x = 14, y = 14 }
 
     [colors.primary]
-    background = "${ground}"
+    background = "${groundDeep}"
     foreground = "${text}"
 
     [colors.cursor]
     cursor = "${ember}"
-    text = "${ground}"
+    text = "${groundDeep}"
 
     [colors.normal]
-    black   = "${panel}"
+    black   = "${ground}"
     red     = "${ember}"
     green   = "${teal}"
-    yellow  = "${ember2}"
+    yellow  = "${warn}"
     blue    = "${teal}"
-    magenta = "${ember2}"
+    magenta = "${risk}"
     cyan    = "${teal}"
-    white   = "${muted}"
+    white   = "${text2}"
 
     [colors.bright]
-    black   = "${faint}"
-    red     = "${ember2}"
+    black   = "${text3}"
+    red     = "${risk}"
     green   = "${teal}"
-    yellow  = "${ember2}"
+    yellow  = "${warn}"
     blue    = "${teal}"
-    magenta = "${ember2}"
+    magenta = "${risk}"
     cyan    = "${teal}"
     white   = "${text}"
   '';
@@ -110,7 +165,7 @@ in
   # fuzzel launcher — JarvisOS palette, ember selection.
   environment.etc."xdg/fuzzel/fuzzel.ini".text = ''
     [main]
-    font=Archivo:size=13
+    font=${sansFamily}:size=13
     icon-theme=Papirus-Dark
     prompt=">  "
     width=32
@@ -120,14 +175,14 @@ in
     inner-pad=12
 
     [colors]
-    background=${lib.removePrefix "#" panel}f2
-    text=${lib.removePrefix "#" muted}ff
-    match=${lib.removePrefix "#" ember}ff
-    selection=${lib.removePrefix "#" ground}ff
-    selection-text=${lib.removePrefix "#" text}ff
-    selection-match=${lib.removePrefix "#" ember}ff
-    border=${lib.removePrefix "#" ember}ff
-    prompt=${lib.removePrefix "#" ember}ff
+    background=${rgba ground "f2"}
+    text=${rgba text2 "ff"}
+    match=${rgba ember "ff"}
+    selection=${rgba groundDeep "ff"}
+    selection-text=${rgba text "ff"}
+    selection-match=${rgba ember "ff"}
+    border=${rgba ember "ff"}
+    prompt=${rgba ember "ff"}
 
     [border]
     width=1
