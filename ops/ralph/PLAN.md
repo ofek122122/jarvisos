@@ -1792,7 +1792,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       caught on the re-grade.)
 
 - [x] B73. The four gates that could not see a change to themselves.
-      — COMMITHASH
+      — b7b1abd
       (One sentence, finished on every code path that had it: **the thing
       that runs a gate is read by it.** `qml_reads` seeds its read-set with
       `gate.script`, so editing `qmltest.sh` or `hudshots.sh` runs THAT gate

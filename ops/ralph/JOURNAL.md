@@ -9671,3 +9671,96 @@ the comparison (which are pictures).
   sentence each: **B27/B28**, **B43/B47/B54**, and **B10/A28** — one live
   recording of one spoken turn on ares is still the biggest thing a human can
   hand this loop.
+
+## 2026-09-25 — iteration 98 — the four gates that could not see a change to themselves (B73)
+
+Track A is still where the value is and still almost entirely waiting on one
+human look: every open A item is a decision (A13/A27/A38, A21/A22/A25, A47
+and the five it blocks, A50/A60/A62/A65/A68/A70/A72) or is deliberately
+deferred until a signal exists (A11 needs frozen-schema fields, A18 waits for
+the topic that would break it, A33/A35/A36 wait for a second moving element).
+So the ladder's step 2, and the item the last iteration named: **B73**.
+
+**One sentence, finished on every path that had it.** B72 wrote it down for
+the declared gates — *the change most likely to break a gate is a change to
+the gate* — and closed it for exactly one table. Three other code paths had
+the same hole and each had a different reason nothing could reach it:
+
+- `qml_reads` walks OUT from the entry directory, following `import` lines
+  and `qmldir` declarations. A bash script that points an engine at that
+  directory is not a type on anybody's import path, so `qmltest.sh` and
+  `hudshots.sh` could not be found from themselves.
+- A Python suite cannot import the script that runs it. `runtests.sh` picks
+  the interpreter, layers the venv and sets the PYTHONPATH that decides which
+  copy of `jarvis_bus` gets imported — and the line that did exactly that is
+  sitting in its own header, which is the whole argument in one artifact.
+- `cargotest.sh` is read by nothing at all: a crate's tests live inside the
+  source they test, which is why `dependents` apologises for Rust instead of
+  answering. It is *how* a crate's tests run — the nix dev shell, the
+  vendored registry, the cache outside the repo.
+
+All four are implicit reads now. Each is guarded on the script being THERE,
+which is the refusal the QML and declared gates already make: a DELETED
+runner is a changed path like any other, and `bash ops/ralph/runtests.sh
+tools` is still a command that cannot run. Before this every one of the four
+named `tools` alone — which reads them as TEXT, to check the service list in
+`runtests.sh`'s header against `suites()`. A real reader, and not the one at
+risk.
+
+**What it costs, and the case B73 called argued rather than obvious.** The
+two runners take a TARGET, so binding one is binding all of its targets: ten
+Python suites (241.7 s, the `services/pylib/` case) and both crates. That is
+the most expensive rule in this table, and the numbers are what make it a
+trade and not a tax — `runtests.sh` has been touched by 6 commits in 262,
+`cargotest.sh` by 1, `qmltest.sh` by 1, `hudshots.sh` by 3. B72 made the
+opposite call one table over (`nixtest.sh` is deliberately not bound to
+`services/`, because 22 s on every Python edit is the noise that gets a gate
+switched off) and the difference is entirely which side of "rare" the trigger
+falls on. **B76** writes down the one place that reasoning is thin: the rule
+cannot tell a comment from code, so editing the `# Services:` prose in
+`runtests.sh` now buys four minutes to learn nothing.
+
+**The claim is made once over the tables, not five times per kind.** This is
+the part worth keeping. The sentence now has four implementations in four
+shapes — `declared_readers` adds `gate.script` to a tuple at the call site,
+`qml_reads` seeds its output set with it, the two runners each carry their
+own `is_file()` guard — and the way that goes wrong is the FIFTH gate, which
+gets the walk or the declaration and silently not the self-read. That is
+precisely what B72 and B73 each spent an iteration on, once per code path. So
+`test_every_gate_this_repo_names_is_planned_by_a_change_to_itself` walks
+`QML_GATES`, `DECLARED_GATES`, `RUNTESTS_SH` and `CARGOTEST_SH` and asserts
+the one claim over all six, counting both halves of a plan — a gate that is
+not run here (`hudscreens.sh`) is planned by being NAMED, which is what
+`unrun` is for.
+
+**The mutation that survived, and the test it earned.** Nine of ten were
+caught first pass. `or (runner and p == CARGOTEST_SH)` mutated to a bare `or
+runner` — every crate claiming every changed path once the runner is among
+them — lived through the whole suite, because every assertion in the file
+changed the runner and NOTHING else, so "every crate reads the runner" and
+"every crate reads everything" were literally the same answer. A README
+edited in the same breath tells them apart, and `why` is the audit trail
+printed beside each step: a step claiming a path with nothing to do with it
+is what makes a plan unreadable. The second grading run took that one and the
+declared-gate self-read (B72's own rule, never mutated until now): 2/2.
+
+- tests: `bash ops/ralph/verify.sh` green — it planned `runtests.sh tools`
+  **420** (was 411) over the 4 changed paths, 34.1 s. Ten mutations, ten
+  caught (8 then 2). Checked by hand afterwards, which is the demonstration:
+  `verify.sh --list ops/ralph/qmltest.sh` now plans 2 gates, `hudshots.sh` 2,
+  `cargotest.sh` 3 (both crates), `runtests.sh` **10**.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py, tools/verify.py, tools/tests/test_dependents.py,
+  tools/tests/test_verify.py
+- commit: b7b1abd
+- next: **B75(c)** is still the loop-sized measurement the last two iterations
+  named — what `hudscreens.sh`'s probes cost without the seven `grim`
+  captures — and it is the only thing that lets anyone choose between (a),
+  (b) and (c). Also doable by the loop: **B62**, **B67**, **B76** (but not
+  until a four-minute run is really bought by a paragraph). Track A remains
+  blocked on human sentences: A47's OCR-or-IPC decision blocks A55 and four
+  growth checks; A13/A27/A38 are one two-minute look at
+  `docs/hud/screens/02-heard-desk.png`; A21/A22/A25 are one answer to one
+  question about time on screen. And **B10/A28** — one live recording of one
+  spoken turn on ares — is still the biggest thing a human can hand this loop.
