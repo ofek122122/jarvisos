@@ -3292,7 +3292,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       build it here — it is a schema, and R5 is already written.
       Discovered in A78.
 
-- [ ] B78. The terminal view has the same blind spot the HUD just lost,
+- [x] B78. The terminal view has the same blind spot the HUD just lost,
       and only one of its two readers could close it. `jv health` prints
       `uptime_s` (cli.rs) and is a SNAPSHOT — one read of `latest`, no
       memory, no second frame to compare against — so it can never say a
@@ -3304,7 +3304,30 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       become is a second implementation of the rule: the freshness window
       and the monotonicity argument live in `core/HealthState.qml`, and
       two readers that disagreed about what a restart is would be worse
-      than one that cannot see them. Discovered in A78.
+      than one that cannot see them. Discovered in A78. — 4b3441d
+      (`cli::Lives` is `jv tap`'s only memory of the processes behind the
+      heartbeats, and prints `restart jv-ears: 2x (was up >=8.2s)` on the
+      beat whose `uptime_s` went backwards. It argues nothing:
+      `HealthState`'s rules are kept verbatim — a first sighting claims
+      nothing (so A82's boot crash loop is invisible here exactly as it is
+      on screen), an unreadable `uptime_s` is SKIPPED and not forgotten so
+      the next good frame compares against the last good one, and `<` not
+      `<=` because two beats a coarse clock stamped alike are one process.
+      The trust gate is now one function, `trust_health`, shared with `jv
+      health --check`, so the two readers of `sys.health` in this binary
+      cannot come to believe different frames; it is stricter than the
+      HUD's in one place (a state word off the frozen enum refuses the
+      whole frame), and strictness can only LOSE a death, never invent one.
+      The rule deliberately NOT carried over is `restartsOf`'s freshness
+      window: it bounds how long a plate DISPLAYS a claim, and a line
+      printed once into a stream has no duration to bound. `3x` is
+      `HealthPlate`'s notation for the same fact and `>=` is `SayGauge`'s
+      mark for a bound — the dead process is only known to have REACHED
+      the uptime it last heartbeated. The roster is capped at 64 and past
+      the cap a new name is REFUSED rather than evicting the oldest, which
+      is the opposite of `Confirmations` and for a stated reason. 11 unit
+      tests (151, was 140) + 2 integration (42, was 40), 12 mutations, 12
+      caught. Raised: B82, B83.)
 
 - [ ] A83. **An answer to a question the HUD never saw is dropped on the
       floor, and the case is not exotic.** A79 will only write an ending
@@ -3378,6 +3401,43 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       about the TAP's own observation and not a verdict about the tool.
       That is a different kind of line from every `>>>` the tap writes
       today, which is why it is a proposal. Discovered in B79.
+
+- [ ] B82. **`jv health --check` holds a window and still cannot see a
+      restart, and it is now one line from being able to.** B78 put the
+      memory in `jv tap` because that is where PLAN said it went, but
+      `HealthCheck` already keeps per-service state across a whole `--for`
+      window (`says` does exactly the backwards-counter trick for
+      `llm_first_says`) and already reads `uptime_s` through the shared
+      `trust_health`. So a service that died and came back INSIDE the six
+      seconds `--check` listens is a service `--check` currently reports
+      as `ok`, and its exit status says the machine is well. The question
+      that makes this a proposal rather than a patch is what it should do
+      about it: `--check`'s whole contract is one word per service out of
+      the frozen enum plus `lost`/`unknown`, and `restarted` would be an
+      eighth word AND a new non-zero exit — which is `jv health --check`
+      failing a machine that is, at the moment it is asked, entirely
+      healthy. The HUD chose to rank `restarted` level with `degraded`
+      (A78); doing the same here makes a boot-time crash loop fail the
+      check for one window and pass the next, which is a flapping gate.
+      Worth deciding with A76, which is the same flap question about the
+      broker. Discovered in B78.
+
+- [ ] B83. **The restart line says how many, and nothing anywhere says
+      when.** `restart jv-ears: 2x` counts deaths since the tap connected,
+      and two deaths four hours apart print identically to two deaths four
+      seconds apart — the crash loop and the unlucky afternoon read the
+      same. `was up >=8.2s` carries the distinction only for the life that
+      just ended, which is the wrong half: a reader chasing a crash loop
+      wants the RATE. The tap has the frame's `ts` in hand and could say
+      it (`2x, 11.4s apart`), and under `--latency` the hop line above
+      already carries the clock — but a third number on a line that is
+      already three is the kind of growth `Turn::lines` exists to refuse,
+      and the honest alternative is a count at the SUMMARY, where `jv tap`
+      already says what it saw once the stream stops and where "jv-ears
+      restarted 26 times in 4 minutes" is a sentence rather than a
+      fragment. That summary does not exist for anything but latency
+      today, which is the real cost and why this is a proposal. Discovered
+      in B78.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD

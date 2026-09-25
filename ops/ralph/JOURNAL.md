@@ -10273,3 +10273,113 @@ them. Under `--latency` that omission costs something real, which is B80.
   Otherwise unchanged: Track A is human-blocked (A47 -> A55 and the
   growth checks; A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
   A76/A77/A81/A82 and B62/B67/B76/B77 are raised-but-undecided.
+
+## 2026-09-25 — iteration 104 — B78: the restart, seen on the wire
+
+A79, B79 and A78 all pointed here, and B78 is the last unbuilt half of
+the A78/A79 pair. The A track is human-blocked almost everywhere, so the
+ladder says feature.
+
+**What was wrong.** Every unit in `modules/jarvis-services.nix` is
+`Restart=on-failure`, so a service that crashes is replaced by a new
+process that heartbeats `starting`, then `ok`. Nothing on the bus
+publishes "I was restarted" — and a service that could would be the one
+least able to, having just lost the memory. A78 gave the HUD the one
+reading that can see it anyway: `uptime_s` counts from one process's own
+start, so it only rises while that process lives, and a heartbeat
+carrying LESS of it than the last one from the same service was written
+by a different process. The terminal had none of that. `jv health` prints
+`uptime_s` and is a snapshot — one line per frame, no memory — so it can
+never say a service restarted, however long it runs. `jv tap` already
+holds per-turn state across frames and was the reader that could.
+
+    >>> restart jv-ears: 2x (was up >=8.2s)
+
+**What it decides: nothing**, and that is the design. What a restart IS
+is argued in `core/HealthState.qml`, and two readers of the same bus that
+disagreed about it would be worse than one that cannot see it at all. So
+`cli::Lives` keeps that file's rules rather than re-deriving them:
+
+- *A first sighting claims nothing.* With nothing remembered there is no
+  direction for the number to have moved in, and a small `uptime_s` on a
+  first beat is what every service looks like on a machine that just
+  booted. The consequence is the same one A82 names for the HUD: the boot
+  crash loop, the most likely one there is, is invisible to both readers,
+  and systemd's `NRestarts` is not the bus's to ask for (R5).
+- *An unreadable `uptime_s` is SKIPPED, not forgotten*, so the next good
+  frame is compared against the last good one — the comparison that means
+  something. `"5" < 400` is true in JavaScript and that is why the QML
+  checks the type; here `get_f64` refuses a string outright, and the test
+  says so out loud rather than leaving it to the reader of a helper.
+- *`<` and not `<=`.* Two beats a coarse clock stamped with the same
+  number are one process.
+
+**The trust gate is now one function.** `HealthCheck::trust` became a
+free `trust_health` that both readers of `sys.health` in this binary
+pass through, so `jv health --check` and `jv tap` cannot come to believe
+different frames about the same service. It is STRICTER than the HUD's in
+one place — a `state` word outside the frozen enum refuses the whole
+frame here and only the word there — and that asymmetry is safe in one
+direction only, which is the direction it points: refusing a frame can
+lose a death and can never invent one, because a smaller `uptime_s` is
+the only evidence there is and a frame never read cannot make a number go
+backwards.
+
+**The one rule deliberately not carried over** is `restartsOf`'s
+freshness window. The HUD draws its row only while the replacement
+process is still young, because a plate asserts its claim continuously
+and a standing `RESTARTED 3x` over a service up for a week is a stale
+sentence. A tap prints once, at the moment of observation, into a stream
+whose position is itself the timestamp — there is no duration for a
+window to bound. That is a difference about how long a claim is
+DISPLAYED, not about what a restart is.
+
+**Three smaller choices worth naming.** `3x` is the notation
+`HealthPlate` already draws this fact in, so the corner and the terminal
+do not spell one number two ways. `>=` is `SayGauge`'s mark for a bound
+rather than a reading: the dead process is only known to have REACHED the
+uptime it last heartbeated and may have lived up to a period longer, and
+8.2 s is a crash loop where 418.7 s is one bad afternoon. And the roster
+is capped at 64 with a new name REFUSED past the cap rather than the
+oldest evicted — the opposite of `Confirmations`, because there the
+newest question is the one somebody is waiting on, while here the oldest
+service is the one whose history is worth the most and a tally that
+silently begins again is worse than one that never begins.
+
+What this shipped without is B83: the line says how many and nothing
+says when, so two deaths four hours apart print like two four seconds
+apart. And B82 is the neighbour it did not take — `jv health --check`
+holds a window and could nearly see this, but an eighth state word and a
+new non-zero exit are a flapping gate, which is A76's question again.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over the 3 changed
+  paths, 79.4 s: `runtests.sh pylib` 38.6 s, `runtests.sh tools` 35.1 s,
+  `cargotest.sh jarvisd` 5.7 s (151 unit, was 140; 42 integration, was
+  40). Re-asked as `verify.sh --since HEAD~1` after the commit: same 3
+  paths, GREEN. The gate verify names but does not run: `bash
+  ops/ralph/hudscreens.sh` GREEN, 185.9 s, 7/7 matching HEAD — the right
+  answer for a change no pixel of the HUD can see. All 13 tests were RED
+  before `Lives` existed; the integration pair was re-run with the
+  `println!` removed from `bin/jv.rs` and went red, so it is load-bearing
+  on the binary and not only on the unit. Mutations: 12 graded, 12
+  caught — an equal uptime read as a death, a tally that never rises, the
+  NEW life reported instead of the one that ended, an off-by-one cap, the
+  trust gate bypassed, the NaN/negative filter dropped, an empty `src`
+  admitted, `>=` written as `=`, an unclipped name, the cap evicting
+  instead of refusing, a first sighting reported as a death, and the line
+  never printed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins — `uptime_s` has been required in
+  `schemas/sys.health.json` since v1.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs, ops/ralph/PLAN.md
+- commits: 4b3441d (the reader and the line)
+- next: the A78/A79 pairs are now both complete on both tracks. **B82**
+  is the cheapest remaining thing here and is half a decision (it shares
+  A76's flap question, so answer them together or not at all). **B80**
+  and **B81** are B79's own limits, **B83** is this one's. On the A
+  track: **A22** is a design decision with its reader already written and
+  **A83** belongs with it; **A80**'s gate crosses two elements. Otherwise
+  unchanged: Track A is human-blocked (A47 -> A55 and the growth checks;
+  A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
+  A76/A77/A81/A82 and B62/B67/B76/B77 are raised-but-undecided.
