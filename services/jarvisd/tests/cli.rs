@@ -853,6 +853,122 @@ async fn think_splits_into_the_llm_and_everything_around_it() {
     assert!(!s.contains("think unsplit"), "the table apologises for a split think:\n{s}");
 }
 
+/// One voice turn per cycle whose reply carries the `say_id` jv-brain really
+/// mints, and the terminal `speech.state` jv-voice answers with — the two
+/// frames a turn's ENDING is made of, on a real broker, from a real
+/// jv-voice connection.
+///
+/// Odd turns finish; even turns are talked over. Both are timed to their
+/// first word and print the same `respond`, which is the whole reason the
+/// ending lines exist: without them the two are indistinguishable in this
+/// output.
+fn pump_turns_with_endings(bus: &TestBus, every_ms: u64) -> tokio::task::JoinHandle<()> {
+    let addr: BusAddr = bus.addr.clone();
+    tokio::spawn(async move {
+        let mut ears = BusClient::connect(&addr, "jv-ears").await.expect("ears connect");
+        let mut brain = BusClient::connect(&addr, "jv-brain").await.expect("brain connect");
+        let mut voice = BusClient::connect(&addr, "jv-voice").await.expect("voice connect");
+        let mut n = 0u32;
+        loop {
+            n += 1;
+            let utt = format!("utt-ralph-{n}");
+            for (topic, b) in [
+                ("sys.health", ears_heartbeat(0.02)),
+                ("audio.vad", vad("speech_start", &utt)),
+                ("audio.vad", vad("speech_end", &utt)),
+                ("audio.transcript", transcript("final", &utt)),
+            ] {
+                if ears.publish(topic, 1.0, 1, b).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(every_ms)).await;
+            }
+            // A streamed reply: one say_id per sentence, one reply_group.
+            let mut last = String::new();
+            for s in 0..3 {
+                last = format!("say-{n}-{s}");
+                let say = body(&[
+                    ("text", "hi".into()),
+                    ("say_id", last.as_str().into()),
+                    ("in_reply_to_utterance", utt.as_str().into()),
+                    ("reply_group", format!("grp-{n}").as_str().into()),
+                ]);
+                if brain.publish("speech.say", 1.0, 1, say).await.is_err() {
+                    return;
+                }
+            }
+            // jv-voice leaving `speaking`: exactly one terminal frame per
+            // reply, naming the sentence it was holding when the turn ended.
+            let state = if n % 2 == 0 {
+                body(&[("state", "interrupted".into()), ("say_id", last.as_str().into()), ("reason", "wake".into())])
+            } else {
+                body(&[("state", "idle".into()), ("say_id", last.as_str().into()), ("reason", "completed".into())])
+            };
+            if voice.publish("speech.state", 1.0, 1, state).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(every_ms)).await;
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_reply_that_was_cut_off_is_not_reported_like_one_spoken_in_full() {
+    let bus = start(Config::default()).await;
+    let p = pump_turns_with_endings(&bus, 30);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.5"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let endings: Vec<&str> = out
+        .stdout
+        .lines()
+        .filter(|l| l.starts_with(">>> turn ") && l.contains("reply ended"))
+        .collect();
+    assert!(endings.len() >= 2, "no reply was ever reported as ending:\n{}", out.stdout);
+    assert!(endings.iter().any(|l| l.contains("completed")), "nothing finished:\n{}", out.stdout);
+    assert!(endings.iter().any(|l| l.contains("wake")), "nothing was cut off:\n{}", out.stdout);
+
+    // The ending names the TURN, not the sentence jv-voice was holding — a
+    // say_id would be an identifier nothing else in this output prints.
+    for line in &endings {
+        assert!(line.contains("utt-ralph-"), "the ending names no turn: {line}");
+        assert!(!line.contains("say-"), "the ending names a say_id: {line}");
+    }
+    // One ending per reply, however many sentences it took.
+    let mut ids: Vec<&str> = endings.iter().filter_map(|l| l.split_whitespace().nth(2)).collect();
+    let before = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), before, "a turn ended twice:\n{}", out.stdout);
+
+    let s = &out.stdout;
+    assert!(s.contains("--- turn endings:"), "no endings table:\n{s}");
+    assert!(s.contains("\ncompleted "), "no completed row:\n{s}");
+    assert!(s.contains("\nwake "), "no wake row:\n{s}");
+    assert!(s.contains("did not complete"), "the table does not say what it qualifies:\n{s}");
+    assert!(!s.contains("no turn ending"), "the table apologises for endings it has:\n{s}");
+}
+
+#[tokio::test]
+async fn turns_whose_endings_never_landed_say_so_rather_than_looking_finished() {
+    let bus = start(Config::default()).await;
+    // The same turns, replied to by a jv-brain that mints no say_id — so
+    // nothing on this bus can thread an ending back to a turn.
+    let p = pump_turns(&bus, 30, whole_turn);
+
+    let out = wait_out(spawn_jv(&bus.bus_arg(), &["tap", "--latency", "--for", "1.2"]), 8.0).await;
+    p.abort();
+
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let s = &out.stdout;
+    assert!(!turn_lines(&out).is_empty(), "no turn was reported at all:\n{s}");
+    assert!(!s.contains("reply ended"), "an ending came from nowhere:\n{s}");
+    assert!(s.contains("no turn ending"), "the summary must say the gap is a gap:\n{s}");
+    assert!(s.contains("speech.state"), "and name the frame it wanted:\n{s}");
+}
+
 #[tokio::test]
 async fn a_think_nobody_divided_says_so_rather_than_guessing() {
     let bus = start(Config::default()).await;

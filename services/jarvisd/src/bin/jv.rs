@@ -10,7 +10,7 @@
 
 use clap::{Parser, Subcommand};
 use jarvisd::broker::BusAddr;
-use jarvisd::cli::{self, Confirmations, HopStats, Lives, Outcome, TurnStats, Utterances};
+use jarvisd::cli::{self, Confirmations, Endings, HopStats, Lives, Outcome, TurnStats, Utterances};
 use jarvisd::client::BusClient;
 use jarvisd::proto::ServerMsg;
 use jarvisd::time::mono_now;
@@ -237,6 +237,12 @@ async fn main() -> anyhow::Result<()> {
             // frames can see one — which is why `jv health`, a snapshot, never
             // will, however long it runs (cli::Lives).
             let mut lives = Lives::default();
+            // How each reported turn's reply ENDED. A turn is reported at
+            // its first word, so `respond` says the same thing about a reply
+            // that died mid-synthesis as about one spoken in full; the frame
+            // that tells them apart lands later and names a `say_id`
+            // (cli::Endings, PLAN B85).
+            let mut endings = Endings::default();
             // jv-ears' endpoint hold, once it has said what it is. No
             // fallback: a turn measured before the first heartbeat lands
             // reports `?` for the spans that need it (cli::Turn).
@@ -355,6 +361,12 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     "speech.say" => {
+                        // EVERY sentence of a streamed reply, not just the
+                        // first: jv-voice reports the turn's ending against
+                        // whichever say_id it was holding when the turn
+                        // ended, which for a reply spoken in full is the
+                        // last one.
+                        endings.said(body);
                         if let Some(id) = cli::get_str(body, "in_reply_to_utterance") {
                             // Only the FIRST reply frame: a streamed reply is
                             // many speech.say frames for one utterance, and
@@ -379,6 +391,15 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
                     }
+                    // jv-voice leaving `speaking`, which is the only place
+                    // on this bus that says how an utterance ended. Every
+                    // refusal about what an ending IS lives in `Endings`, so
+                    // there is nothing to decide here (PLAN B85).
+                    "speech.state" => {
+                        if let Some(line) = endings.observe(body) {
+                            println!(">>> {line}");
+                        }
+                    }
                     _ => {}
                 }
             })
@@ -386,6 +407,7 @@ async fn main() -> anyhow::Result<()> {
             if latency {
                 print!("{}", stats.summary());
                 print!("{}", turns.summary());
+                print!("{}", endings.summary(turns.reported()));
             }
             cli::exit_code(run.outcome, count, run.seen)
         }

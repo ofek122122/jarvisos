@@ -7,6 +7,7 @@
 //! and they are cheap to pin down directly. `bin/jv.rs` keeps only argument
 //! parsing and the async stream loop.
 
+use crate::schema::SpeechStateReason;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 // ---------------------------------------------------------------- envelope reads
@@ -1130,6 +1131,12 @@ impl TurnStats {
         self.turns == 0
     }
 
+    /// How many turns have been reported. `Endings::summary` needs it: a tap
+    /// that reported turns and saw none of them end has a gap worth naming.
+    pub fn reported(&self) -> usize {
+        self.turns
+    }
+
     pub fn summary(&self) -> String {
         if self.is_empty() {
             return String::new();
@@ -1195,6 +1202,254 @@ impl TurnStats {
             out.push_str(
                 "--- the machine's share of a turn is hold+respond; spoke is the user, and no\n    faster machine shortens it.\n",
             );
+        }
+        out
+    }
+}
+
+// ---------------------------------------------------------------- turn endings
+
+/// How many spoken outputs one tap remembers the turn behind.
+///
+/// Bounded for the reason every memory in this file is: `jv tap` is meant to
+/// be left running for hours, and a `speech.say` whose ending never comes —
+/// jv-voice died mid-turn, or the tap stopped before the state frame — is
+/// forgotten by nothing else. Past the cap the OLDEST is dropped, the same
+/// argument `Confirmations` makes about its oldest question: the newest
+/// output is the one still being spoken, and its ending is the one still to
+/// come.
+///
+/// 128 is far past any plausible reply. jv-brain emits one `speech.say` per
+/// sentence and jv-voice reports one ending per `reply_group`, so this holds
+/// a dozen streamed replies at once, and an ending lands inside the turn it
+/// belongs to.
+pub const SAYS_REMEMBERED: usize = 128;
+
+/// The widest a `reason` word prints inside an ending line.
+///
+/// Only a word OUTSIDE the frozen enum can reach it — the four inside are 5
+/// to 9 characters — and it is off the wire, so it is as long as whatever
+/// published it decided. 16 is what the line has left at the widest
+/// utterance id.
+pub const ENDING_WORD_COLUMNS: usize = 16;
+
+/// The endings table in the order the summary prints it: the word jv-voice
+/// puts on the wire, and what it means for a turn this tap already reported.
+///
+/// The glosses are about the TURN and not about jv-voice's internals, because
+/// what a reader of `--latency` needs from them is whether the `respond`
+/// number above stands for words that were heard.
+const ENDING_TABLE: [(&str, &str); 4] = [
+    ("completed", "spoken in full"),
+    ("wake", "you cut it off"),
+    ("preempted", "something urgent cut in"),
+    ("error", "synthesis or playback threw"),
+];
+
+/// Which row of `ENDING_TABLE` a reason is tallied in.
+///
+/// An exhaustive match over the GENERATED `schema::SpeechStateReason`, and
+/// that is the enforcement: a fifth word added to
+/// `schemas/speech.state.json` makes this match non-exhaustive and this file
+/// stops compiling, rather than the new word going silently untallied. A
+/// written-down list is the failure PLAN B87 is about; a `match` is the one
+/// form of it that cannot rot.
+fn ending_slot(reason: SpeechStateReason) -> usize {
+    match reason {
+        SpeechStateReason::Completed => 0,
+        SpeechStateReason::Wake => 1,
+        SpeechStateReason::Preempted => 2,
+        SpeechStateReason::Error => 3,
+    }
+}
+
+/// A `reason` word off the wire as the frozen enum, or None for a word
+/// outside it.
+///
+/// Parsed by the generated binding rather than compared against a list here,
+/// so the vocabulary this reader accepts IS `schemas/speech.state.json`'s.
+fn ending_reason(word: &str) -> Option<SpeechStateReason> {
+    serde_json::from_value(serde_json::Value::String(word.to_string())).ok()
+}
+
+/// One spoken output this tap saw requested, and the input utterance it
+/// answers.
+struct Said {
+    say_id: String,
+    utterance: String,
+}
+
+/// How each reported turn's reply ENDED — `jv tap`'s answer to "were those
+/// words actually heard?" (PLAN B85).
+///
+/// A turn is reported the moment its first `speech.say` lands, because that
+/// is what time-to-first-word means. Nothing after that moment is in the
+/// number: a reply that died in synthesis, one the user talked over after two
+/// words, and one spoken to its last sentence all print the same
+/// `respond=2.1s`. That is B13's failure with the label still attached — a
+/// number whose name stopped covering what it measures — and the frames that
+/// fix it were already on the bus.
+///
+/// jv-voice publishes exactly ONE terminal `speech.state` per reply: it
+/// speaks a whole `reply_group` inside `_speak_turn` and leaves it with
+/// `idle`+`completed`, `interrupted`+`wake`/`preempted`, or `idle`+`error`.
+/// That frame carries a `say_id`, and the `speech.say` that asked for it
+/// carried `in_reply_to_utterance` beside the same id — so the ending threads
+/// back to the turn with no new publisher and no schema change, the same free
+/// seam `hear`/`think` and `tool` were found on.
+///
+/// **It decides nothing.** `reason` is the only thing on this bus that says
+/// how an utterance ended, and this reader never infers one:
+///
+///   * only from a `reason` FRAME. `idle` on its own is jv-voice's queue
+///     draining, and its first frame at startup; a transition with no reason
+///     on it is not an ending. Nothing is timed out here, so a reply whose
+///     ending never comes is dropped by the cap, silently, and is never
+///     reported as an ending the machine did not state.
+///   * only about an output this tap SAW requested. A reason naming a
+///     `say_id` we never heard asked for belongs to a turn this tap cannot
+///     name — it is dropped rather than attached to the latest turn, which is
+///     the refusal `Confirmations` makes about an answer out of nowhere.
+///   * only about a VOICE TURN. `in_reply_to_utterance` is required and
+///     NULLABLE, and a null one is a system announcement: real speech with a
+///     real ending, but no turn was reported for it and there is no number
+///     here for its ending to qualify.
+///
+/// A turn ends ONCE: an ending drops every say of that utterance and not only
+/// the one it named. jv-voice publishes no second terminal state for a reply
+/// today, and this way that is a property of the reader rather than of the
+/// publisher's current shape.
+pub struct Endings {
+    said: VecDeque<Said>,
+    cap: usize,
+    counts: [usize; ENDING_TABLE.len()],
+    /// Endings whose `reason` was a word outside the frozen enum: printed
+    /// verbatim on their own line, and in no row of the table. A word this
+    /// binary does not know is not a diagnosis, and guessing which tally it
+    /// belongs in would put a number under a name it does not stand for.
+    unnamed: usize,
+}
+
+impl Default for Endings {
+    fn default() -> Self {
+        Self::with_capacity(SAYS_REMEMBERED)
+    }
+}
+
+impl Endings {
+    /// A reader holding at most `cap` outputs. A cap of zero would be a
+    /// reader that can report nothing, so one is the floor — the same floor
+    /// `Confirmations::with_capacity` sets for the same reason.
+    pub fn with_capacity(cap: usize) -> Self {
+        Endings {
+            said: VecDeque::new(),
+            cap: cap.max(1),
+            counts: [0; ENDING_TABLE.len()],
+            unnamed: 0,
+        }
+    }
+
+    /// How many outputs are remembered — the memory this holds, for a test
+    /// that wants to prove it is bounded.
+    pub fn remembered(&self) -> usize {
+        self.said.len()
+    }
+
+    /// Whether any ending has been seen at all. An ending whose word was
+    /// unusable still happened, so it counts here.
+    pub fn is_empty(&self) -> bool {
+        self.counts.iter().all(|&n| n == 0) && self.unnamed == 0
+    }
+
+    /// One `speech.say` body: remember which turn this output answers.
+    ///
+    /// Newest wins for a reused `say_id`, the same way `Confirmations::asked`
+    /// replaces a reused `request_id`: an id asked again is a new output, and
+    /// ending the old one would name the wrong turn.
+    pub fn said(&mut self, body: &rmpv::Value) {
+        let (Some(say_id), Some(utterance)) = (
+            get_str(body, "say_id").filter(|s| !s.is_empty()),
+            get_str(body, "in_reply_to_utterance").filter(|s| !s.is_empty()),
+        ) else {
+            return;
+        };
+        self.said.retain(|s| s.say_id != say_id);
+        while self.said.len() >= self.cap {
+            self.said.pop_front();
+        }
+        self.said.push_back(Said { say_id, utterance });
+    }
+
+    /// One `speech.state` body, and the line it is worth when it ends a reply
+    /// this tap saw requested.
+    ///
+    /// Every field is read here rather than at the call site so that all
+    /// three refusals are in the tested unit: `bin/jv.rs` passes the body
+    /// through and prints whatever comes back, and cannot hold an opinion
+    /// about what an ending is.
+    pub fn observe(&mut self, body: &rmpv::Value) -> Option<String> {
+        let reason = get_str(body, "reason").filter(|s| !s.is_empty())?;
+        let say_id = get_str(body, "say_id").filter(|s| !s.is_empty())?;
+        let i = self.said.iter().position(|s| s.say_id == say_id)?;
+        let utterance = self.said[i].utterance.clone();
+        self.said.retain(|s| s.utterance != utterance);
+        let id = short_id(&utterance);
+        Some(match ending_reason(&reason) {
+            Some(r) => {
+                let (word, gloss) = ENDING_TABLE[ending_slot(r)];
+                self.counts[ending_slot(r)] += 1;
+                format!("turn {id}: reply ended {word} ({gloss})")
+            }
+            None => {
+                self.unnamed += 1;
+                format!("turn {id}: reply ended {} (not in the frozen enum)", clip(&reason, ENDING_WORD_COLUMNS))
+            }
+        })
+    }
+
+    /// The endings table, and the sentence the turn table above it cannot
+    /// say.
+    ///
+    /// `turns_reported` is used for one thing only: a tap that reported turns
+    /// and never saw one of them end has a gap worth naming, and silence
+    /// there would read as "they all finished". It is not printed as a
+    /// fraction of the endings, because the two counts are over different
+    /// sets — a reply whose input boundaries this tap never heard is an
+    /// ending here and no turn there.
+    pub fn summary(&self, turns_reported: usize) -> String {
+        if self.is_empty() {
+            if turns_reported == 0 {
+                return String::new();
+            }
+            let plural = if turns_reported == 1 { "" } else { "s" };
+            return format!(
+                "--- no turn ending: no `speech.state` carried a `reason` for an output this\n    tap saw requested, so nothing above says whether the {turns_reported} reported\n    turn{plural} finished or were cut off mid-sentence. jv-voice publishes exactly\n    one such frame per reply, on the way out of `speaking`.\n"
+            );
+        }
+        let total: usize = self.counts.iter().sum::<usize>() + self.unnamed;
+        let mut out = format!("--- turn endings: {total}, as jv-voice reported them leaving `speaking`\n");
+        for (i, (word, gloss)) in ENDING_TABLE.iter().enumerate() {
+            if self.counts[i] == 0 {
+                continue;
+            }
+            out.push_str(&format!("{word:<12} {:>4}  {gloss}\n", self.counts[i]));
+        }
+        if self.unnamed > 0 {
+            let plural = if self.unnamed == 1 { "" } else { "s" };
+            out.push_str(&format!(
+                "--- {} ending{plural} named a reason outside schemas/speech.state.json's enum\n    and {} in no row above.\n",
+                self.unnamed,
+                if self.unnamed == 1 { "is" } else { "are" },
+            ));
+        }
+        out.push_str(
+            "--- a turn is reported at its FIRST word and timed to it, so a reply cut off\n    mid-sentence prints the same `respond` and `total` above as one spoken in\n    full.",
+        );
+        let unfinished = total - self.counts[0];
+        if unfinished == 0 {
+            out.push_str(&format!(" all {total} of them completed.\n"));
+        } else {
+            out.push_str(&format!(" {unfinished} of these {total} did not complete.\n"));
         }
         out
     }
@@ -4842,6 +5097,266 @@ mod tests {
         assert!(short.contains(" fs.delete ->"), "{short}");
     }
 
+
+
+    // -------------------------------------------------------- turn endings
+
+    /// One `speech.say` body, as jv-brain puts a sentence of a reply on the
+    /// bus. `in_reply_to_utterance` is required and NULLABLE, and a null one
+    /// is a real frame: an announcement nobody asked for.
+    fn say(say_id: &str, in_reply_to: Option<&str>) -> rmpv::Value {
+        map(&[
+            ("text", "Right away.".into()),
+            ("say_id", say_id.into()),
+            (
+                "in_reply_to_utterance",
+                match in_reply_to {
+                    Some(u) => u.into(),
+                    None => rmpv::Value::Nil,
+                },
+            ),
+            // Rides along on every streamed sentence; this reader is
+            // required not to need it.
+            ("reply_group", "grp-1".into()),
+        ])
+    }
+
+    /// One `speech.state` body, as jv-voice publishes it on every transition.
+    fn spoke(state: &str, say_id: Option<&str>, reason: Option<&str>) -> rmpv::Value {
+        let mut pairs = vec![("state", rmpv::Value::from(state))];
+        if let Some(s) = say_id {
+            pairs.push(("say_id", s.into()));
+        }
+        if let Some(r) = reason {
+            pairs.push(("reason", r.into()));
+        }
+        map(&pairs)
+    }
+
+    #[test]
+    fn a_reply_spoken_in_full_and_one_cut_off_are_told_apart() {
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        // Starting to speak is not an ending, and neither is anything
+        // without a reason on it.
+        assert_eq!(e.observe(&spoke("speaking", Some("s-1"), None)), None);
+        let line = e.observe(&spoke("idle", Some("s-1"), Some("completed"))).expect("a line");
+        assert!(line.starts_with("turn utt-1: "), "{line}");
+        assert!(line.contains("completed"), "{line}");
+        assert!(line.contains("spoken in full"), "{line}");
+
+        let mut e = Endings::default();
+        e.said(&say("s-2", Some("utt-2")));
+        let line = e.observe(&spoke("interrupted", Some("s-2"), Some("wake"))).expect("a line");
+        assert!(line.contains("wake"), "{line}");
+        assert!(line.contains("you cut it off"), "{line}");
+        // The two numbers `jv tap --latency` printed for these turns are
+        // identical, which is the whole reason this reader exists.
+    }
+
+    #[test]
+    fn an_ending_for_an_output_this_tap_never_saw_requested_says_nothing() {
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        // A reason naming an output we never heard asked for belongs to a
+        // turn this tap cannot name. It is dropped, not attached to the one
+        // turn it does know.
+        assert_eq!(e.observe(&spoke("idle", Some("s-other"), Some("completed"))), None);
+        assert_eq!(e.summary(1).lines().filter(|l| l.starts_with("completed")).count(), 0);
+        // And the turn it does know is untouched, so the real ending still
+        // lands.
+        assert!(e.observe(&spoke("idle", Some("s-1"), Some("error"))).is_some());
+    }
+
+    #[test]
+    fn a_transition_that_is_not_an_ending_says_nothing() {
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        // jv-voice's queue draining, and its very first frame at startup.
+        assert_eq!(e.observe(&spoke("idle", None, None)), None);
+        assert_eq!(e.observe(&spoke("idle", Some("s-1"), None)), None);
+        assert_eq!(e.observe(&spoke("speaking", Some("s-1"), None)), None);
+        // An empty reason is an absent one.
+        assert_eq!(e.observe(&spoke("idle", Some("s-1"), Some(""))), None);
+        assert!(e.is_empty(), "nothing above was an ending");
+        // Nothing here times a reply out: a turn whose ending never comes is
+        // forgotten by the cap, silently, and is never reported as an ending
+        // the machine did not state.
+        assert_eq!(e.remembered(), 1);
+    }
+
+    #[test]
+    fn an_announcement_belongs_to_no_turn_and_ends_without_a_line() {
+        let mut e = Endings::default();
+        // Real speech with a real ending — and no turn was reported for it,
+        // so there is no number here for its ending to qualify.
+        e.said(&say("s-1", None));
+        assert_eq!(e.remembered(), 0);
+        assert_eq!(e.observe(&spoke("idle", Some("s-1"), Some("completed"))), None);
+        assert!(e.is_empty());
+    }
+
+    #[test]
+    fn a_turn_of_many_sentences_ends_exactly_once() {
+        let mut e = Endings::default();
+        // One streamed reply: three sentences, three say_ids, one utterance.
+        for s in ["s-1", "s-2", "s-3"] {
+            e.said(&say(s, Some("utt-1")));
+        }
+        assert_eq!(e.remembered(), 3);
+        // jv-voice reports the turn's ending against the LAST sentence it
+        // spoke, because _speak_turn leaves the loop holding that item.
+        let line = e.observe(&spoke("idle", Some("s-3"), Some("completed"))).expect("a line");
+        assert!(line.starts_with("turn utt-1: "), "{line}");
+        // And the turn is gone whole: a second reason naming a sentence of
+        // an ended reply cannot report the same turn ending twice.
+        assert_eq!(e.remembered(), 0);
+        assert_eq!(e.observe(&spoke("interrupted", Some("s-1"), Some("wake"))), None);
+        assert!(e.summary(1).contains("endings: 1"), "{}", e.summary(1));
+    }
+
+    #[test]
+    fn a_reason_outside_the_frozen_enum_is_printed_and_tallied_nowhere() {
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        let line = e.observe(&spoke("idle", Some("s-1"), Some("evaporated"))).expect("a line");
+        // The word is on the frame, so it is on the line — and it is in no
+        // row, because a word this binary does not know is not a diagnosis
+        // and guessing its tally would put a number under a name it does not
+        // stand for.
+        assert!(line.contains("evaporated"), "{line}");
+        assert!(line.contains("not in the frozen enum"), "{line}");
+        let s = e.summary(1);
+        assert!(!s.contains("completed"), "{s}");
+        assert!(s.contains("outside"), "the refusal is not said out loud: {s}");
+        assert!(!e.is_empty(), "an ending happened; only its word was unusable");
+    }
+
+    #[test]
+    fn the_ending_line_fits_eighty_columns() {
+        // The widest of everything: a full-length uuid utterance and the
+        // longest shape the line takes — a reason word this binary cannot
+        // name, clipped to its own column.
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some(WIDEST_ID)));
+        let line = e.observe(&spoke("idle", Some("s-1"), Some(&"w".repeat(120)))).expect("a line");
+        let w = line.chars().count() + ">>> ".len();
+        assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+        assert!(w >= 60, "{w} columns is not a worst case: {line}");
+        assert!(line.contains("3f2a91c4..."), "the id is not abbreviated: {line}");
+        assert!(!line.contains(WIDEST_ID), "the whole id reached the line: {line}");
+        assert!(line.contains(&("w".repeat(ENDING_WORD_COLUMNS - 3) + "...")), "the word is not clipped: {line}");
+        // A word that already fits is never made longer by being clipped.
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        let short = e.observe(&spoke("idle", Some("s-1"), Some("gone"))).expect("a line");
+        assert!(short.contains(" gone ("), "{short}");
+        // And every named ending fits too, at the widest id.
+        for (word, _) in ENDING_TABLE {
+            let mut e = Endings::default();
+            e.said(&say("s-1", Some(WIDEST_ID)));
+            let line = e.observe(&spoke("idle", Some("s-1"), Some(word))).expect("a line");
+            let w = line.chars().count() + ">>> ".len();
+            assert!(w <= TAP_COLUMNS, "{w} columns: {line}");
+        }
+    }
+
+    #[test]
+    fn the_says_remembered_are_bounded_and_the_oldest_goes_first() {
+        let mut e = Endings::with_capacity(3);
+        for i in 0..10 {
+            e.said(&say(&format!("s-{i}"), Some(&format!("utt-{i}"))));
+        }
+        assert_eq!(e.remembered(), 3);
+        // The oldest went, because the newest output is the one still being
+        // spoken and its ending is the one still to come.
+        assert_eq!(e.observe(&spoke("idle", Some("s-0"), Some("completed"))), None);
+        assert!(e.observe(&spoke("idle", Some("s-9"), Some("completed"))).is_some());
+        // A say_id repeated is one output, not two.
+        let mut e = Endings::with_capacity(3);
+        e.said(&say("s-1", Some("utt-1")));
+        e.said(&say("s-1", Some("utt-2")));
+        assert_eq!(e.remembered(), 1);
+        let line = e.observe(&spoke("idle", Some("s-1"), Some("completed"))).expect("a line");
+        assert!(line.starts_with("turn utt-2: "), "newest did not win: {line}");
+        // A capacity of zero would be a reader that can report nothing.
+        let mut e = Endings::with_capacity(0);
+        e.said(&say("s-1", Some("utt-1")));
+        assert_eq!(e.remembered(), 1);
+    }
+
+    #[test]
+    fn the_summary_counts_the_words_and_says_what_the_turn_table_cannot() {
+        let mut e = Endings::default();
+        for (i, reason) in ["completed", "completed", "wake", "preempted", "error"].iter().enumerate() {
+            let sid = format!("s-{i}");
+            e.said(&say(&sid, Some(&format!("utt-{i}"))));
+            assert!(e.observe(&spoke("idle", Some(&sid), Some(reason))).is_some());
+        }
+        let s = e.summary(5);
+        assert!(s.contains("endings: 5"), "{s}");
+        assert!(s.contains("completed"), "{s}");
+        // Every row that has a count is present, with its count.
+        for (word, gloss) in ENDING_TABLE {
+            let row = s.lines().find(|l| l.starts_with(word)).unwrap_or_else(|| panic!("no {word} row:\n{s}"));
+            assert!(row.contains(gloss), "{row}");
+        }
+        assert!(s.lines().any(|l| l.starts_with("completed") && l.contains('2')), "{s}");
+        // The sentence the turn table above cannot say.
+        assert!(s.contains("FIRST word"), "{s}");
+        assert!(s.contains("3 of these 5"), "the unfinished are not counted: {s}");
+
+        // A row with no count is not printed at all — the same rule the turn
+        // table follows for a span nobody measured.
+        let mut e = Endings::default();
+        e.said(&say("s-1", Some("utt-1")));
+        e.observe(&spoke("idle", Some("s-1"), Some("completed")));
+        let s = e.summary(1);
+        assert!(!s.contains("wake"), "an empty row was printed: {s}");
+        assert!(s.contains("all 1 of them completed"), "{s}");
+    }
+
+    #[test]
+    fn turns_reported_with_no_ending_at_all_are_said_out_loud() {
+        let e = Endings::default();
+        // No turns, nothing to qualify, nothing to say.
+        assert_eq!(e.summary(0), "");
+        // Turns reported and not one of them seen to end: silence here would
+        // read as "they all finished".
+        let s = e.summary(7);
+        assert!(s.contains("no turn ending"), "{s}");
+        assert!(s.contains('7'), "{s}");
+    }
+
+    #[test]
+    fn the_gloss_table_and_the_generated_schema_agree_on_the_words() {
+        // Every word this reader prints is a word the frozen schema freezes,
+        // and it lands in the row it is printed in. The other direction — a
+        // FIFTH word added to schemas/speech.state.json — is enforced by
+        // `ending_slot` being an exhaustive match over the generated enum:
+        // this file stops compiling, which no runtime test can promise.
+        for (i, (word, gloss)) in ENDING_TABLE.iter().enumerate() {
+            let reason = ending_reason(word).unwrap_or_else(|| panic!("`{word}` is not in schemas/speech.state.json's reason enum"));
+            assert_eq!(ending_slot(reason), i, "`{word}` is tallied in the wrong row");
+            assert!(!gloss.is_empty());
+        }
+        assert_eq!(ending_reason("Completed"), None, "the wire spelling is snake_case");
+        assert_eq!(ending_reason("finished"), None);
+    }
+
+    #[test]
+    fn the_endings_summary_fits_eighty_columns() {
+        let mut e = Endings::default();
+        for (i, word) in ENDING_TABLE.iter().map(|(w, _)| *w).chain(["evaporated"]).enumerate() {
+            let sid = format!("s-{i}");
+            e.said(&say(&sid, Some(&format!("utt-{i}"))));
+            e.observe(&spoke("idle", Some(&sid), Some(word)));
+        }
+        for line in e.summary(9).lines().chain(Endings::default().summary(9999).lines()) {
+            let w = line.chars().count();
+            assert!(w <= TAP_COLUMNS, "{w} columns, {} too many: {line}", w - TAP_COLUMNS);
+        }
+    }
 
     // ------------------------------------------------------------ restarts
 
