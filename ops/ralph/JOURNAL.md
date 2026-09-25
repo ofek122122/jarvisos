@@ -10099,3 +10099,91 @@ than adding one.
   still blocked on human sentences and one seat at ares (A47 -> A55 and the
   growth checks; A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
   A76/A77 and B62/B67/B76/B77 are still the raised-but-undecided items.
+
+## 2026-09-25 — iteration 102 — A79: the yes and the no, both of them silence until now
+
+A78's sweep of the fields nothing in `shell/jv-hud` reads left three plan
+lines, and this is the second of them. `granted` is the one body field of
+`schemas/action.confirm.json` that no element reads — and it is the field
+that says what happened to a DESTRUCTIVE tool.
+
+**What was missing.** `ConfirmState` (A20) latches jv-act's question while
+the window is open, and the answer frame lands on the same topic and takes
+the whole latch with it. So `pending` going false was three different
+endings wearing one face: you said yes, you said no, or you said nothing
+and jv-act denied it for you. The plate vanishes identically for all three,
+which A22 already names — but A22 is a §06 decision (what a fixed-duration
+element is allowed to be in this HUD, the first one whose lifetime is a
+clock rather than a signal) and a human's. The READING half is not blocked
+by that decision, and a human answering A22 should not also have to write
+it. That separation is the whole of this iteration.
+
+**The ending is latched beside the question.** `outcome` is "granted",
+"denied", "unknown" or ""; `answeredBy` is the route; and
+`answeredRequestId` / `answeredTool` / `answeredSummary` are the question
+that ended. That last part is not redundancy — everything `textOf` returns
+is gated on `pending`, deliberately (A20's mutation finding: words that
+outlive their window are a question the user can still read and can no
+longer answer), so by the time there is an ending there is nothing left to
+read off `request`. Both halves of the latch are held because the answer
+frame carries neither `tool` nor `summary`: they are request-only in the
+frozen schema.
+
+**Three refusals, and the third is the one worth arguing about.**
+
+- *Only for a question this element was HOLDING.* An answer whose
+  request_id we never saw asked is a verdict out of nowhere. Same rule
+  that already stops a stranger's answer from blanking a live question.
+- *Only from an answer FRAME.* `expired` is the HUD's own backstop for a
+  jv-act that died mid-question; it ends the asking and settles nothing,
+  and reading it as a denial would be the HUD deciding the fate of a
+  destructive tool on its own timer. The mirror case is taken: an answer
+  that lands AFTER our ceiling let go is still what really happened to a
+  question the user was shown.
+- *`granted` decides and nothing else does.* An answer whose `granted` is
+  not a boolean is `unknown` — **including `answered_by: "timeout"`.** The
+  schema's prose does say a timeout is a denial, and jv-act publishes
+  `granted: false` when it times out, which is exactly the reason not to
+  infer it here: it would be a second copy of a rule the frame already
+  states (A14), and the copy is the half that drifts. The route is read
+  separately, because "you said no" and "you were not there" are both
+  denials and a reader wants them apart — and a route word the frozen enum
+  does not have comes out empty WITHOUT taking the verdict with it.
+
+**Forgetting.** A new question clears it (a verdict readable beside an
+unanswered question gets attached to the wrong one) and a link drop clears
+it (a decision latched off a bus we can no longer see). Nothing else does,
+because "how long does an ending stay on screen" is precisely A22.
+
+Nothing draws any of it yet, on purpose — which is why the two photograph
+gates came back byte-identical to HEAD, and that is the correct result for
+a reader with no renderer.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over the 2 changed
+  paths, 117.7 s: `runtests.sh tools` 431, `qmltest.sh` 699 (was 679),
+  `hudshots.sh` 23 with all 16 shots matching the sheet at HEAD. The gate
+  verify names but does not run: `bash ops/ralph/hudscreens.sh` GREEN,
+  194.1 s, 7/7 matching HEAD. All 20 new tests were RED before the
+  implementation existed. Mutations: 6 graded through `--runner qml`,
+  6 caught — including the tempting one (a timeout route read as the
+  denial jv-act did not state) and the two forgettings.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins — `granted` has been in
+  `schemas/action.confirm.json` since v1.
+- files: shell/jv-hud/core/ConfirmState.qml,
+  shell/jv-hud/tests/tst_confirmstate.qml, ops/ralph/PLAN.md
+- commits: 67a9cfc (the reader)
+- next: **A22** is now a design decision and nothing else — the reader is
+  under it, so whoever answers it writes a plate and not a state machine.
+  **A83** is the limit this shipped with and belongs in the same
+  conversation: an answer to a question the HUD never saw (started
+  mid-window, bridge reconnected) is dropped, and the obstacle to drawing
+  it is that the answer frame names no tool. **B79** is the terminal half,
+  the same shape B78 is for A78: `jv tap` can put a confirmation's question
+  and its outcome on one line, and must not become a second opinion about
+  what a denial is. **A80** (`load1` / `mem_used_pct`, gated on
+  `SpeechState.thinking`) is the last of A78's three and still a proposal
+  because its gate crosses two elements. Otherwise unchanged: Track A is
+  human-blocked (A47 -> A55 and the growth checks; A13/A27/A38;
+  A21/A22/A25; A73's re-shoot; B10/A28), and A76/A77/A81/A82 and
+  B62/B67/B76/B77/B78 are raised-but-undecided.

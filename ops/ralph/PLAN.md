@@ -2158,6 +2158,12 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the first thing in this HUD that would be on screen for a fixed time
       rather than for as long as its signal is true — a new rule, worth
       deciding deliberately rather than as a side effect. Discovered in A20.
+      **The reading half is built (A79, 67a9cfc):** `ConfirmState.outcome`
+      is "granted" / "denied" / "unknown", `answeredBy` is the route, and
+      `answeredTool` / `answeredSummary` keep the words of the question
+      that ended. So whoever answers this is deciding a design and not
+      also writing a reader — what is left is what the plate SAYS, in what
+      colour, and for how long.
 
 - [x] A23. The HUD says when it has stopped being able to see the machine.
       — 34f9af8
@@ -3217,8 +3223,8 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       plate can print is measured rather than argued. Raised: A81, A82,
       B78.)
 
-- [ ] A79. **A confirmation's outcome is on the bus and the HUD throws it
-      away.** `action.confirm.granted` is the one body field of that
+- [x] A79. **A confirmation's outcome is on the bus and the HUD throws it
+      away.** — 67a9cfc `action.confirm.granted` is the one body field of that
       schema no element reads — `answered_by` IS read, so `ConfirmState`
       knows an answer arrived and by which route (voice, cli, timeout) and
       cannot tell yes from no. A22 asks for the design half (three exits
@@ -3228,6 +3234,21 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       today there is nothing in `core/` that can say a destructive tool
       was GRANTED. Worth separating, because a human answering A22 should
       not also have to write the reader. Raised in iteration 101.
+      (`ConfirmState` latches the ending beside the question: `outcome`
+      ("granted" / "denied" / "unknown"), `answeredBy` ("voice" / "cli" /
+      "timeout" / ""), and the `answeredRequestId` / `answeredTool` /
+      `answeredSummary` of the question that ended — kept rather than
+      read back off `request`, because everything `textOf` returns is
+      gated on `pending` and by then nothing is. Three refusals: only for
+      a question this element was HOLDING, only from an answer FRAME
+      (`expired` ends the asking and settles nothing; a LATE answer is
+      still taken), and `granted` decides and nothing else does — a
+      timeout whose `granted` is missing reads `unknown`, because
+      inferring the denial off the route would be a second copy of a rule
+      the frame already states (A14). Forgotten by a new question and by
+      a link drop; nothing else forgets it, which is A22's question. 20
+      QML tests (699, was 679), 6 mutations, 6 caught. Nothing DRAWS it
+      yet, on purpose. Raised: A83, B79.)
 
 - [ ] A80. **The machine under load is the other half of the sentence
       `HealthPlate` already starts.** `context.system.load1` and
@@ -3284,6 +3305,38 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       and the monotonicity argument live in `core/HealthState.qml`, and
       two readers that disagreed about what a restart is would be worse
       than one that cannot see them. Discovered in A78.
+
+- [ ] A83. **An answer to a question the HUD never saw is dropped on the
+      floor, and the case is not exotic.** A79 will only write an ending
+      for a request_id it was holding — the rule that keeps a stranger's
+      answer from blanking a live question — but the HUD starting during
+      an open window, or a bridge reconnecting mid-question, means the
+      REQUEST frame was missed and the answer lands against an empty
+      latch. The user heard the spoken question (jv-voice said it) and the
+      screen then says nothing about how it ended, which is the A20 gap
+      again one frame further along. Two honest readings, and choosing is
+      a §06 call: keep the refusal (the corner reports the end of a
+      question it showed, and never a verdict out of nowhere), or accept
+      an ending with no question attached and draw it with the tool name
+      the answer frame does not carry — which is the real obstacle, since
+      `tool` and `summary` are request-only in the frozen schema and an
+      ending that can only say "GRANTED" names nothing. Belongs with A22.
+      Discovered in A79.
+
+- [ ] B79. The terminal has the same half-story A79 just closed for the
+      HUD, and jv-act already keeps the other half. `jv act-log` reads the
+      audit (services/jv-act/src/audit.rs records `granted` and
+      `answered_by`) and is the record AFTER the fact; `jv tap` watches
+      the wire, so a confirmation on the stream is two lines a reader has
+      to correlate by request_id — the question, then an answer whose
+      `granted` is a raw field among others. One line that says "jv-act
+      asked: empty the trash — granted (voice, 4.1 s)" is the tap's job,
+      and it is the B-track half of A79 exactly as B78 is of A78. Same
+      caution as B78: the REFUSALS live in `core/ConfirmState.qml` (only
+      a question we saw asked, only an answer frame, `granted` and never
+      the route), and a second reader that disagreed about what a denial
+      is would be worse than one that only prints fields. Discovered in
+      A79.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD
