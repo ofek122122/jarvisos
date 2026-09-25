@@ -3549,7 +3549,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       grows 43 px, so nothing already photographed moved. Raised: A85,
       B89.)
 
-- [ ] B85. **`speech.state.reason` is read by nothing in this repo, and it
+- [x] B85. **`speech.state.reason` is read by nothing in this repo, and it
       is the only field of that frozen schema in that position.** The enum
       has four words — `completed`, `wake`, `preempted`, `error` — and they
       say how an utterance ENDED: jv-voice publishes them at
@@ -3574,6 +3574,27 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       measurement says `respond 2.1s` about words nobody heard. That is
       B13's "a number stops meaning its label" failure with the label
       still attached. Raised in iteration 105.
+
+      **Done — the TAP half only, c0f8632.** `cli::Endings` reads the
+      ending back onto the turn with no new publisher and no schema
+      change: jv-voice publishes exactly ONE terminal `speech.state` per
+      reply (`_speak_turn` speaks a whole `reply_group` and leaves it),
+      that frame carries a `say_id`, and the `speech.say` beside it
+      already threaded the same id to an `in_reply_to_utterance`. One
+      line per turn — `turn utt-4: reply ended wake (you cut it off)` —
+      and a table under the turn summary that says how many of them did
+      not complete. Three things the item did not know. The `say_id` seam
+      is a JOIN and not a field read, which is why this cost a reader
+      rather than a line. Two written-down lists were avoidable and both
+      were avoided (B87's lesson bought cheaply): the vocabulary is
+      parsed by the GENERATED `schema::SpeechStateReason`, so it is the
+      schema's and not a copy of it, and `ending_slot` is an exhaustive
+      match over that enum, so a fifth word stops this file COMPILING
+      rather than going untallied. And silence had to be said out loud:
+      a tap that reported turns and saw none of them end prints the gap
+      and names the frame it wanted, because an empty table reads as
+      "they all finished". 12 unit + 2 integration tests; six mutations,
+      six caught. The HUD half stays unbuilt as argued. Raised: B91, B92.
 
 - [x] B86. **`verify.sh` cannot see a whole service, and jv-ears is that
       service.** `tools/dependents.py` resolves an import to a path with
@@ -3742,6 +3763,44 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       literal an `===` compares the returned variable against", which is
       the shape SpeechState already forces. Neither is obviously right.
       Discovered while building B89.
+
+- [ ] B91. **Two readers of `speech.state`, and only one of them reads the
+      whole frame.** `jv tap` now tells `wake` from `preempted` — "you
+      stopped me" from "I stopped myself to say something more urgent" —
+      and `shell/jv-hud/core/SpeechState.qml` still draws INTERRUPTED for
+      both, because it reads `state` and not `reason`. That is the first
+      time in this repo two consumers of one topic disagree about how much
+      of it is legible, and the asymmetry points the wrong way: the CLI a
+      developer runs for an hour knows something the HUD a user watches all
+      day does not. B85 called this half WEAK and it still is — it is worth
+      exactly one word, and the honest objection is that `preempted` is
+      rare enough that nobody has seen one — but the argument has changed
+      shape now that the distinction exists somewhere. What it would cost:
+      a fifth word out of `SpeechState`, which is B89's gate territory (the
+      plate must NAME it), and A62's corner is already crowded. Raised
+      while building B85's tap half.
+
+- [ ] B92. **The endings table counts them and the percentiles still mix
+      them.** `--- turn endings: 9 ... 4 of these 9 did not complete` is a
+      warning printed UNDER the very rows it is a warning about: `respond`
+      p50 is still one distribution over the turns that were heard in full
+      and the turns that were talked over after two words. B85's own
+      sentence — "the measurement says `respond 2.1s` about words nobody
+      heard" — is now SAID and not yet FIXED. The fix is a split: `respond`
+      and `total` over completed turns, beside the same spans over the ones
+      that ended some other way, which is the shape `you`/`ran` already
+      have under `tool`. Two obstacles, and the second is the real one.
+      (1) `TurnStats::push` happens at the first word and the ending lands
+      later, so a sample would have to be MOVED between two vectors after
+      the fact — `brain_split` already does exactly that for `think`, so
+      there is a pattern. (2) The two tables are over DIFFERENT SETS and
+      nothing measures the difference: a reply whose input boundaries this
+      tap never heard is an ending with no turn, and a turn whose ending
+      never came is a turn with no ending. `Endings::summary` says so in
+      prose precisely because it cannot say it in a fraction. A split
+      distribution would have to refuse the unmatched turns rather than
+      quietly bin them as completed — which is the whole rule, and the one
+      a naive implementation breaks. Raised while building B85's tap half.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD

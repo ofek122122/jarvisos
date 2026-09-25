@@ -10772,3 +10772,103 @@ survived a further round and has its own case now.
   ENDING, which `--latency` never reports) is still the next cheap
   feature; B87/B88 are the gate's own written-down rules; A62/A70 — the
   corner with two plates for one event — are still a human's call.
+
+## 2026-09-25 — iteration 109 · the words nobody heard
+
+- what: **B85, the TAP half.** `cli::Endings` — a reader in `jv tap` that
+  says how each reported turn's reply ENDED, one line as it happens and a
+  table under the latency summary. `speech.state.reason` has carried
+  `completed` / `wake` / `preempted` / `error` since the schema was
+  frozen, and until this commit nothing in this repo read it: not the
+  HUD, and not `schema.rs`, where `SpeechStateReason` was a generated
+  type with no caller.
+
+  **What was wrong.** A turn is reported the moment its first
+  `speech.say` lands, because that is what time-to-first-word means — so
+  nothing after that moment is in the number. A reply that died in
+  synthesis, one the user talked over after two words, and one spoken to
+  its last sentence all printed the same `respond=2.1s`. B13's failure
+  with the label still attached: a number whose name stopped covering
+  what it measures.
+
+  **The seam was free, and it is a JOIN.** jv-voice publishes exactly ONE
+  terminal state per reply — `_speak_turn` speaks a whole `reply_group`
+  and leaves it with `idle`+`completed`, `interrupted`+`wake`/`preempted`
+  or `idle`+`error` — and that frame carries a `say_id`, which the
+  `speech.say` beside it had already threaded to an
+  `in_reply_to_utterance`. Two frames, both already on the bus, no new
+  publisher and no schema change: the same shape `hear`/`think` and
+  `tool` were found on. The difference is that those read a field and
+  this one correlates two frames, which is why it cost a bounded reader
+  (128 says, oldest evicted) rather than a line.
+
+  **It decides nothing, and the refusals are the work.** A transition
+  with no `reason` on it is not an ending — `idle` alone is jv-voice's
+  queue draining and its first frame at startup. A reason naming a
+  `say_id` nobody saw requested belongs to a turn this tap cannot name,
+  and is dropped rather than attached to the latest one (Confirmations'
+  rule about an answer out of nowhere). `in_reply_to_utterance` is
+  required and NULLABLE, and a null one is a system announcement: real
+  speech with a real ending, and no turn here for its ending to qualify.
+  Nothing is timed out. And a turn ends ONCE — the ending drops every say
+  of that utterance and not only the one it named, so that is a property
+  of the reader rather than of what jv-voice happens to publish today.
+
+  **Two written-down lists were avoidable and both were avoided**, which
+  is B87's lesson bought cheaply this time. The vocabulary accepted is
+  parsed by the GENERATED `schema::SpeechStateReason`, so it IS
+  `schemas/speech.state.json`'s and not a copy that can drift; and
+  `ending_slot` is an exhaustive `match` over that enum, so a fifth word
+  makes this file stop COMPILING rather than going silently untallied. A
+  match is the one form of a written-down list that cannot rot. A word
+  OUTSIDE the enum is still printed verbatim (clipped to its own column)
+  and tallied nowhere — guessing its row would put a number under a name
+  it does not stand for — and the summary says how many it refused.
+
+  **Silence would have read as "they all finished."** A tap that reported
+  turns and saw none of them end now prints that gap and names the frame
+  it wanted, rather than an empty space under the turn table. That is why
+  `Endings::summary` takes `turns.reported()`, and why it says the gap in
+  prose rather than as a fraction: the two counts are over different sets
+  (a reply whose input boundaries the tap never heard is an ending with
+  no turn), and a fraction would have claimed a relation nobody measured.
+  That unmeasured relation is B92.
+
+- why: B85 called this the stronger half and it was. The HUD half stays
+  unbuilt exactly as the item argued — `error` rides an `idle` frame the
+  plate draws nothing for, and the same `except` beats `degraded` with
+  the failure in its notes one `await` later, which HealthPlate already
+  draws (A71 refused that duplication). What is left there is `wake` vs
+  `preempted`, now worth writing down for a new reason: the CLI reads a
+  field the HUD does not, which is B91.
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over 3 paths, 84.1 s
+  (pylib 39.1, tools 38.9, jarvisd 6.2). 12 new unit tests (164 lib, was
+  152) and 2 new integration tests through a real broker (44 cli, was
+  42), every one of them RED before the reader existed. Six mutations,
+  six caught: a reason that defaults to `completed`, an ending that drops
+  only the say it named, an unknown `say_id` landing on the newest turn,
+  an unnamed word tallied as `completed`, an announcement treated as a
+  turn, and a cap that evicts the newest instead of the oldest. Also
+  `bash ops/ralph/hudscreens.sh` GREEN (179.0 s) because the gate named
+  it: no QML changed, so nothing should have moved and nothing did — 5 of
+  7 shots differed by the compositor's rounding alone (worst 114 px
+  inside a 256 px floor) and were restored, and all 7 match HEAD.
+- build: `nixos-rebuild build --flake .#ares` green (new closure
+  7dgm1yjkmvnlr52hk9s4kgwklx49kdaq). No schema change, no jv-act, no boot
+  path, no pins.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs
+- commits: c0f8632 (the reader, the lines, and the refusals)
+- next: **B92** is the half this commit SAID and did not FIX — `respond`
+  p50 is still one distribution over the turns that were heard in full
+  and the ones that were talked over, with the warning printed under the
+  very rows it warns about. `brain_split` is the precedent for moving a
+  sample after the fact; the trap is the unmatched turns, which must be
+  refused rather than quietly binned as completed. **B91** is the new
+  asymmetry (the CLI reads `reason`, `core/SpeechState.qml` does not) and
+  is worth one word at most. **A85** still wants somebody to MEASURE the
+  widening before the assertion is designed — the arithmetic in the item
+  says it may be worth about a pixel. B87/B88 are still the gate's own
+  written-down rules, and B87 just got cheaper to argue for: this commit
+  is what avoiding one looks like. A62/A70 — the corner with two plates
+  for one event — are still a human's call.
