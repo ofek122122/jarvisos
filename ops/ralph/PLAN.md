@@ -4,6 +4,37 @@ Priority ladder: **UI/UX first** (blueprint §06), then features/backlog, then
 creative additions. Mark items `[x]` done with the commit hash. Add follow-ups
 you discover. Keep items small enough to finish in one iteration.
 
+## Track D — JarvisOS desktop identity — NEW TOP PRIORITY
+Full-desktop redesign so the OS *looks* like JarvisOS. Spec:
+`docs/superpowers/specs/2026-09-25-jarvisos-desktop-identity-design.md`.
+The CORE landed by hand (wallpaper, GTK/Qt/cursor/icon theming, alacritty +
+fuzzel palettes in `modules/theme.nix`, ember niri focus ring). These items
+extend it. All new on-screen surfaces are `graphical-session.target` user
+services like jv-hud, consume the §06 palette, and keep the top-right free for
+the HUD. Do NOT touch the login greeter's session command untested (a broken
+greetd locks the user out) — style only, and leave the graphical greeter for a
+human-reviewed step.
+
+- [ ] D1. **Top bar** (Quickshell, own module `shell/jv-bar` + `pkgs/jv-bar` +
+      user service): slim bar — niri workspaces (left), clock (center),
+      net·audio·battery (mid-right). Leave the top-right corner for the HUD.
+      Consume the shared Theme. qmllint clean; render-verify.
+- [ ] D2. **Notifications**: a Quickshell notification daemon (or mako themed to
+      §06 as a first step), quiet + ember, honoring reduced-motion.
+- [ ] D3. **Lock screen**: swaylock-effects themed to §06 (dark ground, ember
+      accent, wordmark) as a first step; a Quickshell lock later.
+- [ ] D4. **Migrate the niri config into the flake** (`environment.etc."niri/config.kdl"`
+      or a module), preserving the user's keybinds/outputs, so the whole look is
+      declarative — the one core piece currently living in the user's home file.
+      Add gaps/borders/inactive-dim in §06 while doing it.
+- [ ] D5. **Custom launcher** (Quickshell): replace fuzzel with a JarvisOS
+      launcher — search + app grid in §06. Until then fuzzel is themed.
+- [ ] D6. **Login greeter** (CAREFUL): recolor tuigreet first (safe); then a
+      graphical greeter (regreet themed) as its own reviewed step — never
+      switch the greetd session command untested.
+- [ ] D7. **Boot continuity check**: confirm GRUB + Plymouth share the exact §06
+      tokens the desktop now uses; unify any drift.
+
 ## Track A — UI/UX (Quickshell/QML HUD + workspace) — PRIMARY
 The HUD is a bus CONSUMER: it subscribes to real topics and reflects them
 truthfully. Never fake a sensor/state indicator (invariant 10).

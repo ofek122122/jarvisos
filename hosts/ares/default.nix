@@ -8,6 +8,7 @@
     ../../modules/gpu-nvidia.nix
     ../../modules/desktop.nix
     ../../modules/fonts.nix
+    ../../modules/theme.nix
     ../../modules/audio.nix
     ../../modules/security.nix
     ../../modules/windows-compat.nix
