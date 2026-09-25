@@ -10,6 +10,7 @@ is in sync with the toml, they check the toml still agrees with the blueprint's
 
 from __future__ import annotations
 
+import dataclasses
 import html
 import json
 import re
@@ -219,9 +220,14 @@ def test_one_environment_variable_stills_the_whole_desktop():
     assert gen.MOTION_ENV in (ROOT / "shell" / "jv-hud" / "README.md").read_text("utf-8")
 
 
-# --- D29: the shot harness's stand-in is the same file ---------------------
+# --- D29: a render harness's stand-in is the same file ---------------------
 
+# The one the HUD's contact sheet stages. There are two now (PLAN D20 added the
+# notification corner's), and the sweeps below run over `gen.STANDINS` so a
+# third is a table entry; this name is kept for the tests whose subject is one
+# particular file.
 STUB_MOTION = ROOT / "tools" / "hudshots" / "stub" / "Motion.qml"
+HUD_STANDIN = next(s for s in gen.STANDINS if s.shell == "jv-hud")
 
 
 def qml_code(text: str) -> list[str]:
@@ -250,13 +256,36 @@ def test_the_shots_stand_in_is_the_real_motion_with_three_lines_swapped():
     — for the reason the running HUD would."""
     tokens = gen.load_tokens(MINIMAL)
     real = set(qml_code(gen.render_motion_qml(tokens)))
-    stub = set(qml_code(gen.render_motion_qml(tokens, gen.STUB_MOTION)))
-    assert real - stub == {
-        "import Quickshell",
-        "Singleton {",
-        f'envOverride: Quickshell.env("{gen.MOTION_ENV}") || ""',
-    }
-    assert stub - real == {"QtObject {", 'envOverride: ""'}
+    # EVERY stand-in, not just the HUD's: the claim is about the mechanism, and
+    # a second harness that wandered off the shared body would be exactly the
+    # hand copy D29 removed, re-introduced one table row over.
+    for standin in gen.STANDINS:
+        stub = set(qml_code(gen.render_motion_qml(tokens, gen.standin_motion(standin))))
+        assert real - stub == {
+            "import Quickshell",
+            "Singleton {",
+            f'envOverride: Quickshell.env("{gen.MOTION_ENV}") || ""',
+        }, standin.shell
+        assert stub - real == {"QtObject {", 'envOverride: ""'}, standin.shell
+
+
+def test_every_stand_in_names_the_shell_it_replaces_and_the_script_that_stages_it():
+    """The prose is the only thing that differs between two stand-ins, and it is
+    the only thing telling a reader which file this one is standing in for. A
+    stand-in whose preface named the other harness would send whoever is
+    debugging a sheet to the wrong script."""
+    tokens = gen.load_tokens(MINIMAL)
+    for standin in gen.STANDINS:
+        text = gen.render_motion_qml(tokens, gen.standin_motion(standin))
+        assert f"shell/{standin.shell}/Motion.qml" in text
+        assert standin.script in text
+        assert "@SHELL@" not in text and "@SCRIPT@" not in text
+        # And the script it names exists and stages this exact file, so the
+        # table cannot point at a harness nobody wrote.
+        script = ROOT / standin.script
+        assert script.exists(), standin.script
+        rel = standin.dir.relative_to(ROOT).as_posix()
+        assert rel in script.read_text("utf-8"), f"{standin.script} never stages {rel}"
 
 
 def test_a_new_duration_token_reaches_the_shots_stand_in_too():
@@ -264,8 +293,9 @@ def test_a_new_duration_token_reaches_the_shots_stand_in_too():
     A duration that arrived in the HUD and not in the thing that photographs it
     would make every shot a picture of a shell nobody runs."""
     tokens = gen.load_tokens(MINIMAL.replace("ease_ms = 200", "ease_ms = 200\nslide_ms = 90"))
-    stub = gen.render_motion_qml(tokens, gen.STUB_MOTION)
-    assert "readonly property int slideMs: policy.ms(Theme.slideMs)" in stub
+    for standin in gen.STANDINS:
+        stub = gen.render_motion_qml(tokens, gen.standin_motion(standin))
+        assert "readonly property int slideMs: policy.ms(Theme.slideMs)" in stub, standin.shell
 
 
 def test_the_committed_stand_in_is_what_the_generator_renders():
@@ -273,18 +303,22 @@ def test_the_committed_stand_in_is_what_the_generator_renders():
     `--check` (below) covers it too; this one names it, so a stale stand-in
     fails as itself rather than as a line in a list."""
     rendered = gen.stub_outputs(ROOT / "personality" / "theme.toml")
-    assert rendered[STUB_MOTION] == STUB_MOTION.read_text("utf-8")
+    assert set(rendered) == {s.dir / "Motion.qml" for s in gen.STANDINS}
+    for path, text in rendered.items():
+        assert path.exists(), f"{path} is generated and not committed"
+        assert text == path.read_text("utf-8"), path
 
 
 def test_the_stand_in_imports_no_quickshell_at_all():
     """The whole reason it exists: ONE Quickshell import anywhere in the staged
     tree makes the entire directory unimportable to every engine but
     quickshell's own, and the shots do not have that engine."""
-    text = STUB_MOTION.read_text("utf-8")
-    # In the CODE. The comments name Quickshell freely, and have to: a reader
-    # who does not know why this file is here will delete it.
-    assert not [line for line in qml_code(text) if "Quickshell" in line]
-    assert "DO NOT EDIT" in text, "a stand-in nobody knows is generated gets edited"
+    for standin in gen.STANDINS:
+        text = (standin.dir / "Motion.qml").read_text("utf-8")
+        # In the CODE. The comments name Quickshell freely, and have to: a
+        # reader who does not know why this file is here will delete it.
+        assert not [line for line in qml_code(text) if "Quickshell" in line], standin.shell
+        assert "DO NOT EDIT" in text, "a stand-in nobody knows is generated gets edited"
 
 
 def test_a_build_sandbox_is_never_asked_for_the_stand_in(tmp_path):
@@ -302,18 +336,26 @@ def test_a_build_sandbox_is_never_asked_for_the_stand_in(tmp_path):
     theme = tmp_path / "theme.toml"
     theme.write_text(MINIMAL.replace("ease_ms = 200", "ease_ms = 201"), "utf-8")
     out = tmp_path / "shell"
-    before = STUB_MOTION.read_bytes()
-    try:
-        rc = gen.main(["--shell", "jv-hud", "--theme", str(theme), "--out-dir", str(out)])
-        after = STUB_MOTION.read_bytes()
-    finally:
-        # Put the checkout back before asserting anything: a failing test that
-        # leaves a generated file rewritten is a failure that spreads.
-        STUB_MOTION.write_bytes(before)
-    assert rc == 0
-    assert after == before, "a --out-dir run wrote the stand-in, outside its sandbox"
-    written = sorted(str(q.relative_to(out)) for q in out.rglob("*") if q.is_file())
-    assert written == sorted(gen.outputs(theme, gen.SHELLS["jv-hud"]))
+    # Every stand-in, because every one of them is a shell somebody builds:
+    # pkgs/jv-notify runs this the same way pkgs/jv-hud does (PLAN D20).
+    for standin in gen.STANDINS:
+        path = standin.dir / "Motion.qml"
+        before = path.read_bytes()
+        try:
+            rc = gen.main(
+                ["--shell", standin.shell, "--theme", str(theme), "--out-dir", str(out)]
+            )
+            after = path.read_bytes()
+        finally:
+            # Put the checkout back before asserting anything: a failing test
+            # that leaves a generated file rewritten is a failure that spreads.
+            path.write_bytes(before)
+        assert rc == 0
+        assert after == before, f"a --out-dir run wrote {path}, outside its sandbox"
+        written = sorted(str(q.relative_to(out)) for q in out.rglob("*") if q.is_file())
+        assert written == sorted(gen.outputs(theme, gen.SHELLS[standin.shell]))
+        for q in sorted(out.rglob("*"), key=lambda q: -len(q.parts)):
+            q.unlink() if q.is_file() else q.rmdir()
 
 
 def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeypatch):
@@ -331,18 +373,32 @@ def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeyp
     Patching the two output roots keeps this out of the checkout entirely.
     """
     monkeypatch.setattr(gen, "SHELL_DIR", tmp_path / "shell")
-    monkeypatch.setattr(gen, "STUB_DIR", tmp_path / "stub")
+    moved = tuple(
+        dataclasses.replace(s, dir=tmp_path / "standin" / s.shell) for s in gen.STANDINS
+    )
+    monkeypatch.setattr(gen, "STANDINS", moved)
     theme = tmp_path / "theme.toml"
     theme.write_text(MINIMAL, "utf-8")
-    stub = tmp_path / "stub" / "Motion.qml"
 
+    # jv-bar carries no stand-in at all, so its run must write none of them.
     assert gen.main(["--shell", "jv-bar", "--theme", str(theme)]) == 0
-    assert not stub.exists(), "another shell's run wrote the HUD's stand-in"
+    for standin in moved:
+        assert not (standin.dir / "Motion.qml").exists(), (
+            f"the bar's run wrote {standin.shell}'s stand-in"
+        )
 
-    assert gen.main(["--shell", "jv-hud", "--theme", str(theme)]) == 0
-    assert stub.read_text("utf-8") == gen.render_motion_qml(
-        gen.load_tokens(MINIMAL), gen.STUB_MOTION
-    )
+    # And each shell that DOES carry one writes its own and nobody else's.
+    for mine in moved:
+        assert gen.main(["--shell", mine.shell, "--theme", str(theme)]) == 0
+        assert (mine.dir / "Motion.qml").read_text("utf-8") == gen.render_motion_qml(
+            gen.load_tokens(MINIMAL), gen.standin_motion(mine)
+        )
+        for other in moved:
+            if other.shell != mine.shell:
+                assert not (other.dir / "Motion.qml").exists(), (
+                    f"{mine.shell}'s run wrote {other.shell}'s stand-in"
+                )
+        (mine.dir / "Motion.qml").unlink()
 
 
 # Every QML animation type. If one of these appears in a shell's file, that

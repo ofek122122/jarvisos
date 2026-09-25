@@ -148,9 +148,12 @@ runner that can take them:
 the real plates, writing its PNGs into the run's own scratch so the committed
 contact sheet in `docs/hud/` is never touched. It costs ~53 s a suite run
 against qmltest.sh's ~14 s, so the run count (baseline + one canary per file +
-one per mutation + baseline) is printed before the first one starts. The bar's
-and the notifier's top-level elements have no such runner (PLAN D13, D20), and
-each shell's abort says so rather than offering one that would not work.
+one per mutation + baseline) is printed before the first one starts. The notifier has a
+render harness of its own since D20 (`ops/ralph/notifyshots.sh`, which stages
+the toast the same way and reads `docs/notify/` back), but this harness is not
+pointed at it yet — PLAN D31. The bar has neither (PLAN D13). Each shell's
+abort says which of those it is, rather than offering a runner that would not
+work.
 The Rust canary is the weakest of the four and says so in its docstring: a
 `compile_error!` proves the file is compiled into the crate, not that a test
 exercises it. The `shots` canary shares that limit for a different reason —

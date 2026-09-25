@@ -67,6 +67,44 @@ Item {
   readonly property int urgencyCritical: 2
   readonly property int urgencyLow: 0
 
+  // How urgent the sender says this is, once, as a word. The dot's colour and
+  // the caption below both read THIS rather than comparing the number again:
+  // two readings of one field are two chances to disagree, and the one that
+  // would go unnoticed is the caption's — a sheet that says "critical" over a
+  // plate wearing the Normal dot.
+  readonly property string urgencyName: root.toast.urgency === root.urgencyCritical ? "critical" : root.toast.urgency === root.urgencyLow ? "low" : "normal"
+
+  // The one channel urgency gets (§06): the dot, and nothing else on the
+  // plate. Named rather than written into the Rectangle because it is a
+  // decision — `risk` means the sender is saying something is wrong — and a
+  // decision spelled out inside a binding is a decision nothing can read back.
+  readonly property color dotColor: root.urgencyName === "critical" ? Theme.risk : root.urgencyName === "low" ? Theme.text3 : Theme.text2
+
+  // WHAT THIS PLATE ACTUALLY PUT ON SCREEN, as the plate itself reports it —
+  // the caption `ops/ralph/notifyshots.sh` asserts against every shot
+  // (PLAN D20; the HUD's plates expose `lit` for the same reason, A53).
+  //
+  // One word for the urgency, then a word per row that is really there, and a
+  // trailing ellipsis on a row that had to elide. It exists because the two
+  // §06 rules this plate keeps are both invisible to every other kind of test:
+  // a field the sender left out is ABSENT rather than empty (so "no body" and
+  // "an empty body" must not look the same), and a field too long for a glance
+  // is ELIDED (so a 4000-character summary has to end in an ellipsis rather
+  // than in a plate the height of the screen). `Text.truncated` is the only
+  // thing in QML that knows the second one happened.
+  readonly property string drew: root.urgencyName + (name.visible ? " name" : "") + (summary.visible ? (summary.truncated ? " summary…" : " summary") : "") + (body.visible ? (body.truncated ? " body…" : " body") : "")
+
+  // HOW FAR THIS PLATE PAINTS PAST ITS OWN EDGE, which must be 0.
+  //
+  // The summary and the body cannot overflow: both are given `rows.width` and
+  // both wrap and elide. The name row can — it is a Row with no width of its
+  // own, holding a string a STRANGER chose, and an `app_name` is routinely a
+  // reverse-DNS id or a whole command line rather than a word. This surface has
+  // no input region and floats over every window, so a plate drawing past its
+  // own border is paint on somebody's desktop that nothing on the machine can
+  // move. Asserted per plate on every shot (PLAN D20).
+  readonly property real overflowPx: Math.max(0, header.implicitWidth - (root.plateWidthPx - Theme.padPx * 2))
+
   // Arrival. The plate is built at zero and fades up to its tint on the frame
   // after it exists, so something appearing in a corner you were not looking
   // at reads as an arrival rather than as a repaint. LEAVING IS INSTANT, on
@@ -111,9 +149,13 @@ Item {
       spacing: Theme.gapPx / 2
 
       Row {
+        id: header
+
         spacing: Theme.gapPx
 
         Rectangle {
+          id: dot
+
           // The same 6 px dot every HUD plate uses: one machine, one
           // vocabulary. Its colour is the only thing on this plate that says
           // how urgent the sender thinks it is.
@@ -121,10 +163,12 @@ Item {
           height: 6
           radius: width / 2
           anchors.verticalCenter: parent.verticalCenter
-          color: root.toast.urgency === root.urgencyCritical ? Theme.risk : root.toast.urgency === root.urgencyLow ? Theme.text3 : Theme.text2
+          color: root.dotColor
         }
 
         Text {
+          id: name
+
           // Who is talking. Upper case because §06 labels are, and because it
           // separates the program's name from the program's words without
           // spending a second type size on it. Hidden outright when a sender
@@ -132,6 +176,21 @@ Item {
           // having no name, not by showing the word "unknown".
           text: root.toast.appName.toUpperCase()
           visible: root.toast.appName.length > 0
+          // BOUND AND ELIDED, because this is the one string on the plate that
+          // a stranger chose the SHAPE of. The summary and the body are given
+          // `rows.width` and wrap; this row is a Row, which takes its width
+          // from its children — so an `app_name` with no space in it (a
+          // reverse-DNS portal id, a command line, a stack frame: all of them
+          // real) drew straight past the plate's border. Found by
+          // `ops/ralph/notifyshots.sh` the first time it ran: 656.5 px past a
+          // 320 px plate, which on a surface with no input region is paint on
+          // somebody's desktop that nothing on the machine can move.
+          //
+          // `Math.min` rather than a plain width, so a short name still makes a
+          // short row — the plate is fixed-width but the dot must sit beside
+          // the name and not a column away from it.
+          width: Math.min(implicitWidth, rows.width - dot.width - header.spacing)
+          elide: Text.ElideRight
           color: Theme.text3
           font.family: Theme.familyMono
           font.pixelSize: Theme.labelPx
@@ -141,6 +200,8 @@ Item {
       }
 
       Text {
+        id: summary
+
         // The sender's own summary, in the brightest tier: on the rare
         // occasion this plate is up, this is the line the user is here to
         // read.
@@ -157,6 +218,8 @@ Item {
       }
 
       Text {
+        id: body
+
         // The detail under it, quieter. Absent rather than empty when the
         // sender sent no body, so a one-line notification is a one-line
         // plate.

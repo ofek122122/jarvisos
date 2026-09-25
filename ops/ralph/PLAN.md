@@ -320,7 +320,7 @@ human-reviewed step.
       invariant 3's line that a human should draw it — and it needs a hover
       region that does not eat clicks meant for the window underneath. Same
       shape as **D15** (clicking a workspace): a proposal, not a task.
-- [ ] D20. **A render harness for the notification corner**, the way
+- [x] D20. **A render harness for the notification corner**, the way
       `hudshots.sh` is one for the HUD and **D13** wants one for the bar. It
       matters more here than for either: this is the only surface on the
       machine whose CONTENT comes from programs this repo did not write, so
@@ -329,6 +329,20 @@ human-reviewed step.
       pixels can answer. `Toast.qml`, `Fade.qml` and the strip are reached by
       no QML gate today — only qmllint inside `nix build .#jv-notify` and the
       Python sweeps over `shell/**`, which `test_dependents.py` writes down.
+      DONE (iteration 122): `ops/ralph/notifyshots.sh` stages the shell with
+      the two Quickshell singletons replaced (`Notifications`, `Motion`),
+      rebuilds shell.qml's column as `tools/notifyshots/scene/Strip.qml`,
+      drives the REAL `core/NotifyModel.qml`, and writes ten shots to
+      `docs/notify/` — then reads the sheet back against HEAD like B52. Each
+      shot asserts a caption the plate itself reports (`Toast.drew`: the
+      urgency as a word, the rows really drawn, and `…` when a row ELIDED),
+      so the elide is proved to have happened rather than to be configured.
+      **It found a real bug on its first run**: an `app_name` with no space in
+      it painted 656.5 px past a 320 px plate, over the desktop, on a surface
+      with no input region — the name row was the one row with no width of its
+      own. Bound and elided now, and every shot asserts `overflowPx == 0`.
+      The stand-in `Motion` is generated (D29's `STANDINS` table), not copied.
+      The gap `test_dependents.py` wrote down is now the HUD's three files.
 - [ ] D21. **A toast appears on all three monitors at once.** Correct today
       and not free: nothing in this repo publishes which output has focus, so
       one monitor could only be chosen by a guess, and a guess is how a
@@ -412,7 +426,11 @@ human-reviewed step.
       hole first (`STUB_SHELL` pointed at another shell survived, because a
       repo-root `--check` names all three and rendered the stand-in anyway),
       and closing it is what pins WHICH shell the stand-in rides out with.
-- [ ] D30. **The bar and the notifier now have an `Ease`, and no gate loads
+- [ ] D30. **The bar now has an `Ease` and no gate loads it.** (Half closed by
+      **D20**: `notifyshots.sh` loads `shell/jv-notify`'s `Ease`, `Toast` and
+      the strip, so the notifier's half of this is done and the remaining one
+      is the bar's — **D13**.) The original, for the half that stands:
+      **The bar and the notifier now have an `Ease`, and no gate loads
       either one.** `shell/jv-bar/Ease.qml`, `Motion.qml`, `Workspaces.qml`
       and `shell/jv-notify/Ease.qml`, `Motion.qml`, `Toast.qml` are reached by
       no QML gate at all (`test_dependents.py` writes it down); only qmllint
@@ -425,6 +443,21 @@ human-reviewed step.
       is now unsourced in three shells rather than one. Cheaper since D29:
       `render_motion_qml` takes a target now, so a bar shot harness needs a
       `MotionTarget`, not a second hand-written stand-in.
+- [ ] D31. **`--runner shots` is the HUD's alone, and the notifier now has a
+      render harness it could be pointed at.** D20 built `notifyshots.sh`,
+      which stages `shell/jv-notify` whole and drives the real toasts — the
+      exact thing `tools/mutate.py`'s `SHOTS` Language does with `hudshots.sh`
+      — so `Toast.qml` is gradeable for the first time and nothing can grade
+      it yet. The mechanism is already there and already general: `Language`
+      has a `shells` table and `for_target` resolves it (that is how
+      `--runner qml` picks between three scripts), so this is SHOTS gaining
+      two `Shell` rows rather than new machinery. Two things do need care:
+      `shots_baseline_hint` hard-codes `hudshots.sh`/`docs/hud`/`shell/jv-hud`
+      in a sentence it MEASURES (B53), and ~15 tests in `test_mutate.py` pin
+      the current single-suite shape. Worth doing before **D27**: the sweep
+      D27 asks for is over `core/`, and the toast is the file whose content a
+      stranger chooses. `tools/mutate.py`'s notify hint names this item.
+
 - [ ] D28. **The refusal D11 added is about PATHS, and the question it stands
       in for is about READS.** `tools/dependents.py` already walks the real
       QML imports and can say that `shell/jv-bar/Workspaces.qml` is read by NO

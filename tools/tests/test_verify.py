@@ -491,11 +491,12 @@ def test_every_gate_this_repo_names_is_planned_by_a_change_to_itself():
         dependents.RUNTESTS_SH,
         verify.CARGOTEST_SH,
     }
-    # Eight: three QML gates (the HUD's tests, the bar's, the notifier's), the
-    # HUD's contact sheet, the two declared ones (nixtest, hudscreens), and the
-    # two runners. The number is written down so that adding a gate is a
+    # Nine: three headless QML gates (the HUD's tests, the bar's, the
+    # notifier's), TWO contact sheets (the HUD's and, since D20, the
+    # notification corner's), the two declared ones (nixtest, hudscreens), and
+    # the two runners. The number is written down so that adding a gate is a
     # deliberate edit here rather than a table that grew unnoticed.
-    assert len(gates) == 8, sorted(gates)
+    assert len(gates) == 9, sorted(gates)
     for script in sorted(gates):
         assert (ROOT / script).is_file(), script
         named = [s.command for s in verify.plan(ROOT, [script])]

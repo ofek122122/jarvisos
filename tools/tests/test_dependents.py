@@ -897,15 +897,18 @@ def test_a_bar_element_names_only_the_bars_gate():
 
 
 def test_the_qml_gate_reaches_every_file_of_the_notifier_that_a_test_can_load():
-    """The same sweep for `shell/jv-notify` (PLAN D2), and the same short reach
-    the bar has — written down for the same reason.
+    """The same sweep for `shell/jv-notify` (PLAN D2), and since D20 it is the
+    HUD's reach rather than the bar's.
 
-    One gate, so everything above `core/` is covered only by qmllint inside
-    `nix build .#jv-notify` plus the Python sweeps over `shell/**`. That is a
-    real gap and it is worse here than it is for the bar: the notifier is the
-    one surface whose content comes from programs this repo did not write, so
-    what a toast does with a 4000-character summary or an empty app name is
-    exactly what a render harness would answer. PLAN D20."""
+    This shell had one gate and a four-file gap — the toast, the theme, the ease
+    and the motion policy, covered only by qmllint inside `nix build
+    .#jv-notify` and the Python sweeps over `shell/**` — which mattered more
+    here than anywhere, because this is the one surface whose content comes from
+    programs this repo did not write. `ops/ralph/notifyshots.sh` closed it by
+    staging the shell and photographing the real plates, and what is left out is
+    now exactly what the HUD leaves out: `shell.qml` and the two singletons that
+    import Quickshell, which the stage replaces because no other engine can
+    resolve them."""
     ours = {
         p.relative_to(ROOT).as_posix()
         for p in (ROOT / "shell" / "jv-notify").rglob("*.qml")
@@ -916,21 +919,24 @@ def test_the_qml_gate_reaches_every_file_of_the_notifier_that_a_test_can_load():
     assert ours - seen == {
         "shell/jv-notify/shell.qml",  # Quickshell: gated by `nix build .#jv-notify`
         "shell/jv-notify/Notifications.qml",  # Quickshell: the D-Bus server
-        "shell/jv-notify/Theme.qml",  # generated; `--check` in the same build
         "shell/jv-notify/Motion.qml",  # Quickshell: the session override (D18)
-        "shell/jv-notify/Ease.qml",  # generated; the HUD's copy IS gated (D20)
-        "shell/jv-notify/core/MotionPolicy.qml",  # generated; see the bar's
-        "shell/jv-notify/Toast.qml",  # no render gate for the corner yet (D20)
     }, sorted(ours - seen)
 
 
-def test_a_notify_element_names_only_the_notifiers_gate():
-    """Three scripts now, and the claim is the same one it was at two: a change
-    to what a toast does must not be verified by the bar's tests."""
+def test_a_notify_element_names_only_the_notifiers_gates():
+    """Four scripts now, and the claim is the one it was at two: a change to
+    what a toast does must not be verified by the bar's tests.
+
+    The model names BOTH of this shell's gates, and that is the answer the
+    derivation is for rather than a looseness in it — `notifyshots.sh` drives
+    the real `NotifyModel` to build the corner it photographs, so a change to
+    the cap or the `earlier` count moves the sheet as surely as it moves the
+    headless tests."""
     got = dependents.qml_readers(ROOT, ["shell/jv-notify/core/NotifyModel.qml"])
-    assert set(got) == {"ops/ralph/notifytest.sh"}, got
+    assert set(got) == {"ops/ralph/notifytest.sh", "ops/ralph/notifyshots.sh"}, got
     for other in ("shell/jv-bar/core/NiriModel.qml", "shell/jv-hud/core/BusModel.qml"):
-        assert "ops/ralph/notifytest.sh" not in dependents.qml_readers(ROOT, [other]), other
+        for mine in ("ops/ralph/notifytest.sh", "ops/ralph/notifyshots.sh"):
+            assert mine not in dependents.qml_readers(ROOT, [other]), (mine, other)
 
 
 def test_the_cli_names_the_qml_gates_it_used_to_apologise_for():

@@ -684,8 +684,9 @@ class Shell:
 # `tests/` directory imports `"../core"` and nothing else, which is a fact
 # about those files and is asserted by `test_dependents.py` (it resolves the
 # same imports to decide which gate reads what). So each hint says what its
-# own suite can reach — and only the HUD's offers a second runner, because
-# only the HUD has one.
+# own suite can reach — and only the HUD's offers a second RUNNER, because only
+# the HUD's render harness is wired into this one. The notifier has a render
+# harness of its own since D20 and its hint names it; PLAN D31 is the wiring.
 SHELLS: tuple[Shell, ...] = (
     Shell(
         target="hud",
@@ -717,11 +718,11 @@ SHELLS: tuple[Shell, ...] = (
         canary_hint=(
             "notifytest.sh is handed shell/jv-notify/tests, whose driver imports "
             "\"../core\" and nothing else, so only shell/jv-notify/core is "
-            "gradeable here and a canary anywhere else in the shell lives. There "
-            "is no staged-render runner for the notifier to regrade it with — "
-            "that is PLAN D20, and it matters more there than anywhere: the "
-            "toast is the one surface whose CONTENT comes from programs this "
-            "repo did not write."
+            "gradeable here and a canary anywhere else in the shell lives. "
+            "`ops/ralph/notifyshots.sh` now stages the whole shell and "
+            "photographs the real toasts (D20), so Toast.qml IS held by "
+            "something — but this harness has not been pointed at it yet (PLAN "
+            "D31), so grading a toast means running that script by hand."
         ),
     ),
 )

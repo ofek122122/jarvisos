@@ -483,6 +483,15 @@ def main(argv: list[str] | None = None) -> int:
         default="bash ops/ralph/hudshots.sh",
         help="the command that would refresh this sheet, named in the report",
     )
+    # There are two sheets now (PLAN D20: the notification corner has one), and
+    # the report tells a reader what to go and look at. "If you changed the HUD
+    # on purpose" printed under ten pictures of toasts would send them to the
+    # wrong surface.
+    ap.add_argument(
+        "--subject",
+        default="the HUD",
+        help="what this sheet is a picture of, as the report says it",
+    )
     ap.add_argument(
         "--tolerance-pixels",
         type=int,
@@ -548,9 +557,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {finding}")
     print()
     print(
-        "If you changed the HUD on purpose, this is the sheet catching up: the\n"
-        "new PNGs are on disk — LOOK at them, then commit them and the next\n"
-        f"`{args.rerun}` is green. If you did not change the HUD,\n"
+        f"If you changed {args.subject} on purpose, this is the sheet catching "
+        "up: the\nnew PNGs are on disk — LOOK at them, then commit them and the "
+        f"next\n`{args.rerun}` is green. If you did not change {args.subject},\n"
         f"something drew a different picture than the one in {args.sheet}."
     )
     return 1

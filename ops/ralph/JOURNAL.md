@@ -12166,3 +12166,78 @@ is not worth chasing.)
   it: a sweep of six found one real hole in code written an hour earlier.
   Worth noting for whoever takes D30 — `render_motion_qml` now takes a target,
   so a second stand-in (a bar shot harness) is a `MotionTarget`, not a copy.
+
+## 2026-09-25 — iteration 122 — D20: the corner whose words a stranger writes, photographed
+
+- **WHAT.** `ops/ralph/notifyshots.sh` — a render harness for `shell/jv-notify`,
+  the sibling of `hudshots.sh` one shell over. It stages the shell with the two
+  singletons that import Quickshell replaced (`Notifications`, which IS the
+  org.freedesktop.Notifications server, and `Motion`), rebuilds shell.qml's
+  column as `tools/notifyshots/scene/Strip.qml`, drives the REAL
+  `core/NotifyModel.qml`, and writes ten shots into `docs/notify/` — then reads
+  the sheet back against HEAD, the way B52 taught the HUD's to.
+- **WHY THIS SHELL AND NOT THE BAR.** D13 and D20 have been open together for
+  four iterations and the plan already said which one matters more: this is the
+  only surface on the machine whose CONTENT comes from programs this repo did
+  not write. Every other surface is fed by the bus and the bus is schema'd; a
+  notification is any string, of any length, in any script, from any process
+  with a D-Bus session, landing on a plate that floats over every window and
+  has an empty input region. Until this sheet, the only thing that had ever
+  answered "what does a toast do with that" was qmllint, whose answer is that
+  the QML parses.
+- **AND THE FIRST RUN ANSWERED IT BADLY, WHICH IS THE POINT.** `09-long-name`
+  sends a 120-character app name with no space in it — a reverse-DNS portal id,
+  which is a real thing a real sender sends. The name row painted **656.5 px
+  past a 320 px plate**: twice the plate's own width, over whatever window was
+  under it, on a surface nothing on this machine can move. The summary and the
+  body could never do that (both are given `rows.width` and wrap); the name row
+  is a `Row`, which takes its width from its children, and it had no width of
+  its own. It is `Math.min(implicitWidth, …)` and `ElideRight` now, and
+  `Toast.overflowPx` is asserted 0 for every plate on every shot.
+- **WHAT THE SHOTS ASSERT, beyond being pictures.** `Toast.drew` is the plate's
+  own account of what it put on screen: the urgency as a word, one word per row
+  that is really there, and a trailing `…` on a row that had to elide. The
+  ellipsis is `Text.truncated`, so `06-long` (4000 characters of summary)
+  proves the elide HAPPENED rather than that it was configured — the difference
+  between a plate and a wall, and invisible to every test that is not a
+  picture. The urgency is named ONCE (`urgencyName`) and both the dot's colour
+  and the caption read it, so a sheet cannot say `critical` over a Normal dot.
+- **THE STAND-IN IS GENERATED, because D29 built the table for it.** A second
+  harness needed a second `Motion` that cannot import Quickshell, and D29's
+  answer was already the right one: `tools/gen_theme_qml.py` grew a `STANDINS`
+  table of (shell, dir, script) and renders each from the same body with the
+  same three lines swapped. The preface is derived, so a stand-in names the
+  shell it replaces and the script that stages it, and a test checks that
+  script exists and really stages that directory. The HUD's file changed by
+  prose only — its 16 shots came back byte-identical, which is the right answer.
+- **THE GAP SHRANK, and it was written down before it did.** `test_dependents`
+  used to name seven files of `shell/jv-notify` that no QML gate reaches; it now
+  names three, and they are exactly the three the HUD leaves out (`shell.qml`
+  and the two Quickshell singletons). `NotifyModel.qml` names both of its gates
+  now, which is the derivation being right rather than loose: the sheet drives
+  the real model, so a change to the cap moves the pictures.
+- **ONE SENTENCE ELSEWHERE BECAME FALSE AND WAS FIXED.** `tools/mutate.py`'s
+  notify canary hint said "there is no staged-render runner for the notifier —
+  that is PLAN D20". There is one now, and `--runner shots` is still not
+  pointed at it, so the hint says that instead and **D31** is the wiring (the
+  mechanism exists: `Language.shells` + `for_target`, the same way `--runner
+  qml` picks between three scripts).
+- tests: `bash ops/ralph/verify.sh` GREEN — 6 gates over 13 paths (jv-compat,
+  jv-hud-bridge, pylib, tools **554 pass**, hudshots, notifyshots), 139 s. The
+  first run of the gate was RED on the new sheet alone — ten PNGs the committed
+  sheet had never seen, which is the read-back's designed bootstrap and is what
+  committing them fixes; re-run after the commit is green.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: ops/ralph/notifyshots.sh, tools/notifyshots/{scene/{Strip,tst_shots}.qml,
+  stub/{Notifications,Motion}.qml}, docs/notify/ (10 PNGs + README),
+  shell/jv-notify/Toast.qml, tools/gen_theme_qml.py, tools/hudsheet.py,
+  tools/dependents.py, tools/mutate.py, tools/hudshots/stub/Motion.qml,
+  tools/tests/{test_notifyshots,test_gen_theme_qml,test_dependents,test_verify}.py,
+  ops/ralph/README.md, ops/ralph/PLAN.md
+- next: **D31** (point `--runner shots` at the new harness) is the cheapest
+  thing that makes D20 worth more, and it is what **D27**'s sweep would want
+  under it. **D13** is now the loudest of the three render items: the bar is
+  the only shell left with no picture of itself, and D30 is down to its half.
+  Worth noting for whoever takes D13 — `Strip.qml` is the shape to copy, and
+  the `STANDINS` table means the bar's `Motion` stand-in is a table row.
