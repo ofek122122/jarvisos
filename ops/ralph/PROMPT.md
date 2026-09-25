@@ -44,7 +44,7 @@ excellent, finish it completely, and never break the build.
   `hudshots.sh`, `nixtest.sh`. They are not the gate; `verify.sh` is, and it
   runs each of them when it is the one that reads what you touched.
 - One gate is NOT run for you: `ops/ralph/hudscreens.sh`, which photographs the
-  real HUD through a real compositor (2m25s) and rewrites `docs/hud/screens/`.
+  real HUD through a real compositor (3m00s) and rewrites `docs/hud/screens/`.
   `verify.sh` names it, with the paths that asked for it, whenever your change
   is one it reads (B72) — run it yourself then, look at the shots, commit them.
 - Run `nixos-rebuild build --flake .#ares` — it MUST succeed. **NEVER test/switch.**

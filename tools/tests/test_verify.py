@@ -549,7 +549,7 @@ def test_the_gate_that_evaluates_the_flake_is_a_step_like_any_other():
 
 def test_the_gate_it_will_not_run_is_printed_above_the_verdict():
     """B72's other half, and the harder one. `hudscreens.sh` reads the HUD and
-    is not a step: measured at 2m25s in this sandbox, it boots a compositor and
+    is not a step: measured at 3m00s in this sandbox, it boots a compositor and
     takes seven photographs of the real shell for a human to look at. B74 took
     away half of B72's argument — the screens are no longer rewritten by a run
     that changed nothing — and left the other half standing: a run that DID

@@ -1793,3 +1793,192 @@ def test_the_readme_states_the_floor_the_harness_compares_with():
         "docs/hud/screens/README.md does not say how faint a difference has "
         f"to be to be forgiven, which is {sheet.NOISE_CHANNEL} per channel"
     )
+
+
+# ------------------------------ where the run's time goes (B75)
+#
+# `verify.sh` names this gate and does not run it, on one reason B74 left
+# standing: it costs minutes and produces pictures rather than a verdict.
+# B75 asks whether a CHEAPER HALF exists — the probes are verdicts, the
+# screens are not — and nobody could answer it, because the cost was a
+# single number with no parts in it. The run books its own seconds now,
+# and `sheet.PHASES` says which half each phase belongs to.
+#
+# These are the gates on the ACCOUNTING, which is the part that can lie:
+# a table that drops a phase, or charges one stretch twice, would report a
+# cheap sheet-half that is not there and get this gate bound on a fiction.
+
+
+def booked_phases():
+    """Every phase name the two halves of the harness actually book."""
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    return set(re.findall(r'cost\.phase\("([a-z]+)"\)', shoot)) | set(
+        re.findall(r"^\s*book ([a-z]+) ", driver_text(), re.M)
+    )
+
+
+def test_every_phase_the_harness_books_is_classified_and_the_other_way_round():
+    """The two ends of the split. A phase the harness books and nothing
+    classifies would be charged to neither half — so the table would be
+    printed under a total that excludes it, and the sheet half would look
+    smaller than it is. A phase classified here and booked by nobody is a
+    row that silently never appears, which is how a gate gets bound on a
+    price that was never measured.
+    """
+    assert booked_phases() == set(sheet.PHASES), (
+        "the phases the harness books and the phases sheet.PHASES classifies "
+        f"disagree: booked-only {sorted(booked_phases() - set(sheet.PHASES))}, "
+        f"classified-only {sorted(set(sheet.PHASES) - booked_phases())}"
+    )
+
+
+def test_the_expensive_probes_are_booked_as_probes_and_the_pictures_as_sheet():
+    """The classification is the whole answer to B75, so it is asserted and
+    not just declared: the two probes `verify.sh` would want a verdict from
+    are on the bill a picture-less run still pays, and the two things only
+    the sheet needs — the PNG encodes and reading them back against HEAD —
+    are the only ones on the other side.
+    """
+    kinds = {name: kind for name, (kind, _) in sheet.PHASES.items()}
+    assert kinds["idle"] == sheet.PROBE and kinds["click"] == sheet.PROBE
+    assert {n for n, k in kinds.items() if k == sheet.SHEET} == {"encode", "compare"}
+
+
+def test_the_table_accounts_for_every_second_of_the_run():
+    """The seconds nobody booked are PRINTED, not dropped. A table that
+    silently summed to less than the run took would let the next reader
+    divide a half by a total the rows never covered."""
+    table = "\n".join(sheet.cost_table([("idle", 60.0), ("encode", 8.0)], 100.0))
+    assert "unaccounted" in table
+    assert "32.0 s" in table, table
+
+
+def test_a_phase_that_ran_four_times_is_one_row():
+    """Every shot books `processes` and `capture`, so the rows are sums. Four
+    rows for four shots would be a table nobody can compare against the next
+    run's, which is the only use it has."""
+    table = "\n".join(sheet.cost_table([("capture", 1.5)] * 4, 100.0))
+    assert len([l for l in table.splitlines() if " capture " in l]) == 1, table
+    assert "6.0 s" in table, table
+
+
+def test_the_two_halves_are_summed_and_shown_as_shares_of_the_run():
+    """The bottom line is what B75 gets read for: what a verdict-only run
+    would still pay, next to what only the pictures cost."""
+    table = "\n".join(
+        sheet.cost_table(
+            [("idle", 60.0), ("click", 20.0), ("encode", 8.0), ("compare", 2.0)],
+            100.0,
+        )
+    )
+    assert f"{sheet.PROBE}" in table and f"{sheet.SHEET}" in table
+    assert "80.0 s" in table and "10.0 s" in table, table
+    assert "80.0%" in table and "10.0%" in table, table
+
+
+def test_a_phase_nobody_classified_is_refused_rather_than_ignored():
+    """An unknown phase is a table missing a row and a total missing its
+    seconds. Refusing it is what makes the gate above enforceable."""
+    with pytest.raises(ValueError, match="grim"):
+        sheet.cost_table([("grim", 1.0)], 10.0)
+
+
+def test_an_accounting_that_charges_more_than_the_run_took_is_refused():
+    """The one bookkeeping error this table cannot survive: a phase opened
+    inside another one charges the same stretch twice, and the sheet half
+    would come out cheaper than it is — which is a gate bound on a fiction.
+    """
+    with pytest.raises(ValueError, match="twice"):
+        sheet.cost_table([("idle", 60.0), ("click", 60.0)], 100.0)
+    # Tenths are two clocks rounding, not double counting.
+    sheet.cost_table([("idle", 100.2)], 100.0)
+
+
+def test_a_run_that_took_no_time_is_refused():
+    """Every share in the table is a fraction of the total."""
+    with pytest.raises(ValueError, match="no time"):
+        sheet.cost_table([], 0.0)
+
+
+def test_the_book_refuses_a_phase_opened_inside_another(tmp_path):
+    """The runtime half of the same rule. `capture` is called by the shot
+    loop AND from inside both probes, so a `cost.phase` in the wrong place
+    is a live hazard rather than a hypothetical one — and it would be
+    invisible in the table, which is exactly why it raises here instead.
+    """
+    ticks = iter([0.0, 1.0, 2.0, 3.0])
+    cost = sheet.Cost(tmp_path / "cost.tsv", clock=lambda: next(ticks))
+    with pytest.raises(RuntimeError, match="inside"):
+        with cost.phase("idle"):
+            with cost.phase("capture"):
+                pass
+
+
+def test_the_book_records_a_phase_whose_body_failed(tmp_path):
+    """A run that dies in a check has still spent the seconds, and the
+    stretch it died in is the one worth reading."""
+    # The ticks do not start at zero on purpose: a book that wrote down the
+    # clock instead of the ELAPSED time would agree with a run that did,
+    # forever, if every fake clock in these tests started at 0.0.
+    ticks = iter([5.0, 12.0])
+    cost = sheet.Cost(tmp_path / "cost.tsv", clock=lambda: next(ticks))
+    with pytest.raises(KeyError):
+        with cost.phase("checks"):
+            raise KeyError("a check said no")
+    assert sheet.read_cost((tmp_path / "cost.tsv").read_text("utf-8")) == [
+        ("checks", 7.0)
+    ]
+
+
+def test_the_book_opens_the_next_phase_after_closing_the_last(tmp_path):
+    """The nesting guard, turned back on the run that respects it. A book
+    that never CLOSED a phase would refuse every phase after the first, and
+    a harness that books ten of them would die in the second shot — which
+    every test around this one misses, because each opens exactly one.
+    """
+    ticks = iter([0.0, 2.0, 10.0, 13.0])
+    cost = sheet.Cost(tmp_path / "cost.tsv", clock=lambda: next(ticks))
+    with cost.phase("capture"):
+        pass
+    with cost.phase("encode"):
+        pass
+    assert sheet.read_cost((tmp_path / "cost.tsv").read_text("utf-8")) == [
+        ("capture", 2.0),
+        ("encode", 3.0),
+    ]
+
+
+def test_the_book_is_a_file_because_two_processes_write_it(tmp_path):
+    """Half the phases are bash's (the flake, the compositor, the
+    comparison) and half are the driver's. Appending, not rewriting: the
+    shell's lines are already in the file when python opens it."""
+    path = tmp_path / "cost.tsv"
+    path.write_text("realize\t12.500\n", "utf-8")
+    ticks = iter([100.0, 103.0])
+    with sheet.Cost(path, clock=lambda: next(ticks)).phase("click"):
+        pass
+    assert sheet.read_cost(path.read_text("utf-8")) == [
+        ("realize", 12.5),
+        ("click", 3.0),
+    ]
+
+
+def test_a_line_neither_half_wrote_is_refused():
+    """The file is read by one side and written by two, in two languages."""
+    with pytest.raises(ValueError, match="seconds"):
+        sheet.read_cost("realize 12.5\n")
+
+
+def test_the_run_prints_its_table_even_when_the_sheet_changed():
+    """The interesting run is the one whose comparison says the HUD moved —
+    it exits nonzero by design, and under `set -e` that would take the
+    table with it. The price of the run a human is looking at is the price
+    worth knowing."""
+    driver = driver_text()
+    assert "compare_status=$?" in driver and "exit $compare_status" in driver, (
+        "ops/ralph/hudscreens.sh lets the comparison's exit status end the "
+        "run, so the one run whose cost anybody asks about prints no table"
+    )
+    assert driver.index("cost_table(") > driver.index("tools/hudsheet.py"), (
+        "the table is printed before the comparison it is supposed to price"
+    )

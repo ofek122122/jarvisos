@@ -62,7 +62,7 @@
 # plans; this one is named there instead, beside the paths that asked for it,
 # so a green verdict cannot quietly stand in for a sheet nobody took. Two
 # measured reasons, neither of them "it cannot run here" — it runs here fine:
-#   1. 2m25s, and what it produces is not a verdict to collect but seven
+#   1. 3m00s, and what it produces is not a verdict to collect but seven
 #      pictures somebody has to look at.
 #   2. it REWRITES the screens it is pointed at — which B72 could not
 #      qualify and B74 now can. The rewrite is no longer unconditional:
@@ -72,8 +72,25 @@
 #      run which DID change the HUD leaves seven new PNGs in the tree,
 #      which is the right outcome for a human at a keyboard and the wrong
 #      one for a gate computing a plan from that tree.
-# Reason 1 is the one that still carries this on its own; whether reason 2
-# survives its own measurement is PLAN B75, for a human.
+# Reason 1 is the one that still carries this on its own, and B75 asked the
+# obvious follow-up: is there a CHEAPER HALF? The probes (the corner, the
+# exclusive zone, the click, the idle frames) are verdicts a gate could
+# collect; the screens are not. So the run books its own seconds — every
+# phase, into one file both halves of this harness append to, classified in
+# `sheet.PHASES` as a cost a picture-less run would still pay or one only the
+# pictures need — and prints the table at the end. The answer is NO, and the
+# numbers are why (measured here, and the table re-measures them):
+#
+#     probe  144.8 s  80.5%   ·   sheet  34.9 s  19.4%   of 179.8 s
+#
+# A run that kept no picture at all would still pay 2m25s of the 3m00s,
+# because the pictures are not what costs: `grim` and the seven PNG encodes
+# come to 0.9 s BETWEEN them, and almost the whole sheet half is the read-back
+# against HEAD (34.3 s). What costs is the idle probe — 97.6 s, 54% of
+# everything, five windows each deliberately holding still for ten seconds —
+# and that is the least skippable verdict in the file. The 2m25s this header
+# quoted until now is where the same measurement lands the other lesson: B74's
+# comparison added 34 s to the run and nobody re-measured the total.
 # The path list above is in `DECLARED_GATES` in tools/dependents.py, held
 # equal to this one by tools/tests/test_dependents.py; `flake.lock` is in it
 # on this script's own argument, that a sheet rendered against a different Qt
@@ -82,6 +99,21 @@ set -euo pipefail
 
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 out="${1:-$root/docs/hud/screens}"
+
+# WHAT THE RUN COSTS, booked as it is spent (PLAN B75). Two clocks write one
+# file: these three phases are the shell's, the rest are booked inside
+# tools/hudscreens/shoot.py, and `sheet.PHASES` says which half of the run
+# each belongs to — the half a verdict-only run would still pay, or the half
+# only the seven pictures need. The table is printed at the end, below.
+#
+# `date` rather than bash's own $EPOCHREALTIME, and awk under LC_ALL=C:
+# neither the stamp nor the subtraction may depend on a locale's idea of
+# where the decimal point goes.
+run_t0=$(date +%s.%N)
+book() {  # book <phase> <start> — seconds from <start> until now
+  LC_ALL=C awk -v n="$1" -v a="$2" -v b="$(date +%s.%N)" \
+    'BEGIN { printf "%s\t%.3f\n", n, b - a }' >> "$cost"
+}
 
 # Realize out of the flake's own pinned nixpkgs, rather than whatever this
 # machine happens to have: a sheet rendered against a different Qt or a
@@ -92,6 +124,7 @@ nixpkgs() {
 }
 
 echo "hudscreens: realizing the compositor and the shell…" >&2
+realize_t0=$(date +%s.%N)
 sway=$(nixpkgs sway)
 swaybg=$(nixpkgs swaybg)
 grim=$(nixpkgs grim)
@@ -107,6 +140,10 @@ hud=$(nix build "$root#jv-hud" --no-link --print-out-paths)
 jarvisd=$(nix build "$root#jarvisd" --no-link --print-out-paths)
 
 stage=$(mktemp -d)
+# The book cannot be opened before this line — the stage is where it lives —
+# so the realization above is booked from its own stamp the moment it can be.
+cost="$stage/cost.tsv"
+book realize "$realize_t0"
 cleanup() {
   [ -n "${swaypid:-}" ] && kill "$swaypid" 2>/dev/null || true
   rm -rf "$stage"
@@ -122,6 +159,8 @@ chmod 700 "$XDG_RUNTIME_DIR"
 export HOME="$stage"
 export XDG_CACHE_HOME="$stage/cache"
 export XDG_CONFIG_HOME="$stage/config"
+
+compositor_t0=$(date +%s.%N)
 
 # ares' monitors and the compositor's input rules come from
 # tools/hudscreens/sheet.py — one source, read by the compositor here and
@@ -168,6 +207,7 @@ sleep 1
 # layer-shell attached properties quietly fail to attach — which looks
 # like a HUD that loaded and drew nothing.
 export QT_QPA_PLATFORM=wayland
+book compositor "$compositor_t0"
 
 export JV_SCREENS_OUT="$out"
 export JV_SCREENS_STAGE="$stage"
@@ -197,8 +237,27 @@ import sys; sys.path.insert(0, '$root/tools/hudscreens'); import sheet
 print(sheet.NOISE_PIXELS, sheet.NOISE_CHANNEL)")
 accept=()
 [ "$(realpath -m "$out")" = "$(realpath -m "$root/docs/hud/screens")" ] && accept=(--accept-noise)
+compare_t0=$(date +%s.%N)
+compare_status=0
 "$py/bin/python" "$root/tools/hudsheet.py" \
   --root "$root" --out "$out" --sheet docs/hud/screens \
   --rerun "bash ops/ralph/hudscreens.sh" \
   --tolerance-pixels "${floor% *}" --tolerance-channel "${floor#* }" \
-  "${accept[@]}"
+  "${accept[@]}" || compare_status=$?
+book compare "$compare_t0"
+
+# AND WHERE THE TIME WENT (PLAN B75). The comparison's status is caught
+# rather than allowed to end the run, because the run whose cost anybody
+# asks about is the one that found a changed HUD: it exits nonzero by
+# design, and under `set -e` that would take this table with it.
+"$py/bin/python" - "$root/tools/hudscreens" "$cost" "$run_t0" <<'EOF'
+import sys, time
+sys.path.insert(0, sys.argv[1])
+import sheet
+
+records = sheet.read_cost(open(sys.argv[2]).read())
+total = time.time() - float(sys.argv[3])
+print("\n".join(sheet.cost_table(records, total)))
+EOF
+
+exit $compare_status

@@ -17,8 +17,10 @@ it docks to, and the emptiness it leaves behind when it has nothing to
 say.
 """
 
+import contextlib
 import re
 import subprocess
+import time
 from pathlib import Path
 
 # ares' monitors, as CLAUDE.md declares them: one 2560x1440 primary and
@@ -754,3 +756,165 @@ def output_by_role(role):
         if o["role"] == role:
             return o
     raise KeyError(role)
+
+
+# ------------------------------------------- where a run's seconds go (B75)
+#
+# `ops/ralph/verify.sh` names this gate and does not run it. B72 gave two
+# reasons, B74 measured one of them away, and what was left standing was a
+# single number: minutes, and seven photographs rather than a verdict. B75
+# asks the obvious next question — is there a CHEAPER HALF? The probes (the
+# corner, the exclusive zone, the click, the idle frames) are verdicts a gate
+# could collect; the screens are not. Nobody could answer it, because that
+# number had no parts in it.
+#
+# So the run books its own time, phase by phase, and every phase is one of:
+#
+#   PROBE — a run that wrote no PNG and compared nothing would still pay it.
+#           The flake, the compositor, a jarvisd and a jv-hud per shot, the
+#           settles a plate needs before anything can be measured on it, and
+#           the `grim` exposures the corner and growth checks READ — a
+#           picture nobody keeps still has to be taken.
+#   SHEET — only the pictures need it: the PNG encodes, and reading the seven
+#           back against the sheet committed at HEAD.
+#
+# The split is written down HERE, once, rather than at the ten call sites, so
+# B75's answer is a table and not a sentence per phase — and
+# `tools/tests/test_hudscreens.py` holds both of its ends: every phase the
+# harness books is classified here, and every phase classified here is booked
+# by the harness. A phase in neither half would be charged to neither, so the
+# shares would be fractions of a total the rows never covered.
+PROBE = "probe"
+SHEET = "sheet"
+
+PHASES = {
+    "realize": (PROBE, "sway, grim, Qt and the two binaries, out of the flake"),
+    "compositor": (PROBE, "the compositor and the backdrop, up and answering"),
+    "processes": (PROBE, "a jarvisd and a jv-hud per shot, started and stopped"),
+    "settle": (PROBE, "the frames published, and the waits a settled plate needs"),
+    "capture": (PROBE, "grim, and the ppm read back into numpy"),
+    "checks": (PROBE, "the monitors, the corner, the zone, the focus, the growth"),
+    "idle": (PROBE, "five idle windows and the control for each"),
+    "click": (PROBE, "one click over a plate, onto the window underneath"),
+    "encode": (SHEET, "the PNGs, written"),
+    "compare": (SHEET, "them read back against the sheet committed at HEAD"),
+}
+
+# The name of the book, inside the run's own scratch stage.
+COST_FILE = "cost.tsv"
+
+# How far the phases may over-book the clock before the table is a lie rather
+# than arithmetic. Two clocks write it — bash's `date` for the phases either
+# side of the driver, `time.monotonic` for the ones inside it — so tenths are
+# rounding. Seconds are a phase opened INSIDE another one, which is the one
+# bookkeeping error this table cannot survive: it charges a stretch twice and
+# reports a cheaper SHEET half than the run really has, which is a gate bound
+# on a fiction.
+COST_SLACK_S = 0.5
+
+
+class Cost:
+    """The book a run writes its seconds into, one open phase at a time.
+
+    A file rather than an accumulator, because half the phases belong to the
+    shell (the flake, the compositor, the comparison) and half to the driver
+    it runs, and an appended file is the only thing both halves can write.
+
+    Nesting RAISES. `capture()` is called by the shot loop and again from
+    inside both probes, so a `phase` in the wrong place is a live hazard and
+    not a hypothetical one — and double counting is invisible in the table,
+    which is why it has to be loud here.
+    """
+
+    def __init__(self, path, clock=None):
+        self._path = Path(path)
+        self._clock = clock or time.monotonic
+        self._open = None
+
+    @contextlib.contextmanager
+    def phase(self, name):
+        if name not in PHASES:
+            raise ValueError(f"nothing classifies the phase {name!r}")
+        if self._open is not None:
+            raise RuntimeError(
+                f"{name!r} was opened inside {self._open!r} — the same seconds "
+                "would be charged to both, and the table cannot see it"
+            )
+        self._open = name
+        started = self._clock()
+        try:
+            yield
+        finally:
+            # A run that died in a check has still spent the seconds, and the
+            # stretch it died in is the one worth reading.
+            took = self._clock() - started
+            self._open = None
+            with self._path.open("a") as fh:
+                fh.write(f"{name}\t{took:.3f}\n")
+
+
+def read_cost(text):
+    """`<phase>\\t<seconds>` lines, in the order the two halves appended them."""
+    out = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        name, tab, secs = line.partition("\t")
+        if not tab:
+            raise ValueError(f"not a <phase>, a tab and its seconds: {line!r}")
+        out.append((name.strip(), float(secs)))
+    return out
+
+
+def cost_table(records, total):
+    """The table that answers B75: the run's seconds, by phase, then the two
+    halves as shares of it.
+
+    `total` is the whole run measured from outside every phase — so the
+    seconds nobody booked are PRINTED as `unaccounted` rather than dropped.
+    A table that quietly summed to less than the run took would invite the
+    next reader to divide a half by a total its rows never covered.
+    """
+    if total <= 0:
+        raise ValueError("a run that took no time has no shares to report")
+    booked = {}
+    for name, secs in records:
+        if name not in PHASES:
+            raise ValueError(
+                f"nothing classifies the phase {name!r}, so its seconds belong "
+                "to neither half of the question B75 asks"
+            )
+        booked[name] = booked.get(name, 0.0) + secs
+    spent = sum(booked.values())
+    if spent > total + COST_SLACK_S:
+        raise ValueError(
+            f"the phases book {spent:.1f} s of a run that took {total:.1f} s, so "
+            "some stretch of it was charged twice — a phase opened inside "
+            "another one, which understates the half this table is read for"
+        )
+
+    width = max(len(n) for n in (*PHASES, "unaccounted"))
+    lines = [
+        f"hudscreens: the run took {total:.1f} s, and this is where it went "
+        "(PLAN B75)",
+        "",
+    ]
+    for name, (kind, what) in PHASES.items():
+        if name in booked:
+            lines.append(
+                f"  {kind:<7}{booked[name]:7.1f} s  {name.ljust(width)}  {what}"
+            )
+    lines += [
+        f"  {'':<7}{total - spent:7.1f} s  {'unaccounted'.ljust(width)}  "
+        "the run, minus every phase that booked itself",
+        "",
+    ]
+    for kind, meaning in (
+        (PROBE, "a run that kept no pictures would still pay this"),
+        (SHEET, "only the pictures need this"),
+    ):
+        share = sum(s for n, s in booked.items() if PHASES[n][0] == kind)
+        lines.append(
+            f"  {kind:<7}{share:7.1f} s  {share / total * 100:5.1f}%  {meaning}"
+        )
+    return lines + [""]

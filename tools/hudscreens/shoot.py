@@ -1617,36 +1617,48 @@ def main() -> int:
     stage = Path(os.environ["JV_SCREENS_STAGE"])
     outdir.mkdir(parents=True, exist_ok=True)
 
+    # What the run costs, booked as it is spent (PLAN B75). `hudscreens.sh`
+    # has already written the phases it owns — the flake, the compositor —
+    # into this same file, and prints the table once the comparison is done.
+    # Every name below is classified in `sheet.PHASES`, and a test holds both
+    # ends of that: no stretch of this file can escape the accounting, and
+    # none can be charged to the wrong half of it.
+    cost = sheet.Cost(stage / sheet.COST_FILE)
+
     background = np.array(
         [int(sheet.BACKDROP[i : i + 2], 16) for i in (1, 3, 5)], dtype=np.uint8
     )
 
-    check_outputs_are_ares_monitors()
-    bare_focus = seat_focus()
-    log(f"three monitors up; the seat's keyboard is on {bare_focus}")
+    with cost.phase("checks"):
+        check_outputs_are_ares_monitors()
+        bare_focus = seat_focus()
+        log(f"three monitors up; the seat's keyboard is on {bare_focus}")
 
-    # The desktop with no HUD on it at all. The quiet shot is compared
-    # against THIS, not against an idea of what dark looks like.
-    check_desk_is_bare(
-        stage / "bare.ppm",
-        background,
-        f"the bare desktop is not a flat {sheet.BACKDROP} — the backdrop never "
-        "came up, so 'the HUD drew nothing' would be unprovable",
-    )
+        # The desktop with no HUD on it at all. The quiet shot is compared
+        # against THIS, not against an idea of what dark looks like.
+        check_desk_is_bare(
+            stage / "bare.ppm",
+            background,
+            f"the bare desktop is not a flat {sheet.BACKDROP} — the backdrop "
+            "never came up, so 'the HUD drew nothing' would be unprovable",
+        )
 
     written: list[str] = []
     for shot in sheet.SHOTS:
         log(f"shot {shot['file']}")
         bus_addr = str(stage / f"bus-{shot['file']}.sock")
         env = dict(os.environ, JARVIS_BUS=bus_addr)
-        broker = Proc("jarvisd", [os.environ["JARVISD_BIN"]], stage / f"{shot['file']}-jarvisd.log", env)
         hud = None
+        with cost.phase("processes"):
+            broker = Proc("jarvisd", [os.environ["JARVISD_BIN"]], stage / f"{shot['file']}-jarvisd.log", env)
         try:
-            broker.wait_for("jarvisd listening on")
-            hud = Proc("jv-hud", [os.environ["JV_HUD_BIN"]], stage / f"{shot['file']}-hud.log", env)
-            hud.wait_for("Configuration Loaded")
-            time.sleep(SETTLE_S)
-            publish_shot(shot, bus_addr)
+            with cost.phase("processes"):
+                broker.wait_for("jarvisd listening on")
+                hud = Proc("jv-hud", [os.environ["JV_HUD_BIN"]], stage / f"{shot['file']}-hud.log", env)
+                hud.wait_for("Configuration Loaded")
+            with cost.phase("settle"):
+                time.sleep(SETTLE_S)
+                publish_shot(shot, bus_addr)
             hold = shot.get("hold", [])
 
             # A shot that declares `grows_from` is photographed TWICE. The
@@ -1662,13 +1674,18 @@ def main() -> int:
             # under another one looks like on a stack docked to the corner.
             shorter = None
             if shot.get("grows_from"):
-                settle(SETTLE_S, shot["grows_from"], bus_addr)
+                with cost.phase("settle"):
+                    settle(SETTLE_S, shot["grows_from"], bus_addr)
                 before = stage / f"{shot['file']}-shorter.ppm"
-                capture("primary", before)
-                shorter = drawn_box(read_ppm(before), background)
+                with cost.phase("capture"):
+                    capture("primary", before)
+                    smaller = read_ppm(before)
+                with cost.phase("checks"):
+                    shorter = drawn_box(smaller, background)
                 log(f"  one plate shorter: drawn at {shorter}")
 
-            settle(SETTLE_S, hold, bus_addr)
+            with cost.phase("settle"):
+                settle(SETTLE_S, hold, bus_addr)
 
             # AFTER the frames, on purpose. `visible` is false whenever the
             # HUD has nothing to say, and an unmapped layer surface reserves
@@ -1677,13 +1694,14 @@ def main() -> int:
             # for a HUD that would steal the screen the moment it spoke. It
             # was written that way first, and ExclusionMode.Normal walked
             # straight through it.
-            check_no_space_reserved()
-            if seat_focus() != bare_focus:
-                raise Fail(
-                    f"the seat's keyboard moved to {seat_focus()} while the HUD "
-                    f"was drawing (was {bare_focus}) — the HUD stole focus, "
-                    "which invariant 10 forbids"
-                )
+            with cost.phase("checks"):
+                check_no_space_reserved()
+                if seat_focus() != bare_focus:
+                    raise Fail(
+                        f"the seat's keyboard moved to {seat_focus()} while the "
+                        f"HUD was drawing (was {bare_focus}) — the HUD stole "
+                        "focus, which invariant 10 forbids"
+                    )
 
             grown = None
             for target in shot["captures"]:
@@ -1694,32 +1712,37 @@ def main() -> int:
                 # the run is the one that would quietly be of a bare
                 # desktop.
                 if hold:
-                    publish_shot({"frames": hold}, bus_addr)
-                capture(target, ppm)
-                img = read_ppm(ppm)
-                check_capture(shot, target, img, background)
-                if target == "primary" and shot.get("grows_from"):
-                    # BEFORE the PNG is written, not after: a failed run
-                    # that had already saved the picture would leave the
-                    # wrong one sitting in docs/hud/screens, where the next
-                    # reader finds it looking exactly as finished as the
-                    # others.
-                    grown = drawn_box(img, background)
-                    if not sheet.grew_downwards(shorter, grown):
-                        raise Fail(
-                            f"{shot['file']}: the HUD drew {shorter} on the "
-                            f"primary without the frame this shot is OF, and "
-                            f"{grown} with it — which is not a plate arriving "
-                            "under another one at the same top-right corner. "
-                            "The picture about to be written is of a HUD "
-                            "saying less than its caption says it does"
+                    with cost.phase("settle"):
+                        publish_shot({"frames": hold}, bus_addr)
+                with cost.phase("capture"):
+                    capture(target, ppm)
+                    img = read_ppm(ppm)
+                with cost.phase("checks"):
+                    check_capture(shot, target, img, background)
+                    if target == "primary" and shot.get("grows_from"):
+                        # BEFORE the PNG is written, not after: a failed run
+                        # that had already saved the picture would leave the
+                        # wrong one sitting in docs/hud/screens, where the
+                        # next reader finds it looking exactly as finished
+                        # as the others.
+                        grown = drawn_box(img, background)
+                        if not sheet.grew_downwards(shorter, grown):
+                            raise Fail(
+                                f"{shot['file']}: the HUD drew {shorter} on "
+                                f"the primary without the frame this shot is "
+                                f"OF, and {grown} with it — which is not a "
+                                "plate arriving under another one at the same "
+                                "top-right corner. The picture about to be "
+                                "written is of a HUD saying less than its "
+                                "caption says it does"
+                            )
+                        log(
+                            f"  and {grown[3] - shorter[3]} px taller with "
+                            f"it: {grown}"
                         )
-                    log(
-                        f"  and {grown[3] - shorter[3]} px taller with it: "
-                        f"{grown}"
-                    )
                 name = f"{shot['file']}-{target}.png"
-                write_png(outdir / name, img)
+                with cost.phase("encode"):
+                    write_png(outdir / name, img)
                 written.append(name)
                 log(f"  wrote {name} ({img.shape[1]}x{img.shape[0]})")
 
@@ -1734,12 +1757,15 @@ def main() -> int:
                     "measured whether the plate it is OF ever arrived"
                 )
         finally:
-            if hud is not None:
-                hud.stop()
-            broker.stop()
+            with cost.phase("processes"):
+                if hud is not None:
+                    hud.stop()
+                broker.stop()
 
-    probe_idle_frames(stage, background)
-    probe_click_through(stage, background)
+    with cost.phase("idle"):
+        probe_idle_frames(stage, background)
+    with cost.phase("click"):
+        probe_click_through(stage, background)
 
     expected = sheet.all_files()
     if written != expected:

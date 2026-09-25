@@ -84,11 +84,14 @@ DECLARED, in `DECLARED_GATES`, against a `# reads:` header each script carries
 about itself, which `test_dependents.py` holds equal. `nixtest.sh` is then a
 step like any other (22 s, whenever `modules/`, `hosts/ares/`, `pkgs/`, `nix/`
 or the flake itself moves). `hudscreens.sh` is deliberately NOT one: it runs
-here fine — 2m25s, measured — but it boots a compositor and rewrites seven
-screens that are not reproducible (two runs on an unchanged tree differ in
-five of the seven, by 3 and 4 pixels of 3.7 M, one channel, by one), so
-binding it would dirty the tree the plan was computed from, every time, with
-churn no eye can tell from a real change. It is
+here fine — 3m00s, measured — but it boots a compositor and what it produces
+is seven photographs for a human rather than a verdict to collect. B74 took
+away the other half of that argument (a run that changed nothing now restores
+what it compared against, so it no longer dirties the tree the plan was
+computed from) and B75 asked whether a cheaper, verdict-only half would be
+bindable. It would not: the run books its own phases now, and 144.8 s of the
+179.8 s is the probes. The pictures cost 0.9 s — `grim` and seven PNG encodes
+— and the rest of that half is reading them back against HEAD. So it is
 NAMED on every verdict instead, green or red, beside the paths that asked for
 it, because a list of the gates that read your change which silently drops one
 reads as coverage.
