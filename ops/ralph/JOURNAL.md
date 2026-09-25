@@ -10976,3 +10976,97 @@ survived a further round and has its own case now.
   and the trap is the unmatched turns, which must be refused rather than
   binned as completed. B87/B88 are the gate's own rules and unchanged.
   A62/A70 — one corner, two plates, one event — are still a human's call.
+
+## 2026-09-25 — iteration 111 — the word you would never be quick enough to read
+
+- built: **PLAN B93** — `docs/hud/screens/05-preempted-primary.png`, the
+  first and only picture of the word B91 taught the HUD to say. One
+  composed `speech.state` from jv-voice (`state: interrupted`,
+  `reason: preempted`, the utterance 04-unheard photographs being spoken,
+  one transition later), on the primary, with no `hold` and no second
+  plate. The shot is the cheapest thing in the sheet: no heartbeat behind
+  it, nothing that expires, one frame sitting in `bus.latest()` until the
+  camera is done.
+
+- and the thing taking it found, which is worth more than the picture:
+  **jv-voice publishes `idle` in the statement straight after the
+  interruption**, with nothing awaited between them (`_speak_one`, both
+  branches), and core/SpeechState.qml draws `idle` as nothing at all. So
+  PREEMPTED is on screen for as long as it takes one frame to follow
+  another over a Unix socket — and so has INTERRUPTED been since A3, with
+  nothing in this repo saying so. The caption says it now, a test pins
+  that sentence to the two adjacent `await self._state(...)` lines in
+  service.py, and **B94** raises the three ways to fix it for a human
+  (stop sending the redundant idle / latch the word / do not draw it),
+  because each of them is a different service's decision.
+
+- three things B93 did not know, all found by writing its tests:
+
+  (1) *FOUR elements read `speech.state`, not two.* The item's shape
+  assumed SpeechState and OutputState. ActionState and HeardState read it
+  too — as an EXIT from an outcome and from a heard line. The picture is
+  still one plate, but for three separate reasons rather than one, and
+  each of the three is now asserted: ActionState needs an `action.result`,
+  HeardState an `audio.transcript`, OutputState a `context.system`, and
+  this shot publishes none of them. The first version of that test said
+  `["OutputState", "SpeechState"]` and went red immediately, which is the
+  only reason any of this was looked at.
+
+  (2) *Adding a picture retired A73's staleness notice.* `shot_surface_box`
+  answers "the box these were taken against" by asking git which commit
+  last wrote a PNG here; that is now this commit, declaring today's
+  `300x826`, so `then == now` and the paragraph deleted itself as
+  designed. Read honestly, the derivation establishes that the NEWEST
+  picture is current — the other seven are established by B74, which
+  re-takes all of them every run and compares them to the committed
+  bytes. The replacement prose says that instead of the git heuristic.
+
+  (3) *The gate keys on a phrase, so the phrase is reserved.* The first
+  epitaph opened "These pictures used to be **older than the box**" and
+  the gate went red on it, correctly: a substring search cannot tell prose
+  saying a condition is OVER from prose saying it holds. Reworded, and the
+  test's own docstring now says the phrase is reserved and why.
+
+- also measured, and it corrects two PLAN items: **a shot is not an idle
+  window.** Adding this one took `hudscreens.sh` from 183.8 s to 184.0 s
+  — a settle and one jarvisd/jv-hud pair, about 2 s. Both B93 and A85 led
+  with a cost objection that priced a photograph as a ~20 s idle hold, and
+  it does not apply. A85's photograph half (`MIC LOSING AUDIO` on the
+  sheet) is therefore cheap and should just be taken; what stays expensive
+  in A85 is the growth assertion it leads with, for a widening its own
+  note computes at about one pixel. Both items now say so.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths, 107 s
+  (tools 40.0, hudshots 67.4), and again as `--since HEAD~1` after the
+  commit, GREEN over the four files the commit actually took. 6 new tests
+  in `tools/tests/test_hudscreens.py` (446 in the suite, was 440): the
+  body is legal against the frozen `speech.state` schema, it is the body
+  jv-voice's own test asserts verbatim, it is the same `say_id` as the
+  sheet's speaking frame, it lights exactly one plate for the three
+  reasons above, and the caption names both words and the `idle` that
+  follows. `bash ops/ralph/hudscreens.sh` run twice: once to take the
+  shot (183.8 s), and once at HEAD after committing — GREEN, all 8 shots
+  matching, 5 restored from compositor rounding.
+- honesty about the gate: the first `--since HEAD~1` after the commit was
+  RED on one test (the reserved phrase above), so the commit was amended
+  rather than left broken and re-verified green. It was never pushed.
+  Three tests are also unavoidably red BEFORE a commit that adds a screen
+  and green after it — they read git for the commit that last wrote a PNG,
+  so the tree cannot satisfy them until the commit exists.
+- build: `nixos-rebuild build --flake .#ares` green, closure
+  9b5gamgwmlplz7isgnjabh3zwqy3dn5c — unchanged from iteration 110, which
+  is right: this commit touches a harness, a document and a picture, and
+  nothing that ships. No schema change, no jv-act, no boot path, no pins.
+- files: tools/hudscreens/sheet.py, tools/tests/test_hudscreens.py,
+  docs/hud/screens/README.md, docs/hud/screens/05-preempted-primary.png
+- commits: fe69aa8 (the shot, its tests, and the notice it retired)
+- next: **B94** is the one to read first, and it is a human's — the HUD
+  has two words nobody can read, and the three fixes live in three
+  different files. **A85's photograph half is now cheap** (~2 s) and is
+  the obvious loop task: a `MIC_LOSSY` fixture and a `06-lossy` shot, with
+  its growth assertion explicitly deferred. **B92** is still the larger
+  one: `respond` p50 mixes turns that finished with turns that were talked
+  over, and the trap is the unmatched turns, which must be refused rather
+  than binned as completed. B87/B88/B90 are the gate's own rules and
+  unchanged. A62/A70 — one corner, two plates, one event — are still a
+  human's call, and B94 is the same shape with a clock on it.

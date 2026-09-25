@@ -3092,6 +3092,24 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       on ares**, which is the same seat A47, A55 and B10/A28 are waiting
       for. Ten mutations, ten caught.
 
+      **The staleness notice is RETIRED — fe69aa8, and not the way this
+      item expected.** Nobody re-shot the directory at ares; B93 added a
+      screen, and `shot_surface_box` answers "the box the pictures were
+      taken against" by asking which commit last wrote a PNG here — which
+      is now B93's, declaring today's `300x826`. So `then == now` and the
+      paragraph deleted itself, exactly as designed. Read the derivation
+      honestly: what it establishes is that the NEWEST picture is current.
+      That the other seven are too is established by something else and
+      something better — B74 re-takes all of them every run and compares
+      them to the committed bytes, so a screen that had stopped being the
+      HUD ends the run nonzero. The prose now says that instead. The
+      phrase the gate keys on ("older than the box") is reserved: the
+      paragraph that replaced the notice deliberately avoids it, because a
+      substring search cannot tell prose saying a condition is OVER from
+      prose saying it holds — which cost one red gate to learn. What is
+      still open is the part that was never about the box: nobody has
+      LOOKED at these screens on ares' real panels (A47, A55).
+
 - [x] A74. **The sibling sheet quotes the same box and nothing holds it
       either.** `docs/hud/README.md` opens with "300 × 807 px, the box" —
       the same sentence A73 just pinned one directory down, unpinned, and
@@ -3706,6 +3724,18 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       HealthPlate are welded — which is the same coincidence that made
       this item attractive. Noted while building B89.
 
+      **The cost objection above is wrong, measured (iteration 111).** It
+      prices this as another idle hold, and B93 showed a SHOT is not one:
+      adding `05-preempted` moved the run from 183.8 s to 184.0 s, because
+      a shot costs a settle and a jarvisd/jv-hud pair while an idle window
+      costs six seconds plus its control. So the PHOTOGRAPH half of this
+      item — a `sheet.MIC_LOSSY` fixture and a shot that puts `MIC LOSING
+      AUDIO` on the sheet — is ~2 s and should just be taken. What stays
+      expensive is the half this item leads with: the growth assertion,
+      for a widening its own paragraph above computes at about a pixel.
+      Split it: take the picture, and leave the assertion to whoever wants
+      to measure the pixel first.
+
 - [x] B89. **A plate can silently stop drawing a word its state element
       can produce.** MicState now has five readings and MicPlate draws
       three of them, two by deliberate silence — and the mapping lives in
@@ -3821,7 +3851,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       quietly bin them as completed — which is the whole rule, and the one
       a naive implementation breaks. Raised while building B85's tap half.
 
-- [ ] B93. **The new word is on no photograph, and this time it is cheap.**
+- [x] B93. **The new word is on no photograph, and this time it is cheap.**
       `docs/hud/screens/` has no StatePlate shot of PREEMPTED (B91), the
       same gap A85 records for `MIC LOSING AUDIO` — but without A85's two
       difficulties. The word needs exactly ONE composed frame (`speech.state`
@@ -3836,6 +3866,61 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       3 minutes and every window is another idle hold. Worth pairing with
       A85 in one iteration if anybody ever pays that cost, since they buy
       two words for one hold. Raised while building B91.
+
+      **Done — fe69aa8, and the cost objection was wrong.** `05-preempted`
+      is one composed `speech.state` on the primary, and adding it took the
+      run from 183.8 s to 184.0 s: a shot is a settle and a process pair
+      (~2 s), not an idle window (~20 s). A85's cost paragraph, and this
+      one's, were both pricing a shot as if it were a window — so the
+      objection that held both of them up does not apply to the half that
+      is a PHOTOGRAPH, and A85's photograph half is now cheap for the same
+      reason. What is still expensive in A85 is what it always was: the
+      growth assertion this harness does not have, for a widening its own
+      iteration-108 note computes at about a pixel.
+
+      Three things the item did not know. (1) FOUR elements in `core/`
+      read `speech.state`, not two — ActionState and HeardState read it as
+      an exit from an outcome and a heard line. The shot is still one
+      plate, but for three separate reasons (each of the three needs a
+      subject topic this shot does not publish), and the test states each
+      of them rather than the one the item assumed. (2) Adding a picture
+      retires A73's staleness notice, because the notice derives the
+      pictures' box from the commit that last wrote one — see A73.
+      (3) **B94**, which is the real find.
+
+- [ ] B94. **Human decision: the HUD draws two words nobody can read.**
+      Photographing PREEMPTED (B93) is what made this visible.
+      `services/jv-voice/jv_voice/service.py` publishes `interrupted` and
+      then `idle` in the very next statement, with nothing awaited between
+      them (`_speak_one`, both branches) — and core/SpeechState.qml draws
+      `idle` as NOTHING. So INTERRUPTED and PREEMPTED are on screen for as
+      long as it takes one frame to follow another over a Unix socket.
+      That has been true of INTERRUPTED since A3 and nothing in this repo
+      said so until the caption under `05-preempted-primary.png` did.
+
+      It is a human's call because every fix is a decision the loop should
+      not make alone, and they are in three different places:
+
+        · **jv-voice stops sending the redundant idle**, or delays it. It
+          is a service change in the publisher, it changes what every
+          consumer sees, and `interrupted` already means the turn is over
+          — the `idle` after it carries no `say_id` and tells nobody
+          anything. Cheapest, and the most likely to be right.
+        · **SpeechState holds the word** for a second or two the way
+          HeardState and ConfirmState hold theirs. A latch, in the element
+          that has been careful not to grow one; and a HUD asserting a
+          state the bus has replaced is the direction this file has always
+          refused to err in.
+        · **Nothing** — the word is for a log or a replay, not a screen,
+          and the plate should simply not draw it. That is a real answer
+          and it retires B91's screen half rather than fixing it.
+
+      Whichever it is, `docs/hud/screens/05-preempted-primary.png` is the
+      picture to argue over — it is what the word looks like when it IS on
+      screen. Note the shape this shares with A22 (what the corner should
+      do with a confirmation that ENDED) and A62/A70: all of them are "the
+      HUD has something true and momentary to say, and nobody has decided
+      how long it says it for." Raised while building B93.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD
