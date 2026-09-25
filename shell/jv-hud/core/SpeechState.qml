@@ -2,14 +2,16 @@
 //
 // The HUD's first element backed by real sensor topics, and therefore the
 // first one that can break invariant 10 by arithmetic. It answers exactly
-// one question — idle / listening / speaking / interrupted / unknown —
-// from three topics, and it is the `core/` half on purpose: this is the
-// logic, so it is pure QtQuick and tested headlessly (A9's rule).
+// one question — idle / listening / speaking / interrupted / preempted /
+// unknown — from three topics, and it is the `core/` half on purpose: this
+// is the logic, so it is pure QtQuick and tested headlessly (A9's rule).
 // StatePlate.qml next door is the wiring and the pixels.
 //
 // Where each answer comes from:
 //
-//   speech.state   (jv-voice)  idle / speaking / interrupted, verbatim.
+//   speech.state   (jv-voice)  idle / speaking / interrupted, verbatim —
+//                              and `reason`, which says which of the two
+//                              of you stopped the sentence (B91, below).
 //   audio.wake     (jv-ears)   the wake word fired -> "listening"; one
 //                              arriving mid-question also ends it, since
 //                              the user abandoned that question.
@@ -102,7 +104,7 @@ QtObject {
   property real thinkWindowS: 30.0
 
   // The one output: "unknown" | "idle" | "listening" | "thinking" |
-  // "speaking" | "interrupted".
+  // "speaking" | "interrupted" | "preempted".
   readonly property string state: {
     // The microphone claim first: it is the one that costs the most.
     if (root.listening)
@@ -112,8 +114,10 @@ QtObject {
     // nearest thing we recognise would be an invention, not a reading.
     const named = root.speech === null ? "" : root.speech.body.state;
     // What is audible right now beats what we infer about the brain.
-    if (named === "speaking" || named === "interrupted")
+    if (named === "speaking")
       return named;
+    if (named === "interrupted")
+      return root.selfInterrupted ? "preempted" : "interrupted";
     if (root.promptOpen)
       return "thinking";
     return named === "idle" ? "idle" : "unknown";
@@ -125,6 +129,27 @@ QtObject {
   // Jarvis (or the room) is genuinely doing something — this, and only
   // this, is what earns the ember/teal accent (§06: scarcity is the point).
   readonly property bool active: root.state === "listening" || root.state === "speaking"
+
+  // --- which of the two of you stopped the sentence (B91) -------------
+
+  // An utterance can stop for two quite different reasons and until now
+  // both reached the screen as INTERRUPTED: the user talked over Jarvis
+  // (`wake`), or Jarvis cut its own sentence short because something more
+  // urgent arrived (`preempted` — jv-voice drops the rest of that turn and
+  // speaks the urgent one instead). Only the second is worth its own word,
+  // because only the second is a thing the user did not do and would
+  // otherwise have no way to tell from the one they did.
+  //
+  // Everything else is `interrupted`, which stays true of all of them: a
+  // `wake`, a frame with no `reason` at all, a reason that is not a
+  // string, and a word a later schema version adds. That is the same
+  // direction this whole file errs in — an utterance we watched stop is a
+  // fact, and naming who stopped it on a field we could not read would be
+  // an invention. The reason rides other transitions too (`completed` and
+  // `error` land on the `idle` that follows), and they are not read here:
+  // `idle` draws nothing, and a reply that failed is HealthPlate's
+  // sentence (A6), not a word on this plate.
+  readonly property bool selfInterrupted: root.speech !== null && root.speech.body.reason === "preempted"
 
   // --- the frames we are willing to believe ---------------------------
 

@@ -16,7 +16,7 @@ corner, in this order:
 |---|---|---|
 | `LinkPlate` (A23) | the HUD cannot see the bus at all | (the pipe itself) |
 | `ConfirmPlate` (A20) | jv-act is waiting on your yes or no | `action.confirm` |
-| `StatePlate` (A3) | Jarvis is listening, thinking, speaking or was interrupted | `speech.state` + `audio.wake` + `brain.*` |
+| `StatePlate` (A3) | Jarvis is listening, thinking, speaking, was interrupted, or preempted itself | `speech.state` + `audio.wake` + `brain.*` |
 | `OutputPlate` (A40/A41) | Jarvis is speaking into a sink you cannot hear | `speech.state` + `context.system` + `sys.health` (jv-voice) |
 | `HeardPlate` (A26) | your words are still the live question | `audio.transcript` (+ `audio.vad` for the window, A57) |
 | `ReplyPlate` (A71) | the answer you just heard ran out of room | `brain.response` (+ `audio.wake` / `brain.request` for the exit) |
@@ -321,7 +321,8 @@ topics, and is where the tests are.
 | `idle` | `speech.state` = idle — **draws nothing** | — |
 | `listening` | `audio.wake` fired and the window is still open | teal — the open mic is *yours* |
 | `speaking` | `speech.state` = speaking | ember — Jarvis is doing something |
-| `interrupted` | `speech.state` = interrupted | quiet; a fact, not an alarm |
+| `interrupted` | `speech.state` = interrupted, and it was *you* (`reason` = wake, or no reason we can read) | quiet; a fact, not an alarm |
+| `preempted` | `speech.state` = interrupted with `reason` = preempted — Jarvis stopped its own sentence for something urgent | quiet, exactly like `interrupted` |
 
 `listening` is the claim that costs the most if it is wrong, because it is a
 claim about the microphone. jv-ears publishes when a window *opens* and
@@ -335,6 +336,8 @@ stop saying it too early rather than too late:
   disarms there for a wake-gated utterance.
 - `interrupted` never closes it: jv-voice publishes that *because* of the
   wake, and blanking the plate there would blank it while you are talking.
+  (Neither does `preempted`, which is the same frame under a different
+  `reason` — see below.)
 - otherwise it expires after `wakeWindowS` — jv-ears' own `wake_timeout_s`,
   read off its heartbeat (see *How jv-ears is tuned* below). This used to be
   a constant typed into the QML under a comment asking the next reader to

@@ -63,7 +63,12 @@ Item {
   // Ember is Jarvis; teal is you. Anything else is quiet by design —
   // `interrupted` is a fact worth reading, not an alarm worth colouring,
   // and `thinking` (A12) is Jarvis working with nothing to perceive and
-  // nothing to say yet: a word, not a third accent.
+  // nothing to say yet: a word, not a third accent. `preempted` (B91) is
+  // the same fact with the other culprit — Jarvis stopped its own sentence
+  // for something more urgent — so it is drawn the same quiet way and
+  // reads differently only in the word. Which of you stopped it belongs in
+  // the text, where it says exactly one thing; a colour would have to be
+  // learned, and there is nothing here to be alarmed about either way.
   readonly property color dotColor: root.voice.state === "speaking" ? Theme.ember : root.voice.state === "listening" ? Theme.teal : Theme.text3
 
   implicitWidth: plate.implicitWidth
