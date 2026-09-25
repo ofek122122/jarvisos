@@ -36,6 +36,13 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import hudsheet  # noqa: E402
 
+# The prose scanner (A73) lives with the screen sheet's other instruments,
+# and this document is gated by the same one on purpose: two regexes reading
+# for the same mistake in two READMEs is one of them going quietly out of
+# date while the other keeps passing.
+sys.path.insert(0, str(ROOT / "tools" / "hudscreens"))
+import sheet  # noqa: E402
+
 SHEET = ROOT / "docs" / "hud"
 SCENE = ROOT / "tools" / "hudshots" / "scene" / "tst_shots.qml"
 
@@ -324,20 +331,61 @@ def test_the_committed_sheet_is_what_git_says_it_is():
     assert "README.md" not in shots
 
 
+def scene_box() -> tuple[int, int]:
+    """The box the scene renders into, read off the scene. `test_hudshots.py`
+    pins every driver in that directory to `shell.qml`'s surface (A63), so
+    this is the HUD's own box and not a copy that can quietly drift from it.
+    """
+    text = SCENE.read_text("utf-8")
+    return (
+        int(re.search(r"^\s*width:\s*(\d+)", text, re.M).group(1)),
+        int(re.search(r"^\s*height:\s*(\d+)", text, re.M).group(1)),
+    )
+
+
 def test_every_committed_shot_is_the_surface_box_the_scene_declares():
     """The first thing in this repo to open a committed PNG. shell.qml's
     surface is 300x807 and the scene renders that box exactly (A29), so a
     shot of any other size is a sheet taken with a different harness."""
-    text = SCENE.read_text("utf-8")
-    box = (
-        int(re.search(r"^\s*width:\s*(\d+)", text, re.M).group(1)),
-        int(re.search(r"^\s*height:\s*(\d+)", text, re.M).group(1)),
-    )
+    box = scene_box()
     for name, data in sorted(committed().items()):
         img = hudsheet.decode_png(data)
         assert (img.width, img.height) == box, (
             f"{name} is {img.width}x{img.height}; the scene photographs a "
             f"{box[0]}x{box[1]} surface"
+        )
+
+
+def test_every_box_the_readme_quotes_is_the_box_the_scene_renders():
+    """A74. This sheet opens with "300 × 807 px, the box", and until now
+    nothing read that sentence — it is right today only because A71 happened
+    to update it by hand. Its twin one directory down was not so lucky: it
+    said `300x560` through four growths of the surface, and A73 pinned it.
+    Same failure, same instrument, other document.
+
+    Stricter than A73's gate, deliberately. That sheet may quote monitors and
+    the whole desk because it photographs a real compositor on real screens.
+    This one disclaims everything a compositor owns — layer-shell, the input
+    mask, the exclusive zone, the three monitors — so the only box it can
+    honestly be describing is the one the scene renders, and a monitor size
+    appearing here is prose that has wandered into the other sheet's subject.
+
+    Nor is there an older-than-the-box case to state, the way A73 had to:
+    `hudshots.sh` re-renders these PNGs on every HUD iteration and the test
+    above measures every one of them against this same box, so the pictures
+    cannot be older than the sentence.
+    """
+    box = scene_box()
+    quoted = sheet.boxes_in_prose((SHEET / "README.md").read_text("utf-8"))
+    assert quoted, (
+        "docs/hud/README.md quotes no box at all — the sentence this gate was "
+        "built to hold has gone, and a gate over nothing passes forever"
+    )
+    for other in sorted(quoted - {box}):
+        raise AssertionError(
+            f"docs/hud/README.md quotes {other[0]}x{other[1]}; the scene "
+            f"renders {box[0]}x{box[1]}, which is the only box this sheet "
+            "describes — monitors and the desk belong to docs/hud/screens"
         )
 
 

@@ -17,6 +17,12 @@ Each PNG is **one HUD surface, at its real size** — 300 × 807 px, the box
 is not a crop artifact; it is §06's earned emptiness, and it is most of what
 this HUD looks like most of the time.
 
+That box is not typed twice. A test reads it back out of this sentence and
+holds it against the box the scene renders, which is held against
+`shell.qml` — because the same sentence in `screens/README.md` said a
+different size for four growths of the surface, and no reader could have
+known which of the two was the HUD.
+
 The plates are the real files. So is `Theme`, generated from
 `personality/theme.toml`, and so are the faces — JetBrains Mono and Archivo,
 pinned from the flake so a missing font cannot quietly become a different
