@@ -113,11 +113,13 @@ Item {
 
     // A sys.health heartbeat. `metrics` is the free-form field A14 gave
     // jv-ears for its capture counters and jv-brain for its llm rung.
-    function beat(service, state, metrics, notes) {
+    // `uptime` defaults to the half-hour every other shot on this sheet is
+    // taken at; a shot about a service dying passes its own (A78).
+    function beat(service, state, metrics, notes, uptime) {
       let b = {
         "service": service,
         "state": state,
-        "uptime_s": 1847,
+        "uptime_s": uptime === undefined ? 1847 : uptime,
         "period_s": 5
       };
       if (metrics !== undefined)
@@ -318,6 +320,52 @@ Item {
           }
         }
       });
+    }
+
+    // COMPOSED, and the second shot whose plate is up while every service
+    // on it reports `ok` (A78). The first was 15-bus-drops.png and the
+    // reason is different: there, a field nothing read; here, a fact NO
+    // field carries. Nothing on the bus says "I was restarted" — the
+    // process that could is the one that just lost the memory — so the
+    // only witness is `uptime_s` going backwards between two heartbeats,
+    // which needs a reader that remembers the last one.
+    //
+    // Why this machine exists: every unit in modules/jarvis-services.nix
+    // is `Restart=on-failure`, and one of them says so in a comment about
+    // a bug it is the recovery path for. A jv-ears that dies every few
+    // seconds is therefore a MACHINE THAT LOOKS WELL — the replacement
+    // heartbeats `ok`, the corner is empty, and the microphone plate is up
+    // because the device really is open again.
+    //
+    // Six heartbeats, three of them from a process younger than the one
+    // before it, and the capture counters walk with the uptime rather than
+    // staying at the half-hour `micOpen()` uses: a two-second-old jv-ears
+    // has not captured half an hour of audio, and this sheet holds every
+    // field to the producer that emits it. The last uptime is 2 s, inside
+    // the two periods a heartbeat is believed for, which is exactly how
+    // long a restart stays news.
+    function shot_restarts() {
+      Bus.ingest('{"t":"link","up":true}');
+      suite.beat("jv-brain", "ok", {
+        "llm_rung": 0,
+        "llm_gpu": 1
+      });
+      suite.beat("jv-voice", "ok");
+      const lives = [1847, 6, 9, 4, 7, 2];
+      for (let i = 0; i < lives.length; i++)
+        suite.earsBeat(lives[i]);
+    }
+
+    // jv-ears with a real device open and a real age. `captured_s` is
+    // bounded by the uptime because it cannot be anything else — the
+    // counter starts when the process does.
+    function earsBeat(uptime) {
+      suite.beat("jv-ears", "ok", {
+        "mic_open": 1,
+        "capture_age_s": 0.02,
+        "captured_s": Math.max(0, uptime - 0.6),
+        "capture_stall_s": 2.0
+      }, undefined, uptime);
     }
 
     // COMPOSED. jv-act reaching into the machine and getting nowhere. The
@@ -746,7 +794,14 @@ Item {
       // corner on screen on its own account. `mic health` and not
       // `mic health` plus anything else says the row arrived without a
       // finding, a rung or a VRAM reading under it.
-      { "file": "15-bus-drops.png", "build": suite.shot_drops, "plates": ["mic", "health"] }
+      { "file": "15-bus-drops.png", "build": suite.shot_drops, "plates": ["mic", "health"] },
+      // The other plate up over a machine that says it is fine (A78), and
+      // the caption is the assertion: `mic health` with every service
+      // reporting `ok` means the findings list has an entry nothing on the
+      // bus stated — a restart, which is only visible as an `uptime_s` that
+      // went backwards. `mic` is up in the same corner because the device
+      // really is open: the replacement process opened it.
+      { "file": "16-restarting.png", "build": suite.shot_restarts, "plates": ["mic", "health"] }
     ]
 
     function test_the_sheet() {

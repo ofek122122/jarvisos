@@ -127,11 +127,11 @@ Item {
       });
     }
 
-    function beat(service, state, metrics, notes) {
+    function beat(service, state, metrics, notes, uptime) {
       let b = {
         "service": service,
         "state": state,
-        "uptime_s": 1847,
+        "uptime_s": uptime === undefined ? 1847 : uptime,
         "period_s": 5
       };
       if (metrics !== undefined)
@@ -280,10 +280,26 @@ Item {
       for (let i = 0; i < suite.roster.length; i++) {
         const service = suite.roster[i];
         if (service === "jv-ears" || service === "jv-brain" || service === "jv-voice"
-            || service === "jarvisd")
+            || service === "jarvisd" || service === "jv-act")
           continue;
         suite.beat(service, "degraded", undefined, "impaired");
       }
+      // And jv-act crash-looping (A78), which is the widest DETAIL this
+      // plate can draw: `RESTARTED 99+x` against `DEGRADED`'s eight
+      // characters. It has to be a service that is NOT degraded — a
+      // restart ties with `degraded` and the service's own word wins the
+      // tie — and one that sorts into the first `maxLines` of a
+      // nine-service roster, or the line the cap belongs to is behind the
+      // `+N MORE`. jv-act is both, and a crash-looping actuator beside a
+      // machine this unwell is not a contrived pair.
+      //
+      // Past the cap on purpose, like every string in this file: 101
+      // heartbeats counting down is 100 deaths, which is one more than the
+      // two digits the plate will print. The tally is the only thing on
+      // this plate that can grow without a service name or an enum
+      // bounding it, so the cap is the thing being measured.
+      for (let uptime = 101; uptime >= 1; uptime--)
+        suite.beat("jv-act", "ok", undefined, undefined, uptime);
       // And the broker, throwing frames away (A75), which adds the row ABOVE
       // the list. Past four digits on purpose: `9999+ DROPPED` is the widest
       // string DropState can render, and this file measures caps rather than

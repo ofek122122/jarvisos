@@ -645,6 +645,60 @@ figure in this corner is bounded: the surface is 300 px wide, sized to the
 longest line any plate may draw, and a truncation that does not admit it
 reads as a complete number.
 
+### 16 — a service that keeps dying
+
+![16-restarting.png](16-restarting.png)
+
+**On screen:** `mic` · `health`
+
+`composed`. The second shot on this sheet whose plate is up over a machine
+where every service reports `ok`, and the reason is not 15's. There, a field
+nothing read; here, **a fact no field carries**. Nothing on this bus says "I
+was restarted" — the process that could say it is the one that just lost the
+memory — so the only witness is `uptime_s` going backwards between two
+heartbeats, which needs a reader that remembers the last one (PLAN A78).
+
+**Why this machine is worth a picture.** Every unit in
+`modules/jarvis-services.nix` is `Restart=on-failure`, and one of them says so
+in a comment about a bug it is the recovery path for. So a jv-ears crashing
+every few seconds looks, from the bus, like a well machine: the replacement
+process heartbeats `starting` and then `ok`, `HealthState.rank("ok")` is 0,
+and §06's earned emptiness — which has taught this HUD's reader that an empty
+corner means nothing is wrong — draws exactly nothing. The microphone plate is
+up beside it for the same honest reason: the device really is open, because
+the new process opened it.
+
+**`uptime_s` is the only required field of `schemas/sys.health.json` that
+nothing in `shell/jv-hud` read.** `jv health` has printed it since the CLI
+existed. It is monotonic within one process's life, so a heartbeat carrying
+less of it than the last one from the same service was written by a different
+process — and that is the whole inference. The frames behind this shot are six
+heartbeats whose uptimes run 1847, 6, 9, 4, 7, 2: three falls, three deaths,
+and a replacement two seconds old.
+
+**The count is on the line, and that is the decision.** One crash at boot and
+a service dying every eight seconds are the same event repeated, and only the
+tally tells them apart — so `3x` is on the plate rather than left to
+`jv health`. It is the only number in this corner that is a tally over time
+rather than a reading, and it is capped (`RESTARTED 99+x`) for the reason
+every figure here is bounded: the surface is 300 px wide.
+
+**How long a restart is news** is `period_s * 2` — the same span this element
+already believes one heartbeat for, read off the frame's own body, so nothing
+here runs a timer. A service crash-looping inside that window never stops
+reporting; one that restarted an hour ago says nothing until it does it again,
+and then says `2x`. The tally is forgotten entirely when the bus link drops: a
+HUD that could not see the bus does not know how many processes came and went
+while it was blind.
+
+**`restarted` is this file's own word**, like `lost` and `unknown` — a
+heartbeat that publishes it is outside the frozen enum and comes out
+`unknown`. It ties with `degraded` rather than outranking it: the service is
+running and answering, which is what `degraded` names, and a list three lines
+deep would otherwise push a jv-voice that cannot reach the speakers off the
+plate for a jv-ears that crashed once at boot. A service with something worse
+to say keeps its own word.
+
 ## Regenerating
 
 ```

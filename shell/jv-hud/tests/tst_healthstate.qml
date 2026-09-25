@@ -637,6 +637,548 @@ TestCase {
     compare(health.findings[2].service, "jv-voice");
   }
 
+  // --- the process behind the heartbeat (A78) -------------------------
+  //
+  // Every unit in modules/jarvis-services.nix is `Restart=on-failure`, so
+  // the interesting failure is not a service reporting trouble — it is a
+  // service that has died four times in a minute and whose newest
+  // heartbeat, written by the process that replaced it, says `ok`. Before
+  // this section that machine drew an EMPTY corner, which §06 has taught
+  // the reader to trust.
+  //
+  // The two ways the claim could be worse than that silence:
+  //
+  //   · inventing a death. `uptime_s` is a number off the wire and the
+  //     claim is a COMPARISON, so a string, a NaN, or the first heartbeat
+  //     the HUD ever hears are all ways to manufacture a restart out of a
+  //     service that has been up for a week.
+  //   · keeping the news after it is news. A count that stays on screen
+  //     for the life of the process is the all-day gauge this plate
+  //     exists not to be, and one that spans a link loss is a tally over
+  //     a stretch the HUD could not see.
+
+  function test_a_first_heartbeat_claims_no_restart() {
+    // The honest shape of not knowing, and the ordinary shape of a boot: a
+    // small `uptime_s` is what EVERY service looks like on the first frame
+    // the HUD hears, and with nothing remembered there is no direction for
+    // the number to have moved in.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 3
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+    compare(health.findingCount, 0);
+    verify(!health.reporting, "an empty corner, which is the truth here");
+  }
+
+  function test_a_rising_uptime_claims_no_restart() {
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 30
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 35
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+  }
+
+  function test_a_repeated_uptime_is_not_a_restart() {
+    // Two heartbeats carrying the same number is a service whose clock
+    // resolution is coarser than this test, not a process that died in
+    // between. Strictly backwards, or nothing.
+    //
+    // Both inside the freshness window on purpose: at 30 s the window has
+    // already closed, so a version of this file that DID call a repeat a
+    // death would report nothing and the test would pass having proved
+    // only that 30 is more than two periods.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 4
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 4
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+  }
+
+  function test_an_uptime_that_went_backwards_is_a_restart() {
+    // The whole point: the service says `ok`, and it is not fine.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    compare(health.findingCount, 0, "a service that has been up 15 minutes");
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 4
+    });
+    compare(suite.entry(health, "jv-ears").state, "restarted");
+    compare(suite.entry(health, "jv-ears").restarts, 1);
+    compare(health.findingCount, 1);
+    verify(health.reporting);
+  }
+
+  function test_a_restart_to_zero_is_still_a_restart() {
+    // The schema's minimum, and the one a heartbeat published in the first
+    // moments of a process really carries.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 30
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 0
+    });
+    compare(suite.entry(health, "jv-ears").state, "restarted");
+  }
+
+  function test_the_count_climbs_with_every_death() {
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 4
+    });
+    // Alive for a moment, then gone again — which is what a crash loop
+    // looks like from the bus.
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 9
+    });
+    compare(suite.entry(health, "jv-ears").restarts, 1, "still one death, one process");
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 2
+    });
+    compare(suite.entry(health, "jv-ears").restarts, 2);
+    compare(suite.entry(health, "jv-ears").state, "restarted");
+  }
+
+  function test_one_service_restarting_says_nothing_about_another() {
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-voice", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 1
+    });
+    compare(suite.entry(health, "jv-ears").state, "restarted");
+    compare(suite.entry(health, "jv-voice").state, "ok");
+    compare(suite.entry(health, "jv-voice").restarts, 0);
+    compare(health.findingCount, 1);
+  }
+
+  // --- how long a restart is news -------------------------------------
+
+  function test_the_restart_leaves_when_the_new_process_is_no_longer_new() {
+    // `period_s * 2` — the same span this file already grants one
+    // heartbeat, read off the frame's own body, which is why no timer is
+    // involved: the beat that carries too large an uptime is the one that
+    // takes the row off.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900,
+      "period_s": 5
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 4,
+      "period_s": 5
+    });
+    compare(suite.entry(health, "jv-ears").state, "restarted");
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 9.9,
+      "period_s": 5
+    });
+    compare(suite.entry(health, "jv-ears").state, "restarted", "still inside the window");
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 10,
+      "period_s": 5
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+    compare(health.findingCount, 0, "one crash an hour ago is not a standing fault");
+  }
+
+  function test_the_window_is_the_services_own_period_and_not_a_constant() {
+    // A service that beats every 30 s gets 60 s of being new. Nothing here
+    // is tuned in seconds; it is the schema's own number, per service.
+    const health = makeHealth();
+    beat(health, "jv-voice", "ok", {
+      "uptime_s": 900,
+      "period_s": 30
+    });
+    beat(health, "jv-voice", "ok", {
+      "uptime_s": 45,
+      "period_s": 30
+    });
+    compare(suite.entry(health, "jv-voice").state, "restarted");
+  }
+
+  function test_the_count_survives_the_window_it_stopped_being_news_in() {
+    // The row leaves and the memory does not: the second death is the
+    // second death, and a count that reset every time the row went quiet
+    // could never say a service had been doing this all afternoon.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 1
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 400
+    });
+    compare(suite.entry(health, "jv-ears").restarts, 0, "nothing to say right now");
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 1
+    });
+    compare(suite.entry(health, "jv-ears").restarts, 2);
+  }
+
+  function test_a_restart_only_noticed_late_is_counted_and_not_announced() {
+    // The drop is real — a different process wrote the second frame — but
+    // by the time the HUD saw one, the replacement had been up longer than
+    // its own heartbeat is believed for. Counted, silent, and the count is
+    // there the next time it happens.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900,
+      "period_s": 5
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 40,
+      "period_s": 5
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 2,
+      "period_s": 5
+    });
+    compare(suite.entry(health, "jv-ears").restarts, 2);
+  }
+
+  // --- whose word wins ------------------------------------------------
+
+  function test_a_service_with_something_worse_to_say_keeps_its_own_word() {
+    // `degraded` and `restarted` tie, and the tie goes to the service: it
+    // is reporting on itself, where this file inferred a death from a
+    // number. The count stays on the entry regardless.
+    const health = makeHealth();
+    beat(health, "jv-voice", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-voice", "degraded", {
+      "uptime_s": 2,
+      "notes": "piper fell behind"
+    });
+    compare(suite.entry(health, "jv-voice").state, "degraded");
+    compare(suite.entry(health, "jv-voice").notes, "piper fell behind");
+    compare(suite.entry(health, "jv-voice").restarts, 1,
+            "the count is the truth about the process either way");
+  }
+
+  function test_an_error_outranks_a_restart() {
+    const health = makeHealth();
+    beat(health, "jv-act", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-act", "error", {
+      "uptime_s": 1
+    });
+    compare(suite.entry(health, "jv-act").state, "error");
+    compare(health.findings[0].severity, 5);
+  }
+
+  function test_a_service_still_starting_after_a_death_says_so() {
+    // The worst crash loop there is: a service that dies during startup
+    // never reaches `ok`, so `starting` would be the only word it ever
+    // published. `starting` is not trouble on its own — every service says
+    // it once — and a restart outranks it for exactly that reason.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "starting", {
+      "uptime_s": 0.2
+    });
+    compare(suite.entry(health, "jv-ears").state, "restarted");
+  }
+
+  function test_a_restart_ranks_with_a_degraded_service_and_not_above_it() {
+    // The list is three lines deep. A completed death ranking above a live
+    // impairment would push a jv-voice that cannot reach the speakers off
+    // the plate for a jv-ears that crashed once at boot.
+    const health = makeHealth();
+    beat(health, "jv-brain", "degraded", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-voice", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-voice", "ok", {
+      "uptime_s": 1
+    });
+    compare(health.findingCount, 2);
+    compare(health.findings[0].severity, health.findings[1].severity);
+    compare(health.findings[0].service, "jv-brain", "the tie is broken by name, as ever");
+  }
+
+  function test_the_word_is_never_taken_off_the_wire() {
+    // `restarted` is this file's own word, like `lost` and `unknown`. A
+    // service publishing it is publishing a state outside the frozen enum,
+    // and a HUD that passed it through would let any process claim a death
+    // it never had.
+    const health = makeHealth();
+    beat(health, "jv-ears", "restarted");
+    compare(suite.entry(health, "jv-ears").state, "unknown");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+  }
+
+  // --- the numbers this file will not compare -------------------------
+
+  function test_an_unreadable_uptime_claims_nothing_and_forgets_nothing() {
+    // `"4" < 900` is true in JavaScript. A service publishing its uptime
+    // in quotes would otherwise be reported dead — and the last GOOD
+    // reading has to survive, or the comparison after it is against a
+    // number this file never read.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": "4"
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 4
+    });
+    compare(suite.entry(health, "jv-ears").restarts, 1,
+            "measured against the 900, which is the last thing that was read");
+  }
+
+  function test_an_infinite_uptime_is_not_a_reading() {
+    // An infinity compares greater than everything, so it would become a
+    // high-water mark no later heartbeat could rise above — and the next
+    // honest number would read as a death, for the rest of the session.
+    //
+    // Through a hand-built bus, because JSON cannot carry it: core/
+    // BusModel.qml refuses a line containing `1e999` WHOLE (there is a
+    // test for that next door, in tst_earsbudgets.qml), so the bridge can
+    // never deliver one. This element's contract is any bus offering
+    // `latest`/`ageOf`, and the schema's type for this field is `number`,
+    // of which an infinity is one — so the check is written rather than
+    // inherited from whoever happens to be parsing today.
+    //
+    // A 1000 s heartbeat, which the schema allows and nothing on this
+    // machine uses, because it is the only arrangement in which the damage
+    // is VISIBLE: the number that follows the infinity has to be larger
+    // than the one before it (or the restart is real) and still inside the
+    // window a restart is news in (or the row says nothing either way).
+    const bus = spawn(stubBus);
+    const health = spawn(healthState);
+    health.bus = bus;
+    bus.order = ["jv-ears"];
+    bus.beats = ({
+      "jv-ears": suite.stubBeat("jv-ears", 900, 1000)
+    });
+    bus.beats = ({
+      "jv-ears": suite.stubBeat("jv-ears", Infinity, 1000)
+    });
+    bus.beats = ({
+      "jv-ears": suite.stubBeat("jv-ears", 950, 1000)
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+  }
+
+  function test_a_negative_uptime_is_not_a_reading() {
+    // Below the schema's own minimum. A process is not up for -1 seconds,
+    // and a number that low would be a restart against every real one.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": -1
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+  }
+
+  function test_a_missing_uptime_is_not_a_reading() {
+    // Required by the schema, which is not the same as present on the
+    // wire. `undefined < 900` is false, so an absent field would not have
+    // manufactured a restart — but it would have been remembered as one.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": undefined
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 3
+    });
+    compare(suite.entry(health, "jv-ears").restarts, 1,
+            "3 is below the 900, and the frame between them said nothing");
+  }
+
+  function test_an_unreadable_frame_between_two_rising_uptimes_changes_nothing() {
+    // The other way the skip can go wrong, and it is not the same test as
+    // the one above: a version that RECORDED the refusal would write a
+    // sentinel as the high-water mark AND count the drop to it as a death.
+    // The second mistake hides the first — the next honest number is above
+    // the sentinel, so no further death is counted, and the tally is right
+    // by one wrong step in each direction. Only a rising uptime after the
+    // gap can tell them apart, which again wants a window wide enough to
+    // still call 950 new.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900,
+      "period_s": 1000
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": "4",
+      "period_s": 1000
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 950,
+      "period_s": 1000
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+  }
+
+  function test_a_count_is_not_shown_beside_an_age_this_file_cannot_read() {
+    // The restart is remembered and the CURRENT frame is what says whether
+    // it is still news. A heartbeat whose `uptime_s` is unreadable cannot
+    // say how old the process it came from is, so the count goes quiet
+    // rather than standing on an age nobody measured.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 2
+    });
+    compare(suite.entry(health, "jv-ears").state, "restarted");
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": "2"
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+  }
+
+  function test_a_period_that_is_not_a_number_is_not_a_heartbeat() {
+    // `"5" > 0` is true, so a string period used to be believed and then
+    // multiplied — by the expiry, by the timer's interval, and now by the
+    // window a restart is news inside. Refused outright: `unknown` is a
+    // finding, which is what an uninterpretable heartbeat deserves.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "period_s": "5"
+    });
+    compare(suite.entry(health, "jv-ears").state, "unknown");
+    compare(health.findingCount, 1);
+  }
+
+  function test_an_untrusted_heartbeat_neither_claims_a_restart_nor_loses_one() {
+    // A frame this file may not read leaves the memory exactly as it was:
+    // a hedged heartbeat is not evidence of a death, and it is not
+    // evidence against the one that came before it either.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 1
+    }, {
+      "conf": 0.6
+    });
+    compare(suite.entry(health, "jv-ears").state, "unknown", "the hedged frame is the newest");
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 1
+    });
+    compare(suite.entry(health, "jv-ears").restarts, 1, "one death, counted once");
+  }
+
+  // --- the memory does not span a blindness ----------------------------
+
+  function test_losing_the_link_forgets_how_many_processes_there_have_been() {
+    // A HUD that could not see the bus does not know how many came and
+    // went while it was blind, and a count that silently spans a gap of
+    // unknown length means something other than what it says. Coming back
+    // is a first sighting, which claims nothing.
+    const health = makeHealth();
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 900
+    });
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 2
+    });
+    compare(suite.entry(health, "jv-ears").restarts, 1);
+    health.bus.ingest('{"t":"link","up":false,"err":"bridge died"}');
+    compare(health.roster.length, 0);
+    health.bus.ingest('{"t":"link","up":true}');
+    beat(health, "jv-ears", "ok", {
+      "uptime_s": 3
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+  }
+
+  function test_a_bus_that_keeps_its_frames_through_a_drop_still_forgets() {
+    // The other half of the forgetting, and the reason there are two. A
+    // `BusModel` empties its caches on a drop and lowers `linkUp`
+    // afterwards, so the pass that a drop triggers runs while the link
+    // still looks up — this bus never empties anything, which is the only
+    // way to drive the case where the flag is all there is to go on.
+    const bus = spawn(stubBus);
+    const health = spawn(healthState);
+    health.bus = bus;
+    bus.order = ["jv-ears"];
+    bus.beats = ({
+      "jv-ears": suite.stubBeat("jv-ears", 900)
+    });
+    bus.beats = ({
+      "jv-ears": suite.stubBeat("jv-ears", 2)
+    });
+    compare(suite.entry(health, "jv-ears").state, "restarted");
+    bus.linkUp = false;
+    bus.linkUp = true;
+    bus.beats = ({
+      "jv-ears": suite.stubBeat("jv-ears", 3)
+    });
+    compare(suite.entry(health, "jv-ears").state, "ok");
+    compare(suite.entry(health, "jv-ears").restarts, 0);
+  }
+
+  // One heartbeat as the stub bus hands them over: no ingest, no clock, so
+  // `ageOf` is the stub's own 0 and nothing here can expire — and no
+  // JSON, which is the only way a value JSON cannot carry reaches the
+  // element.
+  function stubBeat(service, uptime, period) {
+    return {
+      "topic": "sys.health",
+      "ts": 100,
+      "seq": suite.seq++,
+      "src": service,
+      "conf": 1.0,
+      "v": 1,
+      "body": {
+        "service": service,
+        "state": "ok",
+        "uptime_s": uptime,
+        "period_s": period === undefined ? 5 : period
+      }
+    };
+  }
+
   function test_a_bus_that_says_the_link_is_down_is_not_read_at_all() {
     // Invariant 10: not one pixel comes from a cache the link no longer
     // backs. BusModel empties itself on a drop as well; this element does

@@ -30,6 +30,14 @@
 //     friendlier paraphrase, and never a state word the schema does not
 //     define; core/HealthState.qml turns anything it cannot read into
 //     `unknown` rather than passing it through to a screen.
+//   · `jv-ears RESTARTED 3x` among them, for a service whose process has
+//     been replaced while the HUD was watching (A78). Every unit is
+//     `Restart=on-failure`, so this is the line that used to be an EMPTY
+//     corner: the new process heartbeats `ok` and the old one is not on
+//     the bus to be mourned. The count is what separates one crash at
+//     boot from a service dying every eight seconds, so it is on the line
+//     rather than left to `jv health` — the only number in this plate that
+//     is a tally over time rather than a reading.
 //   · `+N MORE` when there are more findings than fit. Truncation that
 //     does not say it truncated reads as a complete list.
 //   · `llm CPU RUNG 4` when the brain is on the CPU floor (invariant 6).
@@ -136,7 +144,7 @@ Item {
     for (const finding of health.findings.slice(0, root.maxLines))
       out.push({
         "name": finding.service,
-        "detail": finding.state.toUpperCase(),
+        "detail": root.detailOf(finding),
         "tone": root.toneOf(finding.severity)
       });
     const hidden = health.findingCount - root.maxLines;
@@ -175,6 +183,25 @@ Item {
         "tone": Theme.text3
       });
     return out;
+  }
+
+  // The state word, and — for a restart — how many there have been. The
+  // count rides the `restarted` word only: under `DEGRADED` or `LOST` a bare
+  // number beside a different word would be a tally of nothing a reader can
+  // name, and the service's own word is the one that earned the line.
+  //
+  // Capped, and it says it is capped. Not cosmetic: this plate has no
+  // `maxTextPx`, so it is the one whose width is exactly its longest string,
+  // and the surface is a fixed 300 px box (shell.qml). Every other line here
+  // is bounded by a service name and a word from an enum; a tally is the
+  // only thing on this plate that could grow without limit. Past 99 the
+  // exact figure has stopped being the point — the service is not coming
+  // back on its own — and `jv health` has the uptime to the second.
+  function detailOf(finding: var): string {
+    const word = finding.state.toUpperCase();
+    if (finding.state !== "restarted" || finding.restarts < 2)
+      return word;
+    return word + " " + (finding.restarts > 99 ? "99+" : String(finding.restarts)) + "x";
   }
 
   // Severity, as colour. The theme spends `risk` only where something is
