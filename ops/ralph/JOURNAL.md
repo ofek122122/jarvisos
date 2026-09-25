@@ -12103,3 +12103,66 @@ is not worth chasing.)
   (`onBattery`/`fullscreen` have no source) is now unsourced in three shells
   instead of one. **D27** is still the cheapest evidence in the repo and has
   never been run.
+
+## 2026-09-25 — the photograph was a hand copy of the thing it photographs
+
+- **D29.** `tools/hudshots/stub/Motion.qml` is the Motion that
+  `ops/ralph/hudshots.sh` stages over `shell/jv-hud/Motion.qml` when it takes
+  the sheet. It exists for one real reason and it is not a shortcut: Quickshell
+  links its QML plugin into its own binary, so `Quickshell.env` cannot resolve
+  under the plain `qml` the shots run on, and ONE `import Quickshell` anywhere
+  in the staged tree makes the whole directory unimportable. Everything else in
+  it was meant to be the real file — and since D18 the real file is GENERATED,
+  so the sheet was a hand copy of generated code. That is the exact failure
+  this generator exists to prevent one level down, and it was sitting one level
+  up. `test_hudshots.py` could see a MISSING member (a new duration token
+  cannot slip past it); it could not see the stand-in answering the same
+  question differently.
+- **WHAT CHANGED.** Both renderings now come out of one body
+  (`MOTION_HEAD`/`MOTION_TAIL`) through a `MotionTarget`, a small frozen record
+  naming the only things that CANNOT be shared: the Quickshell import, the root
+  type (`Singleton` vs `QtObject`), the `envOverride:` binding, and a preface
+  so a reader of the stand-in learns it is one before anything else. Everything
+  a Motion actually DOES — the gate, the republished `*_ms` tokens, `ms()`, the
+  declared preference handed to `core/MotionPolicy.qml` — is in the shared body
+  and cannot diverge. The test that makes this worth having asserts the
+  difference is EXACTLY those three lines of code, in both directions.
+- **AND WHERE IT IS NOT EMITTED.** `pkgs/jv-hud`'s checkPhase runs this same
+  generator with `--out-dir .` inside a sandbox that holds one shell's tree and
+  no `tools/` at all. The stand-in's path is absolute (`STUB_DIR` is derived
+  from the script's own location), so a sandbox run that emitted it would write
+  outside the sandbox, or fail the build outright against a read-only store
+  path. Guarded, and the guard has a test whose theme deliberately differs from
+  the repo's — with the committed tokens the write would be skipped as a no-op
+  and the test would pass with the guard gone.
+- **THE SWEEP FOUND A REAL HOLE, WHICH IS THE POINT OF RUNNING ONE.** Six
+  mutations, five caught. The survivor was `STUB_SHELL = "jv-hud"` → `"jv-bar"`:
+  *which* shell carries the stand-in was stated in a comment and graded by
+  nobody. It survived because a repo-root `--check` names all three shells and
+  kept rendering the stand-in either way — so the drift gate stayed green while
+  the coupling was gone. What it would have broken is the run a person actually
+  makes after touching the HUD, `--shell jv-hud`: the HUD's Motion rewritten,
+  the sheet's left behind, D29 reopened one level up.
+  `test_the_stand_in_goes_out_with_the_shell_it_stands_in_for` closes it from
+  both sides (the HUD's run emits it; jv-bar's run does not), patching the two
+  output roots so the question is asked without touching the checkout. Regraded
+  after: **7/7 caught**.
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 4 paths (jv-compat,
+  jv-hud-bridge, tools **539 pass**, hudshots), 114.2 s. The 16 shots came back
+  **byte-identical to the sheet committed at HEAD**, which is the right answer
+  and worth stating: the stand-in's provenance changed, its behaviour did not,
+  so the pixels had better not have moved. `ops/ralph/hudscreens.sh` was NOT
+  named — it reads `pkgs/jv-hud`, `services/jarvisd`, `shell/jv-hud` and
+  `tools/hudscreens`, and this change touches none of them.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: tools/gen_theme_qml.py, tools/hudshots/stub/Motion.qml,
+  tools/tests/test_gen_theme_qml.py, tools/tests/test_hudshots.py,
+  ops/ralph/PLAN.md
+- next: **D30** is now the loudest — the bar and the notifier move (D18 gave
+  them an `Ease` and a `Motion`) and NOTHING photographs or drives them; D13
+  and D20 each gained a second reason. **D27** remains the cheapest evidence in
+  the repo and has still never been run, and this iteration is the argument for
+  it: a sweep of six found one real hole in code written an hour earlier.
+  Worth noting for whoever takes D30 — `render_motion_qml` now takes a target,
+  so a second stand-in (a bar shot harness) is a `MotionTarget`, not a copy.

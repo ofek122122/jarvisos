@@ -391,7 +391,7 @@ human-reviewed step.
       nobody so far. ~15 mutations over the two is ~20 suite runs at ~14 s, so
       under five minutes — the cheapest evidence in the repo, and the only
       kind that says what these two suites are worth.
-- [ ] D29. **`tools/hudshots/stub/Motion.qml` is now a hand copy of a
+- [x] D29. **`tools/hudshots/stub/Motion.qml` is now a hand copy of a
       GENERATED file.** The stub exists for one real reason — the shots
       harness cannot import Quickshell, so `Quickshell.env` has to go — and
       everything else in it is meant to be the real file. That was a copy of
@@ -403,6 +403,15 @@ human-reviewed step.
       generator rendering the stub too, from the same body with one line
       swapped — at which point "the shots animate for the reason the running
       HUD would" stops being a claim in a comment. Found while finishing D18.
+      DONE (iteration 121): both renderings come out of one body through a
+      `MotionTarget` naming the only three lines that cannot be shared (the
+      Quickshell import, the root type, the `envOverride:` binding), held to
+      exactly that difference by a test in both directions. `--out-dir` runs
+      are guarded — pkgs/jv-hud's checkPhase renders one shell inside a sandbox
+      with no `tools/` at all. 7 mutations, 7 caught; the sweep found one real
+      hole first (`STUB_SHELL` pointed at another shell survived, because a
+      repo-root `--check` names all three and rendered the stand-in anyway),
+      and closing it is what pins WHICH shell the stand-in rides out with.
 - [ ] D30. **The bar and the notifier now have an `Ease`, and no gate loads
       either one.** `shell/jv-bar/Ease.qml`, `Motion.qml`, `Workspaces.qml`
       and `shell/jv-notify/Ease.qml`, `Motion.qml`, `Toast.qml` are reached by
@@ -413,7 +422,9 @@ human-reviewed step.
       what **D13** and **D20** are for. Raised here because D18 moved both
       from "nothing to photograph" to "something that moves and is not
       photographed", and A11 (`Motion.onBattery`/`fullscreen` have no source)
-      is now unsourced in three shells rather than one.
+      is now unsourced in three shells rather than one. Cheaper since D29:
+      `render_motion_qml` takes a target now, so a bar shot harness needs a
+      `MotionTarget`, not a second hand-written stand-in.
 - [ ] D28. **The refusal D11 added is about PATHS, and the question it stands
       in for is about READS.** `tools/dependents.py` already walks the real
       QML imports and can say that `shell/jv-bar/Workspaces.qml` is read by NO
