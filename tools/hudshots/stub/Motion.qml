@@ -1,7 +1,7 @@
 // Motion — the shot harness's stand-in for the HUD's motion singleton.
 //
 // STAGED OVER shell/jv-hud/Motion.qml for one reason only: the real one
-// reads `Quickshell.env("JV_HUD_REDUCED_MOTION")`, and Quickshell cannot
+// reads `Quickshell.env("JV_REDUCED_MOTION")`, and Quickshell cannot
 // be imported by any engine but its own. Everything else is the real
 // file — the same core/MotionPolicy.qml, handed the same declared
 // preference out of personality/theme.toml — so a shot animates (or does

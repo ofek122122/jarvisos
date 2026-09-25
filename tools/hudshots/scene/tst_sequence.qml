@@ -25,7 +25,7 @@
 // this plate arrive" is a question about a 140 ms fade running on the
 // render thread, and the answer would depend on how long the test happened
 // to block. `Motion.policy.envOverride = "1"` is the reduced-motion path
-// the real HUD honours (JV_HUD_REDUCED_MOTION=1, parsed in
+// the real HUD honours (JV_REDUCED_MOTION=1, parsed in
 // core/MotionPolicy.qml), and under it `Ease` is disabled outright and
 // every opacity is ASSIGNED: a plate is on screen in the same frame the
 // bus gave it something to say, and gone in the same frame that stopped

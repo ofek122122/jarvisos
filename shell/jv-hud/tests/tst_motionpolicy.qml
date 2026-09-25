@@ -112,7 +112,7 @@ TestCase {
       "declaredReduced": false,
       "envOverride": "1"
     });
-    verify(p.prefersReduced, "JV_HUD_REDUCED_MOTION=1 overrides the token");
+    verify(p.prefersReduced, "JV_REDUCED_MOTION=1 overrides the token");
     compare(p.suppressedBy, "reduced-motion");
   }
 
@@ -121,7 +121,7 @@ TestCase {
       "declaredReduced": true,
       "envOverride": "0"
     });
-    verify(!p.prefersReduced, "JV_HUD_REDUCED_MOTION=0 overrides the token");
+    verify(!p.prefersReduced, "JV_REDUCED_MOTION=0 overrides the token");
     verify(p.animate);
   }
 

@@ -11991,3 +11991,115 @@ is not worth chasing.)
   with the mechanism that already keeps two Theme.qml files byte-identical),
   and **D13**/**D20** just acquired a second reason to exist: the hints this
   iteration wrote have to change the day either lands.
+
+## 2026-09-25 23:55 — one switch, for a desktop that is three processes
+- built: **PLAN D18**, and **D14** fell out of it. `tools/gen_theme_qml.py`
+  now renders `Ease.qml`, `Motion.qml` and `core/MotionPolicy.qml` into every
+  shell, exactly as it already rendered `Theme.qml` — three files, byte for
+  byte identical in `jv-hud`, `jv-bar` and `jv-notify`, generated from one
+  renderer because `import "."` resolves inside ONE store copy and a shared
+  file is not available to us.
+- WHAT WAS ACTUALLY BROKEN, and it was not the duplication — there was none.
+  §06's stillness rule (declared preference · session override · battery ·
+  fullscreen) was decidable in one place and that place was the HUD, so the
+  other two shells did not ask the question at all. The bar could not move,
+  which read as a design choice and was really an absence: there was no
+  `Ease` to reach for. The notifier's one fade was gated on
+  `Theme.reducedMotion` — the versioned preference, honestly, and neither the
+  session override nor the machine — so `JV_HUD_REDUCED_MOTION=1` stilled the
+  corner of the screen a human was looking at and left the toasts fading in
+  beside it. A preference half-obeyed is worse than one never offered, and
+  that is the bug this closes.
+- THE ENV VAR IS NOW `JV_REDUCED_MOTION`, not `JV_HUD_`. Three shells draw
+  ONE desktop; the variable is the session's answer about that desktop, and
+  naming it after the first surface that happened to want it was how it ended
+  up meaning "the corner only". Renamed in the generator, in
+  `personality/theme.toml`, in the HUD's README, in the shots stub and in the
+  test that asserts the two spellings ("1"/"0") are the only ones that count.
+- THE PART THAT MAKES IT STICK, and it is one line rather than a policy:
+  `Theme`/`Motion`/`Ease`/`MotionPolicy` are in `GENERATED_*` tables and in
+  NO shell's own table. A shell's registries are built as
+  `GENERATED_X + own_X`, so a fourth shell gets the tokens and the whole
+  motion decision by existing. The only way to end up with a private `Motion`
+  was to copy one, and there is nothing left to copy — a test asserts the two
+  sets never intersect, because two places to edit is how one of them gets
+  forgotten (this is D11 happening again, written down before it happens).
+- TWO SMALLER THINGS, each of which answers a question the move raised:
+  · **`Motion` derives its durations from the tokens.** One gated property
+    per `*_ms` key in `[motion]`, so `[motion] slide_ms = 90` lands in all
+    three shells as a gated `Motion.slideMs` with no edit to the generator.
+    A duration that exists in theme.toml and NOT on `Motion` is a duration an
+    element can only reach ungated, which is the shape of the next bug.
+  · **`[motion] reduced_motion` is now REQUIRED.** The generated wiring reads
+    it; before, it was a token the HUD happened to use, and a theme.toml
+    without it would have generated three shells that do not compile.
+- D14, THE VISIBLE HALF: `shell/jv-bar/Workspaces.qml` eases exactly one
+  property — the label colour — through the shared `Ease`. It earns the
+  frames because the colour IS the signal (your keyboard arriving on a
+  workspace), and nothing else in the bar animates: a workspace appearing or
+  vanishing still snaps, because there is no intermediate state between "niri
+  has this workspace" and "it does not". Idle is still 0 fps, and
+  `JV_REDUCED_MOTION=1` now stills the strip with everything else.
+- WHAT THE TESTS SAY NOW. The notifier's own weaker gate test
+  (`..._animates_without_the_reduced_motion_switch`) is deleted and
+  `test_nothing_animates_without_going_through_motion` is parameterized over
+  all three shells: one claim, three surfaces. Three more were added — the
+  trio is the same bytes everywhere (which is what lets ONE suite,
+  `tst_motionpolicy.qml`, be the test for all three), the generated types are
+  registered without any shell naming them, and one environment variable
+  reaches every `Motion` and is documented where a human would look for it.
+- AND WHAT THEY STILL DO NOT SAY, written into `test_dependents.py` rather
+  than left to be discovered: `shell/jv-bar/{Ease,Motion,Workspaces}.qml`,
+  `shell/jv-notify/{Ease,Motion,Toast}.qml` and both new
+  `core/MotionPolicy.qml` are reached by NO QML gate. The HUD's copies are
+  driven by `hudshots.sh`, so the decision is exercised; the bar easing a
+  colour and a toast fading in are not, and that is **D30** (D13/D20 with a
+  second reason). The two new MotionPolicys are unreached for a precise
+  reason worth keeping: the walk follows types a staged file NAMES, and in
+  the HUD only the shots' stub Motion names it.
+- THE BUILD FAILED FIRST, and it failed for a good reason worth keeping: a
+  flake copies only what git TRACKS, so the three brand-new files were
+  invisible to `nix build .#jv-notify` while they sat untracked — and the
+  per-shell `python gen_theme_qml.py --check` in the checkPhase said exactly
+  that, `stale generated files: Ease.qml, Motion.qml, core/MotionPolicy.qml`.
+  The drift gate caught a file that, as far as the sandbox was concerned, did
+  not exist. `git add` and it was green.
+- tests: `bash ops/ralph/verify.sh` GREEN — 8 gates over 26 paths (jv-brain,
+  jv-compat, jv-hud-bridge, tools **533 pass**, qmltest, bartest, notifytest,
+  hudshots), 173.1 s. `ops/ralph/hudscreens.sh` was named and was RUN: 204 s, 9
+  shots, **all 9 identical to the sheet committed at HEAD** — which is the
+  right answer and the one worth stating, because the HUD's own trio changed
+  only in its comments, so its pixels had better not have moved. Nothing to
+  commit under `docs/hud/screens/`.
+  **7 mutations on `core/MotionPolicy.qml` through `--runner qml hud`, 6
+  caught**: the `=0` override stilling motion instead of forcing it on, the
+  machine's say outranking the user's wish in `suppressedBy`, `animate`
+  forgetting everything but the preference, any non-empty override meaning
+  stillness, `ms()` handing back the duration with the gate dropped, and the
+  declared preference ignored when no override is set. The seventh did not
+  survive so much as it never differed: `base > 0` → `base >= 0` is an
+  EQUIVALENT mutant (both arms return 0 when `base` is 0), so it is not a
+  hole in the suite and no test was written for it. That the suite catches
+  the other six is the whole of D18's claim that ONE suite can now stand for
+  three shells.
+  build: `nixos-rebuild build --flake .#ares` green, with jv-bar, jv-notify
+  and jv-hud all rebuilt. No schema change, no jv-act, no boot path, no pins.
+  Never tested, never switched.
+- files: tools/gen_theme_qml.py, tools/tests/test_gen_theme_qml.py,
+  tools/tests/test_dependents.py, tools/hudshots/stub/Motion.qml,
+  tools/hudshots/scene/tst_sequence.qml, personality/theme.toml,
+  shell/jv-hud/{Ease,Motion,README.md,qmldir}, shell/jv-hud/core/{MotionPolicy,qmldir},
+  shell/jv-hud/tests/tst_motionpolicy.qml,
+  shell/jv-bar/{Ease,Motion,Workspaces,qmldir}, shell/jv-bar/core/{MotionPolicy,qmldir},
+  shell/jv-notify/{Ease,Motion,Toast,qmldir} (Fade.qml deleted),
+  shell/jv-notify/core/{MotionPolicy,qmldir}, ops/ralph/PLAN.md
+- next: **D29** is the sharp one and it is small — `tools/hudshots/stub/
+  Motion.qml` is now a hand copy of a GENERATED file, which is the exact
+  failure mode this iteration closed one level up; the generator rendering
+  the stub too (same body, one line swapped) turns "the shots animate for the
+  reason the running HUD would" from a comment into a check. **D30** is what
+  D18 made visible rather than created: the bar now moves and nothing
+  photographs it, which is D13 and D20 with a second reason each, and A11
+  (`onBattery`/`fullscreen` have no source) is now unsourced in three shells
+  instead of one. **D27** is still the cheapest evidence in the repo and has
+  never been run.

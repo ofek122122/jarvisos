@@ -53,11 +53,13 @@ label_tracking_em = 0.14
 
 [motion]
 # The declared preference: true means this machine wants no animation at all,
-# and every HUD element obeys it through `Motion` (§06's prefers-reduced-motion
-# rule, in the one place where it is decidable). It lives here because it is a
-# standing choice about how Jarvis behaves, so it is diffable and revertable
-# like the voice. For a single session without a rebuild, set
-# JV_HUD_REDUCED_MOTION=1 (or =0 to force motion back on).
+# and every element of every shell — the HUD's corner, the bar's strip, a
+# toast — obeys it through that shell's generated `Motion` (§06's
+# prefers-reduced-motion rule, in the one place where it is decidable). It
+# lives here because it is a standing choice about how Jarvis behaves, so it
+# is diffable and revertable like the voice. For a single session without a
+# rebuild, set JV_REDUCED_MOTION=1 (or =0 to force motion back on) — one
+# variable, all three shells.
 reduced_motion = false
 # §06: ease toward a target over ~200 ms, never snap to a raw sensor value.
 # A frame is only allowed to move because a real signal moved.

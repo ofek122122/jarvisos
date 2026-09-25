@@ -36,6 +36,7 @@ family_mono = "JetBrains Mono"
 label_px = 11
 
 [motion]
+reduced_motion = false
 ease_ms = 200
 plate_opacity = 0.86
 
@@ -143,9 +144,84 @@ def test_every_shell_gets_the_same_theme_singleton_byte_for_byte(shell):
     assert theme == (ROOT / "shell" / "jv-hud" / "Theme.qml").read_text("utf-8")
 
 
-# Every QML animation type. If one of these appears in a HUD file, that file
-# is capable of moving the screen, and §06 says something has to be able to
-# stop it.
+@SHELLS
+def test_every_shell_gets_the_same_motion_trio_byte_for_byte(shell):
+    """§06's stillness rule is ONE decision, in three processes (PLAN D18).
+
+    `Ease` + `Motion` + `core/MotionPolicy` is the only place the rule is
+    decidable — declared preference, session override, battery, fullscreen —
+    and a shell that carried its own copy would answer a slightly different
+    question the first time one of them was edited. They cannot share a file
+    (`import "."` resolves inside one store copy), so they are generated from
+    one renderer, exactly like Theme.qml, and this is what says the three
+    copies are still one decision. It is also what lets ONE suite
+    (shell/jv-hud/tests/tst_motionpolicy.qml) be the test for all of them."""
+    for name in ("Ease.qml", "Motion.qml", "core/MotionPolicy.qml"):
+        mine = (ROOT / "shell" / shell.name / name).read_text("utf-8")
+        assert mine == (ROOT / "shell" / "jv-hud" / name).read_text("utf-8"), name
+
+
+@SHELLS
+def test_the_generated_types_are_registered_without_any_shell_naming_them(shell):
+    """A fourth shell gets the tokens and the motion trio by existing.
+
+    The generated types are not in `SINGLETONS`/`COMPONENTS`/`CORE` — the
+    per-shell tables hold only what a human wrote — so the way a new shell
+    ends up with a `Motion` of its own is by someone copying one, and there is
+    nothing to copy. This pins that: every registry carries them, and no
+    hand-written table does."""
+    for table, entry in (
+        (shell.singletons, ("Theme", "Theme.qml")),
+        (shell.singletons, ("Motion", "Motion.qml")),
+        (shell.components, ("Ease", "Ease.qml")),
+        (shell.core, ("MotionPolicy", "MotionPolicy.qml")),
+    ):
+        assert entry in table, f"{shell.name} does not register {entry[1]}"
+    hand_written = (
+        gen.SINGLETONS + gen.COMPONENTS + gen.CORE
+        + gen.BAR_SINGLETONS + gen.BAR_COMPONENTS + gen.BAR_CORE
+        + gen.NOTIFY_SINGLETONS + gen.NOTIFY_COMPONENTS + gen.NOTIFY_CORE
+    )
+    generated = gen.GENERATED_SINGLETONS + gen.GENERATED_COMPONENTS + gen.GENERATED_CORE
+    assert not set(hand_written) & set(generated), (
+        "a shell's own table names a type this script generates for every "
+        "shell: two places to edit, and one of them will be forgotten"
+    )
+
+
+def test_motion_republishes_every_duration_token_gated():
+    """`Motion.<token>` is 0 while motion is suppressed; `Theme.<token>` is not.
+
+    Which means a duration that exists in theme.toml and NOT on Motion is a
+    duration an element can only reach ungated. So the properties are derived
+    from the tokens rather than listed: adding `[motion] slide_ms = 90` to
+    theme.toml gives every shell a gated `Motion.slideMs` with no edit here."""
+    tokens = gen.load_tokens(MINIMAL.replace("ease_ms = 200", "ease_ms = 200\nslide_ms = 90"))
+    qml = gen.render_motion_qml(tokens)
+    assert "readonly property int easeMs: policy.ms(Theme.easeMs)" in qml
+    assert "readonly property int slideMs: policy.ms(Theme.slideMs)" in qml
+    # …and nothing that is not a duration: `reduced_motion` is the preference
+    # the policy CONSUMES, not a number anything animates for.
+    assert "reducedMotion: policy.ms" not in qml
+    assert "plateOpacity" not in qml
+
+
+def test_one_environment_variable_stills_the_whole_desktop():
+    """Three shells draw one desktop. A session override that reached the HUD's
+    corner while the bar and the toasts kept moving would be a preference half
+    obeyed, which is worse than one never offered — so there is one variable,
+    and every shell's Motion reads exactly it."""
+    for shell in gen.SHELLS.values():
+        motion = (ROOT / "shell" / shell.name / "Motion.qml").read_text("utf-8")
+        assert f'Quickshell.env("{gen.MOTION_ENV}")' in motion, shell.name
+    # The name is documented where a human looks for it, not only in QML.
+    assert gen.MOTION_ENV in (ROOT / "personality" / "theme.toml").read_text("utf-8")
+    assert gen.MOTION_ENV in (ROOT / "shell" / "jv-hud" / "README.md").read_text("utf-8")
+
+
+# Every QML animation type. If one of these appears in a shell's file, that
+# file is capable of moving the screen, and §06 says something has to be able
+# to stop it.
 ANIMATION_TYPES = (
     "Behavior",
     "PropertyAnimation",
@@ -164,7 +240,8 @@ ANIMATION_TYPES = (
 )
 
 
-def test_nothing_animates_without_going_through_motion():
+@SHELLS
+def test_nothing_animates_without_going_through_motion(shell):
     """§06: motion is off with prefers-reduced-motion, on battery, and under
     a fullscreen window. A9's rule keeps logic testable; this one keeps the
     OFF switch reachable — an element that hand-rolls an animation without
@@ -173,11 +250,17 @@ def test_nothing_animates_without_going_through_motion():
 
     Files under core/ cannot reference Motion (it is a Quickshell singleton),
     which is exactly right: core/ is logic, and logic does not animate.
+
+    Every shell, since D18: before it, the notifier had this test in its own
+    weaker form (its one fade was gated on `Theme.reducedMotion`, which
+    honours the versioned preference and neither the session override nor the
+    machine), and the bar had no animation to test because it had no way to
+    make one. One `Motion` each, generated, means one claim for all three.
     """
-    hud = ROOT / "shell" / "jv-hud"
+    root = ROOT / "shell" / shell.name
     offenders = []
-    for qml in sorted(hud.rglob("*.qml")):
-        if qml.is_relative_to(hud / "tests"):
+    for qml in sorted(root.rglob("*.qml")):
+        if qml.is_relative_to(root / "tests"):
             continue
         text = qml.read_text("utf-8")
         code = "\n".join(
@@ -863,35 +946,6 @@ def test_the_notifier_declares_no_capability_its_pixels_do_not_have():
             f"that pin Text.PlainText. Every string on this surface came from "
             f"a program that is not this one."
         )
-
-
-def test_nothing_in_the_notifier_animates_without_the_reduced_motion_switch():
-    """§06's reduced-motion rule, in the shell that has its own way of obeying
-    it (PLAN D2).
-
-    The HUD's version of this test requires `Motion.` — the singleton wrapping
-    core/MotionPolicy.qml, which weighs the declared preference against a
-    session override, a battery and a fullscreen window. jv-notify has no copy
-    of that policy on purpose (a second copy is a second thing to drift), so
-    its one animation is gated on `Theme.reducedMotion`, the versioned
-    preference straight out of personality/theme.toml. Same claim, one input:
-    a file that animates without naming the switch is a file that keeps moving
-    after a human asked for stillness, and nothing else in the build notices.
-
-    PLAN D18 is the generator sharing the motion trio across all three shells,
-    at which point this becomes the HUD's test."""
-    offenders = []
-    for qml in notify_qml_files():
-        code = "\n".join(
-            l for l in qml.read_text("utf-8").splitlines() if not l.lstrip().startswith("//")
-        )
-        used = [a for a in ANIMATION_TYPES if re.search(rf"\b{a}\b\s*(\{{|on\b)", code)]
-        if used and "Theme.reducedMotion" not in code:
-            offenders.append(f"{qml.relative_to(ROOT)}: {', '.join(used)}")
-    assert not offenders, (
-        "these animate without consulting Theme.reducedMotion, so §06's "
-        "stillness switch cannot turn them off:\n" + "\n".join(offenders)
-    )
 
 
 def test_the_bar_leaves_the_corner_the_hud_draws_in():
