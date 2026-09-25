@@ -3488,7 +3488,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `last_loss_at or clock()` restamped anyway. Raised: B86, and it is
       about the gate rather than about ears.)
 
-- [ ] A84. **The mic indicator draws MIC while audio is being lost — the
+- [x] A84. **The mic indicator draws MIC while audio is being lost — the
       HUD half of B84.** Once jv-ears counts its discards, `MicState`'s
       three words (`live` / `stalled` / `off`) are one short: a device that
       is open, delivering, and losing chunks reads as `live`, which is the
@@ -3511,7 +3511,43 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       being recorded" and the health list answers "what is unwell", and
       those are different questions. Worth building on that precedent,
       but it is the corner's crowding question again (A62/A70). Raised in
-      iteration 105.
+      iteration 105. — 40e5a90
+      (Built on that precedent, and TWO gauges rather than the three
+      guessed above. `capture_loss_age_s` is the measurement — absent
+      until something HAS been discarded, so its absence is "nothing was
+      lost" and not an ears that forgot to say — and `capture_loss_window_s`
+      is the budget, riding from the first heartbeat beside
+      `capture_stall_s`, because before the first loss the window is what
+      tells a reader what the absence MEANS. The third, how MUCH was lost,
+      was left off deliberately and that is B7 answered rather than
+      ignored: half of it can never be a number (a device overrun has no
+      length), so a run losing audio only that way would publish a zero
+      total beside a degraded state — B13's number that stopped meaning
+      its label. The amounts stay in `notes`, named by culprit, where
+      nothing computes with them.
+      The word is ranked, not added: `stalled` outranks `losing` outranks
+      `live`, which is jv-ears' own order in `CaptureMeter.health()`, so
+      the plate cannot contradict the heartbeat it was drawn from, and
+      `<=` is the same inclusive boundary on both sides. `capturing`
+      stays TRUE through `losing` — a microphone dropping chunks is still
+      recording the ones it keeps, and the privacy light is not a quality
+      light. A loss age that is present but unreadable reads as `losing`,
+      not `live`: jv-ears publishes it only once something was discarded,
+      so the PRESENCE is the evidence and the value only dates it — the
+      same asymmetry that already makes an unreadable `capture_age_s`
+      come out `stalled`.
+      Tests: 10 new QML cases (652 test functions, was 642; `qmltest.sh`
+      709 passed) and 7 new ears (142, was 136),
+      plus the `BUDGET_MIRRORS` entry (three mirrored budgets now) and
+      the plate-binding row that fails the build if MicPlate ever runs the
+      loss window off the fallback. One more in `tools`: the screenshot
+      sheet's two mic exposures are now PINNED to carry no loss gauge,
+      because the A43 growth window measures a plate ARRIVING and a
+      MicPlate that silently got wider would measure something else.
+      `hudscreens.sh` re-run and looked at: the mic exposure still draws
+      the narrow `MIC` at (2485, 16, 2543, 50) and the deaf pair still
+      grows 43 px, so nothing already photographed moved. Raised: A85,
+      B89.)
 
 - [ ] B85. **`speech.state.reason` is read by nothing in this repo, and it
       is the only field of that frozen schema in that position.** The enum
@@ -3613,6 +3649,41 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       or harness module that no suite names — and its failure message has to
       say so, or the next author to add a file will read it as a mysterious
       veto. Discovered while fixing B86.
+
+- [ ] A85. **The new word is on no photograph.** `docs/hud/screens/` has
+      a mic-and-health window (A43) precisely because ONE jv-ears
+      heartbeat can light two plates at once — and the A84 word is the
+      same coincidence one fault along: a device that is open, delivering
+      and discarding chunks is `MIC LOSING AUDIO` on MicPlate AND
+      `jv-ears DEGRADED` on HealthPlate, off a single re-published beat.
+      So the sheet has a ready-made shape for it and does not use it: the
+      only mic line anyone can see in the repo is `MIC NO AUDIO`, and the
+      wider one ships unphotographed. It is a `sheet.MIC_LOSSY` fixture
+      (MIC_OPEN's body plus `capture_loss_age_s`, `state: degraded`, the
+      loss note) and a window that measures the plate getting WIDER
+      rather than a plate arriving — which is a growth assertion this
+      harness does not have yet, and is the interesting half. Cost is the
+      real objection: the probe is already 158 s of the gate's 193 s and
+      every window is another idle hold. Discovered while building A84.
+
+- [ ] B89. **A plate can silently stop drawing a word its state element
+      can produce.** MicState now has five readings and MicPlate draws
+      three of them, two by deliberate silence — and the mapping lives in
+      one ternary in the plate with nothing anywhere asserting it covers
+      the enum. Add a sixth word tomorrow and the plate draws `MIC` over
+      it: no test goes red, because the QML suites test the ELEMENT (they
+      are headless, and plates import the Quickshell singletons a headless
+      run cannot load, A56) and the screenshot sheet only photographs the
+      states somebody remembered to stage. It generalises past this plate
+      — SpeechState, ReplyState, ActionState and HealthState all publish
+      derived words some plate switches on — so the shape is one `tools`
+      test reading both files as TEXT: collect the string literals an
+      element can return for its `state`, collect what the plate's file
+      mentions, and fail on a word the plate never names. It is B88's
+      class (a claim about a relation nothing asserts) and it has the
+      same trap: the failure message has to say "drawing it as nothing is
+      a decision — name it and say so", or the next author reads a
+      mysterious veto. Discovered while building A84.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD

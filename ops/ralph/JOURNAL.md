@@ -10598,3 +10598,93 @@ survived a further round and has its own case now.
   feature; its HUD half should stay unbuilt for A71's reason. Otherwise
   unchanged: B82 is still half of A76's decision, B80/B81/B83 are the
   tap's own limits, and A22/A83 want answering together.
+
+## 2026-09-25 — iteration 107 — the microphone that is recording holes
+
+- what: **A84.** `MicPlate` grew a third line, `MIC LOSING AUDIO`, and
+  `core/MicState.qml` the fourth word under it. jv-ears has counted its
+  discarded chunks since B84 (iteration 105) but shipped the fault on
+  `state` + `notes` only, because B7 says a gauge nobody consumes is noise
+  on the bus; the HUD therefore drew a calm teal `MIC` over a recording
+  with holes in it, which is invariant 10's not-fakeable half over-claiming
+  in the one direction it may not. Two gauges now ride the heartbeat —
+  `capture_loss_age_s` (absent until something HAS been discarded) and
+  `capture_loss_window_s` (the budget, from the first beat) — `EarsBudgets`
+  reads the second as its third budget, and `MicState` judges the first
+  against it.
+
+  **Two gauges and not the three the item guessed.** The third was
+  `mic_lost_s`, how MUCH was lost, and leaving it off is B7 answered
+  rather than ignored: half of that number can never exist — PortAudio
+  reports a device overrun without its length — so a run that lost audio
+  only that way would publish a zero total beside a degraded state, which
+  is B13's number that has stopped meaning its label. The amounts stay in
+  `notes`, named by culprit (jv-ears dropping chunks is this process being
+  slow; a device overrun is the machine), because a reader acts on those
+  differently and nothing computes with them.
+
+  **The word is ranked, not added.** `stalled` outranks `losing` outranks
+  `live`, which is exactly the order `CaptureMeter.health()` puts the same
+  two faults in, and the window boundary is `<=` on both sides. That is
+  the point: the plate and the heartbeat it was drawn from cannot end up
+  disagreeing about whether anything is wrong. `capturing` stays TRUE
+  through `losing` — a microphone dropping chunks is still recording the
+  ones it keeps, and the privacy light is not a quality light, so the
+  plate stays lit and only the word and the colour move.
+
+  **A loss age we cannot read is a loss, not a silence.** jv-ears
+  publishes that gauge only once something was discarded, so its PRESENCE
+  is the evidence and its value only dates it; a garbage value leaves a
+  known hole we cannot call old, and the reading is `losing`. Which is the
+  same asymmetry this file already had one fault over — an unreadable
+  `capture_age_s` comes out `stalled`, never `live` — and the absence of
+  the gauge is still the honest "nothing was lost", because ears would
+  have said.
+
+  **And the screenshot sheet was quietly relying on an absence.** The A43
+  mic-and-health window measures a plate ARRIVING (HealthPlate, 43 px of
+  growth under an unchanged MicPlate line) and its first exposure is only
+  the narrow `MIC` because `sheet.MIC_OPEN` happens to carry no loss
+  gauge. That was true and unasserted, so a future fixture with one would
+  have widened MicPlate and left the growth measurement quoting a number
+  about something else. It is a `tools` assertion now, on both exposures.
+
+- why: B84 made the machine able to say it was losing audio and the HUD
+  still could not show it, so the one indicator invariant 10 calls not
+  fakeable was drawing "fine" over the fault. Everything this needed was
+  already built — the freshness-rule-over-a-gauge-and-a-budget shape from
+  A14 — so it was one derived reading rather than new machinery.
+- tests: `bash ops/ralph/verify.sh` GREEN — 6 gates over 11 paths, 270.7 s
+  (jv-compat 49, jv-ears **142 (was 136)**, jv-hud-bridge 26, tools 440,
+  `qmltest.sh` 709 with **10 new cases** — 652 test functions, was 642 —
+  and `hudshots.sh`). Both new-gauge ears tests were RED before the
+  metrics change and the MicState cases RED before the fourth word. Also
+  `bash ops/ralph/hudscreens.sh` GREEN and the shots looked at: the mic
+  exposure still draws the narrow `MIC` at (2485, 16, 2543, 50) and the
+  deaf pair still grows 43 px, so nothing already photographed moved —
+  the seven PNGs came back byte-identical to HEAD.
+- build: `nixos-rebuild build --flake .#ares` green (new closure
+  b56123my80z1b4jifk69iwihvafx5102). No schema change — `metrics` is
+  free-form and service-local by `schemas/sys.health.json` — no jv-act, no
+  boot path, no pins.
+- files: services/jv-ears/jv_ears/audio.py,
+  services/jv-ears/tests/test_mic_loss.py, shell/jv-hud/MicPlate.qml,
+  shell/jv-hud/core/MicState.qml, shell/jv-hud/core/EarsBudgets.qml,
+  shell/jv-hud/tests/tst_micstate.qml,
+  shell/jv-hud/tests/tst_earsbudgets.qml, shell/jv-hud/README.md,
+  tools/tests/test_gen_theme_qml.py, tools/tests/test_hudscreens.py,
+  tools/tests/test_mutate.py
+- commits: 40e5a90 (the fourth word and the two gauges under it)
+- next: **A85** is the cheap companion and the one with a new assertion in
+  it — the losing word is on no photograph, and the A43 window it belongs
+  in measures a plate ARRIVING while this one gets WIDER, which this
+  harness cannot yet say. **B89** is the deeper one raised here: nothing
+  anywhere checks that a plate draws every word its state element can
+  produce, so the next fifth word will be silently drawn as `MIC` — it is
+  B88's class, a relation between two files that no third thing asserts.
+  Otherwise unchanged: **B85**'s tap half (a turn's ENDING, which
+  `--latency` never reports) is still the next cheap feature and its HUD
+  half should stay unbuilt for A71's reason; B87/B88 are the gate's own
+  written-down rules; A62/A70 — the corner now has two plates for this one
+  event, which this iteration took the `stalled` precedent on rather than
+  answering — are still a human's call.
