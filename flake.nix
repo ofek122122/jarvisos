@@ -70,6 +70,13 @@
         # into the wrapper rather than found on PATH, the same rule the HUD's
         # bridge follows. modules/desktop.nix runs that same `pkgs.niri`.
         jv-bar = pkgs.callPackage ./pkgs/jv-bar { };
+        # jv-notify — the notification corner (blueprint §06, PLAN D2), and
+        # this machine's org.freedesktop.Notifications daemon. Same shape as
+        # the other two shells: the QML in the store plus a wrapped
+        # quickshell, with qmllint and the headless notifier tests as its
+        # check phase. It takes no extra argument at all — the daemon runs no
+        # child process and reads no file, only the session bus.
+        jv-notify = pkgs.callPackage ./pkgs/jv-notify { };
         # The face personality/theme.toml names as family_sans. nixpkgs has
         # no `archivo`; see pkgs/archivo for why it is pinned upstream rather
         # than carved out of google-fonts. modules/fonts.nix installs it —

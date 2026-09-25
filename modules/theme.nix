@@ -3,7 +3,8 @@
 # ordinary apps and the session read as JarvisOS: GTK + Qt dark/ember, cursor
 # and icon themes, and the terminal + launcher palettes. Two graphical-session
 # surfaces have their units here: the wallpaper (colours in
-# pkgs/jarvis-wallpaper) and the top bar (QML in shell/jv-bar).
+# pkgs/jarvis-wallpaper), the top bar (QML in shell/jv-bar) and the
+# notification corner (QML in shell/jv-notify).
 #
 # The PALETTE IS NOT WRITTEN HERE. It is read out of `personality/theme.toml`
 # with `builtins.fromTOML`, the way modules/fonts.nix reads the font families
@@ -24,6 +25,7 @@
 let
   wallpaper = self.packages.x86_64-linux.jarvis-wallpaper;
   jv-bar = self.packages.x86_64-linux.jv-bar;
+  jv-notify = self.packages.x86_64-linux.jv-notify;
 
   theme = builtins.fromTOML (builtins.readFile ../personality/theme.toml);
 
@@ -86,6 +88,7 @@ in
 {
   environment.systemPackages = [
     jv-bar # the top bar, so it can also be started by hand while working on it
+    jv-notify # the notification corner, for the same reason
   ]
   ++ (with pkgs; [
     swaybg # wallpaper
@@ -151,6 +154,35 @@ in
     after = [ "graphical-session.target" ];
     serviceConfig = {
       ExecStart = "${jv-bar}/bin/jv-bar";
+      Restart = "on-failure";
+      RestartSec = 2;
+    };
+  };
+
+  # jv-notify — the notification corner (blueprint §06, PLAN D2), and this
+  # machine's org.freedesktop.Notifications daemon. Before it there was NO
+  # notification daemon on ares at all: every app that asked the session bus
+  # to show you something got an error, and you were never told.
+  #
+  # Here beside the bar rather than in modules/jarvis-services.nix, for the
+  # same reason: it is DESKTOP, not perception. It never opens the bus, never
+  # reads a sensor and never needs commonEnv — its one input is the session
+  # bus, and what it draws is other programs' news. What Jarvis has to say
+  # goes to jv-hud over the real bus (invariant 1), which is also why this
+  # surface never spends the ember accent.
+  #
+  # Wanted by default, like the bar and unlike the HUD: a notification daemon
+  # that was not running when an app went looking for one is a notification
+  # nobody ever sees. The surface itself is still unmapped until something has
+  # actually been sent.
+  systemd.user.services.jv-notify = {
+    description = "JarvisOS notification corner (org.freedesktop.Notifications)";
+    unitConfig.ConditionUser = "ofek";
+    wantedBy = [ "graphical-session.target" ];
+    partOf = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    serviceConfig = {
+      ExecStart = "${jv-notify}/bin/jv-notify";
       Restart = "on-failure";
       RestartSec = 2;
     };

@@ -516,6 +516,13 @@ QML_GATES = (
         script="ops/ralph/bartest.sh",
         entry="shell/jv-bar/tests",
     ),
+    # And the notifier's (PLAN D2). Third script, same argument: what is
+    # derived from a path is which gate runs, so editing a toast must not run
+    # the bar's tests.
+    QmlGate(
+        script="ops/ralph/notifytest.sh",
+        entry="shell/jv-notify/tests",
+    ),
     QmlGate(
         script="ops/ralph/hudshots.sh",
         entry="tools/hudshots/scene",

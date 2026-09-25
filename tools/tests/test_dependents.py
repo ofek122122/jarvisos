@@ -888,6 +888,41 @@ def test_a_bar_element_names_only_the_bars_gate():
     assert "ops/ralph/bartest.sh" not in got, got
 
 
+def test_the_qml_gate_reaches_every_file_of_the_notifier_that_a_test_can_load():
+    """The same sweep for `shell/jv-notify` (PLAN D2), and the same short reach
+    the bar has — written down for the same reason.
+
+    One gate, so everything above `core/` is covered only by qmllint inside
+    `nix build .#jv-notify` plus the Python sweeps over `shell/**`. That is a
+    real gap and it is worse here than it is for the bar: the notifier is the
+    one surface whose content comes from programs this repo did not write, so
+    what a toast does with a 4000-character summary or an empty app name is
+    exactly what a render harness would answer. PLAN D20."""
+    ours = {
+        p.relative_to(ROOT).as_posix()
+        for p in (ROOT / "shell" / "jv-notify").rglob("*.qml")
+    }
+    seen: set[str] = set()
+    for gate in dependents.QML_GATES:
+        seen |= dependents.qml_reads(ROOT, gate)
+    assert ours - seen == {
+        "shell/jv-notify/shell.qml",  # Quickshell: gated by `nix build .#jv-notify`
+        "shell/jv-notify/Notifications.qml",  # Quickshell: the D-Bus server
+        "shell/jv-notify/Theme.qml",  # generated; `--check` in the same build
+        "shell/jv-notify/Toast.qml",  # no render gate for the corner yet (D20)
+        "shell/jv-notify/Fade.qml",  # likewise
+    }, sorted(ours - seen)
+
+
+def test_a_notify_element_names_only_the_notifiers_gate():
+    """Three scripts now, and the claim is the same one it was at two: a change
+    to what a toast does must not be verified by the bar's tests."""
+    got = dependents.qml_readers(ROOT, ["shell/jv-notify/core/NotifyModel.qml"])
+    assert set(got) == {"ops/ralph/notifytest.sh"}, got
+    for other in ("shell/jv-bar/core/NiriModel.qml", "shell/jv-hud/core/BusModel.qml"):
+        assert "ops/ralph/notifytest.sh" not in dependents.qml_readers(ROOT, [other]), other
+
+
 def test_the_cli_names_the_qml_gates_it_used_to_apologise_for():
     """What replaced the caveat. The command is what a tired loop will run, so
     it prints the script, not the name of a thing it cannot see."""

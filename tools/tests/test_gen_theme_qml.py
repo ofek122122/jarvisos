@@ -747,6 +747,153 @@ def test_nothing_in_the_bar_waits_for_a_pointer_it_can_never_receive():
     )
 
 
+# --- D2: the notification corner is a third surface, and it draws strangers'
+#     words ------------------------------------------------------------------
+#
+# jv-notify keeps the HUD's contract exactly — no keyboard, no exclusive zone,
+# no input region, unmapped when empty — so it gets the HUD's table rather than
+# a third one. What is new here is WHAT it draws: every other surface on this
+# machine shows something JarvisOS published, and this one shows text that
+# arrived over D-Bus from any process with a session. So the checks below are
+# about the two ways that goes wrong quietly.
+
+
+def notify_qml_files() -> list[Path]:
+    notify = ROOT / "shell" / "jv-notify"
+    return [
+        q for q in sorted(notify.rglob("*.qml")) if not q.is_relative_to(notify / "tests")
+    ]
+
+
+def test_every_notify_surface_pins_the_properties_that_make_it_safe():
+    """Invariant 10 for the notification corner (PLAN D2).
+
+    The same table as the HUD's, because it is the same promise: a surface that
+    floats over every window, takes no space, takes no keyboard, and passes
+    every click through. It is asserted separately only because the file set is
+    different — a shell added tomorrow that nothing swept would be a surface
+    nobody checked."""
+    surfaces = 0
+    for qml in notify_qml_files():
+        for name, body in window_bodies(qml.read_text("utf-8")):
+            surfaces += 1
+            where = f"{qml.relative_to(ROOT)}'s {name}"
+            for prop, value in SAFE_SURFACE.items():
+                assert assigned(body, prop) == [value], (
+                    f"{where} must bind `{prop}: {value}` exactly once — "
+                    f"got {assigned(body, prop)}. This is invariant 10, and a "
+                    f"surface that gets it wrong is wrong quietly."
+                )
+            mask = assigned(body, "mask")
+            assert len(mask) == 1 and re.fullmatch(r"Region\s*\{\s*\}", mask[0]), (
+                f"{where} must bind `mask: Region {{}}` — an EMPTY input "
+                f"region. It is also what `actionsSupported: false` is the "
+                f"other half of: with no click to invoke one, a notification "
+                f"action is a promise these pixels cannot keep. Got {mask}."
+            )
+    assert surfaces, (
+        "found no Quickshell window in shell/jv-notify — either the corner "
+        "stopped mapping a surface, or this gate stopped being able to see one"
+    )
+
+
+def test_nothing_in_the_notifier_asks_for_the_keyboard():
+    hits = scan(notify_qml_files(), KEYBOARD_GRABS)
+    assert not hits, (
+        "invariant 10: no surface on this machine steals focus, and a toast "
+        "that took the keyboard would take it from whatever you are typing "
+        "into the moment a stranger's program sent one:\n" + "\n".join(hits)
+    )
+
+
+def test_nothing_in_the_notifier_waits_for_a_pointer_it_can_never_receive():
+    hits = scan(notify_qml_files(), POINTER_SINKS)
+    assert not hits, (
+        "the surface's input region is empty, so these handlers can never "
+        "fire. A notification action is the obvious thing to reach for here "
+        "and it needs the mask opened first, which is a decision about "
+        "invariant 10 and not a handler:\n" + "\n".join(hits)
+    )
+
+
+def test_the_notifier_declares_no_capability_its_pixels_do_not_have():
+    """The honesty declaration, read off the file (PLAN D2).
+
+    A notification daemon answers GetCapabilities, and every sender decides
+    what to send from the answer. Claiming `actions` would make apps offer
+    buttons on a surface whose input region is empty — the user watches an app
+    hand them a choice that does nothing. Claiming `body-markup` would mean
+    interpreting markup from strangers on a surface that floats over every
+    window; the plates render Text.PlainText, so the claim would also be false.
+
+    So each of these is pinned to false HERE rather than left to a default,
+    and the pairing with the pixels is what this test is for: qmllint would be
+    perfectly happy with `actionsSupported: true`."""
+    text = strip_qml_comments(
+        (ROOT / "shell" / "jv-notify" / "Notifications.qml").read_text("utf-8")
+    )
+    server = dict(re.findall(r"^\s*(\w+Supported)\s*:\s*(true|false)", text, re.M))
+    assert server.get("bodySupported") == "true", "the plate draws the body, so it asks for one"
+    for cap in (
+        "actionsSupported",  # no click: the mask is empty
+        "actionIconsSupported",
+        "bodyMarkupSupported",  # the plates are Text.PlainText
+        "bodyHyperlinksSupported",
+        "bodyImagesSupported",
+        "imageSupported",  # the corner draws type, not a sender's pixmap
+        "inlineReplySupported",
+        "persistenceSupported",  # no history, so nothing may skip a resend
+    ):
+        assert server.get(cap) == "false", (
+            f"{cap} must be declared false until these pixels do it: "
+            f"got {server.get(cap)!r}. A capability is a promise to every "
+            f"process on this machine."
+        )
+
+    # And the other half of `bodyMarkupSupported: false`: every Text in this
+    # shell that shows a sender's string renders it as plain text. A daemon
+    # that said it does not do markup and then interpreted `<img>` anyway
+    # would be rendering strangers' markup over every window.
+    for qml in notify_qml_files():
+        code = strip_qml_comments(qml.read_text("utf-8"))
+        texts = len(re.findall(r"\bText\s*\{", code))
+        plain = len(re.findall(r"textFormat\s*:\s*Text\.PlainText", code))
+        assert texts == plain, (
+            f"{qml.relative_to(ROOT)} has {texts} Text elements and {plain} "
+            f"that pin Text.PlainText. Every string on this surface came from "
+            f"a program that is not this one."
+        )
+
+
+def test_nothing_in_the_notifier_animates_without_the_reduced_motion_switch():
+    """§06's reduced-motion rule, in the shell that has its own way of obeying
+    it (PLAN D2).
+
+    The HUD's version of this test requires `Motion.` — the singleton wrapping
+    core/MotionPolicy.qml, which weighs the declared preference against a
+    session override, a battery and a fullscreen window. jv-notify has no copy
+    of that policy on purpose (a second copy is a second thing to drift), so
+    its one animation is gated on `Theme.reducedMotion`, the versioned
+    preference straight out of personality/theme.toml. Same claim, one input:
+    a file that animates without naming the switch is a file that keeps moving
+    after a human asked for stillness, and nothing else in the build notices.
+
+    PLAN D18 is the generator sharing the motion trio across all three shells,
+    at which point this becomes the HUD's test."""
+    offenders = []
+    for qml in notify_qml_files():
+        code = "\n".join(
+            l for l in qml.read_text("utf-8").splitlines() if not l.lstrip().startswith("//")
+        )
+        used = [a for a in ANIMATION_TYPES if re.search(rf"\b{a}\b\s*(\{{|on\b)", code)]
+        if used and "Theme.reducedMotion" not in code:
+            offenders.append(f"{qml.relative_to(ROOT)}: {', '.join(used)}")
+    assert not offenders, (
+        "these animate without consulting Theme.reducedMotion, so §06's "
+        "stillness switch cannot turn them off:\n" + "\n".join(offenders)
+    )
+
+
 def test_the_bar_leaves_the_corner_the_hud_draws_in():
     """Two processes, two layers, one corner — and nothing can see the clash.
 
