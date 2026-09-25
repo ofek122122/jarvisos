@@ -1561,19 +1561,50 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       with. 33 tests, was 27. 8 mutations, 8 caught. Tests:
       `bash ops/ralph/runtests.sh jv-compat`.)
 
-- [ ] B65. A grant naming a folder the user does not have yet aborts the
+- [x] B65. A grant naming a folder the user does not have yet aborts the
       whole install with a bwrap error: `--bind` fails on a missing source.
-      The three ways out are not equal and one of them is forbidden —
-      jv-compat must NOT create it, because only `jv-act` writes outside a
-      service's own state dir (invariant 3), and `~/Documents/MyAppSaves`
-      is the user's. So: refuse the recipe at LOAD time with a sentence
-      naming the missing folder (loud, and the recipe author is the one who
-      can fix it), use `--bind-try` and let the app silently find nothing
-      there (quiet, and it is the app that ends up confused), or ask jv-act
-      to create it, which drags a confirmation into an install that already
-      has one. Cheap either way and it should be decided before the first
-      recipe with a grant is committed — there are none today, which is why
-      this is free now. Discovered in B63.
+      Decided and built while no recipe with a grant is committed, which is
+      what made it free. Discovered in B63. — e36eee5
+      (**Refuse, loudly, before any work.** `grant_problems(recipe)` answers
+      "can THIS machine honour this recipe", names EVERY bad grant so one fix
+      covers them all, and the pipeline turns a non-empty answer into
+      `blocked` — already the word for "jv-compat refuses", which fail-closed
+      uses for its own reason and not the guard's, where `failed` would claim
+      an installer ran. `--bind-try` rejected as quieter AND worse: the app
+      finds an empty folder, indistinguishable from "no saves yet", writes
+      into its private home, and the user's real folder stays empty — a
+      failure that surfaces days later as missing work. Creating it rejected
+      by invariant 3, and via jv-act it would add a second confirmation to an
+      install that already has one. NOT at recipe-DB load, where the item
+      guessed it belonged: a recipe for an app nobody is installing must not
+      stop `find_recipe` answering about the one that is. It also closed an
+      unfiled hole — `grant_dest`'s ValueError was raised inside `bwrap_args`
+      with nothing catching it, so `home_paths = ["."]` ended `jv-compat
+      install` in a traceback with no terminal frame at all. Two deliberate
+      non-refusals, each tested: the predicate follows symlinks because
+      `--bind` does, and a grant may name a single FILE, which is narrower
+      than the folder around it. The premise is EXECUTED — test_sandbox.py
+      builds the argv, removes the granted folder, and watches bwrap refuse
+      to exec. Tests: `bash ops/ralph/runtests.sh jv-compat` 42, was 33;
+      9 mutations, 9 caught.)
+
+- [ ] B66. `grant_dest` promises that a grant "stays under the app's private
+      home" and checks the STRING: it refuses absolute paths, `..` and the
+      empty grant by inspecting the words, while bwrap resolves the source
+      path for real. So a grant of `Documents` binds whatever `~/Documents`
+      is a symlink to — another disk, `/home`, or `/`. B65 did not create
+      this gap; it made it explicit, by deliberately following links so the
+      existence check agrees with bwrap. The trap is that the obvious fix is
+      WRONG: a user whose `~/Documents` genuinely lives on another disk is an
+      ordinary setup, and refusing every grant that resolves outside the home
+      refuses it. So this is a decision between three properties, not a patch:
+      "stays under the real home" (refuses legitimate relocation), "resolves
+      to something the user owns" (a uid check, which a relocated folder
+      passes and `/` fails), or "leave it and say in recipes/README.md that a
+      grant is exactly as wide as what the link points at". Nothing relies on
+      the stronger reading today and no recipe with a grant is committed, so
+      it is free now for the same reason B65 was — and it stops being free the
+      same day. Discovered in B65.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above

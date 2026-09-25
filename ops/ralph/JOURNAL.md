@@ -8808,3 +8808,100 @@ from `os.uname().nodename` reads like hardening and is the leak.
   **B62** is B61's two decisions; and **B10/A28** — one live recording of
   one spoken turn on ares — remains the biggest thing a human can hand
   this loop.
+
+## 2026-09-25 — iteration 87 — B65: the folder the user does not have yet
+
+B65 was the last cheap thing left in jv-compat and it was cheap for one
+reason: no recipe with a grant is committed, so the decision costs nothing
+today and costs a recipe the day one is. A `home_paths` grant is a fact
+about two things — a recipe, reviewed in this repo, and the user's home,
+which is not this repo's business — and bwrap resolves a bind's SOURCE on
+the host. So a grant naming `Documents/MyAppSaves` on a machine that does
+not have it aborts the sandbox: not a degraded install, a dead one, after
+the screening and after the prefix was built, reported through `failed`
+with bwrap's own sentence about a path the user never typed.
+
+**The decision is to refuse, loudly, before doing anything**, and the two
+rejected options are recorded next to the code that took the third:
+
+- `--bind-try` is the quiet one and it is worse. The app finds an empty
+  folder, which is indistinguishable from "no saves yet", writes into its
+  private home instead, and the user's real folder stays empty. That
+  failure surfaces days later as missing work, which is the worst place
+  for it. The whole cost of the loud option is a sentence the user reads
+  before anything happens.
+- Creating it is forbidden. Only `jv-act` writes outside a service's own
+  state dir (invariant 3) and `~/Documents/MyAppSaves` is the user's, so
+  jv-compat cannot; routing it through jv-act would put a second
+  confirmation into an install that already has one, for something one
+  `mkdir` fixes.
+- And NOT at recipe-DB load, which is where B65 guessed this belonged: a
+  recipe for an app nobody is installing must not stop `find_recipe`
+  answering about the one that is. Whether a grant is there is a fact
+  about this machine, checked where the recipe meets it.
+
+`grant_problems(recipe)` answers "can THIS machine honour this recipe" and
+names EVERY bad grant, so a recipe with three does not cost three installs
+to fix. The malformed-shape refusal joins it and that closed a second hole
+nobody had filed: `grant_dest` raises, the raise was happening inside
+`bwrap_args` with nothing catching it, so a recipe reading
+`home_paths = ["."]` left `jv-compat install` with a ValueError traceback
+and published no terminal frame at all. Both are now `blocked` — already
+the word for "jv-compat refuses", which fail-closed uses for its own
+reason and not the guard's, where `failed` would claim an installer ran.
+
+Two deliberate NON-refusals, each with a test, because both look like
+oversights and are not. The predicate FOLLOWS symlinks (`exists()`, not
+`lexists`) because `--bind` does: a grant pointing at a broken link is
+absent to bwrap and has to be absent here, or the gate disagrees with the
+thing it stands in front of. And nothing is said about what KIND of thing
+a grant names — one file is a NARROWER grant than the folder around it and
+bwrap binds either, so demanding a directory would refuse the more
+conservative of two recipes. One thing is left as a sentence rather than
+machinery: the window between the pre-flight and the exec, where a folder
+deleted in between is a raw bwrap error again.
+
+The premise is EXECUTED rather than argued, which is the habit B63 and B64
+left behind. `test_sandbox.py` builds the argv for a grant that exists,
+removes the folder, and watches bwrap refuse to exec anything — the inner
+command prints `RAN-ANYWAY` and never gets the chance — and asserts bwrap
+names the path. `bwrap_args` stays willing to build that argv on purpose
+(whether this machine can honour a recipe is the pipeline's question, not
+the argv's), which is the only reason the premise can be run at all. The
+file grant is executed the same way: a shell inside the confinement reads
+the one granted `.ini` and cannot see its sibling.
+
+- tests: `bash ops/ralph/runtests.sh jv-compat` **42 (was 33)**, all green.
+- graded with **9 mutations, 9 caught** — and the first pass had a real
+  survivor worth recording: swapping the predicate for `dest.is_dir()`
+  changed nothing any test could see, because the file-grant claim was
+  held only on the bwrap side, where the pre-flight is not involved. The
+  missing line was one assertion on `grant_problems` itself. Also caught:
+  the gate disabled outright, the existence check deleted (the `--bind-try`
+  option smuggled in), the predicate stopping at `lexists`, only the first
+  problem reported, a malformed grant swallowed, the message naming the
+  recipe's words instead of the path on this machine, the refusal calling
+  itself `failed`, and the gate moved behind the prefix it exists to
+  prevent.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: services/jv-compat/jv_compat/prefix.py,
+  services/jv-compat/jv_compat/install.py,
+  services/jv-compat/tests/test_compat.py,
+  services/jv-compat/tests/test_sandbox.py, recipes/README.md
+- commits: e36eee5
+- next: **B66**, raised by doing this one and free for the same reason B65
+  was free: `grant_dest` promises a grant "stays under the private home"
+  and checks the STRING, while bwrap resolves the path — so a grant of
+  `Documents` binds whatever `~/Documents` is a symlink to. B65 made that
+  gap explicit by deliberately following links, and the obvious fix is
+  wrong (a home folder that genuinely lives on another disk is an ordinary
+  setup), so it is a decision between three properties and not a patch.
+  Otherwise unchanged: **Track A is one human look at `docs/hud/` away
+  from unblocking** A47, A55, A62, A63's picture half, A70 and the
+  A21/A22/A25 cluster; **A56** asks whether the shot suites belong in the
+  build gate; **B27/B28** are one decision about whether jv-ears gets a
+  state topic for the no-wake window; **B43/B47/B54** are one question
+  asked three times; **B62** is B61's two decisions; and **B10/A28** — one
+  live recording of one spoken turn on ares — remains the biggest thing a
+  human can hand this loop.
