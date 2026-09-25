@@ -3187,6 +3187,45 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       may be missing a stretch). Do not build it before answering it.
       Raised with A75.
 
+- [ ] A78. **The service that keeps dying is the one that always says it
+      is fine.** `uptime_s` is the only REQUIRED field of
+      `schemas/sys.health.json` that nothing in the HUD reads, and every
+      unit in `modules/jarvis-services.nix` is `Restart=on-failure` — one
+      of them says so in a comment about a bug it is the recovery path
+      for. So a service that crashes publishes `starting`, then `ok`, and
+      `HealthPlate` draws NOTHING: an empty corner over a machine where
+      jv-ears has died four times in a minute, which is exactly the quiet
+      failure `core/HealthState.qml`'s own header names. No schema change
+      is needed to see it — `uptime_s` is monotonic within one process
+      life, so a trusted heartbeat whose `uptime_s` is BELOW the last one
+      from the same service is a different process. `jv health` already
+      prints the field (`cli.rs`); nothing derives a restart from it.
+      Raised in iteration 101.
+
+- [ ] A79. **A confirmation's outcome is on the bus and the HUD throws it
+      away.** `action.confirm.granted` is the one body field of that
+      schema no element reads — `answered_by` IS read, so `ConfirmState`
+      knows an answer arrived and by which route (voice, cli, timeout) and
+      cannot tell yes from no. A22 asks for the design half (three exits
+      drawn differently, and it would be the first fixed-duration element
+      in this HUD, so it is deliberately a human's), but the READING half
+      is not blocked by that decision and is what A22 would be built on:
+      today there is nothing in `core/` that can say a destructive tool
+      was GRANTED. Worth separating, because a human answering A22 should
+      not also have to write the reader. Raised in iteration 101.
+
+- [ ] A80. **The machine under load is the other half of the sentence
+      `HealthPlate` already starts.** `context.system.load1` and
+      `mem_used_pct` are unread, and they are the same shape as B40's VRAM
+      row: not a gauge (an all-day readout is one nobody reads), but the
+      WHY of a Jarvis that took thirty seconds — and unlike the rung, load
+      explains a slow turn on a machine whose brain is on the card. The
+      whole design question is the GATE, since §06 forbids the standing
+      dashboard: `VramState` is gated on `brainOnCpu`, and the honest gate
+      here is `SpeechState`'s `thinking` — the one moment a reader is
+      waiting and the number is news. That crosses two elements, which is
+      why it is a proposal and not a patch. Raised in iteration 101.
+
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD
       shows is not in the build gate. The obstacle is real: the plates need
