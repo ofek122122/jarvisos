@@ -508,6 +508,14 @@ QML_GATES = (
         script="ops/ralph/qmltest.sh",
         entry="shell/jv-hud/tests",
     ),
+    # The bar's headless tests, the same shape one shell over: `bartest.sh`
+    # and `qmltest.sh` are two scripts rather than one with an argument
+    # precisely so this table can tell them apart — a single command pointed
+    # at both trees would make a change to a bar element run the HUD's tests.
+    QmlGate(
+        script="ops/ralph/bartest.sh",
+        entry="shell/jv-bar/tests",
+    ),
     QmlGate(
         script="ops/ralph/hudshots.sh",
         entry="tools/hudshots/scene",

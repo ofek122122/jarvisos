@@ -62,6 +62,14 @@
           # the HUD's view of the bus is exactly the one the flake declares.
           hudBridge = pyEnvs.hudBridgeEnv;
         };
+        # jv-bar — the top bar (blueprint §06, PLAN D1). Same shape as jv-hud:
+        # the QML in the store plus a wrapped quickshell, with qmllint and the
+        # headless bar tests as its check phase.
+        # `niri` comes in as an ordinary callPackage argument: the bar's one
+        # window onto the compositor is `niri msg --json event-stream`, pinned
+        # into the wrapper rather than found on PATH, the same rule the HUD's
+        # bridge follows. modules/desktop.nix runs that same `pkgs.niri`.
+        jv-bar = pkgs.callPackage ./pkgs/jv-bar { };
         # The face personality/theme.toml names as family_sans. nixpkgs has
         # no `archivo`; see pkgs/archivo for why it is pinned upstream rather
         # than carved out of google-fonts. modules/fonts.nix installs it —

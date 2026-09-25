@@ -11,6 +11,7 @@ is in sync with the toml, they check the toml still agrees with the blueprint's
 from __future__ import annotations
 
 import html
+import json
 import re
 import subprocess
 import sys
@@ -69,47 +70,77 @@ def test_output_is_deterministic_and_ordered_like_the_toml():
     assert qml.index("ground:") < qml.index("familyMono:") < qml.index("easeMs:")
 
 
+# Every shell that consumes the tokens, as the tests below are parameterized
+# over it. There are two — `jv-hud`, the corner overlay, and `jv-bar`, the top
+# bar (PLAN D1) — and every claim about registration, about core/ being
+# Quickshell-free and about the committed output being the toml's is the same
+# claim for both. Parameterizing rather than copying is the point: the bar was
+# added by extending a table, and it arrived already covered.
+SHELLS = pytest.mark.parametrize(
+    "shell", [pytest.param(s, id=s.name) for s in gen.SHELLS.values()]
+)
+
+
 def test_qmldir_registers_every_singleton_and_no_module_name():
-    qmldir = gen.render_qmldir()
+    qmldir = gen.render_qmldir(gen.SHELLS["jv-hud"])
     assert "singleton Theme 1.0 Theme.qml" in qmldir
     assert "singleton Bus 1.0 Bus.qml" in qmldir
     # A `module` line would claim a module name Quickshell did not assign;
     # the directory import (`import "."`) needs no such line.
     assert not any(l.startswith("module ") for l in qmldir.splitlines())
+    # And the bar's is its own file, listing its own types: one table for both
+    # shells would register the HUD's plates into a directory where every one
+    # of them is a file that does not exist.
+    bar = gen.render_qmldir(gen.SHELLS["jv-bar"])
+    assert "singleton Niri 1.0 Niri.qml" in bar
+    assert "Bus.qml" not in bar
 
 
-def test_every_qml_singleton_on_disk_is_registered_and_vice_versa():
+@SHELLS
+def test_every_qml_singleton_on_disk_is_registered_and_vice_versa(shell):
     """An unregistered singleton resolves to nothing at runtime and to a
     confusing qmllint error at build time. The two must agree exactly."""
-    hud = ROOT / "shell" / "jv-hud"
+    where = ROOT / "shell" / shell.name
     on_disk = {
-        q.name for q in hud.glob("*.qml") if "pragma Singleton" in q.read_text("utf-8")
+        q.name for q in where.glob("*.qml") if "pragma Singleton" in q.read_text("utf-8")
     }
-    assert on_disk == {file for _, file in gen.SINGLETONS}
-    for name, file in gen.SINGLETONS:
-        assert (hud / file).exists(), f"{file} is registered but missing"
-        assert (hud / file).read_text("utf-8").startswith(
+    assert on_disk == {file for _, file in shell.singletons}
+    for name, file in shell.singletons:
+        assert (where / file).exists(), f"{file} is registered but missing"
+        assert (where / file).read_text("utf-8").startswith(
             "//"
         ), f"{file} should open with a comment saying what it is"
         assert name == file[: -len(".qml")], "the type name is the file name"
 
 
-def test_qmldir_registers_every_plain_component_on_disk_and_vice_versa():
+@SHELLS
+def test_qmldir_registers_every_plain_component_on_disk_and_vice_versa(shell):
     """A qmldir exposes only what it lists, so an unregistered component is
     not a type at all — and the failure reads as a typo in the USING file,
     miles from the missing line. shell.qml is exempt: it is loaded by path."""
-    hud = ROOT / "shell" / "jv-hud"
+    where = ROOT / "shell" / shell.name
     on_disk = {
         q.name
-        for q in hud.glob("*.qml")
+        for q in where.glob("*.qml")
         if q.name != "shell.qml" and "pragma Singleton" not in q.read_text("utf-8")
     }
-    assert on_disk == {file for _, file in gen.COMPONENTS}
-    qmldir = gen.render_qmldir()
-    for name, file in gen.COMPONENTS:
+    assert on_disk == {file for _, file in shell.components}
+    qmldir = gen.render_qmldir(shell)
+    for name, file in shell.components:
         assert f"{name} 1.0 {file}" in qmldir
         assert f"singleton {name}" not in qmldir, f"{file} is a component, not a singleton"
         assert name == file[: -len(".qml")], "the type name is the file name"
+
+
+@SHELLS
+def test_every_shell_gets_the_same_theme_singleton_byte_for_byte(shell):
+    """Two shells, one identity (§06). They cannot SHARE the file — each is
+    copied into the store on its own and `import "."` resolves inside one
+    directory — so the copies are generated from one renderer instead, and
+    this is what says they never diverged. A bar whose ember had drifted one
+    step from the HUD's ember would look deliberate to everyone."""
+    theme = (ROOT / "shell" / shell.name / "Theme.qml").read_text("utf-8")
+    assert theme == (ROOT / "shell" / "jv-hud" / "Theme.qml").read_text("utf-8")
 
 
 # Every QML animation type. If one of these appears in a HUD file, that file
@@ -597,9 +628,9 @@ POINTER_SINKS = (
 )
 
 
-def scan_hud(patterns: tuple[str, ...]) -> list[str]:
+def scan(files: list[Path], patterns: tuple[str, ...]) -> list[str]:
     hits = []
-    for qml in hud_qml_files():
+    for qml in files:
         code = strip_qml_comments(qml.read_text("utf-8"))
         for n, line in enumerate(code.splitlines(), 1):
             for pat in patterns:
@@ -609,7 +640,7 @@ def scan_hud(patterns: tuple[str, ...]) -> list[str]:
 
 
 def test_nothing_in_the_hud_asks_for_the_keyboard():
-    hits = scan_hud(KEYBOARD_GRABS)
+    hits = scan(hud_qml_files(), KEYBOARD_GRABS)
     assert not hits, (
         "invariant 10: the HUD never steals focus. Taking the keyboard is a "
         "human's call and starts at `keyboardFocus`, not here:\n"
@@ -618,10 +649,172 @@ def test_nothing_in_the_hud_asks_for_the_keyboard():
 
 
 def test_nothing_in_the_hud_waits_for_a_pointer_it_can_never_receive():
-    hits = scan_hud(POINTER_SINKS)
+    hits = scan(hud_qml_files(), POINTER_SINKS)
     assert not hits, (
         "the surface's input region is empty, so these handlers can never "
         "fire — a promise the HUD cannot keep:\n" + "\n".join(hits)
+    )
+
+
+# --- D1: the bar is a second surface, and it is docked ---------------------
+#
+# Everything above is about a surface that takes no space and vanishes when it
+# has nothing to say. The bar is the first thing on this machine that keeps a
+# strip of every monitor whether or not anything is happening on it, which is
+# the one §06 licence a new surface can talk itself into — so what it may and
+# may not do is pinned here, in the same shape and for the same reason.
+
+
+def bar_qml_files() -> list[Path]:
+    bar = ROOT / "shell" / "jv-bar"
+    return [q for q in sorted(bar.rglob("*.qml")) if not q.is_relative_to(bar / "tests")]
+
+
+# The bar's version of SAFE_SURFACE. Three of the five values are identical to
+# the HUD's — it cannot take the keyboard, it sits on Top and not Overlay, its
+# input region is empty — and the two that differ are the definition of a bar:
+# it paints its own ground, and it reserves its strip so windows tile BELOW it
+# rather than under it. Written out rather than derived from the HUD's table,
+# because every difference between the two surfaces is a decision someone has
+# to make again on purpose.
+SAFE_BAR_SURFACE = {
+    "WlrLayershell.keyboardFocus": "WlrKeyboardFocus.None",
+    "focusable": "false",
+    "WlrLayershell.layer": "WlrLayer.Top",
+    # A named layer-shell surface: `jv-bar`, so a human reading `niri msg
+    # --json layers` can tell the two shells apart.
+    "WlrLayershell.namespace": '"jv-bar"',
+    # It reserves — the one thing the HUD never does — and it reserves EXACTLY
+    # its own height. A hard-coded zone is a strip of screen nobody gets back
+    # the day the type size moves.
+    "exclusionMode": "ExclusionMode.Normal",
+    "exclusiveZone": "surface.implicitHeight",
+    # Opaque ground, because nothing is ever behind a surface that reserves
+    # its own space: a translucent bar would pay for a blend of the wallpaper.
+    "color": "Theme.groundDeep",
+}
+
+
+def test_every_bar_surface_pins_the_properties_that_make_it_safe():
+    """Invariant 10 for a docked surface (PLAN D1).
+
+    The HUD's version of this test is what caught A10; the bar needs its own
+    because three of these values are deliberately not the HUD's, so a shared
+    table would have to say "or" and would then be satisfied by either — which
+    is exactly the check that passes on a bar that has quietly stopped
+    reserving its strip, or started painting over your windows.
+    """
+    surfaces = 0
+    for qml in bar_qml_files():
+        for name, body in window_bodies(qml.read_text("utf-8")):
+            surfaces += 1
+            where = f"{qml.relative_to(ROOT)}'s {name}"
+            for prop, value in SAFE_BAR_SURFACE.items():
+                assert assigned(body, prop) == [value], (
+                    f"{where} must bind `{prop}: {value}` exactly once — "
+                    f"got {assigned(body, prop)}. This is invariant 10, and a "
+                    f"surface that gets it wrong is wrong quietly."
+                )
+            mask = assigned(body, "mask")
+            assert len(mask) == 1 and re.fullmatch(r"Region\s*\{\s*\}", mask[0]), (
+                f"{where} must bind `mask: Region {{}}` — an EMPTY input "
+                f"region. A clickable workspace would be jv-bar changing the "
+                f"state of this machine, which is invariant 3's line. Got "
+                f"{mask}."
+            )
+    assert surfaces, (
+        "found no Quickshell window in shell/jv-bar — either the bar stopped "
+        "mapping a surface, or this gate stopped being able to see one"
+    )
+
+
+def test_nothing_in_the_bar_asks_for_the_keyboard():
+    hits = scan(bar_qml_files(), KEYBOARD_GRABS)
+    assert not hits, (
+        "invariant 10: no surface on this machine steals focus, and a bar "
+        "that took the keyboard would take it from whatever you are typing "
+        "into:\n" + "\n".join(hits)
+    )
+
+
+def test_nothing_in_the_bar_waits_for_a_pointer_it_can_never_receive():
+    hits = scan(bar_qml_files(), POINTER_SINKS)
+    assert not hits, (
+        "the bar's input region is empty, so these handlers can never fire. "
+        "This is the one place that matters most: a workspace label is the "
+        "most clickable-looking thing on the desktop, and a handler here is "
+        "how `mask` gets opened later 'to make it work':\n" + "\n".join(hits)
+    )
+
+
+def test_the_bar_leaves_the_corner_the_hud_draws_in():
+    """Two processes, two layers, one corner — and nothing can see the clash.
+
+    The HUD sets `ExclusionMode.Ignore`, so it is NOT pushed down by the bar:
+    its plates are drawn over the top-right of the bar's strip. Neither
+    surface can detect the other (different process, different layer), so the
+    only thing keeping them apart is the number the bar reserves — and that
+    number is a copy of the HUD's box, in a file that cannot see it.
+
+    So this is the third party that reads both: the reserve has to cover the
+    HUD's own `implicitWidth` plus the §06 inset the HUD sits in. Grow the
+    HUD's corner and this fails, instead of a plate landing on the clock.
+    """
+    hud = (ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8")
+    box = re.search(r"^\s*implicitWidth:\s*(\d+)", hud, re.M)
+    assert box, "shell/jv-hud/shell.qml no longer declares a fixed surface box"
+    inset = gen.load_tokens((ROOT / "personality" / "theme.toml").read_text("utf-8"))
+    inset = inset["geometry"]["inset_px"]
+
+    bar = strip_qml_comments((ROOT / "shell" / "jv-bar" / "shell.qml").read_text("utf-8"))
+    reserve = re.search(r"property\s+int\s+hudReservePx:\s*(.+)$", bar, re.M)
+    assert reserve, "shell/jv-bar/shell.qml no longer reserves the HUD's corner"
+    # The expression is arithmetic over integers and a token name; evaluate the
+    # literal part and require the token to be the inset it claims to be.
+    assert re.fullmatch(r"\d+\s*\+\s*Theme\.insetPx", reserve.group(1).strip()), (
+        "the reserve should read as `<the HUD's box> + Theme.insetPx`, so the "
+        f"§06 inset is spent rather than retyped; got {reserve.group(1)!r}"
+    )
+    reserved = int(reserve.group(1).split("+")[0].strip()) + int(inset)
+    assert reserved >= int(box.group(1)) + int(inset), (
+        f"the bar reserves {reserved} px for the HUD, whose surface is "
+        f"{box.group(1)} px wide and sits {inset} px off the edge. The HUD "
+        f"would be drawn over the bar's own content."
+    )
+
+
+def test_the_bars_recorded_snapshot_is_the_line_niri_really_wrote():
+    """`tst_nirimodel.qml` drives the model with niri's own opening line.
+
+    It has to be a COPY — a QML engine cannot read a file out of the
+    repository — and a copy of a recording is worth having only while it is
+    still the recording. The failure this prevents is the one no unit test
+    written from memory can catch: `idx` that is really `index`, a `name`
+    that is absent rather than null. Every one of those parses, changes
+    nothing, and leaves a bar drawing no workspaces on a machine full of them.
+    """
+    recorded = (ROOT / "harness" / "fixtures" / "niri" / "ares-desk.jsonl").read_text("utf-8")
+    lines = [l for l in recorded.splitlines() if l.strip()]
+    assert len(lines) == 6, f"the recording is {len(lines)} lines; the fixture moved"
+
+    test = (ROOT / "shell" / "jv-bar" / "tests" / "tst_nirimodel.qml").read_text("utf-8")
+    snapshot = re.search(r"property string snapshot:\s*'([^']*)'", test)
+    assert snapshot, "tst_nirimodel.qml no longer carries the recorded snapshot"
+    assert snapshot.group(1) == lines[0], (
+        "the snapshot in tst_nirimodel.qml is not harness/fixtures/niri/"
+        "ares-desk.jsonl line 1 any more. One of the two was edited; the "
+        "recording is the one that is evidence."
+    )
+
+    # The other five are shortened where a window title held this machine's
+    # paths, so only their EVENT KIND is compared — which is the half the
+    # test's claim rests on: these are the events the bar does not read, in
+    # the order niri sent them.
+    unread = re.findall(r"^\s*'(\{\"[A-Za-z]+\".*)'[,\s]*$", test, re.M)
+    kinds = [json.loads(u) for u in unread]
+    assert [list(k)[0] for k in kinds] == [list(json.loads(l))[0] for l in lines[1:]], (
+        "the five unread events in tst_nirimodel.qml are no longer the five "
+        "niri sent after the snapshot"
     )
 
 
@@ -1021,19 +1214,25 @@ def test_the_heard_line_and_the_thinking_word_time_out_together():
     )
 
 
-def test_core_qmldir_registers_every_component_and_no_module_name():
-    qmldir = gen.render_core_qmldir()
-    assert "BusModel 1.0 BusModel.qml" in qmldir
+@SHELLS
+def test_core_qmldir_registers_every_component_and_no_module_name(shell):
+    qmldir = gen.render_core_qmldir(shell)
+    assert f"# shell/{shell.name}/core" in qmldir
     assert not any(l.startswith("singleton ") for l in qmldir.splitlines())
     assert not any(l.startswith("module ") for l in qmldir.splitlines())
-    assert "core/qmldir" in gen.outputs(ROOT / "personality" / "theme.toml")
+    assert "core/qmldir" in gen.outputs(ROOT / "personality" / "theme.toml", shell)
+    # The comment has to name the table a reader must edit, and there is one
+    # per shell — a generated file that sends you to the wrong table is worse
+    # than one that sends you nowhere.
+    assert f"{shell.registry}CORE in tools/gen_theme_qml.py" in qmldir
 
 
-def test_every_core_component_on_disk_is_registered_and_vice_versa():
-    core = ROOT / "shell" / "jv-hud" / "core"
+@SHELLS
+def test_every_core_component_on_disk_is_registered_and_vice_versa(shell):
+    core = ROOT / "shell" / shell.name / "core"
     on_disk = {q.name for q in core.glob("*.qml")}
-    assert on_disk == {file for _, file in gen.CORE}
-    for name, file in gen.CORE:
+    assert on_disk == {file for _, file in shell.core}
+    for name, file in shell.core:
         text = (core / file).read_text("utf-8")
         assert text.startswith("//"), f"{file} should open with a comment saying what it is"
         assert "pragma Singleton" not in text, f"{file} is a component, not a singleton"
@@ -1065,18 +1264,20 @@ def test_bus_forwards_every_function_busmodel_offers():
     )
 
 
-def test_core_imports_nothing_but_qtquick():
-    """shell/jv-hud/core is the half that headless QML tests can load.
+@SHELLS
+def test_core_imports_nothing_but_qtquick(shell):
+    """shell/<shell>/core is the half that headless QML tests can load.
 
     Importing a directory resolves every type its qmldir lists, so ONE
     Quickshell import anywhere in core/ makes the whole directory
     unimportable to qmltestrunner — quickshell links its QML plugin into its
-    own binary. That would silently take the HUD's only QML tests with it,
-    so it fails here instead, loudly.
+    own binary. That would silently take this shell's only QML tests with it
+    (`qmltest.sh` for the HUD, `bartest.sh` for the bar), so it fails here
+    instead, loudly.
     """
     allowed = {"QtQuick"}
     offenders = []
-    for qml in sorted((ROOT / "shell" / "jv-hud" / "core").rglob("*.qml")):
+    for qml in sorted((ROOT / "shell" / shell.name / "core").rglob("*.qml")):
         for n, line in enumerate(qml.read_text("utf-8").splitlines(), 1):
             m = re.match(r"\s*import\s+(\S+)", line)
             if m and m.group(1) not in allowed:

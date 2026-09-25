@@ -2,7 +2,7 @@
 #
 # Quickshell synthesizes a qmldir per directory; shipping our own turns
 # that off for this one, which is what makes the singleton resolvable to
-# qmllint as well as to the engine. No `module` line: the HUD is imported
+# qmllint as well as to the engine. No `module` line: a shell is imported
 # by directory (`import "."`), and claiming a module name Quickshell did
 # not assign only invites a collision. New singletons go in
 # SINGLETONS in tools/gen_theme_qml.py — and other types in
