@@ -44,6 +44,15 @@ time. It is NAMED instead, beside the paths that asked for it, on every
 verdict — green or red — because the failure being prevented here is a gate
 that is quietly not in the list.
 
+AND THE RUNNERS (B73). `runtests.sh` and `cargotest.sh` are not suites and are
+read by none: they are HOW a suite runs — the venv and the PYTHONPATH for one,
+the nix dev shell and the vendored registry for the other. Nothing derived
+could reach either, so a change to `runtests.sh` used to plan `tools` alone
+(which reads it as text) and a change to `cargotest.sh` planned exactly that
+too. Each is now every suite it can run: ten Python suites, both crates. That
+is the 241.7 s case above, and it is the same argument — nobody can guess
+which of the ten a change to the runner moved.
+
 WHAT THIS IS NOT. It is not the whole verify gate. `nixos-rebuild build
 --flake .#ares` is, and so is `nix build .#jarvisd`. Those are named in
 PROMPT.md and run beside this.
@@ -70,7 +79,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dependents  # noqa: E402
 
-CARGOTEST = "bash ops/ralph/cargotest.sh"
+# The script every crate's tests are RUN by, and the command that runs one.
+# Split apart the way `dependents.RUNTESTS_SH` is: the path is a read in its
+# own right (PLAN B73).
+CARGOTEST_SH = "ops/ralph/cargotest.sh"
+CARGOTEST = f"bash {CARGOTEST_SH}"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -119,14 +132,24 @@ def rust_commands(root: Path, paths: Iterable[str]) -> dict[str, list[str]]:
 
     The prefix test is per segment: `services/crate-xyz/f` is not inside
     `services/crate-x`, and a string `startswith` would say it was.
+
+    Plus the runner, which is inside no crate and read by no suite (PLAN B73).
+    `cargotest.sh` is HOW a crate's tests run at all — it borrows the
+    derivation's dev shell for cargo, rustc and the vendored registry, and
+    points the build at a cache outside the repo — so a change to it is every
+    crate, for the same reason `dependents` makes a change to `runtests.sh`
+    every Python suite. Guarded on the file being there: a deleted runner is a
+    changed path, and a command that cannot run is worse advice than none.
     """
+    want = sorted({rel for g in paths for rel in _rels(root, g)})
+    runner = CARGOTEST_SH in want and (root / CARGOTEST_SH).is_file()
     out: dict[str, list[str]] = {}
     for crate in crates(root):
         under = f"services/{crate}"
         hit = [
             p
-            for p in sorted({rel for g in paths for rel in _rels(root, g)})
-            if p == under or p.startswith(under + "/")
+            for p in want
+            if p == under or p.startswith(under + "/") or (runner and p == CARGOTEST_SH)
         ]
         if hit:
             out[f"{CARGOTEST} {crate}"] = hit

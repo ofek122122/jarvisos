@@ -683,6 +683,31 @@ def test_the_comparator_and_the_committed_sheet_name_the_sheet():
     assert "ops/ralph/hudshots.sh" in got, got
 
 
+def test_editing_a_qml_gate_runs_it():
+    """B73, and it is B72's one-line argument arriving at the other code path:
+    the change most likely to break a gate is a change to the gate.
+
+    Nothing above could reach this. `qml_reads` walks OUT from the entry
+    directory, following `import` lines and `qmldir` declarations, and a bash
+    script that points an engine at that directory is not a QML file on
+    anybody's import path — so editing `qmltest.sh` named `tools`, which reads
+    it as text for a different reason entirely, and never the runner that had
+    just been rewritten. The pairing is the sharp half: each gate is its own
+    read and not the other one's."""
+    for name in ("qmltest", "hudshots"):
+        script = f"ops/ralph/{name}.sh"
+        got = dependents.qml_readers(ROOT, [script])
+        assert set(got) == {script}, (script, got)
+        assert got[script] == [script], got
+
+
+def test_a_qml_gate_reads_its_own_script_and_says_so_in_the_read_set(tmp_path):
+    """The rule lives where the read-set is built and not in the caller, so
+    anything that asks `qml_reads` a question gets the same answer."""
+    root = mkqml(tmp_path)
+    assert "ops/ralph/gate.sh" in dependents.qml_reads(root, gate_for(root))
+
+
 def test_each_gate_stages_exactly_what_it_says_it_stages():
     """The seam. Everything above is derived from the QML, but WHERE the QML
     is assembled is a fact about a shell script — `hudshots.sh` copies the
@@ -847,6 +872,55 @@ def test_a_declared_path_does_not_claim_the_sibling_beside_it():
     so it is the one most likely to be read as a string."""
     assert not dependents.is_read(("hosts/ares",), "hosts/ares-spare/default.nix")
     assert dependents.is_read(("hosts/ares",), "hosts/ares/default.nix")
+
+
+# -------------------------------------------------------------- the runner
+#
+# The last hole B73 named, and the one that is argued rather than obvious:
+# `runtests.sh` is not a suite, it is how every Python suite is RUN — the
+# interpreter, the venv, the PYTHONPATH that decides which copy of
+# `jarvis_bus` the tests import. A suite cannot name its own runner, so the
+# derived rule can never find it, and the honest plan for a change to it is
+# every suite it can run.
+
+
+def test_editing_the_python_runner_names_every_suite_it_can_run():
+    """The change is rare and it is total: `runtests.sh` once started putting
+    `services/pylib` on PYTHONPATH, and that one line changed which copy of
+    `jarvis_bus` all ten suites import. Before this it named `tools` alone,
+    which reads the script as TEXT to check the service list in its header —
+    a real reader, and not the one at risk."""
+    got = dependents.readers(ROOT, ["ops/ralph/runtests.sh"])
+    assert set(got) == {s.name for s in dependents.suites(ROOT)}, sorted(got)
+    assert all(why == ["ops/ralph/runtests.sh"] for why in got.values()), got
+
+
+def test_the_runner_rule_is_the_runner_and_not_every_script_beside_it():
+    """`ops/ralph/` holds a dozen scripts and only one of them runs the Python
+    suites. A rule that fired on the directory would turn every gate edit into
+    a four-minute run of everything."""
+    got = dependents.readers(ROOT, ["ops/ralph/qmltest.sh"])
+    assert set(got) == {"tools"}, got
+
+
+def test_the_runner_names_the_suites_this_repo_has_and_not_a_list(tmp_path):
+    """Derived from `suites()` like everything else, so a tenth service needs
+    no edit here."""
+    root = mkrepo(tmp_path)
+    (root / "ops" / "ralph").mkdir(parents=True)
+    (root / "ops" / "ralph" / "runtests.sh").write_text("#!/usr/bin/env bash\n", "utf-8")
+    got = dependents.readers(root, ["ops/ralph/runtests.sh"])
+    assert set(got) == {"svc-a", "svc-b", "tools"}, got
+
+
+def test_a_runner_that_is_not_in_this_repo_names_nothing(tmp_path):
+    """The same refusal the QML and declared gates make: a command naming a
+    script that is not there is worse advice than none. A DELETED runner is
+    the case that makes this concrete — the path is still a change, and
+    `bash ops/ralph/runtests.sh tools` is still unrunnable."""
+    root = mkrepo(tmp_path)
+    assert not (root / "ops" / "ralph" / "runtests.sh").exists()
+    assert dependents.readers(root, ["ops/ralph/runtests.sh"]) == {}
 
 
 # ----------------------------------------------------------------- the CLI

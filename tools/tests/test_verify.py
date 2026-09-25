@@ -173,6 +173,52 @@ def test_a_path_outside_the_crate_does_not_wake_cargo(tmp_path):
     assert verify.plan(root, ["services/crate-xyz/f.txt"]) == []
 
 
+def test_editing_the_rust_runner_runs_every_crate(tmp_path):
+    """B73's Rust half. `cargotest.sh` is not a crate and is not read by any
+    suite — it is how a crate's tests are run at all: the nix dev shell, the
+    vendored registry, the cached target dir. Nothing derived can find it, and
+    a change to it is every crate or it is nothing."""
+    root = mkrepo(tmp_path)
+    steps = verify.plan(root, ["ops/ralph/cargotest.sh"])
+    assert [s.command for s in steps] == ["bash ops/ralph/cargotest.sh crate-x"]
+    assert steps[0].why == ("ops/ralph/cargotest.sh",)
+
+
+def test_the_rust_runner_pulls_in_the_crates_and_not_the_paths_beside_it(tmp_path):
+    """The test the mutation harness earned. `or (runner and p == CARGOTEST_SH)`
+    reads as if the guard alone carried it, and a bare `or runner` passes every
+    assertion above — because every one of them changes the runner and NOTHING
+    else, so "every crate reads the runner" and "every crate reads everything"
+    are the same answer. A README edited in the same breath tells them apart:
+    `why` is the audit trail printed beside each step, and a step claiming a
+    path that has nothing to do with it is the thing that makes a plan
+    unreadable."""
+    root = mkrepo(tmp_path)
+    steps = verify.plan(root, ["ops/ralph/cargotest.sh", "README.md"])
+    crate = [s for s in steps if s.command == "bash ops/ralph/cargotest.sh crate-x"]
+    assert crate, [s.command for s in steps]
+    assert crate[0].why == ("ops/ralph/cargotest.sh",), crate[0].why
+
+
+def test_a_rust_runner_that_is_not_in_this_repo_names_nothing(tmp_path):
+    """A deleted runner is still a changed path, and `bash
+    ops/ralph/cargotest.sh jarvisd` is still a command that cannot run."""
+    root = mkrepo(tmp_path)
+    (root / "ops" / "ralph" / "cargotest.sh").unlink()
+    assert verify.plan(root, ["ops/ralph/cargotest.sh"]) == []
+
+
+def test_the_python_runner_does_not_wake_cargo_and_the_rust_one_does_not_wake_pytest(tmp_path):
+    """Two runners, two halves, and neither is a licence for the other. The
+    thing that would make this rule unbearable is one gate script edit costing
+    every suite AND every crate."""
+    root = mkrepo(tmp_path)
+    py = [s.command for s in verify.plan(root, ["ops/ralph/runtests.sh"])]
+    rs = [s.command for s in verify.plan(root, ["ops/ralph/cargotest.sh"])]
+    assert not any("cargotest" in c for c in py), py
+    assert not any("runtests" in c for c in rs), rs
+
+
 def test_every_gate_appears_once_however_many_paths_pulled_it_in(tmp_path):
     """Two changed files in the same service is one run of its suite. The plan
     is a set of commands, and the paths are why, not how many."""
@@ -411,6 +457,55 @@ def test_the_expensive_case_is_the_bus_library_and_it_is_ten_suites():
     steps = verify.plan(ROOT, ["services/pylib/jarvis_bus/client.py"])
     assert len(steps) == 10
     assert all(s.command.startswith("bash ops/ralph/runtests.sh") for s in steps)
+
+
+def test_editing_a_runner_is_the_expensive_case_too():
+    """The real repo, both halves of B73's argued case. Ten suites is the
+    price of `services/pylib/` (241.7 s in the table above) and it is the
+    price of the script that runs them, for the same reason: nobody could
+    have guessed which of the ten a change there moved."""
+    py = [s.command for s in verify.plan(ROOT, ["ops/ralph/runtests.sh"])]
+    assert len([c for c in py if c.startswith("bash ops/ralph/runtests.sh ")]) == 10
+    rs = [s.command for s in verify.plan(ROOT, ["ops/ralph/cargotest.sh"])]
+    assert "bash ops/ralph/cargotest.sh jarvisd" in rs
+    assert "bash ops/ralph/cargotest.sh jv-act" in rs
+
+
+def test_every_gate_this_repo_names_is_planned_by_a_change_to_itself():
+    """B73 whole, as ONE claim over the tables instead of five per-kind ones.
+
+    The sentence is: the thing that runs a gate is read by it. It is now
+    implemented four times in four shapes — `declared_readers` adds
+    `gate.script` to a tuple, `qml_reads` seeds its output set with it, and
+    the two runners each carry their own `is_file()` guard — and the way that
+    goes wrong is the FIFTH gate, which gets the walk or the declaration and
+    silently not the self-read. That is exactly what B72 and B73 each spent an
+    iteration closing for one code path, so the claim is made here over every
+    table this repo has rather than gate by gate.
+
+    Both halves of the plan count: a gate that is NOT run here (`hudscreens.sh`)
+    is planned by being named, which is what `unrun` is for."""
+    gates = {
+        *(g.script for g in dependents.QML_GATES),
+        *(g.script for g in dependents.DECLARED_GATES),
+        dependents.RUNTESTS_SH,
+        verify.CARGOTEST_SH,
+    }
+    assert len(gates) == 6, sorted(gates)
+    for script in sorted(gates):
+        assert (ROOT / script).is_file(), script
+        named = [s.command for s in verify.plan(ROOT, [script])]
+        named += [g.script for g, _ in dependents.unrun(ROOT, [script])]
+        assert any(script in c for c in named), (script, named)
+
+
+def test_editing_a_qml_gate_brings_that_gate_into_the_verdict():
+    """B73's headline through the gate rather than the notice: the two HUD
+    gates are the strongest assertions this repo makes about what the HUD
+    shows, and neither was in the plan for a change to itself."""
+    for name in ("qmltest", "hudshots"):
+        cmds = [s.command for s in verify.plan(ROOT, [f"ops/ralph/{name}.sh"])]
+        assert f"bash ops/ralph/{name}.sh" in cmds, (name, cmds)
 
 
 def test_a_hud_change_brings_the_two_qml_gates_into_the_verdict():

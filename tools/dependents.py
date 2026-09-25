@@ -49,6 +49,18 @@ DECLARED, in `DECLARED_GATES`, and the declaration is checked against the
 `# reads:` header of the script it describes. One of them is not run for you,
 and says so where the plan is printed rather than being left out in silence.
 
+AND THE GATES THEMSELVES (B73). Every rule above walks from a suite OUTWARD
+to the sources it reads, and none of them can walk to the script that does the
+running: a QML gate is found from its entry directory and a bash file is not a
+type on any import path; a Python suite cannot import `runtests.sh`. So the
+one change most likely to break a gate — a change to the gate — was the one
+change it could not see. Both are implicit reads now, the way `DECLARED_GATES`
+already had it: a QML gate reads its own script, and `runtests.sh` is read by
+every suite it can run, because it picks the interpreter, layers the venv and
+sets the PYTHONPATH that decides which `jarvis_bus` all ten of them import.
+`cargotest.sh` is the same rule for Rust and lives in `tools/verify.py`, with
+the rest of the Rust half.
+
 WHAT IT STILL CANNOT SEE. Rust. `services/jarvisd` and `services/jv-act` are
 crates; their tests live inside the source they test and `cargotest.sh` takes
 a crate name, so there is nothing to derive. That is printed as a standing
@@ -67,7 +79,12 @@ import sys
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
-RUNTESTS = "bash ops/ralph/runtests.sh"
+# The script every Python suite is RUN by, and the command that runs one.
+# Split apart because the path is a read-set entry as well as a prefix: a
+# suite cannot name its own runner, so the rule in `readers` puts it there
+# (PLAN B73).
+RUNTESTS_SH = "ops/ralph/runtests.sh"
+RUNTESTS = f"bash {RUNTESTS_SH}"
 
 # Punctuation a path picks up when it is quoted inside prose.
 EDGES = "`'\",;:()[]{}<>*"
@@ -386,14 +403,29 @@ def readers(
     exclude: Iterable[str] = (),
     warn: Callable[[str], None] | None = None,
 ) -> dict[str, list[str]]:
-    """Suite name -> the changed paths it reads. Empty when nobody reads them."""
+    """Suite name -> the changed paths it reads. Empty when nobody reads them.
+
+    Every suite also reads `runtests.sh`, which is not a path any of them
+    NAMES — a suite cannot import the script that runs it — and is the one
+    thing all ten have in common (PLAN B73). It picks the interpreter, layers
+    the venv, and sets the PYTHONPATH that decides which copy of `jarvis_bus`
+    gets imported; that last line, when it was added, changed the answer every
+    suite in this repo gives. Before this, a change to it named `tools` alone,
+    because `tools` reads the script as TEXT to check the service list in its
+    header — a real reader, and not the one at risk.
+
+    Guarded on the file being there, the same refusal the QML and declared
+    gates make: a command naming a script this repo does not have is worse
+    advice than none, and a DELETED runner is a changed path like any other.
+    """
     skip = set(exclude)
     want = sorted({rel for given in paths for rel in _expand(root, given)})
+    runner = (RUNTESTS_SH,) if (root / RUNTESTS_SH).is_file() else ()
     out: dict[str, list[str]] = {}
     for suite in suites(root, warn):
         if suite.name in skip:
             continue
-        hit = [p for p in want if is_read(suite.reads, p)]
+        hit = [p for p in want if is_read((*suite.reads, *runner), p)]
         if hit:
             out[suite.name] = hit
     return dict(sorted(out.items()))
@@ -609,7 +641,13 @@ def qml_reads(
         cache[vdir] = _dir_types(root, dirs)
         return cache[vdir]
 
-    out: set[str] = {rel for rel in gate.also if (root / rel).exists()}
+    # The gate script itself, implicitly and for the same reason the declared
+    # gates count theirs (B72, B73): the change most likely to break a gate is
+    # a change to the gate, and nothing below can reach it — this walk starts
+    # at `entry` and follows QML imports, and a bash script that points an
+    # engine at a directory is not a type on anybody's import path.
+    out: set[str] = {gate.script}
+    out |= {rel for rel in gate.also if (root / rel).exists()}
     seen: set[str] = set()
     # The runner is handed ONE directory, and only its files are entries. The
     # sheet's stage holds `Sessions.qml` from `shell/jv-hud/tests` too, but as

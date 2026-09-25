@@ -1791,18 +1791,37 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       (`InFlight.swap_in`) now, asserted at the moment of the write, and
       caught on the re-grade.)
 
-- [ ] B73. The QML gates have the hole B72 just closed for the declared
-      ones: editing `ops/ralph/qmltest.sh` or `ops/ralph/hudshots.sh` names
-      `tools` — which reads them as text — and never the gate that was
-      edited, because `qml_readers` walks from the entry directory outward
-      and the script itself is not in that walk. Same one-line argument as
-      the declared case ("the change most likely to break a gate is a change
-      to the gate"), a different code path, and it was left alone here
-      rather than folded into an iteration whose subject was the table.
-      `cargotest.sh` and `runtests.sh` have it too, and for them it is
-      argued rather than obvious: those scripts take a target, so editing
-      one affects every suite and the honest plan is arguably all of them.
-      Discovered in B72.
+- [x] B73. The four gates that could not see a change to themselves.
+      — COMMITHASH
+      (One sentence, finished on every code path that had it: **the thing
+      that runs a gate is read by it.** `qml_reads` seeds its read-set with
+      `gate.script`, so editing `qmltest.sh` or `hudshots.sh` runs THAT gate
+      — and not the other one, which is the sharp half of the test, since a
+      rule spelled `{g.script for g in QML_GATES}` would pass every loose
+      version of it. `runtests.sh` is read by every suite it can RUN: no
+      suite names it (a suite cannot import its own runner) and it picks the
+      interpreter, layers the venv, and sets the PYTHONPATH that decides
+      which copy of `jarvis_bus` all ten of them import — the line that did
+      exactly that is sitting in its header. `cargotest.sh` is the same rule
+      for Rust and lives in `verify.py` with the rest of the Rust half:
+      both crates, always. Each guarded on the script being THERE, the
+      refusal the QML and declared gates already make — a deleted runner is
+      a changed path like any other and `bash ops/ralph/runtests.sh tools`
+      is still a command that cannot run. Before this, all four named
+      `tools` alone, which reads them as TEXT for the service-list check —
+      a real reader, and not the one at risk.
+      The price is the 241.7 s case and it is bought rarely: 6 commits in
+      262 have touched `runtests.sh`, 1 `cargotest.sh`, 1 `qmltest.sh`,
+      3 `hudshots.sh`. The claim is now made ONCE over the tables rather
+      than five times per kind — `test_every_gate_this_repo_names_is_
+      planned_by_a_change_to_itself` walks `QML_GATES`, `DECLARED_GATES`
+      and the two runners, so the fifth gate is covered the day it is
+      added and not the day somebody notices. Tests: `runtests.sh tools`
+      420 (was 411); ten mutations, ten caught — one only after it earned
+      a test, because every assertion in the file changed the runner and
+      NOTHING else, so "every crate reads the runner" and "every crate
+      reads everything" were the same answer until a README was edited
+      beside it. Raised: **B76**.)
 
 - [x] B74. `docs/hud/screens/` is compared against the HUD this repo draws,
       and stops being a sheet that can only be overwritten. — e305ac9
@@ -1845,6 +1864,22 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the seven `grim` captures and the comparison. (c) is the one that needs
       a measurement before anyone can choose, and the loop can take it.
       Discovered in B74.
+
+- [ ] B76. B73's runner rule has no granularity, and it is the first place
+      in this table where a COMMENT-only edit buys four minutes. Touching
+      the `# Services:` header of `runtests.sh` — which is prose for a
+      human, pinned by a `tools` test — now plans all ten Python suites,
+      241.7 s, to learn nothing. B72 made the opposite call one table over
+      and said why: `nixtest.sh` is deliberately NOT bound to `services/`
+      because "paying 22 s on every Python edit would be the noise that
+      gets a gate switched off". The trade is defensible here and the
+      numbers are why — the runner has changed 6 times in 262 commits and
+      `services/` changes most iterations — so this is a note and not a
+      bug. The option, if it ever stops being defensible: read the script's
+      CODE and not its comments, which is a rule `names()` already applies
+      to Python and `_qml_scrub` to QML, and which nothing applies to a
+      bash file. Do not build it on a hunch; build it the first time a
+      four-minute run is bought by a paragraph. Discovered in B73.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
