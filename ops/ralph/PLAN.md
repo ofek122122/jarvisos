@@ -1715,20 +1715,36 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the shape (b) was invented for. The expensive case is still
       `services/pylib/jarvis_bus/`.
 
-- [ ] B71. **`mutate.sh` leaves the mutation applied when it is killed.**
-      A SIGTERM mid-run (a timeout, a Ctrl-C, a loop that decided the run was
-      too slow) restores nothing, so the worktree keeps whichever mutation was
-      in flight — and the NEXT run reports "the baseline suite is RED before
-      any mutation", which is true and points at nothing. It cost fifteen
-      minutes in iteration 91 and it would cost far more than that if the
-      iteration had committed instead of re-running. The restore is already
-      written for the ordinary path; what is missing is a trap. Two shapes,
-      and the loop should not pick alone because one of them changes what the
-      harness may do to a dirty tree: (a) a `trap` on INT/TERM/EXIT that puts
-      every touched file back, which is small and right for the common case
-      but cannot help a SIGKILL; (b) refuse to mutate in place at all and
-      stage a copy of the worktree per run, which is proof against every
-      signal and costs a copy of the repo per mutation. Raised by B69.
+- [x] B71. `mutate.sh` no longer leaves the mutation applied when it is
+      killed. — c007204
+      (Shape (a) plus the half of (b) that was actually load-bearing, which
+      is why the decision the PLAN reserved for a human did not need making.
+      `restore_on_signal` traps INT/TERM/HUP and turns them into an unwind,
+      so the restore that was already written runs on the ordinary way this
+      harness dies — one-shot, so a second Ctrl-C from an impatient hand
+      cannot interrupt the restore the first one asked for. SIGKILL cannot
+      be trapped, so `InFlight` writes a note before every mutant write, in
+      this WORKTREE's git directory — `--absolute-git-dir`, so two worktrees
+      never read each other's, and nothing a `git add -A` can commit.
+      `recover_inflight` reads it at the very top of `run()`, BEFORE a single
+      original is read: a stale mutant captured as the "original" is the one
+      way this harness could have made the damage permanent, and it is its
+      own mutation. Three outcomes, only one of which writes — the file is
+      still exactly the mutant (put it back, say RECOVERED), the file is
+      already the original (sweep the note), or it is neither, meaning
+      somebody has edited it since, and the harness refuses and says where
+      the original text is kept rather than overwriting work with a text
+      from a dead process. NOT taken: (b) proper, a copy of the worktree per
+      run. What it would still buy over the note is one `write_text` wide —
+      a kill part-way through the mutant write — and that case is reported,
+      not guessed. Tests: `runtests.sh tools` 347 (was 331), including a real
+      subprocess killed mid-mutation by a real SIGTERM, its untrapped control
+      that reproduces B71 verbatim, and the same driver under SIGKILL feeding
+      the recovery. 9 mutations, 8 caught on the first pass — the survivor
+      was the arm-before-write ORDER, which no test could see because both
+      orderings look identical once the run is over; it is a method
+      (`InFlight.swap_in`) now, asserted at the moment of the write, and
+      caught on the re-grade.)
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above

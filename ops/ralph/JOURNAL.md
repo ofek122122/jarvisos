@@ -9329,3 +9329,94 @@ direction the drift gets fixed from.
   **B43/B47/B54** (the same question asked three times), and **B10/A28** — one
   live recording of one spoken turn on ares, still the biggest thing a human
   can hand this loop.
+
+## 2026-09-25 — iteration 94 — B71: the mutation the harness left behind when it was killed
+
+The loop's evidence about its own tests is `ops/ralph/mutate.sh`, and it had a
+failure mode that damages the tree it is supposed to be protecting. The restore
+is a `finally`. A `finally` is code, and SIGTERM's default action is to end the
+process without running any — so a timeout, a Ctrl-C, or a loop that decided a
+53 s suite run was too slow left the worktree holding whichever mutation was in
+flight. The next run then reported "the baseline suite is RED before any
+mutation", which is a true sentence that points at nothing. It cost iteration 91
+fifteen minutes and would have cost far more had that iteration committed
+instead of re-running.
+
+B71 offered two shapes and reserved the choice for a human: (a) a trap, small
+and right for the common case but no help against SIGKILL; (b) refuse to mutate
+in place at all and stage a copy of the worktree per run, proof against every
+signal at the price of a repo copy per mutation. Both are shipped in the sense
+that matters, and the decision turned out not to need making: (a) verbatim, plus
+the guarantee (b) existed to buy, bought for a few hundred bytes instead.
+
+- `restore_on_signal` traps INT/TERM/HUP and raises, so the unwind runs the
+  restore that was already written. It is ONE-SHOT — the first signal disarms
+  the rest — because the second Ctrl-C from an impatient hand would otherwise
+  interrupt the restore the first one asked for.
+- `InFlight.swap_in` writes a note before every mutant write, naming the file,
+  the text that was overwritten, and the sha of what overwrote it. The note
+  lives in this WORKTREE's git directory (`--absolute-git-dir`): not in the
+  tree, where a `git add -A` could commit it and `git status` would call a
+  clean tree dirty; not in /tmp, because it has to be found by a run that
+  happens after a reboot; and per-worktree, because two worktrees grade
+  different trees and a note from one would name a file the other never
+  touched.
+- `recover_inflight` reads it at the very top of `run()`, BEFORE a single
+  original is read. That order is the whole thing: reading originals first
+  would capture a stale mutant as the text to restore TO, which is the one way
+  this harness could have made the damage permanent. It is its own mutation.
+
+Three outcomes and only one of them writes. The file is still exactly the
+mutant the note records, so nobody has been here since and putting the original
+back is provably safe: it is put back, stamped strictly newer than the mutant it
+replaces (the dead run may have stamped that into the future — iteration 70's
+bug wearing a new hat), and the run says RECOVERED and explains what it would
+otherwise have reported. The file is already the original, so only the note
+outlived the restore: sweep it. Anything else — an edit, a different mutation, a
+half-written file — and the harness refuses and says where the original text is
+kept, because overwriting somebody's work with a text from a dead process is
+worse than any red baseline.
+
+Not taken: (b) proper. What a copy-per-run would still buy over the note is one
+`write_text` wide — a kill landing part-way through the mutant write — and that
+case is the third outcome above: reported, not guessed. The docstring says so
+rather than leaving the reader to assume the note covers everything.
+
+- tests: `bash ops/ralph/runtests.sh tools` **347 (was 331)**, all green. The
+  three that carry the claim run a REAL grading in a REAL subprocess, blocked
+  with the mutation on disk, and then kill it: SIGTERM with the trap (the file
+  comes back, the note is gone), the same SIGTERM with the trap removed — the
+  control, and it is B71 verbatim, the mutant still in the worktree — and
+  SIGKILL, whose leftovers are then handed to `run()`, which recovers them. The
+  dependents notice named `bash ops/ralph/runtests.sh pylib`; it was run, 68
+  green.
+- graded with **9 mutations, 8 caught on the first pass**. The survivor is the
+  interesting one: "arm the note AFTER the mutant is written". No test could see
+  it, because once the run is over both orderings leave the same files — and the
+  window it opens is exactly the window the note exists for. The fix was to make
+  the order a thing rather than two statements: `InFlight.swap_in(mutant, write)`
+  arms and then writes, and a test asserts the note is on disk at the moment the
+  write happens, which is the only moment it can be asked. Re-graded 1/1.
+  A second bug the tests found before the grading did: the recovery read the
+  mutant's mtime AFTER `write_text` had already reset it, so the "strictly
+  newer" stamp was computed against the wrong number.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: ops/ralph/mutate.sh, tools/mutate.py, tools/tests/test_mutate.py
+- commit: c007204
+- harness note for the next iteration: grading `tools` is no longer 5 s. The
+  three subprocess tests wait up to 30 s each for a driver that a mutant may
+  stop from ever reaching its mutation, so a mutant that breaks the harness
+  makes its own suite run ~90 s slower. The 9-mutation grading above took about
+  eight minutes wall clock against the ~2.5 the count would have predicted.
+  B70 prices the dependents notice on the assumption `tools` is cheap; that
+  assumption is now worth re-measuring before (b) is chosen.
+- next: Track A is still one human look at `docs/hud/` away from A47, A55, A62,
+  A70/A72 and the A21/A22/A25 cluster, and A73's remaining half is the same
+  seat: re-shoot `docs/hud/screens/` on ares. Doable by the loop: **B70** (now
+  with a corrected price for `tools`, above), **A56** (whether the shot suites
+  belong in the build gate), **B62** (B61's two decisions), **B67** (B66's
+  sibling-of-the-home half). Waiting on one human sentence each: **B27/B28**
+  (a jv-ears state topic), **B43/B47/B54** (the same question asked three
+  times), and **B10/A28** — one live recording of one spoken turn on ares,
+  still the biggest thing a human can hand this loop.
