@@ -458,6 +458,279 @@ def test_a_change_to_a_frozen_schema_names_its_readers():
     )
 
 
+# ------------------------------------------------------------ the QML gates
+#
+# PLAN B69. `ops/ralph/qmltest.sh` and `ops/ralph/hudshots.sh` are the
+# strongest assertions this repo makes about `shell/jv-hud`, and the rule
+# above cannot find either: a QML file names its subject by TYPE
+# (`ReplyState {}`), never by path, so there is no string for the reader to
+# match. Until now both were printed as a standing caveat, which is honest
+# and is not an answer.
+#
+# A QML type is a FILE on the import path, so the map is mechanical — and it
+# is derived from the same two places the engine derives it from: the
+# `import "..."` lines, and the `qmldir` the directory ships.
+
+
+def qmlgate(name: str) -> "dependents.QmlGate":
+    found = {g.script: g for g in dependents.QML_GATES}
+    script = f"ops/ralph/{name}.sh"
+    assert script in found, sorted(found)
+    return found[script]
+
+
+def mkqml(tmp_path: Path) -> Path:
+    """A repo shaped like the HUD: a shell directory with a `core/` under it
+    and a `tests/` beside it, and a staging directory that substitutes one
+    file of the shell the way `hudshots.sh` substitutes `Bus.qml`."""
+    root = tmp_path / "qmlrepo"
+    for rel in (
+        "services/keep/tests/test_keep.py",
+        "shell/ui/Plate.qml",
+        "shell/ui/core/Widget.qml",
+        "shell/ui/core/Inner.qml",
+        "shell/ui/tests/tst_widget.qml",
+        "ops/ralph/gate.sh",
+    ):
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("", "utf-8")
+    write(root, "shell/ui/tests/tst_widget.qml", 'import QtTest\nimport "../core"\nWidget {}\n')
+    write(root, "shell/ui/core/Widget.qml", "import QtQuick\nInner {}\n")
+    write(root, "shell/ui/core/Inner.qml", "import QtQuick\nItem {}\n")
+    return root
+
+
+def gate_for(root: Path, **kw) -> "dependents.QmlGate":
+    kw.setdefault("script", "ops/ralph/gate.sh")
+    kw.setdefault("entry", "shell/ui/tests")
+    return dependents.QmlGate(**kw)
+
+
+def test_a_qml_type_is_found_through_the_import_that_brings_it_in(tmp_path):
+    """The reading that did not exist: `tst_widget.qml` says `Widget {}` and
+    `import "../core"`, and those two lines together are the whole path to
+    `shell/ui/core/Widget.qml`. Nothing in the file is that string."""
+    root = mkqml(tmp_path)
+    reads = dependents.qml_reads(root, gate_for(root))
+    assert "shell/ui/core/Widget.qml" in reads
+
+
+def test_a_qml_type_carries_the_types_it_names(tmp_path):
+    """Transitively, like the import closure on the Python side: the plate
+    author changing `Inner.qml` is three files away from the test that would
+    go red, and three files is exactly as far as "I did not think of it"."""
+    root = mkqml(tmp_path)
+    assert "shell/ui/core/Inner.qml" in dependents.qml_reads(root, gate_for(root))
+
+
+def test_a_type_that_is_only_a_word_in_prose_or_a_string_is_not_named(tmp_path):
+    """The narrow half, and the one that decides whether this is trustworthy.
+    `Sessions.qml` carries whole recorded bus frames as string literals and
+    every driver's header is a paragraph about the plates — if either counted,
+    a gate would be named by a sentence about it."""
+    root = mkqml(tmp_path)
+    write(
+        root,
+        "shell/ui/tests/tst_widget.qml",
+        'import QtTest\nimport "../core"\n'
+        "// Inner is the thing Widget draws; see Inner.qml.\n"
+        'TestCase { property string s: "Inner and Widget" }\n',
+    )
+    reads = dependents.qml_reads(root, gate_for(root))
+    assert "shell/ui/core/Widget.qml" not in reads
+    assert "shell/ui/core/Inner.qml" not in reads
+
+
+def test_a_type_is_only_looked_for_where_the_file_imports(tmp_path):
+    """QML resolves a type on the import path and nowhere else. A driver that
+    names `Plate` without importing the directory it lives in does not read
+    it — and if it really did, the engine would not have loaded it either."""
+    root = mkqml(tmp_path)
+    write(root, "shell/ui/tests/tst_widget.qml", 'import QtTest\nPlate {}\n')
+    assert "shell/ui/Plate.qml" not in dependents.qml_reads(root, gate_for(root))
+
+
+def test_a_qmldir_decides_which_file_a_type_is(tmp_path):
+    """`shell/jv-hud/qmldir` is generated and authoritative — Quickshell
+    synthesizes one per directory and shipping ours turns that off. So when a
+    directory ships one, it is the map, and a `.qml` file it does not declare
+    is not a type there at all."""
+    root = mkqml(tmp_path)
+    write(root, "shell/ui/core/qmldir", "singleton Widget 1.0 Inner.qml\n")
+    reads = dependents.qml_reads(root, gate_for(root))
+    assert "shell/ui/core/Inner.qml" in reads
+    assert "shell/ui/core/Widget.qml" not in reads
+    assert "shell/ui/core/qmldir" in reads, "the map itself is read"
+
+
+def test_a_staged_directory_shadows_the_one_it_replaces(tmp_path):
+    """`hudshots.sh` copies the whole shell and then writes two stubs over it,
+    because the real `Bus` imports Quickshell and no other engine can load it.
+    The sheet therefore reads the stub and NOT the file it hides — saying
+    otherwise would send an author to run a gate that never opened their
+    file."""
+    root = mkqml(tmp_path)
+    (root / "stage").mkdir()
+    write(root, "stage/Plate.qml", "import QtQuick\nItem {}\n")
+    write(root, "shell/ui/tests/tst_widget.qml", 'import QtTest\nimport ".."\nPlate {}\n')
+    reads = dependents.qml_reads(
+        root, gate_for(root, mounts=(("..", ("shell/ui", "stage")),))
+    )
+    assert "stage/Plate.qml" in reads
+    assert "shell/ui/Plate.qml" not in reads
+
+
+def test_an_import_the_gate_does_not_stage_is_reported_not_skipped(tmp_path):
+    """The same rule as an unparsable Python file: what it reads is unknown,
+    not none. A driver that starts importing a directory the staging never
+    assembles is how this map would silently stop covering a gate."""
+    root = mkqml(tmp_path)
+    write(root, "shell/ui/tests/tst_widget.qml", 'import QtTest\nimport "../../../outside"\nX {}\n')
+    said: list[str] = []
+    dependents.qml_reads(root, gate_for(root), warn=said.append)
+    assert said and "outside" in said[0], said
+
+
+def test_a_lowercase_qml_file_is_not_a_type(tmp_path):
+    """`shell.qml` is the Quickshell half; it is not instantiable by name and
+    `hudshots.sh` deletes it from the stage outright. Claiming it would make
+    every surface change name two gates that never open it — which is the
+    guess this replaces, pointed the other way."""
+    root = mkqml(tmp_path)
+    write(root, "shell/ui/shell.qml", "import QtQuick\nItem {}\n")
+    write(root, "shell/ui/tests/tst_widget.qml", 'import QtTest\nimport ".."\nshell {}\n')
+    assert "shell/ui/shell.qml" not in dependents.qml_reads(root, gate_for(root))
+
+
+def test_a_gate_whose_script_is_not_in_this_repo_is_not_offered(tmp_path):
+    """A gate is a script, and the directories it stages are only half of it.
+
+    The trees this reads are named by absolute-looking convention
+    (`shell/jv-hud/tests`), so a repo that happens to have the same shape
+    without the script would be told to run a command that is not there —
+    which is worse than silence, because the author would go looking for the
+    file rather than for the change they made."""
+    root = mkrepo(tmp_path)
+    for rel, src in (
+        ("shell/jv-hud/tests/tst_thing.qml", 'import QtTest\nimport "../core"\nThing {}\n'),
+        ("shell/jv-hud/core/Thing.qml", "import QtQuick\nItem {}\n"),
+    ):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(src, "utf-8")
+    assert not (root / "ops/ralph/qmltest.sh").exists()
+    assert dependents.qml_readers(root, ["shell/jv-hud/core/Thing.qml"]) == {}
+
+
+# ----------------------------------------- the two gates, over the real HUD
+
+
+def test_a_core_element_names_both_qml_gates():
+    """B69's subject, stated: a `core/` file is read by the headless unit
+    tests (`tst_replystate.qml` says `ReplyState {}`) AND by the contact sheet
+    (`tst_shots.qml` -> `Corner` -> `ReplyPlate` -> `ReplyState`). Every Track
+    A iteration changes one of these files, and neither gate could be found
+    from it."""
+    got = dependents.qml_readers(ROOT, ["shell/jv-hud/core/ReplyState.qml"])
+    assert set(got) == {"ops/ralph/qmltest.sh", "ops/ralph/hudshots.sh"}, got
+
+
+def test_a_plate_names_the_sheet_and_not_the_headless_tests():
+    """The other direction and the sharper claim. No file under
+    `shell/jv-hud/tests` imports `".."`, so the plates are not in
+    `qmltest.sh`'s reach at all — they are drawn only by the sheet. A tool
+    that named both here would be back to guessing generously."""
+    got = dependents.qml_readers(ROOT, ["shell/jv-hud/ReplyPlate.qml"])
+    assert set(got) == {"ops/ralph/hudshots.sh"}, got
+
+
+def test_a_headless_test_names_only_its_own_gate():
+    """And a `tst_*.qml` is nobody's type: the sheet's stage copies
+    `Sessions.qml` out of that directory and nothing else."""
+    got = dependents.qml_readers(ROOT, ["shell/jv-hud/tests/tst_replystate.qml"])
+    assert set(got) == {"ops/ralph/qmltest.sh"}, got
+
+
+def test_the_recordings_shared_between_the_two_gates_name_both():
+    """`Sessions.qml` is generated from `harness/fixtures/sessions` and is the
+    one file both stages hold — `tst_sessionreplay.qml` replays it headlessly
+    and `tst_sequence.qml` replays it through the real plates."""
+    got = dependents.qml_readers(ROOT, ["shell/jv-hud/tests/Sessions.qml"])
+    assert set(got) == {"ops/ralph/qmltest.sh", "ops/ralph/hudshots.sh"}, got
+
+
+def test_the_stub_that_stands_in_for_quickshell_names_the_sheet():
+    """`tools/hudshots/stub/` is outside `shell/jv-hud` and outside every
+    Python suite's reach; `hudshots.sh` is the only thing in the repo that
+    opens it."""
+    got = dependents.qml_readers(ROOT, ["tools/hudshots/stub/Bus.qml"])
+    assert "ops/ralph/hudshots.sh" in got, got
+
+
+def test_the_real_bus_singleton_is_not_in_the_sheets_stage():
+    """…and the file it shadows is not. `shell/jv-hud/Bus.qml` runs the
+    bridge child through Quickshell.Io; the sheet overwrites it before
+    anything is linted or drawn, so the sheet has nothing to say about it."""
+    got = dependents.qml_readers(ROOT, ["shell/jv-hud/Bus.qml"])
+    assert "ops/ralph/hudshots.sh" not in got, got
+
+
+def test_the_comparator_and_the_committed_sheet_name_the_sheet():
+    """`hudshots.sh` does not only render: it reads the sheet back against the
+    PNGs committed at HEAD (B52). Both halves of that comparison are things a
+    change can break without touching a line of QML."""
+    got = dependents.qml_readers(ROOT, ["tools/hudsheet.py", "docs/hud/README.md"])
+    assert "ops/ralph/hudshots.sh" in got, got
+
+
+def test_each_gate_stages_exactly_what_it_says_it_stages():
+    """The seam. Everything above is derived from the QML, but WHERE the QML
+    is assembled is a fact about a shell script — `hudshots.sh` copies the
+    shell into a temporary directory and writes two stubs over it, and no
+    reader of the QML could know that.
+
+    So it is written once, here, and checked against the script itself: every
+    directory a gate claims to stage must exist AND be named in the script
+    that stages it. A staging that moves and a table that does not is the one
+    way this map can lie, and it is the way that would not show up as a
+    failure anywhere else."""
+    for gate in dependents.QML_GATES:
+        script = (ROOT / gate.script).read_text("utf-8")
+        for rel in (gate.entry, *(d for _, ds in gate.mounts for d in ds), *gate.also):
+            assert (ROOT / rel).exists(), f"{gate.script} stages missing {rel}"
+            assert rel in script, f"{gate.script} does not name {rel}"
+
+
+def test_the_qml_gates_reach_every_file_of_the_hud_that_runs():
+    """A whole-HUD sweep, because the failure this prevents is a file nobody
+    looked at. Every `.qml` under `shell/jv-hud` and `tools/hudshots` is read
+    by at least one gate, apart from the three the repo deliberately keeps
+    out: `shell.qml` (Quickshell, gated by `nix build .#jv-hud`) and the two
+    singletons the sheet replaces with stubs."""
+    ours = {
+        p.relative_to(ROOT).as_posix()
+        for d in ("shell/jv-hud", "tools/hudshots")
+        for p in (ROOT / d).rglob("*.qml")
+    }
+    seen: set[str] = set()
+    for gate in dependents.QML_GATES:
+        seen |= dependents.qml_reads(ROOT, gate)
+    assert ours - seen == {
+        "shell/jv-hud/shell.qml",
+        "shell/jv-hud/Bus.qml",
+        "shell/jv-hud/Motion.qml",
+    }, sorted(ours - seen)
+
+
+def test_the_cli_names_the_qml_gates_it_used_to_apologise_for():
+    """What replaced the caveat. The command is what a tired loop will run, so
+    it prints the script, not the name of a thing it cannot see."""
+    done = run_cli("--root", str(ROOT), "shell/jv-hud/core/ReplyState.qml")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "bash ops/ralph/qmltest.sh" in done.stdout
+    assert "bash ops/ralph/hudshots.sh" in done.stdout
+
+
 # ----------------------------------------------------------------- the CLI
 
 
@@ -483,12 +756,14 @@ def test_the_cli_prints_the_command_to_run_and_why():
 
 
 def test_the_cli_says_what_it_cannot_see():
-    """The QML gates (`qmltest.sh`, `hudshots.sh`) name their subjects by QML
-    type, not by path, so nothing here can find them — and a tool that lists
-    "the suites that read this" while silently omitting two of the repo's
-    gates is worse than no tool. It says so whenever it has anything to say."""
+    """This used to be about QML, which B69 taught it to read. What is left is
+    Rust: `services/jarvisd` and `services/jv-act` keep their tests inside the
+    source they test, so there is no third file to derive a relation from and
+    nothing here will ever name `cargotest.sh`. A tool that lists "the suites
+    that read this" while silently omitting a gate is worse than no tool, so
+    it says so whenever it has anything to say."""
     done = run_cli("--root", str(ROOT), "shell/jv-hud/shell.qml")
-    assert "qmltest.sh" in done.stdout and "hudshots.sh" in done.stdout
+    assert "cargotest.sh" in done.stdout
 
 
 def test_the_cli_says_so_when_nothing_reads_what_changed(tmp_path):
@@ -501,7 +776,7 @@ def test_the_cli_says_so_when_nothing_reads_what_changed(tmp_path):
     root = mkrepo(tmp_path)
     done = run_cli("--root", str(root), "README.md")
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "no Python suite" in done.stdout
+    assert "no suite or gate" in done.stdout
 
 
 def test_the_cli_reads_the_working_tree_when_asked(tmp_path):
@@ -548,7 +823,7 @@ def test_the_cli_excludes_the_suite_that_has_just_run(tmp_path):
         "--root", str(root), "--exclude", "svc-a", "services/svc-a/pkg_a/thing.py"
     )
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "no Python suite" in done.stdout
+    assert "no suite or gate" in done.stdout
 
 
 def test_the_cli_says_nothing_at_all_when_nothing_changed(tmp_path):

@@ -33,11 +33,19 @@ and `"/etc"` are refused, because a candidate that resolves to the repo root
 or outside it would claim everything and end with "run every suite", which is
 the same as saying nothing.
 
-WHAT IT CANNOT SEE. QML. `ops/ralph/qmltest.sh` and `ops/ralph/hudshots.sh`
-are the strongest gates over `shell/jv-hud`, and a QML test names its subject
-by TYPE (`ReplyState {}`), not by path. There is no path to find, so this
-prints the two scripts as a standing caveat rather than pretending the list is
-complete.
+AND THE SAME QUESTION IN QML (B69). `ops/ralph/qmltest.sh` and
+`ops/ralph/hudshots.sh` are the strongest gates over `shell/jv-hud`, and the
+rule above cannot find either: a QML file names its subject by TYPE
+(`ReplyState {}`), never by path. But a QML type IS a file, and the engine
+finds it two ways — the directories `import "..."` puts on the path, and the
+`qmldir` those directories ship. So the gates are walked the way the engine
+walks them, from the drivers outward, and a `core/` element three types below
+the contact sheet is reached.
+
+WHAT IT STILL CANNOT SEE. Rust. `services/jarvisd` and `services/jv-act` are
+crates; their tests live inside the source they test and `cargotest.sh` takes
+a crate name, so there is nothing to derive. That is printed as a standing
+caveat, which is what this used to say about QML.
 """
 
 from __future__ import annotations
@@ -45,15 +53,14 @@ from __future__ import annotations
 import argparse
 import ast
 import dataclasses
+import posixpath
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 RUNTESTS = "bash ops/ralph/runtests.sh"
-
-# The gates this tool is blind to, named every time it has anything to say.
-QML_GATES = ("ops/ralph/qmltest.sh", "ops/ralph/hudshots.sh")
 
 # Punctuation a path picks up when it is quoted inside prose.
 EDGES = "`'\",;:()[]{}<>*"
@@ -385,6 +392,297 @@ def readers(
     return dict(sorted(out.items()))
 
 
+# --------------------------------------------------------------- QML gates
+#
+# The rule above reads Python, and Python is not where this repo's strongest
+# assertions about the HUD live. `ops/ralph/qmltest.sh` runs the headless
+# element tests; `ops/ralph/hudshots.sh` draws the contact sheet, replays the
+# recorded sessions through the real plates and reads the sheet back against
+# the PNGs committed at HEAD. Neither can be found by matching strings,
+# because a QML file names its subject by TYPE — `ReplyState {}` — and never
+# by path (PLAN B69).
+#
+# A QML type IS a file, though, and the engine finds it the same two ways
+# every time: the directory `import "..."` lines put on the path, and the
+# `qmldir` that directory ships. So this reads what the engine reads.
+
+
+@dataclasses.dataclass(frozen=True)
+class QmlGate:
+    """One gate script, and the QML tree it points an engine at.
+
+    `entry` is the directory whose `.qml` files the runner is given. Every
+    other directory follows from the `import` lines inside them — resolved
+    against the real repo, because for `qmltest.sh` the tree IS the repo.
+
+    `mounts` is the exception, and the only thing here that is written down
+    rather than derived: `hudshots.sh` assembles a temporary stage (the whole
+    shell, with two Quickshell-bound singletons overwritten by stubs), so a
+    driver's `import ".."` means something no reader of the QML could work
+    out. Each mount maps a virtual directory — relative to `entry`, as the
+    driver writes it — onto the repo directories that land there, later
+    shadowing earlier. `test_dependents.py` checks every one of them against
+    the script that does the staging, so a stage that moves cannot leave this
+    table behind.
+
+    `also` is what the gate reads that is not QML at all: the comparator it
+    runs, and the committed sheet it compares against.
+    """
+
+    script: str
+    entry: str
+    mounts: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    also: tuple[str, ...] = ()
+
+
+QML_GATES = (
+    QmlGate(
+        script="ops/ralph/qmltest.sh",
+        entry="shell/jv-hud/tests",
+    ),
+    QmlGate(
+        script="ops/ralph/hudshots.sh",
+        entry="tools/hudshots/scene",
+        mounts=(
+            # The drivers sit in `$stage/shots` beside a copy of Sessions.qml…
+            (".", ("tools/hudshots/scene", "shell/jv-hud/tests")),
+            # …and `$stage` itself is the shell, with the two singletons that
+            # import Quickshell replaced. `shell.qml` is deleted from the
+            # stage and is not a type, so nothing reaches it from here.
+            ("..", ("shell/jv-hud", "tools/hudshots/stub")),
+        ),
+        also=("tools/hudsheet.py", "docs/hud"),
+    ),
+)
+
+# `module`, `depends`, `plugin`… — qmldir lines that declare no type.
+QMLDIR_KEYWORDS = {"singleton", "internal", "optional", "default", "required"}
+
+
+def _qml_scrub(text: str) -> tuple[str, str]:
+    """`text` with comments gone, and again with string bodies blanked.
+
+    The first is where `import "../core"` is read from; the second is where
+    type names are. Both matter: `Sessions.qml` carries whole recorded bus
+    frames as string literals and every driver opens with a paragraph about
+    the plates it draws, so a scan of the raw file would find a gate named by
+    a sentence about it.
+    """
+    code: list[str] = []
+    bare: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "/" and text[i + 1 : i + 2] == "/":
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if c == "/" and text[i + 1 : i + 2] == "*":
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            code.append(" ")
+            bare.append(" ")
+            continue
+        if c in "\"'`":
+            j = i + 1
+            while j < n and text[j] != c:
+                j += 2 if text[j] == "\\" else 1
+            code.append(text[i : min(j + 1, n)])
+            bare.append(c + c)
+            i = j + 1
+            continue
+        code.append(c)
+        bare.append(c)
+        i += 1
+    return "".join(code), "".join(bare)
+
+
+def _qml_imports(code: str) -> list[str]:
+    """The directory imports of one QML file, as written."""
+    return re.findall(r"^[ \t]*import[ \t]+\"([^\"\n]+)\"", code, re.MULTILINE)
+
+
+def _qml_names(bare: str) -> set[str]:
+    """Every identifier the file uses, with strings and comments already out.
+
+    Not filtered to look like a type: the directory's own map is the filter,
+    and it is a better one than any spelling rule.
+    """
+    return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", bare))
+
+
+def _qmldir_types(text: str) -> dict[str, str]:
+    """type -> file name, out of a `qmldir`.
+
+    A directory that ships one has turned off the implicit scan — Quickshell
+    synthesizes a qmldir per directory and `shell/jv-hud/qmldir` exists
+    precisely to replace that — so what it declares is exactly what resolves
+    there.
+    """
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = [p for p in line.split() if p]
+        if not parts or parts[0].startswith("#"):
+            continue
+        while parts and parts[0] in QMLDIR_KEYWORDS:
+            parts.pop(0)
+        if len(parts) >= 2 and parts[-1].endswith(".qml") and parts[0].isidentifier():
+            out[parts[0]] = parts[-1]
+    return out
+
+
+def _dir_types(root: Path, dirs: Sequence[str]) -> tuple[dict[str, str], list[str]]:
+    """One virtual directory: its type map, and the `qmldir`s that made it.
+
+    `dirs` are the repo directories assembled there, later shadowing earlier —
+    which is how the sheet's stub `Bus.qml` hides the real one while the
+    generated `qmldir` beside it still says `singleton Bus 1.0 Bus.qml`.
+    """
+    files: dict[str, str] = {}
+    declared: dict[str, str] = {}
+    maps: list[str] = []
+    for d in dirs:
+        p = root / d
+        if not p.is_dir():
+            continue
+        for f in sorted(p.glob("*.qml")):
+            files[f.name] = f"{d}/{f.name}"
+        qmldir = p / "qmldir"
+        if qmldir.is_file():
+            declared.update(_qmldir_types(qmldir.read_text("utf-8", errors="replace")))
+            maps.append(f"{d}/qmldir")
+    if declared:
+        return {t: files[f] for t, f in declared.items() if f in files}, maps
+    # No qmldir: the engine's implicit scan, where a type is a file whose name
+    # is capitalised. `shell.qml` and every `tst_*.qml` are not types.
+    return (
+        {f[:-4]: rel for f, rel in files.items() if f[:1].isupper()},
+        maps,
+    )
+
+
+def qml_reads(
+    root: Path, gate: QmlGate, warn: Callable[[str], None] | None = None
+) -> frozenset[str]:
+    """Every repo path one QML gate opens, followed type by type.
+
+    Starts at the files the runner is handed and walks the same edges the
+    engine walks: for each file, the directories it imports (plus its own),
+    and in them the types it names. A `core/` element three types below a
+    driver is reached, because three files away is exactly as far as "I did
+    not think of that gate".
+    """
+    if warn is None:
+        warn = _warn
+    if not (root / gate.script).is_file():
+        return frozenset()
+
+    mounts = dict(gate.mounts)
+    mounts.setdefault(".", (gate.entry,))
+    cache: dict[str, tuple[dict[str, str], list[str]]] = {}
+
+    def resolve(vdir: str) -> tuple[dict[str, str], list[str]] | None:
+        """The type map of a virtual directory, or nothing if the gate does
+        not stage it."""
+        if vdir in cache:
+            return cache[vdir]
+        parts = [p for p in vdir.split("/") if p]
+        for cut in range(len(parts), -1, -1):
+            key = "/".join(parts[:cut]) or "."
+            if key in mounts:
+                tail = parts[cut:]
+                dirs = [posixpath.normpath("/".join([d, *tail])) for d in mounts[key]]
+                break
+        else:  # pragma: no cover - "." is always a mount
+            return None
+        if any(d.startswith("..") for d in dirs):
+            return None  # climbed out of the repo; the same refusal as `_resolve`
+        if not any((root / d).is_dir() for d in dirs):
+            return None
+        cache[vdir] = _dir_types(root, dirs)
+        return cache[vdir]
+
+    out: set[str] = {rel for rel in gate.also if (root / rel).exists()}
+    seen: set[str] = set()
+    # The runner is handed ONE directory, and only its files are entries. The
+    # sheet's stage holds `Sessions.qml` from `shell/jv-hud/tests` too, but as
+    # a type the drivers may name — not as a driver of its own, which is why
+    # the eighteen `tst_*.qml` beside it belong to the other gate alone.
+    queue: list[tuple[str, str]] = [
+        (".", f"{gate.entry}/{f.name}")
+        for f in sorted((root / gate.entry).glob("*.qml"))
+    ]
+
+    while queue:
+        vdir, rel = queue.pop()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        out.add(rel)
+        try:
+            code, bare = _qml_scrub((root / rel).read_text("utf-8", errors="replace"))
+        except OSError:
+            continue
+        names = _qml_names(bare)
+        for imp in [".", *_qml_imports(code)]:
+            target = _vjoin(vdir, imp)
+            found = resolve(target)
+            if found is None:
+                warn(
+                    f"dependents: {rel} imports {imp!r}, which {gate.script} "
+                    "does not stage — what it reads there is unknown, not none"
+                )
+                continue
+            types, maps = found
+            hits = [types[n] for n in names if n in types]
+            if hits:
+                out.update(maps)
+            queue += [(target, hit) for hit in hits]
+    return frozenset(out)
+
+
+def _vjoin(vdir: str, imp: str) -> str:
+    """A QML import, as a virtual directory relative to the gate's entry.
+
+    `..` is kept when it climbs above the entry — `tools/hudshots/scene` is
+    `.` and the stage root above it is `..`, and that is a real place the
+    mounts name.
+    """
+    parts = [p for p in vdir.split("/") if p and p != "."]
+    for seg in imp.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if parts and parts[-1] != "..":
+                parts.pop()
+            else:
+                parts.append("..")
+        else:
+            parts.append(seg)
+    return "/".join(parts) or "."
+
+
+def qml_readers(
+    root: Path,
+    paths: Iterable[str],
+    *,
+    exclude: Iterable[str] = (),
+    warn: Callable[[str], None] | None = None,
+) -> dict[str, list[str]]:
+    """Gate script -> the changed paths it opens. Same shape as `readers`."""
+    skip = set(exclude)
+    want = sorted({rel for given in paths for rel in _expand(root, given)})
+    out: dict[str, list[str]] = {}
+    for gate in QML_GATES:
+        if gate.script in skip:
+            continue
+        reads = qml_reads(root, gate, warn)
+        hit = [p for p in want if is_read(reads, p)]
+        if hit:
+            out[gate.script] = hit
+    return out
+
+
 # ----------------------------------------------------------- the worktree
 
 
@@ -416,27 +714,57 @@ def changed(root: Path) -> list[str]:
 
 
 def _report(root: Path, paths: Sequence[str], found: dict[str, list[str]]) -> list[str]:
+    """The notice, as the author reads it at the moment they would commit.
+
+    Commands, not names: a suite name is a fact, and a command is the thing a
+    tired loop will actually run. The path that pulled each one in is printed
+    beside it, because a notice nobody can check is a notice nobody trusts.
+    """
     if not found:
         return [
-            f"dependents: no Python suite names any of the "
+            f"dependents: no suite or gate reads any of the "
             f"{len(paths)} path{'s' if len(paths) != 1 else ''} that changed."
         ]
-    width = max(len(name) for name in found)
+    width = max(len(cmd) for cmd in found)
     head = (
         "dependents: one suite reads what changed — run it:"
         if len(found) == 1
         else f"dependents: {len(found)} suites read what changed — run them:"
     )
     lines = [head, ""]
-    for name, why in found.items():
+    for cmd, why in found.items():
         shown = ", ".join(why[:3]) + (f", +{len(why) - 3} more" if len(why) > 3 else "")
-        lines.append(f"  {RUNTESTS} {name.ljust(width)}   # {shown}")
+        lines.append(f"  {cmd.ljust(width)}   # {shown}")
     lines += [
         "",
-        f"(Python suites only — {QML_GATES[0]} and {QML_GATES[1]} name their",
-        " subjects by QML type, not by path, and nothing here can find them.)",
+        "(Python and QML. Rust is not read: a change under services/jarvisd or",
+        " services/jv-act is `bash ops/ralph/cargotest.sh <crate>`, always.)",
     ]
     return lines
+
+
+def commands(
+    root: Path,
+    paths: Iterable[str],
+    *,
+    exclude: Iterable[str] = (),
+    warn: Callable[[str], None] | None = None,
+) -> dict[str, list[str]]:
+    """Every gate that reads what changed, as the command that runs it."""
+    paths = list(paths)
+    out = {
+        f"{RUNTESTS} {name}": why
+        for name, why in readers(root, paths, exclude=exclude, warn=warn).items()
+    }
+    out.update(
+        {
+            f"bash {script}": why
+            for script, why in qml_readers(
+                root, paths, exclude=exclude, warn=warn
+            ).items()
+        }
+    )
+    return out
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -476,7 +804,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("dependents: nothing changed.")
         return 0
 
-    for line in _report(root, paths, readers(root, paths, exclude=args.exclude)):
+    for line in _report(root, paths, commands(root, paths, exclude=args.exclude)):
         print(line)
     return 0
 

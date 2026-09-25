@@ -39,9 +39,22 @@ The map is derived from the suites themselves, never written down: a suite
 reads what it NAMES (a `ROOT / "services" / "jv-compat"` expression, a
 path-shaped string, an import — and everything that import imports), if what
 it names exists. It is advice, not a verdict: the exit status stays pytest's,
-and on a clean tree it prints nothing. It cannot see the QML gates —
-`qmltest.sh` and `hudshots.sh` name their subjects by QML TYPE, not by path —
-so it prints both as a standing caveat instead of implying a complete list.
+and on a clean tree it prints nothing.
+
+It reads the QML gates the same way (B69), which took a second rule because a
+QML file names its subject by TYPE (`ReplyState {}`) and never by path — but a
+type IS a file, found the way the engine finds it: the directories `import
+"..."` puts on the path, and the `qmldir` those directories ship. So a change
+to `shell/jv-hud/core/` names `qmltest.sh` AND `hudshots.sh` (through
+`Corner` -> the plate -> the element), a change to a plate names the sheet
+alone, and `tools/hudshots/stub/Bus.qml` — which no Python suite and no other
+script opens — names the sheet too. WHERE that QML is assembled is the one
+thing written down rather than derived: `hudshots.sh` stages a copy of the
+shell with two singletons replaced, so `QML_GATES` in `tools/dependents.py`
+holds that staging and `test_dependents.py` checks every directory of it
+against the script itself. What is left unseen is Rust — `jarvisd` and
+`jv-act` keep their tests inside the source they test — and that is now the
+standing caveat.
 
 ## Grading the tests themselves
 Every journal entry claims a number like "six mutations, six caught" — the
