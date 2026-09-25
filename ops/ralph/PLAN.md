@@ -51,17 +51,43 @@ human-reviewed step.
       The boot path is NOT done and is not the loop's: proposal **R9** in
       `docs/optimization-backlog.md` measures its drift colour-by-colour.
       Tests: `bash ops/ralph/verify.sh`.)
-- [ ] D8. **The wallpaper's colours are its own** (`pkgs/jarvis-wallpaper`):
-      it still carries literals, and two of them are the drifted greys D7 just
-      removed from every other desktop surface (#E6ECF0 wordmark, #64747F
-      subtitle and tick ring), plus #F79070 on the comet head, #26323B on the
-      rings and #05080B on the outer gradient stop — the last two being
-      colours theme.toml has no token for at all (#26323B sits between `line`
-      and `line_soft`; #05080B is below `ground_deep`). Recorded as the one
-      loop-owned entry in `COLOUR_EXCEPTIONS`. Deliberately NOT done with D7:
-      whether a vignette still reads as depth once its third stop becomes a
-      token is a thing to LOOK at, and this one is checkable — `resvg` renders
-      the PNG in the sandbox, so the shot can be compared before and after.
+- [x] D8. **The wallpaper's colours are its own** (`pkgs/jarvis-wallpaper`) —
+      done, and the answer to the question it was held back for was NO.
+      (Six literals gone; the file reads `personality/theme.toml` with
+      `builtins.fromTOML` and the same throwing `token`/`face` helpers as
+      modules/theme.nix, so `pkgs/jarvis-wallpaper/default.nix` is out of
+      `COLOUR_EXCEPTIONS` and the table has no loop-owned entry left. The
+      vignette was the open design question and LOOKING answered it: its old
+      outer stop #05080B is darker than `ground_deep`, which is the colour a
+      HUD plate is painted in — so every plate read as LIGHTER than the
+      desktop behind it, the exact inversion of why `ground_deep` exists. The
+      field is `ground` settling into `ground_deep` now (one continuous ramp,
+      three levels where there were seven). Rejected by eye, not by argument:
+      `surface` as the lit centre (lifts the whole field and paints the
+      desktop in the plates' own colour), a plateau at 0.72 (a visible banding
+      seam in the upper left), and a white-hot `text` comet head (the
+      brightest pixel on the screen, meaning nothing). The head is `ember` and
+      reads by mass. Also moved: the wordmark to `text`, the subtitle + tick
+      ring to `text_3`, grid/outer rings to `line`, middle ring to
+      `line_soft`. The face is `face "mono"` now too, and resvg's silent
+      substitution — it warns and exits 0 — fails the build instead.
+      VERIFIED in the store PNG the unit hands swaybg, not the source:
+      head/reticle #F0714A, corners #090D12, wordmark #E4EAEE, subtitle
+      #6E7E89, and byte-identical to the render I looked at. 4 mutations,
+      4 caught. Tests: `bash ops/ralph/verify.sh`.)
+- [ ] D10. **The wallpaper is composed for ONE of the three monitors.** It is
+      a single 2560x1440 PNG and `swaybg -m fill` scales it to each output, so
+      on the two 1920x1080 panels the instrument (translate(1880 980), already
+      mostly off-canvas by design) and the bottom-left wordmark are cropped by
+      a different amount than the composition allows for, and the 64 px grid
+      stops being 64 px. Options: render one PNG per output geometry and give
+      swaybg `-o <output> -i <png>` per monitor, or recompose so the
+      instrument's anchor is a fraction of the canvas. Note the first option
+      needs output NAMES, and the flake declares none — the outputs live in
+      the user's own niri config, which is **D4**, so the second option is the
+      one that is doable today and D4 is what unblocks the first. Found while
+      doing D8: the render is 2560x1440 because the primary is, and nothing in
+      the repo says what the other two get.
 - [ ] D9. **Boot path onto §06** — blocked on human review (**R9**). Four
       files: `modules/grub-theme/{theme.txt,background.svg,default.nix}` and
       `modules/plymouth-theme/default.nix`. The real design in it is

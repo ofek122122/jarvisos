@@ -11415,3 +11415,96 @@ still matches HEAD.
   **A89** (a band's width nearly IS the word — measure more of the sheet
   before writing any rule), **A88** (six callers still measure the union),
   **B94** and **A62/A70** remain a human's call.
+
+## 2026-09-25 19:20 — the wallpaper's darkest colour was darker than the plates that float on it
+- built: **D8** — `pkgs/jarvis-wallpaper` stops carrying colours of its own.
+  It reads `personality/theme.toml` with `builtins.fromTOML` through the same
+  throwing `token`/`face` helpers `modules/theme.nix` got in D7, so the last
+  loop-owned entry is out of `COLOUR_EXCEPTIONS` and the only excused files
+  left are the four boot-path ones a human owns (R9).
+- this item was HELD BACK from D7 on purpose, because one of its six literals
+  was a design question and not a correction, and the answer turned out to be
+  "the old value was wrong for a reason nobody had named". The ground was a
+  three-stop vignette ending at **#05080B** — a colour theme.toml has no token
+  for, and darker than `ground_deep`. `ground_deep` is the colour a HUD plate
+  is painted in, and theme.toml says it sits BELOW the page ground so that a
+  floating panel reads as nearer. On this wallpaper the page was below the
+  plate: I measured the top-right corner, which is the one region §06 reserves
+  for the HUD, at (7,10,14) against a plate that composites to about (9,13,18).
+  Every plate on this desktop was the LIGHTER, further-away thing. The field is
+  `ground` settling into `ground_deep` now — one continuous two-stop ramp, the
+  same one step the theme already owns, spent as distance instead of elevation.
+  It is a shallower vignette (three levels across the field where there were
+  seven) and that is the whole cost.
+- LOOKED at it, which is what the item was waiting for: `resvg` renders in this
+  sandbox, and a scratch template that reproduces the shipped PNG **byte for
+  byte** meant every difference I saw came from the colour and nothing else.
+  Four candidates, three rejected by eye and not by argument:
+  - `surface` as the lit centre stop (keeps three distinct stops, all tokens):
+    lifts the entire field and paints the desktop in the same value as the
+    plates lying on it. The ember glow stops being the brightest thing.
+  - a plateau — `ground` held to offset 0.72, then falling to `ground_deep`:
+    a visible arc of banding across the upper left where the plateau ends.
+    Mach banding on a 3-level ramp is not subtle.
+  - a white-hot comet head in `text`, replacing #F79070: it becomes the
+    brightest pixel on the whole screen and it means NOTHING. §06 spends
+    brightness on signal. The head is plain `ember` now and still reads as a
+    head, because it has more mass than the arc (r=9 against stroke-width 6) —
+    mass, not a hotter hue, was what made it a head all along.
+- the rest was substitution: wordmark #E6ECF0 → `text`, subtitle and dashed
+  tick ring #64747F → `text_3` (the two greys D7 took off every other surface
+  yesterday), rings/grid #26323B → `line` with the middle ring on `line_soft`
+  — two weights of hairline and no third. That one was a choice, since #26323B
+  sat exactly between the tokens; R9 now records the choice, because the boot
+  screens draw the same instrument and a human has to make it again there.
+- also: the wallpaper hand-spelled its **font family** into the SVG, the same
+  drift one field over, and it is the one surface that bakes a face into a
+  raster where nothing can notice later. It asks `face "mono"` now — and since
+  resvg answers a missing family with a warning, a substitute and **exit 0**,
+  the build greps its stderr and refuses. Proven by making theme.toml name a
+  face nothing provides: the build fails with the family in the message.
+- gates, both of them the desktop mirror of a QML rule that has existed since
+  A2, both DISCOVERING their subjects rather than listing them: every `token
+  "x"` under modules/ + pkgs/ must name a colour [palette] defines, and no
+  file there may spell a font family (`FACE_EXCEPTIONS`, the same table shape
+  as `COLOUR_EXCEPTIONS`, exhaustive in both directions — 5 entries: the two
+  files whose JOB is to name a family, plus the three boot-path ones). New in
+  this pass: `PAINTERS`, a floor on how many tokens each painting surface must
+  still be spending. The literal gate cannot say that — it is satisfied by a
+  file with no colour in it at all, so a surface that stopped asking theme.toml
+  anything would pass it silently.
+- 4 mutations, 4 caught: a raw `#4FB8BF` back in the SVG, `JetBrains Mono`
+  hand-spelled in the `font-family=`, the wallpaper's greys inlined so it stops
+  spending tokens, and a stale `FACE_EXCEPTIONS` entry. Plus the two the nix
+  eval catches: `token "embers"` throws by name, the unresolvable face fails
+  the build.
+- verified where it counts — the PNG the **unit hands swaybg**, not the source
+  (`/nix/store/8pskmbj4…-jarvis-wallpaper/share/backgrounds/jarvisos.png`):
+  comet head and reticle #F0714A, far corners #090D12, wordmark glyph #E4EAEE,
+  subtitle #6E7E89, and byte-identical to the candidate I actually looked at.
+  A token-only source can still emit something wrong through a gradient.
+- tests: `bash ops/ralph/verify.sh` GREEN (4 gates, 66.0 s: tools 469 pass,
+  jv-compat, jv-hud-bridge, nixtest 7/7). build: `nixos-rebuild build
+  --flake .#ares` green, closure 6a9xqrp7q87vmsj47y8h00s9jrg93x2f. No schema
+  change, no jv-act, no boot path, no pins. Never tested, never switched.
+- also corrected `docs/superpowers/specs/2026-09-25-jarvisos-desktop-identity-design.md`:
+  its "do not drift" anchor line spelled out the palette, and the copy it
+  spelled was the DRIFTED one — #E6ECF0 / #9BAAB4 / #64747F, the very greys
+  D7 and D8 have spent two iterations removing. That line is where the
+  hand-copy came from. It now names theme.toml and describes the SHAPE (field
+  is `ground`, a panel one step deeper reads as nearer, one ember accent) —
+  the part of a palette a spec can hold without drifting from it.
+- files: pkgs/jarvis-wallpaper/default.nix, tools/tests/test_gen_theme_qml.py,
+  docs/optimization-backlog.md (R9), docs/superpowers/specs/2026-09-25-jarvisos-desktop-identity-design.md,
+  ops/ralph/PLAN.md
+- next: **D1** (the top bar) is the biggest unclaimed piece of Track D and the
+  first new on-screen surface since the HUD; both new gates cover it from the
+  day `pkgs/jv-bar` exists, and it is real bus data (niri workspaces, clock,
+  net/audio), so it belongs at the top of the ladder. **D10** is new and small
+  and was found by this work: the wallpaper is composed for the 1440p primary
+  and `swaybg -m fill` scales that one PNG onto two 1080p panels, so the
+  instrument and the wordmark are cropped by an amount nobody chose —
+  recomposing on fractions is doable today, per-output renders need the output
+  names, which is **D4**. **D9/R9** is still the boot path and a human's, and
+  it now has one more thing waiting in it: those files spell the font family
+  too. From the old corner: **A89**, **A88**, **B94** and **A62/A70**.
