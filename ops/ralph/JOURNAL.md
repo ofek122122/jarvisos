@@ -9860,3 +9860,119 @@ a row is the test, and the re-grade took it 2/2.
   look at `docs/hud/screens/02-heard-desk.png`; A21/A22/A25 are one answer
   about time on screen. And **B10/A28** — one live recording of one spoken
   turn on ares — is still the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 100 — A75: the frames the bus threw away, drawn instead of only printed
+
+**Every open item in both tables was waiting on somebody.** A47's OCR-or-IPC
+decision blocks A55 and four growth checks; A13/A27/A38 and A21/A22/A25 want
+two minutes of a human at a screen; A73's other half and B10/A28 want a seat
+at ares; A11, B36 and B27(a) want a frozen schema opened; B62, B67, A76 and
+B76 are decisions with a human in them, and B76 says in its own text not to
+build it on a hunch. So this followed PROMPT's fallback — three ideas written
+into `PLAN.md` and committed (5b1f1a3) before one was picked — and the one
+worth picking came out of the orientation itself.
+
+**`sys.health.drops` has been on the bus since v1 and nothing in the HUD has
+ever read it.** The schema says "frames dropped since the last heartbeat,
+keyed by topic. Published by jarvisd per slow subscriber; empty/absent =
+none", and `broker.rs` really fills it: an out-queue overflow charged to the
+topic it threw away, a broadcast lag to `_lagged`, a control frame to `_ctl`,
+summed across every connection and drained into each heartbeat. `jv health`
+really prints it — `drops={"audio.vad":2}`. In `shell/jv-hud`, `seq` appears
+in eleven files under `core/` and in every single one of them it is an
+identity component (`seq + "@" + ts`), never a gap check, and `HealthState`
+reads `state`, `notes` and `metrics` and not `drops`. So invariant 5's one
+failure — something blocked the bus long enough that frames were discarded —
+was legible at a terminal and invisible on screen, underneath a corner every
+line of which is drawn from the frames that happened to arrive. That is worse
+than an ordinary missing reading, because it is a fact ABOUT the other plates.
+
+**`core/DropState.qml` decides; `HealthPlate` draws one row, `bus 41
+DROPPED`, above the findings.** Five rules, each with the tests that hold it.
+NOT A GAUGE: absent, empty and zero are all silence, which is exactly where
+this parts company with `VramState` — 0 MiB free is the most informative
+reading that field can carry, and 0 frames dropped is a machine that is well.
+AN AGGREGATE NAMES NOBODY: the map is summed across every subscriber before it
+is published, so the HUD may not be the reader that lost anything; the row
+names no topic, no key and no subscriber, and a tools gate fails the build if
+either file so much as spells `_lagged`. ONE PERIOD, NOT TWO: the count
+describes the interval that just closed, so it speaks for `period_s` and not
+for the two the schema grants a service's LIVENESS — borrowing `HealthState`'s
+window would put an interval's news on screen for twice the interval.
+ONLY THE BROKER SAYS THIS: read off jarvisd by NAME. A TOTAL THAT CANNOT BE
+TOTALLED IS NOT A TOTAL: one unreadable value refuses the whole frame rather
+than being skipped, because a partial total presented as a total understates
+by an unknown amount and saying nothing claims nothing.
+
+**`shown` is the load-bearing half and it is the one that would have rotted
+silently.** `ok` beside a non-empty map is not contrived: `publish_health`
+hardcodes `SysHealthState::Ok` in the same body it drains the drops into, and
+`HealthState.rank("ok")` is 0 — so on a machine where every service is well
+and the brain is on the card, a plate bound to `HealthState.reporting` alone
+would compose the row, never map the surface, and look exactly like a healthy
+machine. Shot 15 is that machine, and its caption (`mic` · `health`, with no
+finding, rung or VRAM row under it) is the assertion.
+
+**The mutation harness earned its keep four times over.** 24 mutations across
+five gradings, 8 first-pass survivors, all repaired. Two were real bugs. The
+broker was read by RECENCY: every test passed, because jv-ears' heartbeat is
+refused by the name check either way — but nine services beat every five
+seconds on a live machine, so `latest("sys.health")` would have taken the row
+off a fraction of a second after it appeared, for the life of the process.
+And `expired` was never cleared on a new frame, so the row could never come
+back for a SECOND interval, which is the ordinary shape of this failure —
+whatever blocked the bus for five seconds rarely stops at five. Two survivors
+were tests that did not test what they said (an array of STRINGS is refused by
+the value check, so it was no test of the shape check). Two were guards no
+input could reach: `withinPeriod` is now the single comparison both the row
+and its timer share, rather than two that could disagree at the boundary, and
+the one case that genuinely differed — a frame arriving exactly one period old
+— is a test. The last one was killable after all, by driving the element with
+a bus that KEEPS its frame through a link loss, which a `BusModel` can never
+be (`applyLink(false)` wipes its caches) and which is why the link check has
+to be written rather than inferred from the model backing it today.
+
+**The box grew for the first time without a plate.** One 11 px row inside an
+existing plate took the crowded corner from 775 px to 794, so the surface is
+826 — and `tst_fit.qml` is what said so, to the pixel, rather than a paragraph
+guessing. A row is not cheaper than a plate: per line, the box pays the same.
+That is the fifth growth and it makes A70's question bigger without answering
+it, exactly as A71's did.
+
+- tests: `bash ops/ralph/verify.sh --since HEAD~1` GREEN — 5 gates over the 31
+  changed paths, 120.2 s: `runtests.sh tools` 436 (was 434), `qmltest.sh` 653
+  (was 615), `runtests.sh jv-compat` 49, `runtests.sh jv-hud-bridge` 26,
+  `hudshots.sh` 23 with a 15th shot. The working-tree run before the commit was
+  RED on two gates and both were the sheet comparing against HEAD, which is the
+  documented refresh (ops/ralph/README.md): look at the PNGs, commit them, and
+  the next run is green. I looked at 15-bus-drops.png and 06-health.png before
+  committing either. And the gate verify names but does not run:
+  `bash ops/ralph/hudscreens.sh` GREEN, 179.1 s, all 7 screens matching the
+  sheet at HEAD — the taller box changed no screen, because the growth is
+  downward into surface the HUD does not paint.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. (It failed once first, usefully: a flake build
+  reads the git tree, so an untracked `DropState.qml` under a tracked `qmldir`
+  is a build error rather than a silent omission.)
+- files: shell/jv-hud/core/DropState.qml (new), shell/jv-hud/tests/
+  tst_dropstate.qml (new), shell/jv-hud/HealthPlate.qml, shell/jv-hud/shell.qml,
+  shell/jv-hud/core/qmldir, tools/gen_theme_qml.py, tools/tests/
+  test_gen_theme_qml.py, tools/hudshots/scene/{tst_shots,tst_fit,tst_sequence}
+  .qml, tools/hudscreens/{sheet,shoot}.py, tools/tests/test_hudsheet.py,
+  ops/ralph/hudscreens.sh, docs/hud/README.md + 15 PNGs,
+  docs/hud/screens/README.md
+- commits: 5b1f1a3 (the three ideas), 1764a52 (the row)
+- next: **A76** is the question this row works around and it is a human's —
+  should the broker ever call itself `degraded` while it is dropping? It is
+  one enum and its tests, and the argument against is real (a per-interval
+  counter flaps, and `jv health --check` would exit 1 on it). **A77** is the
+  design half: the row sums an overflow, a lag and a lost control frame into
+  one number, and a lag is the one of the three that means the HUD's own
+  picture may be missing a stretch. A note for whoever takes either: while
+  writing `DropState` I found `HealthState.trust` tests `period_s` with a bare
+  `!(period_s > 0)`, which `"5" > 0` passes — harmless there, since the value
+  is only ever multiplied, and deliberately stricter in `DropState`, where it
+  becomes a timer interval. Beyond those, the tables are unchanged: Track A is
+  still blocked on human sentences and one seat at ares (A47 → A55 and four
+  growth checks; A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
+  B62/B67/B76 are still the loop-sized-but-undecided items in the B table.

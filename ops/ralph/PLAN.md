@@ -3110,8 +3110,8 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       helper now, shared with that test. The README also says the number is
       held, in prose that quotes no box of its own. Six mutations, six caught.)
 
-- [ ] A75. **The bus's own drop count is on the bus, and the HUD cannot say
-      it.** `schemas/sys.health.json` has carried `drops` since v1 — "frames
+- [x] A75. **The bus's own drop count is on the bus, and the HUD cannot say
+      it.** — 1764a52 `schemas/sys.health.json` has carried `drops` since v1 — "frames
       dropped since the last heartbeat, keyed by topic, published by jarvisd
       per slow subscriber" — and `broker.rs` really publishes it: every
       subscriber's out-queue overflow (`drops.add(&d.topic, 1)`) plus the
@@ -3130,6 +3130,25 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       the wording: the count is an AGGREGATE over every subscriber, so the
       HUD may not be the reader that lost anything and must not say it was.
       Discovered while orienting at iteration 100.
+      (`core/DropState.qml` decides — 32 QML tests, 24 mutations over five
+      gradings — and `HealthPlate` draws one row, `bus 41 DROPPED`, ABOVE the
+      findings, because it is a claim about the list rather than an item in
+      it. Five rules: zero/empty/absent are all silence (the opposite of
+      `VramState`, where 0 is the reading that explains the most); the row
+      names no topic, no key and no subscriber, with a tools gate failing the
+      build if either file spells `_lagged`; the count speaks for ONE
+      `period_s` and not the two the schema grants a service's liveness; the
+      broker is read by NAME; and one unreadable value refuses the whole total
+      rather than being skipped past. `shown` counts the row — `ok` beside a
+      non-empty map is what `broker.rs` really writes, and
+      `HealthState.rank("ok")` is 0, so a plate bound to `HealthState` alone
+      would compose the row and never map the surface. Shot 15 is that
+      machine. Two of the eight first-pass survivors were real bugs: the
+      broker read by recency (invisible to every name test, fatal on a machine
+      where nine services beat every 5 s) and an `expired` never cleared, so
+      the row could not come back for a second interval. The box grew for the
+      first time without a plate: 775 -> 794 makes the surface **826**, and
+      `tst_fit.qml` said so rather than a paragraph.)
 
 - [ ] A76. **jarvisd reports `state: "ok"` while it is throwing frames
       away.** `publish_health` in `services/jarvisd/src/broker.rs` hardcodes
