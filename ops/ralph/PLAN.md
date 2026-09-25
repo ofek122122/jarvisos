@@ -2897,7 +2897,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       on ares**, which is the same seat A47, A55 and B10/A28 are waiting
       for. Ten mutations, ten caught.
 
-- [ ] A74. **The sibling sheet quotes the same box and nothing holds it
+- [x] A74. **The sibling sheet quotes the same box and nothing holds it
       either.** `docs/hud/README.md` opens with "300 × 807 px, the box" —
       the same sentence A73 just pinned one directory down, unpinned, and
       correct today only because A71 happened to update it. `test_hudsheet.py`
@@ -2912,7 +2912,14 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       so there is no "older than the box" case to state — the pictures are
       never stale. NOT taken in A73's iteration to keep one finished thing;
       the cost is one `runtests.sh tools` and one `hudshots.sh`. Raised by
-      A73.
+      A73. — b1ccf6b
+      (Both decisions kept as written. The allowed set is ONE box — the one
+      `tst_shots.qml` renders, which `test_hudshots.py` pins to `shell.qml`,
+      so the derivation runs prose -> scene -> shell with no literal in it —
+      and no staleness notice, because the test above measures all fourteen
+      committed PNGs against that same box. The scene box is a `scene_box()`
+      helper now, shared with that test. The README also says the number is
+      held, in prose that quotes no box of its own. Six mutations, six caught.)
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD

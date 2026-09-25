@@ -9253,3 +9253,79 @@ rather than editing it.
   decisions; **B67** is B66's sibling-of-the-home half; and **B10/A28** —
   one live recording of one spoken turn on ares — remains the biggest thing
   a human can hand this loop.
+
+## 2026-09-25 — iteration 93 — A74: the sibling sheet's box, held by the instrument built for its twin
+
+A73 pinned every box `docs/hud/screens/README.md` quotes to a box the harness
+declares. The sentence it fixed has a twin one directory up: `docs/hud/README.md`
+opens with "300 × 807 px, the box `shell.qml` asks the compositor for", and it
+was right today only because A71 happened to update it by hand. The twin that
+nobody updated said `300x560` through four growths of the surface. Fixing one
+document and leaving the identical sentence in the other loose is the shape of
+bug this loop keeps finding in its own work, so A74 was raised last night and
+taken this morning.
+
+The gate is `sheet.boxes_in_prose` — A73's scanner, unchanged, now reading a
+second document. Two regexes looking for the same mistake in two READMEs would
+mean one of them going quietly out of date while the other keeps passing. The
+box it is held against is read off `tools/hudshots/scene/tst_shots.qml`, which
+`test_hudshots.py` already pins to `shell.qml` (A63), so the derivation runs
+prose -> scene -> shell and holds no literal anybody has to remember. The scene
+box was already extracted inline by the test above; it is a `scene_box()` helper
+now, used by both.
+
+Two things that make this gate different from A73's, both decided in the PLAN
+item and both kept:
+
+- It is **stricter**. The screens sheet quotes monitors and the whole desk
+  legitimately, because it photographs a real compositor on ares' three screens.
+  The contact sheet disclaims everything a compositor owns — layer-shell, the
+  input mask, the exclusive zone, the monitors — so the only box it can honestly
+  describe is the one the scene renders, and a monitor size appearing in its
+  prose is prose that has wandered into the other sheet's subject. The allowed
+  set is one box, not five.
+- It needs **no staleness notice**. A73 had to add one, because pinning the
+  prose to today's box left the pictures at yesterday's. Here `hudshots.sh`
+  re-renders all fourteen PNGs on every HUD iteration and the test above this
+  one measures each against this same box, so a picture cannot be older than
+  the sentence.
+
+The README also now says the number is held, in a paragraph that quotes no box
+of its own (so it cannot itself go stale, and the gate has nothing extra to
+allow). That line is for the reader the 560 fooled: a document that leaves you
+guessing which of two sizes is the HUD is worse than one that tells you which
+direction the drift gets fixed from.
+
+- tests: `bash ops/ralph/runtests.sh tools` **331 (was 330)**, all green. The
+  dependents notice named one gate for the README change — `bash
+  ops/ralph/hudshots.sh` — and it was run: 23 passed, 14 shots match
+  HEAD:docs/hud, tree clean afterwards.
+- graded with **6 mutations, 6 caught**: the prose back to the `300x560` its
+  twin went stale at; the prose quoting a monitor (`2560 × 1440`); the box
+  removed from the sentence entirely, which the empty-quote guard catches and
+  not the comparison; the scanner blinded to three-digit widths; the scanner no
+  longer reading the `×` this prose is actually written with; and the scene
+  rendering a box the sheet no longer describes.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: docs/hud/README.md, tools/tests/test_hudsheet.py
+- commit: b1ccf6b
+- one harness note, cheaper than A73's: writing the mutation spec into a file
+  and passing it as an argument (`mutate.sh tools /tmp/a74.spec`) avoids the
+  byte-for-byte heredoc trap iteration 92 hit — the `—` and `×` in that README
+  line survive a file that Python wrote and would not survive being retyped.
+- next: the loop has now spent three iterations on gates over its own documents
+  and harness (B68, B69, A73, A74), which is the right work when nothing else
+  is unblocked but is not the blueprint. **Track A is still one human look at
+  `docs/hud/` away** from A47, A55, A62, A70/A72 and the A21/A22/A25 cluster,
+  and A73's remaining half is the same seat: re-shoot `docs/hud/screens/` on
+  ares. Doable by the loop, in rough order: **B70** (whether the dependents
+  notice should be a verdict rather than advice — now fully priced: a HUD
+  change names `tools` at 5 s, `qmltest.sh` at ~14 s and `hudshots.sh` at
+  ~53 s), **B71** (`mutate.sh` leaves the mutation applied when it is killed —
+  bitten twice), **A56** (whether the shot suites belong in the build gate),
+  **B62** (B61's two decisions), **B67** (B66's sibling-of-the-home half).
+  Waiting on one human sentence each: **B27/B28** (a jv-ears state topic),
+  **B43/B47/B54** (the same question asked three times), and **B10/A28** — one
+  live recording of one spoken turn on ares, still the biggest thing a human
+  can hand this loop.
