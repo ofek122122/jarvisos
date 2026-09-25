@@ -12743,3 +12743,85 @@ is not worth chasing.)
   box, a small clean-up with a decision in it) and **D17** (the strip's empty
   right half — the first Track D item that wants a real SOURCE rather than a
   token).
+
+## 2026-09-26 — iteration 129 — D38: a second engine, because the first one
+## decides what it prints by filename
+
+- built: `tools/qmlprobe/Probe.qml` plus one `warnprobe.qml` per harness, and
+  the other half of `tools/qmlerrors.py`. D36 made all three shot harnesses
+  refuse a run whose QML threw by reading the runner's output back; D38 is the
+  scene that output never mentions. The answer is not a cleverer scan, it is a
+  second ENGINE: plain `qml` installs no message handler, so the same staged
+  scene loaded under it prints what the engine wrote, and the scanner reads
+  both — the `QWARN :` prefix that looked like the shape of a fault turned out
+  to be optional, and the discriminator (a `file:line:` plus one of
+  ECMAScript's seven error names) was never it.
+- **THE HOLE IS ALPHABETICAL, and that is new.** D36 wrote down that QtTest
+  drops what is logged while no test function is running. What nobody had
+  measured is WHICH scene that is. A driver's scene is built before the run
+  begins only if its file is FIRST in the directory; every later driver's is
+  built between two test functions, where the handler prints it as
+  `UnknownTestFunc()`. Two identical files in one directory prove it:
+
+      PASS   : qmltestrunner::Probea::cleanupTestCase()
+      QWARN  : qmltestrunner::UnknownTestFunc() qml: warn from b onCompleted
+      QWARN  : qmltestrunner::UnknownTestFunc() …/tst_b.qml:7: TypeError: …
+      PASS   : qmltestrunner::Probeb::initTestCase()
+
+  So which of a harness's surfaces D36 covered was decided by a filename, and
+  what covered the shell's own scene was an ACCIDENT — a second driver
+  instantiating it after the run had started. The probe makes it deliberate
+  and independent of how anything is named.
+- **THE MEASUREMENT D38 ASKED FOR, taken, and the answer is clean.** All three
+  shells load without a single throw in the state no sheet is a picture of:
+  before a bus frame, a notification or a compositor event has arrived. The
+  HUD's corner builds 78 objects, the bar's strip 11, the notifier's column 3.
+  Nothing in any of the three shells is silently failing right now.
+- **THE FIRST VERSION WAS WRONG AND THE MEASUREMENT SAID SO.** It read every
+  property of every object in the tree — 9,319 of them on the HUD — on the
+  theory that a QML binding is lazy and one nobody asks for never evaluates.
+  It is not lazy. An injected `property int injected:
+  root.loose.nothingHere.count` on the bar's strip, and the identical fault
+  written as a `property var`, BOTH printed with the walk disabled and the
+  census reading nothing at all. So 9,319 reads bought nothing, and what is
+  left is a census — which buys the one claim a run cannot otherwise make,
+  that a scene was really built here, and `Qt.exit(3)` when it was not.
+- **QT_FORCE_STDERR_LOGGING, which is the finding with the longest reach.**
+  This Qt is built with the journald backend, so a Qt program whose stderr is
+  a PIPE — which is exactly what `tee` makes it — prints NOTHING. Not the
+  errors, not `console.log`, not the probe's own census line. The first probe
+  run came back completely silent and looked like a pass. qmltestrunner is
+  unaffected, because QtTest writes its own `QWARN :` lines to stdout itself,
+  which is why D36 has always worked. D39 (`hudscreens.sh`, which pipes real
+  quickshell through `tee`) is now a different question than it was: not what
+  shape its lines have, but whether it has ever emitted one.
+- **PROVED BY INJECTION, twice, and the second injection raised D40.**
+  · A `var`-shaped fault on the staged strip's root — invisible to qmllint,
+    D34's own shape — and `bash ops/ralph/barshots.sh` ends 1 at the probe,
+    naming `shots/Strip.qml:31`, before a single PNG is written.
+  · The same fault in the root of `tst_settle.qml`, the FIRST driver in that
+    directory, and the whole harness went green: `8 passed, 0 failed`, eleven
+    byte-identical shots, `nothing threw` on both logs, exit 0. Neither half
+    can see a driver's own root — QtTest drops it, and the probe's subject is
+    the shell's scene, not a driver's. That is the right target and it is
+    still a hole, so it is written down as **D40** rather than left as a thing
+    one iteration happened to know.
+- wiring: `tools/qmlprobe` is in each shot gate's `.` mount in
+  `dependents.py`, so a change to the shared probe body runs all three
+  harnesses — held by a test, alongside the existing one that every directory
+  a gate claims to stage exists and is named in the script that stages it.
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 10 paths (tools **604
+  pass**, 9 of them new; all three shot harnesses green, all 37 shots
+  byte-identical), 161.8 s. `hudscreens.sh` was not named by the plan and was
+  not run. build: `nixos-rebuild build --flake .#ares` green. No schema
+  change, no jv-act, no boot path, no pins. Never tested, never switched.
+- files: tools/qmlprobe/Probe.qml (new),
+  tools/{hud,bar,notify}shots/scene/warnprobe.qml (new), tools/qmlerrors.py,
+  tools/tests/test_qmlerrors.py, tools/dependents.py,
+  ops/ralph/{hudshots,barshots,notifyshots}.sh, ops/ralph/PLAN.md
+- next: **D39** is now cheap and has an answer in it — the same
+  `QT_FORCE_STDERR_LOGGING` line, in the one gate that loads `shell.qml` at
+  all, and an iteration that pays its 3m00s anyway gets the first honest look
+  at what a real compositor session has been printing into nothing. Then
+  **D33** (the last copies of the HUD's box) and **D17** (the strip's empty
+  right half, the first Track D item that wants a real SOURCE).

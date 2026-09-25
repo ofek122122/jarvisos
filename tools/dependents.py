@@ -529,8 +529,9 @@ QML_GATES = (
         script="ops/ralph/hudshots.sh",
         entry="tools/hudshots/scene",
         mounts=(
-            # The drivers sit in `$stage/shots` beside a copy of Sessions.qml…
-            (".", ("tools/hudshots/scene", "shell/jv-hud/tests")),
+            # The drivers sit in `$stage/shots` beside a copy of Sessions.qml
+            # and the shared probe body the second engine loads (PLAN D38)…
+            (".", ("tools/hudshots/scene", "shell/jv-hud/tests", "tools/qmlprobe")),
             # …and `$stage` itself is the shell, with the two singletons that
             # import Quickshell replaced. `shell.qml` is deleted from the
             # stage and is not a type, so nothing reaches it from here.
@@ -546,7 +547,7 @@ QML_GATES = (
         entry="tools/notifyshots/scene",
         mounts=(
             # The driver and the staged strip sit together in `$stage/shots`…
-            (".", ("tools/notifyshots/scene",)),
+            (".", ("tools/notifyshots/scene", "tools/qmlprobe")),
             # …and `$stage` itself is the shell, with the two singletons that
             # import Quickshell replaced: `Notifications` (it IS the D-Bus
             # server) and `Motion`. `shell.qml` is deleted from the stage and
@@ -564,7 +565,7 @@ QML_GATES = (
         entry="tools/barshots/scene",
         mounts=(
             # The driver and the staged strip sit together in `$stage/shots`…
-            (".", ("tools/barshots/scene",)),
+            (".", ("tools/barshots/scene", "tools/qmlprobe")),
             # …and `$stage` itself is the shell, with the two singletons that
             # import Quickshell replaced: `Niri` (it runs the event stream as a
             # child process) and `Motion`. `shell.qml` is deleted from the

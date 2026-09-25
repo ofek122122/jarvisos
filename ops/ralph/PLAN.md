@@ -642,25 +642,48 @@ human-reviewed step.
         fault is already gated, and what reaches the engine is the
         dynamically typed one — exactly D34's shape.
 
-- [ ] D38. **Everything QML logs before the first test body runs is dropped,
-      by QtTest, before D36 can see it.** Probed against Qt 6.11.1 while D36
-      was built, and it is a bigger hole than the one D36 closed: a
-      `console.warn` in `Component.onCompleted` prints NOTHING, and an error
-      thrown by a declarative binding prints nothing ever — not at creation,
-      not at re-evaluation — the property simply keeps its default (`property
-      int n: subject.absent.count` yields 0, silently, and so does a binding
-      that calls a function which throws, and so does `JSON.parse("{")`).
-      Which means the three drivers are covered exactly where they DO their
-      work (inside a test body, which is where D34's TypeError was) and not
-      at all for the scene each file declares at its root — `Strip`, `Corner`
-      and `Desk` are all built before `initTestCase`. Two candidate answers,
-      neither obviously right: build the scene inside the test with
-      `createTemporaryObject` (which is a real change to three drivers and to
-      what the shots are pictures of), or give the harnesses a second engine
-      that is not QtTest — `qml` itself prints everything — and load the
-      staged scene under it for warnings only. The measurement to take first
-      is whether any current binding in any of the three shells is silently
-      failing right now, which nothing can currently answer. Raised by D36.
+- [x] D38. **Everything QML logs before the first test body runs is dropped,
+      by QtTest, before D36 could see it.** (Done — this iteration.) A second
+      ENGINE rather than a cleverer scan: `tools/qmlprobe/Probe.qml` loads the
+      same staged scene under plain `qml`, which installs no message handler
+      and prints the engine's own line with no `QWARN :` in front of it, and
+      `tools/qmlerrors.py` now reads both outputs under one rule (the prefix
+      turned out to be optional; the discriminator was never it). Wired into
+      all three harnesses, before the runner, so a scene that threw writes no
+      shots at all.
+      · **THE HOLE IS ALPHABETICAL, which nobody knew.** QtTest drops what is
+        logged while no test function is RUNNING — and a driver's scene is
+        built before the run begins only if it is the FIRST file in the
+        directory. Two identical drivers, and only the second is heard:
+        `PASS : Probea::cleanupTestCase()` / `QWARN : UnknownTestFunc() …
+        tst_b.qml:7: TypeError: …` / `PASS : Probeb::initTestCase()`. So which
+        surface D36 covered was decided by a filename, and what covered the
+        shell's own scene was the ACCIDENT of a second driver instantiating it
+        after the run had started. The probe makes it deliberate.
+      · **THE MEASUREMENT D38 ASKED FOR, taken: nothing is failing.** All
+        three shells load clean in the state no sheet photographs — before a
+        frame, a notification or a compositor event has arrived. The HUD's
+        corner builds 78 objects, the bar's strip 11, the notifier's column 3,
+        and not one binding threw in any of them.
+      · **THE PROPERTY WALK WAS WRONG AND WAS REMOVED.** The first version
+        read every property of every object (9,319 of them on the HUD) on the
+        theory that a QML binding is lazy. It is not: an injected `property
+        int injected: root.loose.nothingHere.count` on the bar's strip, and
+        the identical fault as a `property var`, BOTH printed with the walk
+        disabled and the census reading nothing. What is left is the census,
+        which buys the one claim the run cannot otherwise make — that a scene
+        was really built — and `Qt.exit(3)` when it was not.
+      · **QT_FORCE_STDERR_LOGGING, and this is the discovery with the longest
+        reach.** This Qt is built with the journald backend: with stderr in a
+        pipe — which is exactly what `tee` makes it — `qml` prints NOTHING,
+        not one line, not even its own census. Measured. qmltestrunner is
+        unaffected (it writes its own `QWARN :` lines to stdout itself), which
+        is why D36 worked. Anything else in this repo that pipes a Qt
+        program's output is reading a silent stream.
+      · **PROVED BY INJECTION, end to end.** A `var`-shaped fault on the
+        staged strip's root — invisible to qmllint, D34's own shape — and
+        `bash ops/ralph/barshots.sh` ends 1 at the probe, naming
+        `shots/Strip.qml:31`, before a single PNG is written.
 
 - [ ] D39. **`hudscreens.sh` runs a real compositor and is outside D36's
       rule.** The three shot harnesses now refuse a run whose QML threw;
@@ -669,9 +692,14 @@ human-reviewed step.
       straight through. It is a different runner — not QtTest, so nothing is
       dropped, and `console.warn` from a real session is a different
       population of lines — so `qmlerrors.py` may apply verbatim or may need
-      a second shape. Not done with D36 because the gate costs 3m00s and
-      rewrites a sheet a human has to look at, so its first run belongs to an
-      iteration that is already paying that price. Raised by D36.
+      a second shape. **D38 found the thing that decides it: this Qt is built
+      with the journald backend, so a Qt program whose stderr is a PIPE prints
+      nothing at all.** `hudscreens.sh` pipes quickshell's output, so the
+      first question is not what shape its lines have — it is whether it has
+      ever emitted one, and `QT_FORCE_STDERR_LOGGING=1` is probably the whole
+      fix. Not done with D36 because the gate costs 3m00s and rewrites a sheet
+      a human has to look at, so its first run belongs to an iteration that is
+      already paying that price. Raised by D36; sharpened by D38.
 
 - [x] D37. **The notifier had the bar's exact shape, and it was worse there.**
       (Done 653b2cd.) `shell/jv-notify/shell.qml` repeated over
@@ -704,6 +732,25 @@ human-reviewed step.
       · `nixos-rebuild build` caught the one thing no suite could: the new
         generated file was untracked, so the flake's source filter excluded it
         and `--check` in pkgs/jv-notify called it stale.
+
+- [ ] D40. **A fault in a DRIVER's own root is invisible to both halves, and
+      that was measured rather than guessed.** D38 injected `property int
+      injected: root.loose.nothingHere.count` into the root of
+      `tools/barshots/scene/tst_settle.qml` — the FIRST driver in that
+      directory — and ran the whole harness: `Totals: 8 passed, 0 failed`,
+      eleven byte-identical PNGs, `qmlerrors: nothing threw` on both logs,
+      exit 0. Completely green. QtTest dropped it because that scene is built
+      before the run begins, and the probe never saw it because the probe
+      loads `warnprobe.qml`, whose scene is the SHELL's, not a driver's.
+      Which is the right target — a driver is test code and the shell is the
+      product — but a driver whose own root silently throws is a driver whose
+      arithmetic may be running on a default it never noticed, and every
+      assertion it makes is downstream of that. Two candidate answers: a
+      fourth probe document per harness whose subject is the driver (which
+      means instantiating a `TestCase` outside a runner, and may not work at
+      all), or renaming one driver per harness so the silent slot is held by
+      a file that declares nothing — a trick, and a trick that the next
+      alphabetical file would quietly inherit. Raised by D38.
 
 - [ ] D35. **A monitor narrower than the corner the HUD reserves gets an
       unbounded row.** `roomPx` negative means "nobody has said" — the right

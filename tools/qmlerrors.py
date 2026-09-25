@@ -36,8 +36,8 @@ prints rather than the words in the message. QtTest writes console output as
 merely mentions `TypeError` is a voice; a line the engine attributed to a file
 and a line number is a fault.
 
-WHAT IT CANNOT SEE, measured rather than assumed. qmltestrunner prints nothing
-that is logged while no test function is running: a `console.warn` in
+WHAT THE RUNNER CANNOT SAY, measured rather than assumed. qmltestrunner prints
+nothing that is logged while no test function is running: a `console.warn` in
 `Component.onCompleted` and every error thrown by a binding evaluated as the
 scene is built are both dropped by QtTest's own message handler, before any
 scan of the output could reach them. (Probed against Qt 6.11.1: a handler that
@@ -45,7 +45,24 @@ reads a property of `undefined` prints the line above; the identical fault in a
 declarative binding prints nothing at all, and the property silently keeps its
 default.) What lands in the output is what the engine reports while a test body
 runs — which is where the drivers do all of their work, and where D34's
-TypeError was. The other half is PLAN D38.
+TypeError was.
+
+It is narrower still than that, and the narrowing is alphabetical: a driver
+whose scene is built BEFORE the run begins is silent, and every later one is
+not. Two identical files in one directory, and only the second is heard —
+
+    PASS   : qmltestrunner::Probea::cleanupTestCase()
+    QWARN  : qmltestrunner::UnknownTestFunc() qml: warn from b onCompleted
+    QWARN  : qmltestrunner::UnknownTestFunc() …/tst_b.qml:7: TypeError: …
+
+— so which surface of a harness this rule covers was decided by a filename.
+
+SO THIS FILE READS TWO ENGINES (PLAN D38). The other one is plain `qml`, which
+installs no handler of its own and writes the engine's own line bare, with no
+`QWARN :` in front of it; `tools/qmlprobe/Probe.qml` loads the same staged
+scene under it, and every harness hands what it printed to this. Both outputs
+come here, because a throw is a throw and the discriminator was never the
+prefix.
 """
 
 from __future__ import annotations
@@ -72,6 +89,14 @@ ERROR_NAMES = (
 # `QWARN  : qmltestrunner::Suite::test_x() ` — QtTest's own prefix, and the
 # test body that was running when the message was logged. The type name is
 # optional because a message logged by the runner itself carries no test.
+#
+# THE WHOLE PREFIX IS OPTIONAL, because there are two engines (PLAN D38).
+# QtTest writes it; plain `qml`, which the probe next door runs the same
+# staged scene under, installs no handler and writes what the engine wrote:
+#
+#     file:///tmp/tmp.XXXX/Workspaces.qml:113: TypeError: Value is undefined
+#
+# with nothing in front of it. Same fault, same shape, one rule.
 PREFIX = re.compile(
     r"^Q(?:DEBUG|INFO|WARN|CRITICAL|FATAL|SYSTEM)\s*:\s*"
     r"(?:\w+::(?P<test>[\w:]+?)\(\)\s*)?"
@@ -120,9 +145,10 @@ def scan(text: str, *, stage: str | None = None) -> list[Throw]:
     out: list[Throw] = []
     for line in text.splitlines():
         prefix = PREFIX.match(line)
-        if not prefix:
-            continue
-        rest = line[prefix.end() :]
+        # No prefix is not "not a message": it is the other engine. `qml`
+        # writes the engine's line bare, so the discriminator has to be the
+        # rest of it — which it already was.
+        rest = line[prefix.end() :] if prefix else line
         if rest.startswith(CONSOLE):
             continue
         throw = THROW.match(rest)
@@ -133,7 +159,7 @@ def scan(text: str, *, stage: str | None = None) -> list[Throw]:
                 where=_relative(throw.group("where"), stage),
                 error=throw.group("error"),
                 message=throw.group("message"),
-                test=prefix.group("test") or "",
+                test=(prefix.group("test") or "") if prefix else "",
             )
         )
     return out

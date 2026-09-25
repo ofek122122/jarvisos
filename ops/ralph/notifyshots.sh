@@ -90,6 +90,11 @@ cp "$root/tools/notifyshots/stub/Motion.qml" "$stage/Motion.qml"
 # same shape hudshots.sh uses.
 mkdir -p "$stage/shots"
 cp "$root"/tools/notifyshots/scene/*.qml "$stage/shots/"
+# And the shared probe body (PLAN D38), which `warnprobe.qml` next to it
+# instantiates. It lives in tools/qmlprobe because all three harnesses load
+# their own scene the same way, and three copies of it would be three things
+# to keep matching.
+cp "$root/tools/qmlprobe/Probe.qml" "$stage/shots/"
 
 # The faces theme.toml names, pinned rather than borrowed from whatever this
 # machine happens to have installed: a sheet rendered in DejaVu would be a
@@ -128,6 +133,32 @@ done
 "$qtdecl/bin/qmllint" -W 0 --uncreatable-type disable \
   -I "$qtdecl/lib/qt-6/qml" \
   $(find "$stage" -name '*.qml' | sort)
+
+# THE SECOND ENGINE (PLAN D38). qmltestrunner drops every message logged while
+# no test function is RUNNING, and the first driver in a directory has its
+# whole scene built before the run begins — so a `console.warn` in
+# `Component.onCompleted`, and every error thrown by a binding evaluated as
+# that scene is built, never reach the log the scanner above reads. Measured,
+# with two identical drivers in one directory: only the second one is heard.
+# Which of a harness's surfaces D36 covers is therefore decided by
+# alphabetical order, and the uncovered one is the first.
+#
+# So the same stage is loaded a second time, under plain `qml`: not QtTest, no
+# handler of its own, the engine's messages straight to stderr as the engine
+# wrote them. Same scanner, same rule, the half of the scene the runner cannot
+# speak for. `tools/qmlprobe/Probe.qml` also counts what the scene built, so a
+# probe that quietly loaded nothing cannot pass as a clean one.
+#
+# QT_FORCE_STDERR_LOGGING because this Qt is built with the journald backend:
+# with stderr in a pipe — which is exactly what `tee` makes it — every message
+# goes to the journal instead. Measured, not assumed: without it this prints
+# nothing at all, not even its own count.
+probelog="$stage/probe.log"
+QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
+  timeout 120 "$qtdecl/bin/qml" -I "$qtdecl/lib/qt-6/qml" \
+  "$stage/shots/warnprobe.qml" 2>&1 | tee "$probelog"
+"$python/bin/python3" "$root/tools/qmlerrors.py" "$probelog" \
+  --stage "$stage" --rerun "bash ops/ralph/notifyshots.sh"
 
 mkdir -p "$out"
 # The driver writes relative to the working directory: a QML test cannot read

@@ -35,8 +35,13 @@ function. A `console.warn` in `Component.onCompleted`, and every error thrown
 by a binding evaluated while the scene is being built, are dropped by QtTest's
 own message handler before any of this can see them. What reaches the output
 is what the engine reports while a test body is running — which is where the
-drivers do all of their work, and is exactly where D34's TypeError was. The
-rest is PLAN D38.
+drivers do all of their work, and is exactly where D34's TypeError was.
+
+THE REST IS A SECOND ENGINE (PLAN D38), and the tests for it are at the foot
+of this file. `tools/qmlprobe/Probe.qml` loads the same staged scene under
+plain `qml`, which installs no handler and prints the engine's own line with
+nothing in front of it — so the same rule reads both, and the prefix that
+looked like the shape of a fault turns out to be optional.
 """
 
 import subprocess
@@ -270,4 +275,116 @@ def test_the_three_gates_read_this_scanner_and_nothing_else_does():
     `also` table in `dependents`. A scanner whose change ran no shot harness
     would be a scanner nobody could safely edit."""
     got = dependents.qml_readers(ROOT, ["tools/qmlerrors.py"])
+    assert set(got) == set(SCRIPTS), got
+
+
+# --------------------------------------------------- the second engine (D38)
+#
+# What QtTest never showed anybody. The runner drops every message logged
+# while no test function is RUNNING, and the narrowing is alphabetical: the
+# first driver in a directory has its whole scene built before the run
+# begins, and is silent; every later driver's is built between two test
+# functions, and is not. Recorded with two identical drivers in one temporary
+# directory, and only the second one was heard:
+#
+#     PASS   : qmltestrunner::Probea::cleanupTestCase()
+#     QWARN  : qmltestrunner::UnknownTestFunc() qml: warn from b onCompleted
+#     QWARN  : qmltestrunner::UnknownTestFunc() …/tst_b.qml:7: TypeError: …
+#     PASS   : qmltestrunner::Probeb::initTestCase()
+#
+# So which surface of a harness D36 covers was decided by a filename, and the
+# uncovered one is `tst_fit`, `tst_settle`, `tst_settle`. The other half is a
+# different ENGINE: `tools/qmlprobe/Probe.qml` loads the same staged scene
+# under plain `qml`, which installs no handler and writes the engine's line
+# bare. Same rule reads both, because the discriminator was never the prefix.
+
+# A clean probe of the bar's strip, verbatim — `bash /tmp/qstage.sh jv-bar
+# barshots` over this stage, Qt 6.11.1, QT_QPA_PLATFORM=offscreen,
+# QT_FORCE_STDERR_LOGGING=1.
+PROBED = """\
+qml: qmlprobe: the scene built 11 objects
+"""
+
+# The same probe with D38's own shape injected into the strip's root —
+# `property int injected: root.desk.nothingHere.count`, a binding evaluated as
+# the scene is built. Note what is NOT here: a `QWARN :`, a test name, or a
+# `Totals:` line. This engine has none of them.
+PROBED_THREW = """\
+file:///tmp/tmp.qVTcKjXeZp/shots/Strip.qml:30: TypeError: Cannot read property 'count' of undefined
+qml: qmlprobe: the scene built 11 objects
+"""
+
+
+def test_the_second_engine_prints_no_prefix_and_is_still_read():
+    """The whole D38 seam. `qml` writes what the engine wrote and nothing in
+    front of it, so a scanner that required QtTest's `QWARN :` would read this
+    output as an empty one — which is exactly how a fault in the first
+    driver's scene stayed invisible for as long as it did."""
+    threw = qmlerrors.scan(PROBED_THREW)
+    assert [(t.error, t.where) for t in threw] == [
+        ("TypeError", "file:///tmp/tmp.qVTcKjXeZp/shots/Strip.qml:30")
+    ], threw
+
+
+def test_a_throw_with_no_test_around_it_names_no_test():
+    """There was no test. The report must not invent one — `in ()` would be a
+    sentence about a test function that does not exist."""
+    (throw,) = qmlerrors.scan(PROBED_THREW)
+    assert throw.test == ""
+    assert "\n    in" not in str(throw), str(throw)
+
+
+def test_the_probes_own_census_is_a_voice_and_not_a_fault():
+    """The probe says how many objects the scene built, which is the only
+    thing distinguishing a clean run from one that loaded nothing. It goes out
+    as `console.log`, so it carries the `qml:` prefix and no location — a
+    voice, under the same rule that keeps `NiriModel`'s refusal a voice."""
+    assert qmlerrors.scan(PROBED) == []
+
+
+def test_the_second_engines_stage_is_named_relative_to_itself_too():
+    """`--stage` is how a `file:///tmp/tmp.XXXX/…` becomes a path someone can
+    open. The probe renders from the same stage the runner does, so it gets
+    the same treatment."""
+    (throw,) = qmlerrors.scan(PROBED_THREW, stage="/tmp/tmp.qVTcKjXeZp")
+    assert throw.where == "shots/Strip.qml:30", throw
+
+
+def test_every_shot_harness_runs_the_second_engine_over_its_own_scene():
+    """The seam again, one engine over. A probe that exists and is never run
+    is a probe about nothing — and since the shared body lives outside all
+    three harnesses, the only thing that can say each of them loads it is
+    this."""
+    for script in SCRIPTS:
+        text = (ROOT / script).read_text("utf-8")
+        assert "tools/qmlprobe/Probe.qml" in text, f"{script} does not stage the probe"
+        assert "warnprobe.qml" in text, f"{script} does not load its probe document"
+        assert "/bin/qml" in text, f"{script} does not run the second engine"
+        assert "QT_FORCE_STDERR_LOGGING" in text, (
+            f"{script} would read an empty log: this Qt is built with the "
+            "journald backend and `tee` makes stderr a pipe"
+        )
+
+
+def test_each_harness_has_a_probe_document_the_test_runner_will_not_run():
+    """Both halves share a directory: qmltestrunner is handed `$stage/shots`
+    and runs `tst_*.qml`, and the probe document sits right beside them. It is
+    lowercase, which is also what keeps it from being a QML type anything can
+    name by accident."""
+    for scene in ("hudshots", "notifyshots", "barshots"):
+        doc = ROOT / "tools" / scene / "scene" / "warnprobe.qml"
+        assert doc.is_file(), f"{scene} has no probe document"
+        assert doc.name.islower(), doc
+        body = doc.read_text("utf-8")
+        assert "Probe {" in body, f"{doc} does not instantiate the shared probe"
+        assert "subject:" in body, f"{doc} gives the probe nothing to count"
+
+
+def test_the_three_gates_read_the_shared_probe_body():
+    """`tools/qmlprobe/Probe.qml` is staged into all three harnesses and lives
+    in none of them, so nothing about its path says which gates open it. The
+    mount table in `dependents` is what says so, and this is what holds the
+    table to it — a change to the probe that ran no harness would be a change
+    nobody could verify."""
+    got = dependents.qml_readers(ROOT, ["tools/qmlprobe/Probe.qml"])
     assert set(got) == set(SCRIPTS), got
