@@ -3666,7 +3666,26 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       real objection: the probe is already 158 s of the gate's 193 s and
       every window is another idle hold. Discovered while building A84.
 
-- [ ] B89. **A plate can silently stop drawing a word its state element
+      **Measured against, on paper, before anybody builds it (iteration
+      108).** The widening this item wants to assert may be worth about a
+      pixel. `MIC LOSING AUDIO` is 16 monospace characters, so MicPlate
+      comes to pad·2 + dot + gap + 16·(6.6 + 1.54) ≈ 165 px; `jv-ears
+      DEGRADED` on HealthPlate comes to pad·2 + dot + gap + 7 chars + gap
+      + 8 chars ≈ 165 px as well. The two plates are in the same
+      right-docked column, so `drawn_box`'s left edge is the WIDER of
+      them, and the only pair that isolates the mic line — `deaf →
+      lossy`, where the health line is identical under both — would move
+      it by a pixel or two or not at all. (`open → lossy` is not that
+      pair: it brings HealthPlate with it, so it grows downwards too and
+      is A47 all over again.) That is arithmetic and not a measurement,
+      and it should be MEASURED before the assertion is designed, because
+      if the answer is zero the shape of this item is wrong. The awkward
+      part is that `losing` can never be the only plate lit: a losing
+      device is `degraded` by `CaptureMeter.health()`, so MicPlate and
+      HealthPlate are welded — which is the same coincidence that made
+      this item attractive. Noted while building B89.
+
+- [x] B89. **A plate can silently stop drawing a word its state element
       can produce.** MicState now has five readings and MicPlate draws
       three of them, two by deliberate silence — and the mapping lives in
       one ternary in the plate with nothing anywhere asserting it covers
@@ -3684,6 +3703,45 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       same trap: the failure message has to say "drawing it as nothing is
       a decision — name it and say so", or the next author reads a
       mysterious veto. Discovered while building A84.
+
+      **Done — 5a5ccf0.** Built as described, in
+      `tools/tests/test_gen_theme_qml.py`, and it was RED on the three
+      words MicPlate never named (`live`, `losing`, `stalled`); the plate
+      says which line each one draws now, and which of them the ternary
+      reaches by falling off the end. Three things the item did not know.
+      One literal had to be excluded and exactly one — the operand of
+      `typeof m.capture_age_s === "number"`, a JavaScript type name
+      sitting inside MicState's `state` block. "Names it" had to mean
+      backticks or quotes rather than a bare occurrence, because `live` is
+      already in MicPlate's first line inside "the live-microphone
+      indicator" and a gate a passing sentence satisfies fires on nothing.
+      And it needed non-vacuity at BOTH ends: it finds its work by a
+      convention (a `state` block in an element a plate declares), so it
+      asserts it found pairs at all AND that every element in `core/` with
+      a word set is drawn by a plate it checked. What it does NOT cover is
+      B90.
+
+- [ ] B90. **B89's gate finds its work by a convention, and four other
+      closed word sets do not follow it.** An element that decides between
+      a fixed set of words calls the result `state` and writes it as a
+      block — that is how the new gate finds a word set at all, and only
+      `core/MicState.qml` and `core/SpeechState.qml` do it.
+      `core/ConfirmState.qml` (`outcome`, `answeredBy`),
+      `core/LinkState.qml` (`reason`), `core/OutputState.qml` (`silence`)
+      and `core/HealthState.qml` (`llmBackend`) each decide between
+      literals in exactly the same way under a different name, and every
+      one of them is read by a plate. So the silent failure B89 closed is
+      still open four times over. The naive generalisation does not work
+      and it is worth writing down why: "every block-bodied `readonly
+      property string` in an element" also collects
+      `HealthState.beatKey`, whose literals are separators like `"@"`, and
+      a gate demanding a plate name `"@"` is one the next author deletes.
+      The options are a convention (rename the four, which moves a lot of
+      code for a test) or a rule that can tell a word set from a key
+      builder — perhaps "every literal reachable at a `return`, plus every
+      literal an `===` compares the returned variable against", which is
+      the shape SpeechState already forces. Neither is obviously right.
+      Discovered while building B89.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD

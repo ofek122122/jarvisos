@@ -10688,3 +10688,87 @@ survived a further round and has its own case now.
   written-down rules; A62/A70 — the corner now has two plates for this one
   event, which this iteration took the `stalled` precedent on rather than
   answering — are still a human's call.
+
+## 2026-09-25 — iteration 108 · the word a plate never names
+
+- what: **B89.** A `tools` test that reads a state element and the plate
+  that draws it as TEXT, and fails on a word the element can say that the
+  plate never names. `core/MicState.qml` has had five readings since A84
+  and `MicPlate.qml` draws three of them, two of those by deliberate
+  silence; the mapping is one ternary with a fall-through at the end, and
+  nothing anywhere asserted it covered the set. The sixth word would have
+  been drawn as a calm `MIC` with every suite green.
+
+  **Why no existing suite can see it.** The QML suites test the ELEMENT —
+  they are headless, and a plate imports the Quickshell singletons a
+  headless run cannot load (A56) — so `tst_micstate.qml` can prove
+  MicState says `losing` and can never ask what MicPlate drew for it. The
+  two screenshot sheets go the other way and photograph plates, but only
+  the states somebody remembered to stage: `MIC LOSING AUDIO` is on
+  neither sheet today (that is A85, still open). So the claim is B88's
+  class — a relation between two files with no third thing reading both —
+  and it goes where the other cross-file HUD claims already live.
+
+  **It asks for a NAME, not a branch.** Drawing a word as nothing is a
+  real decision and often the right one: `off` and `unknown` are both
+  silence on MicPlate, for two different reasons, and both reasons are
+  worth more written down than a branch would be. What the gate refuses
+  is the word going UNMENTIONED, which is the shape the silent failure
+  takes — and its message says that in those words, because a veto the
+  next author cannot act on is a veto they delete.
+
+  **Backticks or quotes, and not a bare occurrence.** `live` is already
+  in MicPlate's first line, inside "the live-microphone indicator", so a
+  substring rule would have passed on a sentence that is not about the
+  reading at all. The repo already spells a word off the wire in
+  backticks; that is the rule, and it is the difference between a gate
+  that fires and one that cannot.
+
+  **One literal had to be excluded and only one.** `typeof
+  m.capture_age_s === "number"` is inside MicState's `state` block, and
+  `"number"` is a JavaScript type name that no plate will ever draw. The
+  exclusion is that narrow — the operand of a `typeof` comparison — and
+  everything else in both blocks came out right: five words for MicState,
+  six for SpeechState (including the two that reach `return named;`
+  through an equality guard rather than a literal return).
+
+  **Non-vacuity, both ways.** This finds its work by a convention — a
+  `state` block in an element a plate declares as a property — and a
+  convention is exactly what a rename makes silently untrue. So it
+  asserts it found pairs at all, and that every element in `core/` with a
+  word set is drawn by a plate it checked. A gate that quietly reads
+  nothing is the failure it was written to prevent.
+
+- why: invariant 10 says the sensor indicators are not fakeable, and A84
+  had just added the fourth word to the one indicator that clause is most
+  about. The plate that drops a word does not draw nothing — it draws the
+  fall-through, which for MicPlate is the calm teal recording light over a
+  microphone that is in trouble. That is the not-fakeable half
+  over-claiming in the one direction it may not, and until this commit the
+  only thing standing between the HUD and it was that somebody remembered.
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 2 paths, 111.0 s
+  (jv-compat 2.7, jv-hud-bridge 1.5, tools **441 (was 440)**, `hudshots.sh`
+  67.6 with all 16 shots matching HEAD). The new test was RED before
+  MicPlate named its three words, with the message naming exactly
+  `['live', 'losing', 'stalled']`. Also `bash ops/ralph/hudscreens.sh`
+  GREEN (189.8 s, exit 0) because the gate named it: the change is a
+  comment in a plate, so nothing should have moved, and nothing did — 5 of
+  7 screens differed by the compositor's rounding alone (worst 108 px
+  inside a 256 px floor) and were restored, and all 7 match HEAD.
+- build: `nixos-rebuild build --flake .#ares` green (new closure
+  ramv5kzb1mhw8clb5nl2k9lxyhnjr3cq). No schema change, no jv-act, no boot
+  path, no pins.
+- files: shell/jv-hud/MicPlate.qml, tools/tests/test_gen_theme_qml.py
+- commits: 5a5ccf0 (the gate and the three words it made MicPlate say)
+- next: **A85** is still the photograph of `MIC LOSING AUDIO`, and it now
+  carries a warning it did not have this morning — the widening it wants
+  to measure looks like it is worth about a pixel. The arithmetic is in
+  the PLAN item; somebody should MEASURE it before building the assertion
+  around it, because if it is really zero then the whole shape of that
+  item is wrong. **B90** is raised here: four other elements decide
+  between closed word sets and none of them calls the result `state`, so
+  this gate walks past them, and the naive generalisation collects `"@"`
+  out of a key builder. Otherwise unchanged: **B85**'s tap half (a turn's
+  ENDING, which `--latency` never reports) is still the next cheap
+  feature; B87/B88 are the gate's own written-down rules; A62/A70 — the
+  corner with two plates for one event — are still a human's call.
