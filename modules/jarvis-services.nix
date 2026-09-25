@@ -16,6 +16,7 @@ let
   jarvisd = self.packages.x86_64-linux.jarvisd;
   jv-act = self.packages.x86_64-linux.jv-act;
   jv-hud = self.packages.x86_64-linux.jv-hud;
+  jv-bar = self.packages.x86_64-linux.jv-bar;
   llama = pkgs.llama-cpp.override { cudaSupport = true; };
 
   busSock = "/run/jarvis/bus.sock";
@@ -268,9 +269,12 @@ in
       };
     };
 
+    # The top bar's service is wired in modules/theme.nix (with the rest of the
+    # desktop look); jv-bar is only referenced here to put it on PATH.
+
     # jv-compat is on-demand (jv-compat install <path>), reachable via
     # binfmt/MIME — no persistent unit.
-    environment.systemPackages = [ jarvisd jv-act jv-hud pyEnvs.compatEnv ];
+    environment.systemPackages = [ jarvisd jv-act jv-hud jv-bar pyEnvs.compatEnv ];
 
     # --------------------------------------------------------------- user
     # PipeWire is a session service; ears and voice follow it. ConditionUser

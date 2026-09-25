@@ -491,7 +491,7 @@ def test_every_gate_this_repo_names_is_planned_by_a_change_to_itself():
         dependents.RUNTESTS_SH,
         verify.CARGOTEST_SH,
     }
-    assert len(gates) == 6, sorted(gates)
+    assert len(gates) == 7, sorted(gates)
     for script in sorted(gates):
         assert (ROOT / script).is_file(), script
         named = [s.command for s in verify.plan(ROOT, [script])]

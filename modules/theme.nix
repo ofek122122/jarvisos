@@ -1,8 +1,9 @@
 # JarvisOS system theming — the desktop's look, declaratively (blueprint §06).
 # Fonts live in modules/fonts.nix; this module owns everything else that makes
 # ordinary apps and the session read as JarvisOS: GTK + Qt dark/ember, cursor
-# and icon themes, and the terminal + launcher palettes. The wallpaper's own
-# service is here; its colours are in pkgs/jarvis-wallpaper.
+# and icon themes, and the terminal + launcher palettes. Two graphical-session
+# surfaces have their units here: the wallpaper (colours in
+# pkgs/jarvis-wallpaper) and the top bar (QML in shell/jv-bar).
 #
 # The PALETTE IS NOT WRITTEN HERE. It is read out of `personality/theme.toml`
 # with `builtins.fromTOML`, the way modules/fonts.nix reads the font families
@@ -22,6 +23,7 @@
 { config, lib, pkgs, self, ... }:
 let
   wallpaper = self.packages.x86_64-linux.jarvis-wallpaper;
+  jv-bar = self.packages.x86_64-linux.jv-bar;
 
   theme = builtins.fromTOML (builtins.readFile ../personality/theme.toml);
 
@@ -82,12 +84,15 @@ let
   '';
 in
 {
-  environment.systemPackages = with pkgs; [
+  environment.systemPackages = [
+    jv-bar # the top bar, so it can also be started by hand while working on it
+  ]
+  ++ (with pkgs; [
     swaybg # wallpaper
     adw-gtk3 # dark GTK theme (accent via GTK4/libadwaita)
     papirus-icon-theme
     bibata-cursors
-  ];
+  ]);
 
   # Qt follows the same dark identity as GTK.
   qt = {
@@ -117,6 +122,35 @@ in
     after = [ "graphical-session.target" ];
     serviceConfig = {
       ExecStart = "${pkgs.swaybg}/bin/swaybg -m fill -i ${wallpaper}/share/backgrounds/jarvisos.png";
+      Restart = "on-failure";
+      RestartSec = 2;
+    };
+  };
+
+  # jv-bar — the top bar (blueprint §06, PLAN D1), the second Quickshell
+  # surface on this machine and the first one that is resident. It lives here
+  # rather than beside jv-hud in modules/jarvis-services.nix because it is
+  # DESKTOP, not perception: it never opens the bus, never reads a sensor and
+  # never needs commonEnv — its two sources are niri's event stream (pinned
+  # into its wrapper, read-only) and the machine's clock.
+  #
+  # Unlike jv-hud it IS wanted by default, because it has something true to
+  # say from the first frame: your workspaces and the time. The HUD is held
+  # back for the opposite reason — an overlay with no signal yet is set
+  # dressing — and both rules come from the same §06 sentence.
+  #
+  # `niri msg` finds the compositor through NIRI_SOCKET, which niri-session
+  # exports into the user manager, so being part of the graphical session is
+  # also what gives the bar its socket. Started before niri is up, it shows
+  # no workspaces and retries — truthfully empty, never a guess.
+  systemd.user.services.jv-bar = {
+    description = "JarvisOS top bar (Quickshell layer-shell strip)";
+    unitConfig.ConditionUser = "ofek";
+    wantedBy = [ "graphical-session.target" ];
+    partOf = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    serviceConfig = {
+      ExecStart = "${jv-bar}/bin/jv-bar";
       Restart = "on-failure";
       RestartSec = 2;
     };

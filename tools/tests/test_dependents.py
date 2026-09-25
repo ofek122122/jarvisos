@@ -852,6 +852,42 @@ def test_the_qml_gates_reach_every_file_of_the_hud_that_runs():
     }, sorted(ours - seen)
 
 
+def test_the_qml_gate_reaches_every_file_of_the_bar_that_a_test_can_load():
+    """The same sweep for `shell/jv-bar` (PLAN D1), and it is a SHORTER reach
+    on purpose — which is the fact worth pinning.
+
+    The HUD has two gates: the headless tests and the contact sheet, which
+    stages the whole shell and drives the real plates. The bar has one. So
+    everything above `core/` — the strip itself, the workspaces row, the clock
+    — is reached by no QML gate at all and is covered only by qmllint inside
+    `nix build .#jv-bar`, plus the Python sweeps over `shell/**`. That is a
+    real gap (PLAN D13 is the bar's render harness), and the way a gap like
+    this usually disappears is by nobody writing it down."""
+    ours = {
+        p.relative_to(ROOT).as_posix()
+        for p in (ROOT / "shell" / "jv-bar").rglob("*.qml")
+    }
+    seen: set[str] = set()
+    for gate in dependents.QML_GATES:
+        seen |= dependents.qml_reads(ROOT, gate)
+    assert ours - seen == {
+        "shell/jv-bar/shell.qml",  # Quickshell: gated by `nix build .#jv-bar`
+        "shell/jv-bar/Niri.qml",  # Quickshell: the niri child process
+        "shell/jv-bar/Theme.qml",  # generated; `--check` in the same build
+        "shell/jv-bar/Workspaces.qml",  # no render gate for the bar yet (D13)
+        "shell/jv-bar/Clock.qml",  # likewise
+    }, sorted(ours - seen)
+
+
+def test_a_bar_element_names_only_the_bars_gate():
+    """Two scripts, not one with an argument: touching a bar element must not
+    run the HUD's tests, and touching a HUD element must not run the bar's."""
+    got = dependents.qml_readers(ROOT, ["shell/jv-bar/core/NiriModel.qml"])
+    assert set(got) == {"ops/ralph/bartest.sh"}, got
+    got = dependents.qml_readers(ROOT, ["shell/jv-hud/core/BusModel.qml"])
+    assert "ops/ralph/bartest.sh" not in got, got
+
+
 def test_the_cli_names_the_qml_gates_it_used_to_apologise_for():
     """What replaced the caveat. The command is what a tired loop will run, so
     it prints the script, not the name of a thing it cannot see."""
