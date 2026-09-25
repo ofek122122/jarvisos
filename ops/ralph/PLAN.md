@@ -1805,7 +1805,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       Discovered in B72.
 
 - [x] B74. `docs/hud/screens/` is compared against the HUD this repo draws,
-      and stops being a sheet that can only be overwritten. — PENDING
+      and stops being a sheet that can only be overwritten. — e305ac9
       (`hudsheet.Tolerance`, a floor of **256 px per screen and 3 per
       channel**, measured rather than guessed: four renders of an untouched
       HUD compared six ways, 3..111 px apart, never more than 3 on one

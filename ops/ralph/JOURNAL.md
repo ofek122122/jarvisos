@@ -9581,3 +9581,93 @@ than folded into an iteration whose subject was the table.
   biggest thing a human can hand this loop. Track A needs one look at
   `docs/hud/` to unblock A47, A55, A62, A70/A72, the A21/A22/A25 cluster and
   A73's remaining half.
+
+## 2026-09-25 — iteration 97 — B74: the seven screens, compared instead of overwritten
+
+`ops/ralph/hudshots.sh` has read its own contact sheet back since B52: every
+PNG it renders, against the one committed at HEAD, and a run whose plates drew
+something else ends nonzero naming the pixels. `ops/ralph/hudscreens.sh` — the
+harder sibling, which photographs the REAL `.#jv-hud` through a real
+compositor on ares' three monitors — could only ever WRITE. Nothing in the
+repo had ever asked whether `docs/hud/screens/` still showed the HUD this
+repo draws, and a stale screen is exactly as convincing as a current one.
+
+**The measurement, which is most of the work and refutes half of what raised
+it.** B72 had reported the noise as "3 and 4 pixels of 3.7 M, one channel, by
+one". Four renders this iteration — three back to back, plus the sheet
+committed at HEAD — compared six ways over seven files say something bigger:
+`01-quiet` (draws nothing) and `04-unheard` (two short mono labels) are
+byte-identical in all six comparisons, and `02-heard`/`03-confirm` differ by
+**3 to 111 px**, at most **3 on one channel**, always inside the plate on
+antialiased glyph edges and the plate's own rounded corner. Renders taken back
+to back never exceed 1 per channel; the 2s and 3s are all against HEAD's
+sheet, which was rendered days ago.
+
+So B74's own proposal — "under ~100 pixels by at most 1", with a threshold
+below the smallest real change a plate can make (A34's 4x4 ember square, 16
+px) — is not reachable. The noise is ALREADY past 16 px, so no count can
+discriminate. **Amplitude can**: §06's quietest ink (`text_3`, `teal`,
+`ember`) sits more than a hundred values from the glass it is drawn on, so
+every word, colour and box a plate can change is two orders of magnitude
+above the floor, and antialiasing is one to three. `NOISE_CHANNEL = 3` is the
+bound that grades; `NOISE_PIXELS = 256` is the backstop it needs for the one
+change that is faint AND enormous (a plate opacity of 0.86 -> 0.855 moves
+every pixel of the glass by one). A test holds the first half against
+`personality/theme.toml` itself rather than against a number written down
+twice — raise the floor to where it could swallow a word and it fails there,
+not in a photograph nobody compared.
+
+**What it does with a difference it forgives.** Says so, every time, on a
+GREEN run — a comparison whose tolerance is silent is one nobody can audit —
+and then, ONLY when the run is writing over the committed sheet, puts the
+committed bytes back over the screens that moved by rounding alone. That is
+what makes the run idempotent, and it is deliberately not done for a run
+pointed at a scratch directory: the next person measuring this noise would
+otherwise be measuring the restore. The real run proves it end to end: 5 of 7
+absorbed (worst 111 px, 3 per channel), `git status` on `docs/hud/screens/`
+clean afterwards. A dirty one now means the HUD really did draw something
+else.
+
+The floor is a property of the SHEET, not of the comparator: `EXACT` stays the
+default, `hudshots.sh` passes no tolerance at all, and a test fails if it ever
+starts to — that sheet is byte-reproducible (A45) and has no honest reason to
+move.
+
+**Half of B72's argument is gone and it is written down rather than acted on.**
+`hudscreens.sh` kept out of the verify gate for two reasons: 2m25s and seven
+pictures for a human, and "it rewrites the tree the plan was computed from".
+The second is now only true of a run that DID change the HUD. Reason 1 carries
+the decision on its own today; **B75** asks whether it should, and names the
+option nobody has measured — binding the PROBES (corner, exclusive zone,
+click, idle frames, which are verdicts) without the seven `grim` captures and
+the comparison (which are pictures).
+
+- tests: `bash ops/ralph/verify.sh` green — it planned `runtests.sh tools`
+  **407** (was 385) and `hudshots.sh` 14/14, and named `hudscreens.sh` as
+  not-run beside the four paths that asked for it. Nine mutations, nine
+  caught, but not on the first pass: "the restore runs on every shot, not
+  only the absorbed ones" SURVIVED, because every test that had a real change
+  in it had nothing absorbed, so the restore block never ran. The test it
+  earned is the refresh a real HUD change actually produces — one screen drew
+  something else, the other six jittered — and it is now the strongest thing
+  in the file. `bash ops/ralph/hudscreens.sh` run for real over the committed
+  sheet: 7 screens, every window and probe green, 5 absorbed and restored,
+  tree clean. `verify.sh --since HEAD~1` re-asked about the commit: green over
+  the same 11 paths.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/hudsheet.py, tools/hudscreens/sheet.py, ops/ralph/hudscreens.sh,
+  tools/dependents.py, tools/verify.py, tools/tests/test_hudsheet.py,
+  tools/tests/test_hudscreens.py, tools/tests/test_dependents.py,
+  tools/tests/test_verify.py, docs/hud/screens/README.md
+- commit: e305ac9
+- next: **B75** is the one this iteration earned, and (c) — measuring what the
+  probes cost without the captures — is a loop-sized job. Also doable by the
+  loop: **B73** (the QML gates reading their own scripts), **B62**, **B67**.
+  Track A is still where the value is and still almost entirely waiting on one
+  human look at `docs/hud/`: A47's OCR-or-IPC decision blocks A55 and four
+  growth checks, A13/A27/A38 block the multi-monitor question, and A56 asks
+  whether the sequence suite belongs in the build gate. Waiting on one human
+  sentence each: **B27/B28**, **B43/B47/B54**, and **B10/A28** — one live
+  recording of one spoken turn on ares is still the biggest thing a human can
+  hand this loop.
