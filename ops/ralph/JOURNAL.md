@@ -11175,3 +11175,144 @@ survived a further round and has its own case now.
   larger loop task: `respond` p50 mixes finished turns with talked-over
   ones, and the unmatched turns must be refused rather than binned.
   A62/A70 — one corner, two plates, one event — remain a human's call.
+
+## 2026-09-25 — iteration 113 · the three numbers jv-ears never sent
+
+**RECONSTRUCTED by iteration 114, from commit 93605f8 alone.** That
+iteration committed its code and never committed its journal or plan, so
+this is the bookkeeping it owed, written by the next loop from the commit
+message. It is not a record of a run this loop watched: the tests and the
+build below are what that commit says it did, not what was re-verified
+here. What WAS re-verified here is that the fixtures it wrote are the ones
+`tools/tests/test_hudscreens.py` still holds green, and that the sheet
+still matches HEAD.
+
+- **what**: PLAN A87. The screen sheet's two older jv-ears fixtures were
+  legal against `sys.health` and hand-waved against the service. A85 had
+  made `MIC_LOSSY` faithful to `CaptureMeter.metrics()` and `loss_note()`
+  and gated it; this brought `MIC_OPEN` and `MIC_DEAF` up to the same
+  standard. `MIC_DEAF.notes` became the AGE `CaptureMeter.health()` really
+  sends rather than the summary "capture stalled" nobody writes;
+  `capture_loss_window_s` was added to both, because real ears ships it
+  from the first heartbeat; and it found a third fault A87 had not seen —
+  all THREE fixtures said `capture_stall_s: 2.0`, which is not a number
+  jv-ears can send, since that gauge is `CaptureMeter.STALL_S` copied
+  verbatim and STALL_S is 1.0. The gauge A87 said nobody should add was
+  not added: `capture_loss_age_s` on MIC_OPEN would move MicPlate from
+  `MIC` to `MIC LOSING AUDIO`, and A43's idle window is measured on its
+  absence.
+- **why it was safe**: nothing on screen moved, and that was the condition
+  for doing it at all. `notes` reaches no plate, and reporting the loss
+  window only moves `EarsBudgets.lossWindowS` from the pinned fallback 1.0
+  to the reported 1.0 while flipping `lossWindowReported`, which no plate
+  reads — and there is a test that goes red the day one does.
+- tests: per the commit, `hudscreens.sh` re-shot all 9 pictures and they
+  matched the bytes committed at HEAD.
+- build: not recorded by that commit. Iteration 114 built the same tree
+  (`git+file://…?ref=ralph/auto`) and it is green.
+- files: tools/hudscreens/sheet.py, tools/tests/test_hudscreens.py
+- commits: 93605f8
+- next: A86, which is what iteration 114 took.
+
+## 2026-09-25 — iteration 114 · the plate that stayed put and said a longer word
+
+- **what**: PLAN A86, and the thing it asked for first was a MEASUREMENT
+  rather than a gate. Every growth assertion this harness has proves a
+  plate ARRIVED — same top, same right edge, a taller union — and the one
+  thing none of them can see is a plate that stayed exactly where it was
+  and said a LONGER WORD. That is what `06-lossy` is a picture of, so
+  nothing in a run would have noticed if that picture said `MIC`.
+
+- **the number, and it is zero.** A85's arithmetic guessed the widening
+  might be worth about a pixel. It is worth none at all. `deaf -> lossy`
+  was photographed through the real compositor, and the drawn box is
+  **(2380, 16, 2543, 93) under BOTH readings** — identical, to the pixel.
+  `MIC LOSING AUDIO` and `jv-ears DEGRADED` are both sixteen characters of
+  11 px mono, both plates measure 164 px, and the box around the two of
+  them is the same four numbers whichever word the microphone is drawing.
+  The measurement cost one scaffolded run and was thrown away before
+  anything was designed, which is exactly what A86 asked for and the
+  reason the shape below is right.
+
+- **so the rectangle is the plate's own BAND.** The stack leaves
+  `Theme.gapPx` of untouched desktop between its plates and every plate is
+  a filled rectangle of glass at `plate_opacity = 0.86`, so a contiguous
+  run of drawn rows IS a plate and a gap between runs IS the gap between
+  two of them. `sheet.row_bands` does the cutting (pure, so a test with no
+  compositor runs it, for `grew_downwards`' reason); `drawn_bands` in
+  shoot.py measures how far left each band reaches; `sheet.widened` is the
+  geometry one plate has — top, bottom and right pinned exactly, left
+  strictly further out. Strictly, because the two readings this separates
+  differ by four characters and nothing else.
+
+- `06-lossy` declares `widens_from: [MIC_DEAF]`, and MIC_DEAF is the only
+  fixture it can be measured against: both are the same `degraded` from
+  the same jv-ears, so HealthPlate draws the identical line under both and
+  the microphone line is the only thing in the corner that can move. The
+  run refuses a pair whose plate COUNT changed, and one whose OTHER bands
+  moved, so a pass is evidence about the word rather than about the
+  corner. Measured in the gate run: band 0 goes (2412, 16, 2543, 50) ->
+  (2380, 16, 2543, 50) — **32 px wider** — while band 1 and the union do
+  not move at all.
+
+- **the trap, and it has its own test.** `grows_from`'s shot declares a
+  `hold`, so the settle after the thrown-away exposure re-feeds the real
+  frames. `06-lossy` deliberately declares none (a heartbeat is believed
+  for two of its own periods), so without an explicit re-publish the
+  settle SLEEPS and the picture committed to the sheet is of the NARROWER
+  reading under the wider one's caption — and every check would pass,
+  because the plate really did widen at the moment it was measured. The
+  re-publish is there and a test reads the loop for it.
+
+- tests: `bash ops/ralph/verify.sh` GREEN, and again as `--since HEAD~1`
+  over what the commit actually took. 6 new tests in
+  `tools/tests/test_hudscreens.py` (463 in the tools suite): the band cut
+  (including two plates with no desktop between them staying ONE run, and
+  the numpy iterator being accepted), the widening geometry with the
+  equal-width case failing, the pair isolating the microphone line (the
+  two exposures may differ on `capture_age_s` and `capture_loss_age_s` and
+  nothing else, and must report the same service and state), the
+  measurement being taken on a band and not on the box, the re-publish,
+  and the refusals — plus MicPlate's position above HealthPlate read out
+  of shell.qml, so a reordered stack fails here instead of quietly
+  measuring the health line. Two existing tests were edited honestly:
+  `ears_beats` now reads `widens_from` (the new place a shot can put
+  frames), and the one-frame assertion admits the narrower exposure and
+  says why it is not a second frame in the picture.
+  `bash ops/ralph/hudscreens.sh` run three times: twice with the
+  scaffolding, to take the measurement (the first of those had its log
+  thrown away before it was read, which is the whole reason there was a
+  second), and once as the gate — 199.0 s, 9 screens, **all matching the
+  sheet committed at HEAD**, which is the condition this change had to
+  meet. Against a scratch directory both times, deliberately:
+  the HUD did not move, so the committed PNGs are already right and a run
+  pointed at `docs/hud/screens` would only have restored them.
+- the cost: 199.0 s against iteration 112's 192.5 s. About 2 s of that is
+  this (the `settle` phase went 21.7 -> 23.4 s, which is one `SETTLE_S`
+  and one publish); the rest is the read-back's variance — `compare` alone
+  was 35.3 s in one run this session and 43.7 s in the next.
+- build: `nixos-rebuild build --flake .#ares` green, closure
+  w9smk2s4nj1w6d4gamsbw1mq9kqwy2bp. That is NOT the
+  9b5gamgwmlplz7isgnjabh3zwqy3dn5c iterations 110-112 recorded, and the
+  move is not this commit's: building the committed tree at
+  `ralph/auto` with none of this work in it gives the same
+  w9smk2s4…, so it came in with the merge of main at 4b2fd15. This commit
+  touches a harness and its tests, and nothing that ships. No schema
+  change, no jv-act, no boot path, no pins.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  tools/tests/test_hudscreens.py
+- commits: 0aa0865
+- next: **A89** is the one this iteration is most tempted by and most
+  wants measured first: the bands say the corner's 11 px mono is 8.08 px
+  per character over 34.8 px of plate, fitted over three points, which
+  means a band's WIDTH nearly IS the word — and that is the closest
+  anything here has come to A47's question of WHICH plate. Measure more of
+  the sheet's bands against the words their captions name before writing
+  any rule; a width-to-chars rule that drifted would fail pictures that
+  are right. **A88** is the smaller, well-scoped one: six callers still
+  measure the union, and the work is naming which of them has a widening
+  it should care about rather than converting them all. **B94** is still
+  the oldest question in this corner and still a human's: the HUD draws
+  two words nobody can read. **B92** stays the larger loop task —
+  `respond` p50 mixes finished turns with talked-over ones. A62/A70 — one
+  corner, two plates, one event — remain a human's call.
