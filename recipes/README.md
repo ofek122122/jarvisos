@@ -18,9 +18,25 @@ home_paths = []                 # e.g. ["Documents/MyAppSaves"]
 
 `home_paths` entries are relative to the user's home and may not contain
 `..`, be absolute, or be empty — each of those mounts more of the home
-than the grant names, and `home_paths = ["."]` mounts all of it. They are
-refused when the argv is built (`jv_compat.prefix.grant_dest`), so a
-recipe that names one fails the install instead of widening it.
+than the grant names, and `home_paths = ["."]` mounts all of it.
+
+**A grant must name something that is already on this machine.** bwrap
+resolves a bind's SOURCE on the host, so a grant naming a folder the user
+does not have does not degrade the install, it aborts it. jv-compat
+therefore refuses the recipe before it builds anything — a `blocked`
+frame naming the absolute path — and it will NOT create the folder: only
+jv-act writes outside a service's own state dir (invariant 3), and that
+folder is the user's. Two ways out, and they are not equal: the user
+creates it (one `mkdir`, and the refusal says which), or the recipe grants
+a folder that does exist — which for a missing `Documents/MyAppSaves`
+means granting `Documents`, handing over every other document with it. The
+first is the better answer whenever an app just needs a directory of its
+own. A grant may also name a single FILE, which is narrower than the
+folder around it.
+
+Both refusals are `jv_compat.prefix.grant_problems`, asked once per
+install before a prefix exists, and every bad grant in a recipe is named
+at once so one fix covers them all.
 
 Matching: a sha256 pin always wins; otherwise the first pin-less recipe
 for the installer framework applies; otherwise a zero-grant default

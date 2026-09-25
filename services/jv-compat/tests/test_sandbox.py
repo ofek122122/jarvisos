@@ -218,6 +218,51 @@ def test_a_grant_that_leaves_the_private_home_is_refused(home, bad):
         bwrap_args(recipe(home_paths=[bad]), p, ["true"])
 
 
+def test_a_grant_whose_folder_is_not_there_aborts_the_whole_sandbox(home):
+    """The premise the pre-flight refusal rests on, EXECUTED rather than
+    assumed: `--bind` resolves its source on the host and bwrap exits before
+    it execs anything if that source is missing. So a grant naming a folder
+    the user does not have yet does not degrade the install — it kills it,
+    after the screening, with a message about a path the user never typed.
+
+    `bwrap_args` stays willing to build this argv on purpose (whether THIS
+    machine can honour a recipe is the pipeline's question — `grant_problems`
+    — not the argv's), which is the only reason the premise can be run at
+    all rather than argued about."""
+    gone = home / "Documents" / "AppSaves"
+    gone.mkdir(parents=True)
+    p = create_prefix_layout("demo")
+    argv = bwrap_args(
+        recipe(home_paths=["Documents/AppSaves"]), p, ["/bin/sh", "-c", "echo RAN-ANYWAY"]
+    )
+    gone.rmdir()  # ...and the grant is the ONLY thing that changed.
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    assert r.returncode != 0, "bwrap accepted a bind of a source that is not there"
+    assert "RAN-ANYWAY" not in r.stdout, "the inner command ran anyway"
+    assert str(gone) in r.stderr, f"bwrap did not say which path: {r.stderr.strip()!r}"
+
+
+def test_a_grant_may_name_a_single_file_and_the_app_can_read_it(home):
+    """`grant_problems` refuses a grant that is ABSENT and says nothing
+    about what kind of thing it is, which is a decision and not an
+    oversight: a grant naming one file is NARROWER than one naming the
+    folder around it, and bwrap binds either. Requiring a directory would
+    refuse the more conservative recipe of the two."""
+    (home / "Documents").mkdir()
+    one = home / "Documents" / "settings.ini"
+    one.write_text("theme=dark\n")
+    (home / "Documents" / "tax-return.pdf").write_text("secret")
+    p = create_prefix_layout("demo")
+    r = sh(
+        'read line < "$HOME/Documents/settings.ini"; echo "$line";'
+        '[ -e "$HOME/Documents/tax-return.pdf" ] && echo SIBLING-LEAKED || echo sibling-hidden',
+        recipe(home_paths=["Documents/settings.ini"]),
+        p,
+    )
+    assert r.returncode == 0, f"{r.stdout.strip()} {r.stderr.strip()}"
+    assert r.stdout.split() == ["theme=dark", "sibling-hidden"]
+
+
 # --------------------------------------------- the network
 
 

@@ -114,6 +114,64 @@ def grant_dest(home: Path, rel: str) -> Path:
     return home / p
 
 
+def grant_problems(recipe: Recipe) -> list[str]:
+    """Every reason THIS machine cannot honour this recipe's grants, one
+    sentence each — empty if it can. Asked before any work is done.
+
+    A grant is a fact about two things: the recipe (reviewed, in this repo)
+    and the user's home (not this repo's business). `--bind` resolves its
+    SOURCE on the host, so a grant naming a folder that is not there does not
+    degrade the install, it ABORTS it — bwrap exits before exec, and until
+    this gate existed its message reached the user through a `failed` frame
+    after screening and after the prefix had been built, about a path they
+    never typed. `tests/test_sandbox.py` executes that premise.
+
+    THE REFUSAL IS THE DECISION (PLAN B65), and the three ways out are not
+    equal:
+
+      * `--bind-try` is the quiet one and it is worse. The app finds an empty
+        folder — indistinguishable from "no saves yet" — writes into its
+        private home instead, and the user's real folder stays empty. The
+        failure then surfaces days later as missing work, which is the worst
+        possible place for it.
+      * Creating it is forbidden: only `jv-act` writes outside a service's
+        own state dir (invariant 3), and `~/Documents/MyAppSaves` is the
+        user's. Routing it through jv-act would put a second confirmation
+        into an install that already has one, for something one `mkdir`
+        fixes.
+      * So: refuse, name the absolute path, and say what fixes it.
+
+    NOT at recipe-DB load, which is where B65 first guessed this belonged: a
+    recipe for an app nobody is installing must not stop `find_recipe` from
+    answering about the one that is. A grant's absence is a fact about this
+    machine, checked where the recipe meets it.
+
+    `exists()` FOLLOWS symlinks, deliberately, because `--bind` does: a grant
+    pointing at a broken link is absent to bwrap and has to be absent here.
+    Nothing is said about what KIND of thing it is — a grant naming one file
+    is narrower than one naming the folder around it, and bwrap binds either,
+    so demanding a directory would refuse the more conservative recipe. And
+    nothing here closes the window between this answer and the exec: a folder
+    deleted inside it is a raw bwrap error again, which is a race worth a
+    sentence and not machinery.
+    """
+    home = Path.home()
+    problems: list[str] = []
+    for rel in recipe.home_paths:
+        try:
+            dest = grant_dest(home, rel)
+        except ValueError as exc:
+            problems.append(str(exc))
+            continue
+        if not dest.exists():
+            problems.append(
+                f"grant {rel!r} names {dest}, which is not on this machine — "
+                "create it, or have the recipe grant one that exists, noting "
+                "that a parent grants more than the folder asked for"
+            )
+    return problems
+
+
 def bwrap_args(
     recipe: Recipe,
     prefix: Path,

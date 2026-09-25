@@ -24,7 +24,12 @@ from typing import Optional, Protocol
 from jarvis_bus import BusClient
 
 from .fingerprint import fingerprint, silent_args
-from .prefix import bwrap_args, create_prefix_layout, sandbox_installer_path
+from .prefix import (
+    bwrap_args,
+    create_prefix_layout,
+    grant_problems,
+    sandbox_installer_path,
+)
 from .recipes import Recipe, find_recipe, load_recipes
 
 # How long we wait for jv-guard's verdict before failing closed. It must
@@ -157,6 +162,23 @@ class Installer:
         recipe = find_recipe(self.recipes, sha, fp.installer) or Recipe(
             app=app, match_sha256=[], match_installer=fp.installer
         )
+
+        # Can this machine honour what the recipe grants? A grant naming a
+        # folder the user does not have aborts bwrap (it resolves bind sources
+        # on the host), and a malformed one raised out of `bwrap_args` with no
+        # terminal frame published at all. Both are known now, before a prefix
+        # exists, so both are a REFUSAL: `blocked` is already the word for
+        # "jv-compat will not install this" — fail-closed uses it for its own
+        # reason and not the guard's — and `failed` would claim an installer
+        # ran. PLAN B65.
+        if problems := grant_problems(recipe):
+            await self._event(
+                "blocked", app, sha, recipe=recipe.app,
+                error="recipe cannot be honoured on this machine: "
+                + "; ".join(problems),
+            )
+            return "blocked"
+
         prefix = create_prefix_layout(recipe.app or app)
         await self._event("prefix_created", app, sha, recipe=recipe.app)
 

@@ -4,6 +4,7 @@ including fail-closed when no verdict arrives and a real jv-guard
 blocking an EICAR-style file."""
 
 import asyncio
+import hashlib
 import os
 import re
 import socket
@@ -16,7 +17,13 @@ import pytest
 from jarvis_bus import BusClient
 from jv_compat.fingerprint import fingerprint, silent_args
 from jv_compat.install import Installer, MockRunner, app_slug
-from jv_compat.prefix import SANDBOX_PREFIX, bwrap_args, sandbox_installer_path
+from jv_compat.prefix import (
+    SANDBOX_PREFIX,
+    bwrap_args,
+    grant_problems,
+    prefix_dir,
+    sandbox_installer_path,
+)
 from jv_compat.recipes import Recipe, find_recipe
 
 REPO = Path(__file__).resolve().parents[3]
@@ -79,6 +86,95 @@ def test_bwrap_confinement_defaults_deny():
 def test_bwrap_network_grant():
     r = Recipe(app="x", match_sha256=[], match_installer="", network=True)
     assert "--unshare-net" not in bwrap_args(r, Path("/p"), ["wine"])
+
+
+# ------------------------------- B65: can THIS machine honour the recipe?
+#
+# A grant is a fact about two things: a recipe (reviewed, in this repo) and a
+# home directory (the user's, and not this repo's business). `--bind` resolves
+# its source on the host, so a grant naming a folder that is not there aborts
+# bwrap — which `tests/test_sandbox.py` executes. These tests are about the
+# answer to that: the recipe is refused BEFORE any work, naming the path.
+
+
+def _r(**kw) -> Recipe:
+    kw.setdefault("app", "demo")
+    kw.setdefault("match_sha256", [])
+    kw.setdefault("match_installer", "")
+    return Recipe(**kw)
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch) -> Path:
+    """The user's home, somewhere this test owns. `prefixes_root()` hangs off
+    `Path.home()` too, so this also keeps a prefix out of the real one."""
+    h = tmp_path / "home" / "user"
+    h.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(h))
+    monkeypatch.delenv("JARVIS_PREFIXES_DIR", raising=False)
+    return h
+
+
+def test_a_grant_the_machine_can_honour_is_not_a_problem(home):
+    (home / "Documents" / "AppSaves").mkdir(parents=True)
+    assert grant_problems(_r(home_paths=["Documents/AppSaves"])) == []
+    assert grant_problems(_r()) == []  # no grants at all: nothing to check
+
+
+def test_a_grant_naming_a_folder_this_machine_does_not_have_is_refused(home):
+    """The whole point: the sentence names the ABSOLUTE path, because the
+    recipe's `Documents/MyAppSaves` is not what the user has to look for,
+    and it says what fixes it — jv-compat must not create it itself
+    (invariant 3: only jv-act writes outside a service's own state dir,
+    and this folder is the user's)."""
+    (home / "Documents").mkdir()
+    problems = grant_problems(_r(home_paths=["Documents/MyAppSaves"]))
+    assert len(problems) == 1
+    assert str(home / "Documents" / "MyAppSaves") in problems[0]
+    assert "Documents/MyAppSaves" in problems[0]  # ...and the recipe's own words
+
+
+def test_a_grant_naming_one_file_is_honoured_and_not_widened_to_its_folder(home):
+    """The pre-flight deliberately says nothing about what KIND of thing a
+    grant is: one file is a NARROWER grant than the folder around it, and
+    bwrap binds either — so demanding a directory would refuse the more
+    conservative of two recipes. `test_sandbox.py` runs the bwrap half of
+    this same claim; without this line here, swapping the predicate for
+    `is_dir()` changes nothing any test can see."""
+    (home / "Documents").mkdir()
+    (home / "Documents" / "settings.ini").write_text("theme=dark\n")
+    assert grant_problems(_r(home_paths=["Documents/settings.ini"])) == []
+
+
+def test_every_grant_the_machine_cannot_honour_is_named_not_just_the_first(home):
+    """A recipe with three bad grants must not cost three installs to fix."""
+    problems = grant_problems(
+        _r(home_paths=["Documents/A", "..", "Music/B"])
+    )
+    assert len(problems) == 3
+    assert str(home / "Documents" / "A") in problems[0]
+    assert "grant" in problems[1]
+    assert str(home / "Music" / "B") in problems[2]
+
+
+def test_a_grant_that_leaves_the_private_home_is_a_problem_and_not_a_traceback(home):
+    """`grant_dest` raises, and the raise happened inside `bwrap_args` —
+    which the pipeline calls with no guard, so a malformed recipe left
+    `jv-compat install` with a ValueError traceback and published no
+    terminal frame at all. The same refusal is now an answer."""
+    problems = grant_problems(_r(home_paths=["."]))
+    assert len(problems) == 1 and "grant" in problems[0]
+
+
+def test_a_grant_pointing_at_a_broken_symlink_is_absent_like_bwrap_reads_it(home):
+    """`--bind` follows the link, so bwrap calls this missing. The check has
+    to agree with the thing it is standing in front of, which is why the
+    predicate is `exists()` (follows) and not `lstat` (does not)."""
+    (home / "Documents").mkdir()
+    (home / "Documents" / "AppSaves").symlink_to(home / "gone")
+    problems = grant_problems(_r(home_paths=["Documents/AppSaves"]))
+    assert len(problems) == 1
+    assert str(home / "Documents" / "AppSaves") in problems[0]
 
 
 # ------------------------------------------------------ pipeline e2e
@@ -235,6 +331,63 @@ async def test_blocked_verdict_refuses(bus_addr, tmp_path):
     outcome = await Installer(compat_bus, runner).install(installer_file)
     assert outcome == "blocked"
     assert not runner.argv_log
+
+    gtask.cancel()
+    await guard.close()
+    await compat_bus.close()
+    await watcher.close()
+
+
+async def test_a_recipe_this_machine_cannot_honour_is_refused_before_the_prefix(
+    bus_addr, tmp_path, home
+):
+    """Screened clean, and still nothing runs: a grant naming a folder the
+    user does not have is known before any work is done, so it is a REFUSAL
+    (`blocked`, as fail-closed already is) and not a `failed` install that
+    never started. Before this, bwrap's own message reached the user through
+    `failed`, after the prefix had been built."""
+    installer_file = tmp_path / "nsis-x64.exe"
+    installer_file.write_bytes((FIX / "nsis-x64.exe").read_bytes())
+    sha = hashlib.sha256(installer_file.read_bytes()).hexdigest()
+
+    recipes_dir = tmp_path / "recipes"
+    recipes_dir.mkdir()
+    (recipes_dir / "demo.toml").write_text(
+        "[recipe]\n"
+        f'app = "demo"\nmatch_sha256 = ["{sha}"]\n'
+        '[grants]\nhome_paths = ["Documents/MyAppSaves"]\n'
+    )
+
+    watcher = await BusClient.connect(bus_addr, src="t")
+    await watcher.subscribe(["compat.install"])
+    guard = await BusClient.connect(bus_addr, src="jv-guard")
+    await guard.subscribe(["compat.install"])
+
+    async def fake_guard():
+        while True:
+            frame = await guard.next_frame()
+            if frame and frame["body"].get("event") == "fingerprinted":
+                await guard.publish(
+                    "guard.verdict",
+                    {"sha256": frame["body"]["sha256"], "verdict": "clean",
+                     "reasons": [], "scanned_by": ["mock"]},
+                )
+    gtask = asyncio.create_task(fake_guard())
+    await asyncio.sleep(0.2)
+
+    runner = MockRunner(ok=True)
+    compat_bus = await BusClient.connect(bus_addr, src="jv-compat")
+    outcome = await Installer(compat_bus, runner, recipes_dir=recipes_dir).install(
+        installer_file
+    )
+    assert outcome == "blocked"
+    assert not runner.argv_log, "nothing may run under a grant that cannot be bound"
+    assert not prefix_dir("demo").exists(), "the prefix was built for an install that cannot happen"
+
+    events = await collect(watcher, 3)
+    assert [e["event"] for e in events] == ["fingerprinted", "screened", "blocked"]
+    assert str(home / "Documents" / "MyAppSaves") in events[-1]["error"]
+    assert events[-1]["recipe"] == "demo"  # ...and WHICH recipe to fix
 
     gtask.cancel()
     await guard.close()
