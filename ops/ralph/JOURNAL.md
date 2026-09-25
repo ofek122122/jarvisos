@@ -9085,3 +9085,100 @@ that needed it most.
   question asked three times; **B62** is B61's two decisions; **B67** is
   B66's sibling-of-the-home half; and **B10/A28** — one live recording of one
   spoken turn on ares — remains the biggest thing a human can hand this loop.
+
+## 2026-09-25 — iteration 91 — B69: the two gates a string could not find
+
+B68 gave the verify gate a derived answer to "which suites read what you
+changed", and ended it with an apology: `ops/ralph/qmltest.sh` and
+`ops/ralph/hudshots.sh` were printed as a standing caveat on every run,
+because a QML file names its subject by TYPE (`ReplyState {}`) and never by
+path. Those two are the strongest assertions this repo makes about
+`shell/jv-hud`, and every Track A iteration changes a file one of them opens.
+
+A type is a file, though, and the engine finds it the same two ways every
+time: the directories `import "..."` puts on the path, and the `qmldir` that
+directory ships. So the gates are now walked the way the engine walks them —
+from the files the runner is handed, outward through the types they name, one
+hop per import. `shell/jv-hud/core/ReplyState.qml` names **both**:
+`tst_replystate.qml` says `ReplyState {}` under `import "../core"`, and the
+sheet reaches it four files down (`tst_shots.qml` -> `Corner` -> `ReplyPlate`
+-> `ReplyState`). A plate names the sheet ALONE, because nothing under
+`shell/jv-hud/tests` imports `".."` — the headless tests have never drawn a
+plate. And `tools/hudshots/stub/Bus.qml`, which no Python suite and no other
+script in the repo opens, names the sheet too.
+
+Two narrow rules decide whether this is trustworthy rather than merely
+generous. Comments and string literals are blanked before the scan:
+`Sessions.qml` carries whole recorded bus frames as string literals and every
+driver opens with a paragraph naming the plates it draws, so a raw scan would
+report a gate that a SENTENCE about it had named. And a type is looked for
+only on the file's own import path, because that is the only place the engine
+would have found it — a driver that says `Plate` without importing the
+directory it lives in did not load it either.
+
+A directory that ships a `qmldir` is read through it and not through a file
+scan, which is what makes the sheet's shadowing honest: the generated
+`shell/jv-hud/qmldir` still says `singleton Bus 1.0 Bus.qml` while the stage
+has written `tools/hudshots/stub/Bus.qml` over that file, so the type resolves
+to the stub and the real `Bus.qml` — which imports Quickshell and cannot load
+in any other engine — is correctly NOT a thing the sheet reads.
+
+WHERE the QML is assembled is the one thing written down rather than derived,
+and it had to be: `hudshots.sh` copies the shell into a temp directory, drops
+`shell.qml`, writes two stubs over it and puts the drivers in a subdirectory,
+so a driver's `import ".."` means something no reader of the QML could work
+out. That staging is four lines of `QML_GATES` — and
+`test_each_gate_stages_exactly_what_it_says_it_stages` checks every directory
+of it against the script that does the staging, which is the only way this map
+can lie and the way that would show up nowhere else. A whole-HUD sweep holds
+the other end: every `.qml` under `shell/jv-hud` and `tools/hudshots` is read
+by at least one gate except the three the repo deliberately keeps out —
+`shell.qml` (Quickshell, gated by `nix build .#jv-hud`) and the two singletons
+the sheet replaces.
+
+The caveat did not go away, it got honest: it is about Rust now. `jarvisd` and
+`jv-act` keep their tests inside the source they test, so there is no third
+file to derive a relation from and nothing here will ever name
+`cargotest.sh`.
+
+- tests: `bash ops/ralph/runtests.sh tools` **321 (was 302)**, all green. The
+  four paths this iteration changed name no other suite and no QML gate, and
+  the tool said so itself. No `.qml` changed, so neither QML gate was in
+  scope — which is the first iteration where that sentence is a derived fact
+  rather than a guess.
+- graded with **17 mutations, 17 caught** — 16 on the first pass, and the
+  survivor was a test that proved nothing: "a gate whose script this repo
+  does not have is not offered" was asserted against a synthetic repo with no
+  `shell/jv-hud` either, so the answer was empty for the wrong reason. It now
+  builds the tree WITHOUT the script and checks the silence is the script's.
+  Also caught: the qmldir ignored, lowercase files admitted as types, the
+  stage's shadowing reversed, types looked for off the import path, the walk
+  stopped at the driver, strings scanned, comments scanned, an unstaged import
+  silently skipped, the non-QML reads dropped, `tst_*.qml` treated as drivers
+  of the sheet, `..` flattened at the entry, the resolving qmldir left unread,
+  the stubs dropped from the stage, the gates computed and then left out of
+  the notice, and the Rust caveat removed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py, tools/tests/test_dependents.py,
+  ops/ralph/README.md, ops/ralph/PROMPT.md
+- commit: af794cc
+- note for whoever runs `mutate.sh`: do NOT interrupt it. A SIGTERM mid-run
+  leaves the mutation applied in the worktree, and the next run reports the
+  baseline red for a reason that is not in the tree you think you are reading.
+  That cost fifteen minutes here.
+- next: **A73's second half** — pin `docs/hud/screens/README.md`'s box to
+  `tools/hudscreens/sheet.py` the way `test_hudscreens.py` already pins
+  `sheet.py` to `shell.qml`. The prose has said `300x560` since A30 while the
+  surface went 688 -> 745 -> 807, and a stale number nobody checks is how the
+  first one survived three growths. Then **B70**, which is now a smaller
+  question than B68 left it: the named set for a HUD change is two gates and
+  `tools`, and `hudshots.sh` is ~53 s — (b), "bind it when the set is small",
+  has a concrete cost to quote at last. Otherwise unchanged: **Track A is one
+  human look at `docs/hud/` away from unblocking** A47, A55, A62, A63's
+  picture half, A70/A72 and the A21/A22/A25 cluster; **A56** asks whether the
+  shot suites belong in the build gate; **B27/B28** are one decision about a
+  jv-ears state topic; **B43/B47/B54** are one question asked three times;
+  **B62** is B61's two decisions; **B67** is B66's sibling-of-the-home half;
+  and **B10/A28** — one live recording of one spoken turn on ares — remains
+  the biggest thing a human can hand this loop.

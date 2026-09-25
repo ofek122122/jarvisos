@@ -1667,8 +1667,8 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       whenever it reads what changed, which in practice is most service
       changes, and naming it for the rest would be the guess this replaces.
 
-- [ ] B69. **The two gates `dependents.py` cannot see, and the reason is one
-      line of QML.** `ops/ralph/qmltest.sh` and `ops/ralph/hudshots.sh` are
+- [x] B69. **The two gates `dependents.py` cannot see, and the reason is one
+      line of QML.** — af794cc `ops/ralph/qmltest.sh` and `ops/ralph/hudshots.sh` are
       the strongest assertions this repo makes about `shell/jv-hud`, and B68's
       map is blind to both: a QML test names its subject by TYPE (`ReplyState
       {}`, `import "../core"`), never by path, so there is no string for the
@@ -1681,6 +1681,20 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `tools/hudshots/scene/`. Worth pinning the direction that matters most
       first — a `core/` file changed by a plate author who then runs only
       `hudshots.sh`, and the reverse. Discovered in B68.
+      (Done both directions. The gates are walked the way the engine walks
+      them: from the files the runner is handed, outward through the types
+      they name, resolved on each file's OWN import path and through the
+      `qmldir` the directory ships. Comments and string literals are blanked
+      first — `Sessions.qml` is recorded bus frames and every driver opens
+      with a paragraph naming its plates. `core/ReplyState.qml` names both
+      gates; a plate names the sheet alone, because nothing under
+      `shell/jv-hud/tests` imports `".."`. The ONE thing not derived is where
+      `hudshots.sh` assembles its stage — four lines of `QML_GATES`, each
+      directory of which is checked against the script that stages it, plus a
+      whole-HUD sweep asserting the only unreached `.qml` are `shell.qml` and
+      the two singletons the sheet replaces. 321 tests (was 302), 17
+      mutations, 17 caught. The standing caveat is now Rust, which really has
+      nothing to derive from. Raised while doing it: **B71**.)
 
 - [ ] B70. **The notice is advice, and whether it should be a verdict is a
       cost question the loop should not answer alone.** `runtests.sh` now
@@ -1696,6 +1710,25 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       (b) bind it only when the named set is small (say <= 3 suites) and print
       a loud warning otherwise; (c) leave it advisory and let the journal's
       test line be the evidence, which is where it stands. Raised by B68.
+      **B69 priced half of it**: a HUD change names `tools` (5 s),
+      `qmltest.sh` (~14 s) and `hudshots.sh` (~53 s) — about 70 s, which is
+      the shape (b) was invented for. The expensive case is still
+      `services/pylib/jarvis_bus/`.
+
+- [ ] B71. **`mutate.sh` leaves the mutation applied when it is killed.**
+      A SIGTERM mid-run (a timeout, a Ctrl-C, a loop that decided the run was
+      too slow) restores nothing, so the worktree keeps whichever mutation was
+      in flight — and the NEXT run reports "the baseline suite is RED before
+      any mutation", which is true and points at nothing. It cost fifteen
+      minutes in iteration 91 and it would cost far more than that if the
+      iteration had committed instead of re-running. The restore is already
+      written for the ordinary path; what is missing is a trap. Two shapes,
+      and the loop should not pick alone because one of them changes what the
+      harness may do to a dirty tree: (a) a `trap` on INT/TERM/EXIT that puts
+      every touched file back, which is small and right for the common case
+      but cannot help a SIGKILL; (b) refuse to mutate in place at all and
+      stage a copy of the worktree per run, which is proof against every
+      signal and costs a copy of the repo per mutation. Raised by B69.
 
 - [ ] B17. Every `>>> turn` line is now six numbers wide and a summary
       table six rows deep, and `jv tap --latency` prints a hop table above
