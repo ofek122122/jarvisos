@@ -12666,3 +12666,80 @@ is not worth chasing.)
   and the bar's are quiet; hudshots has never been checked). Then **D33** (the
   last two copies of the HUD's box) and **D17** (the strip's empty right half,
   the first Track D item wanting a real SOURCE rather than a token).
+
+## 2026-09-26 — iteration 128
+
+- **what**: D36. `tools/qmlerrors.py` — the runner's own output, read back —
+  plus the three lines in each of `ops/ralph/{hud,notify,bar}shots.sh` that
+  capture it and hand it over, and `tools/tests/test_qmlerrors.py`.
+- **why**: D34's second fault announced itself exactly once, as a `TypeError`
+  in the middle of a run that ended `8 passed, 0 failed` and wrote eleven
+  correct PNGs. A QML handler that throws keeps whatever the property already
+  had and recovers on the next evaluation, so the surface stays plausible, the
+  contact sheet stays byte-identical, every assertion still holds — and one
+  `QWARN` line in output nobody reads is the entire evidence. All three shot
+  harnesses piped the runner straight through.
+- **RAN ALL THREE FIRST, which is what the item asked for and was the right
+  order.** hudshots (67 s, 23 assertions, 16 shots) had never been checked for
+  warnings at all. All three are clean at d605f4b: zero QWARN lines between
+  them, and the only console voices in any of them are the two settle drivers'
+  samples and the bar sheet's eleven "px between the workspaces and the clock"
+  lines. So the rule went in over a green baseline rather than red for reasons
+  of its own.
+- **THE DISCRIMINATOR IS THE SHAPE THE ENGINE PRINTS, not the words in the
+  message.** The item was explicit that `console.warn` is a legitimate voice
+  here — `NiriModel` uses it for a line of the niri event stream it REFUSES to
+  parse — so "fail on any warning" would make a service's honesty a failure.
+  QtTest writes console output as `qml: <text>`, with no source location, and
+  an error the engine caught as `file:///…/T.qml:7: TypeError: …`, a location
+  and one of ECMAScript's seven error names. A warning whose text quotes
+  "TypeError:" is therefore still a voice, and there is a test that says so.
+- **PROVED BY INJECTION, and the injection is the whole argument for the
+  gate.** A handler in `Toast.qml` reading a property of `undefined`: the
+  runner said `8 passed, 0 failed`, the ten PNGs came out BYTE-IDENTICAL
+  (`git status docs/notify` clean after the run), and `qmlerrors` refused —
+  naming `Toast.qml:129`, the four test bodies it threw in, and the 23 lines
+  collapsed into them. That collapse came out of the run: one handler in one
+  delegate throws once per plate the scene builds, and the first report was
+  fourteen copies of one sentence, which would bury a second fault under the
+  first.
+- **THE FIRST INJECTION NEVER REACHED THE ENGINE, and that is worth knowing.**
+  `var gone = undefined; void gone.count` was caught by `qmllint` inside the
+  stage, before the runner ran. The statically visible version of this fault is
+  already gated; what reaches the engine is the dynamically typed one —
+  `root.toast.nothingHere.count`, where `toast` is a `var` — which is exactly
+  D34's shape, a value composed at runtime from somewhere else.
+- **AND WHAT IT CANNOT SEE, measured rather than assumed (now D38).** Probing
+  Qt 6.11.1 to write the rule turned up a bigger hole than the one being
+  closed: qmltestrunner prints NOTHING logged while no test function is
+  running. A `console.warn` in `Component.onCompleted` vanishes, and an error
+  thrown by a declarative binding prints nothing ever — `property int n:
+  subject.absent.count` silently yields 0, and so does a binding calling a
+  function that throws, and so does `JSON.parse("{")`. So the three drivers are
+  covered exactly where they DO their work (inside a test body, which is where
+  D34's TypeError was) and not at all for the scene each declares at its root.
+  D38 has the probe and two candidate answers; D39 is the same rule for
+  `hudscreens.sh`, which is a real compositor rather than QtTest and costs
+  3m00s, so its first run belongs to an iteration already paying that price.
+- **WIRING, because a gate that reads a new file and cannot say so is the
+  failure B68–B70 exist for.** `tools/qmlerrors.py` is in each shot gate's
+  `also` table in `dependents.py`, so a change to the scanner runs all three
+  harnesses plus its own suite (checked by a test, and by the existing test
+  that every path a gate claims to stage exists and is named in the script).
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 6 paths (tools **595
+  pass**, 14 of them new; all three shot harnesses green and all 37 shots
+  byte-identical), 160.7 s; re-run as `--since HEAD~1` against what the commit
+  took, also green (7 paths, same 4 gates). `hudscreens.sh` was NOT named by
+  either plan and was not run. build: `nixos-rebuild build --flake .#ares`
+  green. No schema change, no jv-act, no boot path, no pins. Never tested,
+  never switched.
+- files: tools/qmlerrors.py (new), tools/tests/test_qmlerrors.py (new),
+  tools/dependents.py, ops/ralph/{hudshots,notifyshots,barshots}.sh,
+  ops/ralph/PLAN.md
+- next: **D38** is the one this iteration earned — it is the other half of the
+  same question, it has a measurement in it that nothing else can answer
+  (is any binding in any of the three shells silently failing right now), and
+  the probe is written down. Then **D33** (the last two copies of the HUD's
+  box, a small clean-up with a decision in it) and **D17** (the strip's empty
+  right half — the first Track D item that wants a real SOURCE rather than a
+  token).

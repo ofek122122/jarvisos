@@ -614,26 +614,64 @@ human-reviewed step.
       · `tools/barshots/scene/Desk.qml` now holds the recorded line and the
         composed-snapshot builder, once, for both drivers in that directory.
 
-- [ ] D36. **Nothing in any of the three shot harnesses fails on a console
-      warning, and a binding that threw is the failure that photographs
-      well.** D34's second fault — `shown` composed from the previous desk's
-      plan — announced itself exactly once, as
-      `TypeError: Value is undefined and could not be converted to an object`
-      in the middle of a run that ended `8 passed, 0 failed` and wrote eleven
-      correct PNGs. A QML binding that throws keeps its previous value and
-      recovers on the next evaluation, so the surface is plausible and the
-      gate is green; the only evidence is a `QWARN`/`qml:` line in output
-      nobody reads unless something else went wrong. `hudshots.sh`,
-      `notifyshots.sh` and `barshots.sh` all pipe the runner's output
-      straight through. Capturing it and ending nonzero on a warning is a few
-      lines in each — but it is deliberately NOT done blind: the other two
-      shells' harnesses have never been checked for warnings, so the first
-      run may be red for reasons that have nothing to do with the rule, and
-      hudshots is a 3-minute gate. Whoever takes it should run all three
-      first and read what is already there. (`console.warn` is a legitimate
-      voice in this repo — `NiriModel` uses it for a line it refuses — so the
-      rule wants to be about TypeErrors and unqualified-access errors, not
-      about every warning.) Raised by D34.
+- [x] D36. **Nothing in any of the three shot harnesses failed on a QML that
+      threw, and a green run of eleven correct PNGs was the proof.** (Done
+      this iteration.) D34's second fault announced itself exactly once, as a
+      `TypeError` in the middle of a run that ended `8 passed, 0 failed`.
+      `tools/qmlerrors.py` now reads the runner's captured output and ends the
+      run non-zero when anything in the scene threw; all three harnesses
+      `tee` the runner into `$stage/runner.log` and hand it over before the
+      sheet is compared, so a run that threw never reaches "wrote N shots".
+      · **Ran all three first, as the item asked.** All clean at d605f4b:
+        zero `QWARN` lines between them, and the only console voices are the
+        two settle drivers' samples and the bar sheet's eleven "px between
+        the workspaces and the clock" lines. So the rule went in green.
+      · **The discriminator is the SHAPE the engine prints, not the words.**
+        Console output is `qml: <text>`, with no source location; an error the
+        engine caught is `file:///…/T.qml:7: TypeError: …`. So `NiriModel`'s
+        refusal stays legitimate, and a `console.warn` whose text quotes
+        "TypeError:" is still a voice. Seven ECMAScript error names, listed.
+      · **Proved by injection, and the injection is the whole argument.** A
+        handler in `Toast.qml` reading a property of `undefined`: the runner
+        said `8 passed, 0 failed`, the ten PNGs came out BYTE-IDENTICAL —
+        `git status docs/notify` clean — and `qmlerrors` refused, naming
+        `Toast.qml:129`, the four test bodies it threw in, and the 23 lines
+        it collapsed into them. Nothing else in this repo could have said so.
+      · The first injection attempt was caught by `qmllint` before the runner
+        ran, which is worth knowing: the statically visible version of this
+        fault is already gated, and what reaches the engine is the
+        dynamically typed one — exactly D34's shape.
+
+- [ ] D38. **Everything QML logs before the first test body runs is dropped,
+      by QtTest, before D36 can see it.** Probed against Qt 6.11.1 while D36
+      was built, and it is a bigger hole than the one D36 closed: a
+      `console.warn` in `Component.onCompleted` prints NOTHING, and an error
+      thrown by a declarative binding prints nothing ever — not at creation,
+      not at re-evaluation — the property simply keeps its default (`property
+      int n: subject.absent.count` yields 0, silently, and so does a binding
+      that calls a function which throws, and so does `JSON.parse("{")`).
+      Which means the three drivers are covered exactly where they DO their
+      work (inside a test body, which is where D34's TypeError was) and not
+      at all for the scene each file declares at its root — `Strip`, `Corner`
+      and `Desk` are all built before `initTestCase`. Two candidate answers,
+      neither obviously right: build the scene inside the test with
+      `createTemporaryObject` (which is a real change to three drivers and to
+      what the shots are pictures of), or give the harnesses a second engine
+      that is not QtTest — `qml` itself prints everything — and load the
+      staged scene under it for warnings only. The measurement to take first
+      is whether any current binding in any of the three shells is silently
+      failing right now, which nothing can currently answer. Raised by D36.
+
+- [ ] D39. **`hudscreens.sh` runs a real compositor and is outside D36's
+      rule.** The three shot harnesses now refuse a run whose QML threw;
+      `ops/ralph/hudscreens.sh` drives the real quickshell through niri, is
+      the only gate that loads `shell.qml` at all, and still pipes its output
+      straight through. It is a different runner — not QtTest, so nothing is
+      dropped, and `console.warn` from a real session is a different
+      population of lines — so `qmlerrors.py` may apply verbatim or may need
+      a second shape. Not done with D36 because the gate costs 3m00s and
+      rewrites a sheet a human has to look at, so its first run belongs to an
+      iteration that is already paying that price. Raised by D36.
 
 - [x] D37. **The notifier had the bar's exact shape, and it was worse there.**
       (Done 653b2cd.) `shell/jv-notify/shell.qml` repeated over
