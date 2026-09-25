@@ -3539,7 +3539,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       B13's "a number stops meaning its label" failure with the label
       still attached. Raised in iteration 105.
 
-- [ ] B86. **`verify.sh` cannot see a whole service, and jv-ears is that
+- [x] B86. **`verify.sh` cannot see a whole service, and jv-ears is that
       service.** `tools/dependents.py` resolves an import to a path with
       `_module_path`, which asks for `<base>/<top>/__init__.py` or
       `<base>/<top>.py` — and `services/jv-ears/jv_ears/` is the ONE service
@@ -3563,7 +3563,56 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       420, and it is how this one is really imported) closes the class. Do
       both — the second is the gate's own rule and wants a `tools` test
       pinning it, the first is what makes jv-ears look like its siblings.
-      Discovered while verifying B84.
+      Discovered while verifying B84. — 1da7d1d
+      (Both, and the second in TWO passes rather than one: a directory with
+      no `__init__.py` is a namespace *portion*, which the interpreter does
+      not stop at either — it keeps searching and lets a real package or a
+      plain module found later win — so resolving it eagerly, on the accident
+      of which base sorts first, would aim an import at source Python does
+      not read, and a wrong suite is more confident than a missing one.
+      Narrowed in one place: a portion must be a directory with Python under
+      it, asked of `_module_files`, so `import docs` cannot claim every PNG
+      in the repo. Four new `tools` tests (440, was 436), two RED first; the
+      proof is the gate itself, which now plans `runtests.sh jv-ears` for a
+      change to `jv_ears/audio.py` and did not before. Five mutations, five
+      caught — after TWO survived the first grading, both real test
+      weaknesses: the precedence decoy sat under `svc-c`, which loses to
+      `svc-a` on sorted bases even with the passes merged, and the depth of
+      the Python-under-it rule had no test at all. Raised: B87, B88.)
+
+- [ ] B87. **The file test was written down and it was wrong (B86); the BASE
+      LIST is written down too.** `_package_bases` returns `["", "tools",
+      "harness"] + services/*`, which is right today only because all eight
+      `pyproject.toml` files in this repo live under `services/`. A ninth
+      Python package anywhere else — `shell/jv-hud/tools/`, a `bench/`, a
+      second library beside `pylib` — is a directory no base names, so every
+      `import` of it resolves to nothing and the closure walk stops at the
+      first edge again. That is B86's failure by a different mechanism: B86
+      was the FILE test being a written-down rule, this is the SEARCH PATH
+      being one, and both fail the same silent way, because a suite that is
+      never named cannot report being skipped. The derivation is sitting
+      there: a base is a directory with a `pyproject.toml` in it, plus the
+      repo root and the two package directories that have none (`tools`,
+      `harness` — and `harness/` has no `__init__.py` either, so it is this
+      repo's SECOND namespace package; nothing imports it by that name today,
+      which is the only reason B86 had one instance and not two). Wants a
+      `tools` test pinning that every pyproject directory is a base.
+      Discovered while fixing B86.
+
+- [ ] B88. **Every Python file in this repo is read by at least one suite —
+      measured, 0 unread — and nothing asserts it.** What B86 landed is the
+      claim that a service suite reads its own package; the whole-repo form
+      is the one that catches a file no gate covers AT ALL, which is a
+      different and worse gap than a missed reader (there some suite still
+      runs it; here none does). It is true right now: every `*.py` outside
+      `SKIP_DIRS`, checked against `dependents.suites(ROOT)`, has a reader —
+      so this is a green test waiting to be written rather than a fix. Note
+      what it would NOT have caught: before B86 `tools` read every `jv_ears`
+      module as TEXT, so the whole-repo claim was already true while the gate
+      was already broken. It guards a different edge — a new `tools/` script
+      or harness module that no suite names — and its failure message has to
+      say so, or the next author to add a file will read it as a mysterious
+      veto. Discovered while fixing B86.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD

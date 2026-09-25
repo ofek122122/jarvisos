@@ -10501,3 +10501,100 @@ and a discard is then the only evidence the meter has.
   probably stay unbuilt for A71's reason. Otherwise unchanged: B82 is
   still half of A76's decision, B80/B81/B83 are the tap's own limits, and
   A22/A83 want answering together.
+
+## 2026-09-25 — iteration 106 · the service the gate could not see
+
+Iteration 105's own `next:` named this and put it ahead of the feature
+work, which was right: until it was fixed, every future iteration that
+touched jv-ears would have been verified by a gate that did not run its
+tests, and would have SAID it was verified.
+
+**The bug, as the gate performed it.** `bash ops/ralph/verify.sh` over a
+change to `services/jv-ears/jv_ears/audio.py` planned one gate,
+`runtests.sh tools` — which reads that package as TEXT — and never
+`runtests.sh jv-ears`, the 136-test suite that executes it. Iteration 105
+went green in 35.8 s over code the gate had not run, then found it by
+running jv-ears' suite by hand anyway.
+
+`tools/dependents.py` resolved `import <top>` by asking for
+`<base>/<top>/__init__.py` or `<base>/<top>.py`. PEP 420 made the first of
+those optional twelve years ago, and `services/jv-ears/jv_ears/` is this
+repo's one service package without an `__init__.py` — setuptools ships it
+regardless, because its pyproject discovery defaults to `namespaces =
+true`, so nothing anywhere complained. `import jv_ears` therefore resolved
+to NOTHING, the closure walk stopped at the first edge, and the suite was
+never named. B68 with the roles reversed: there the human guess missed the
+third suite that reads two parts of the repo, here the derivation missed
+the FIRST one, the suite that simply runs the file. And it is silent in
+the worse direction, because a suite that is never named cannot report
+being skipped — there is no line to notice.
+
+**Why two passes and not one.** The one-line version (`or any(glob)` in
+the existing loop) is wrong, and not subtly: a directory with no
+`__init__.py` is a namespace *portion*, and the interpreter does not stop
+at one either — it remembers it, finishes the path, and lets a real
+package or a plain module found LATER win. `_package_bases` puts `""`
+first and the services in sorted order, so an eager rule would resolve on
+the accident of which base sorts first and aim an import at source Python
+does not read. A wrong suite is more confident than a missing one.
+
+**And where it is deliberately narrower than Python.** Any directory at
+all is a portion to the interpreter, so `import docs` would claim every
+PNG under `docs/` and the answer would drift toward "run every suite",
+which is this tool's one forbidden answer. A portion is taken only when it
+is a directory with Python UNDER it — asked of `_module_files`, the same
+function that decides what a resolved import brings in, so it is one rule
+and not two. Not narrower than that: `*.py` directly inside would have
+refused a `foo/` whose only modules live in `foo/bar/`, which is the shape
+namespace packages are mostly FOR, and `import foo.bar` arrives here as
+the top name `foo`. Refusing costs a missed reader, the expensive way to
+be wrong.
+
+**The `__init__.py` is the other half and it is the lesser one.** It makes
+jv-ears look like its seven siblings and changes no behaviour; the rule
+above is what stops the next namespace package from reintroducing this
+silently. It is deliberately untested — a test pinning "every service
+package has an `__init__.py`" would forbid exactly the shape the tool just
+learned to read.
+
+**Two mutations survived the first grading, and both were my tests being
+wrong rather than the mutants being harmless.** The precedence test put
+its decoy package under `svc-c`; bases sort `svc-a` before `svc-c`, so the
+merged-pass mutant found the real package first and passed a test written
+to catch it — the decoys are at the repo root now, where base `""` really
+does come first. And the depth of the Python-under-it rule had no test at
+all, so `glob("*.py")` and `glob("**/*.py")` were indistinguishable. Both
+pinned, then re-graded. A third, weaker guard (`is_dir()`, without which
+an extensionless script beside a package would resolve under its own name)
+survived a further round and has its own case now.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 3 paths, 182.7 s
+  (`runtests.sh jv-ears` 136 passed, `runtests.sh tools` 440 passed, was
+  436). **The gate naming jv-ears at all is the fix reporting itself**;
+  before the change the same three paths planned `tools` alone. Four new
+  `tools` tests, two of them RED before the fix — the synthetic PEP 420
+  case, and a whole-repo one asserting that every service suite reads its
+  own service's package, which is the assertion that would have caught
+  this in the first place and was red for jv-ears' eight modules. Also
+  `bash ops/ralph/verify.sh --since HEAD~1` GREEN, so the commit took
+  exactly what was verified. Mutations: 5 graded, 5 caught, after the two
+  survivors above were fixed.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins.
+- files: tools/dependents.py, tools/tests/test_dependents.py,
+  services/jv-ears/jv_ears/__init__.py (new), ops/ralph/PLAN.md
+- commits: 1da7d1d (the rule and the missing file)
+- next: the gate is honest about jv-ears now, so **A84** is the feature
+  item — B84's reader, the mic indicator that draws MIC while audio is
+  being lost, and the thing that makes B84's new gauges publishable. The
+  two raised here are cheap and both are B86's own class, i.e. a rule
+  written down instead of derived: **B87** (the base LIST is written down
+  too — a Python package outside `services/` is invisible the same silent
+  way; derive a base from a `pyproject.toml`, and note `harness/` is this
+  repo's second namespace package, unimported today) and **B88** (every
+  `*.py` in the repo has a reader — measured, 0 unread — and nothing
+  asserts it; a green test waiting to be written). **B85**'s tap half (a
+  turn's ENDING, which `--latency` never reports) is still the next cheap
+  feature; its HUD half should stay unbuilt for A71's reason. Otherwise
+  unchanged: B82 is still half of A76's decision, B80/B81/B83 are the
+  tap's own limits, and A22/A83 want answering together.
