@@ -24,6 +24,25 @@ bash ops/ralph/nixtest.sh             # the flake's own options -> the units are
 bash ops/ralph/hudscreens.sh          # the HUD photographed through a real compositor
 ```
 
+## Which suites read what you changed
+Invariant 1 forbids one service importing another, so every claim this repo
+makes about a RELATION between two of its parts is made by a THIRD suite that
+reads them both as source text — `tools` alone reads six services, the frozen
+schemas, `personality/theme.toml` and every QML file in the HUD. "Run the
+relevant suites" was therefore a guess, and three iterations in a row guessed
+wrong and shipped a red `tools` (B65, B66, A71). So `runtests.sh` ends by
+asking, every run:
+```
+python3 tools/dependents.py --changed     # or: <path> [<path> ...]
+```
+The map is derived from the suites themselves, never written down: a suite
+reads what it NAMES (a `ROOT / "services" / "jv-compat"` expression, a
+path-shaped string, an import — and everything that import imports), if what
+it names exists. It is advice, not a verdict: the exit status stays pytest's,
+and on a clean tree it prints nothing. It cannot see the QML gates —
+`qmltest.sh` and `hudshots.sh` name their subjects by QML TYPE, not by path —
+so it prints both as a standing caveat instead of implying a complete list.
+
 ## Grading the tests themselves
 Every journal entry claims a number like "six mutations, six caught" — the
 loop's only evidence that the tests it just wrote have teeth. That claim is

@@ -76,4 +76,19 @@ fi
 # jarvisd binary for tests that spawn the real broker
 export JARVISD_BIN="${JARVISD_BIN:-$(nix build "$root#jarvisd" --no-link --print-out-paths 2>/dev/null)/bin/jarvisd}"
 
-exec "$venv/bin/python" -m pytest tests -q
+rc=0
+"$venv/bin/python" -m pytest tests -q || rc=$?
+
+# The suite you asked for is not the set of suites that read what you changed,
+# and for three iterations running nobody could see the difference (PLAN B68).
+# Invariant 1 forbids one service importing another, so every claim this repo
+# makes about a RELATION between two of its parts is made by a THIRD suite
+# reading them both — and `tools` reads six services, the schemas and the whole
+# HUD. So the gate asks, every run, instead of hoping the author guessed:
+# `tools/dependents.py` derives the readers from the suites themselves.
+# It is advice, not a verdict — the exit status is still pytest's — and it
+# prints nothing at all on a clean tree.
+"$venv/bin/python" "$root/tools/dependents.py" --root "$root" --changed \
+  --exclude "$svc" --quiet-when-empty || true
+
+exit $rc

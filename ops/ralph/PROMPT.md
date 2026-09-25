@@ -34,6 +34,11 @@ excellent, finish it completely, and never break the build.
 - Run the relevant test suite(s) for what you touched with
   `bash ops/ralph/runtests.sh <service>` (nix build has doCheck=false, so this is
   how Python tests actually run). Rust: `nix build .#jarvisd` runs its tests.
+- **"Relevant" is not yours to guess.** Invariant 1 means every claim about a
+  relation between two parts of this repo is made by a THIRD suite that reads
+  them both, so `runtests.sh` ends by printing the other suites that read what
+  you changed (`python3 tools/dependents.py --changed`, PLAN B68). Run every one
+  it names — three iterations in a row shipped a red `tools` without that line.
 - Run `nixos-rebuild build --flake .#ares` — it MUST succeed. **NEVER test/switch.**
 - If anything fails and you can't fix it quickly:
   `git checkout -- . && git clean -fd`, append a JOURNAL entry describing the
