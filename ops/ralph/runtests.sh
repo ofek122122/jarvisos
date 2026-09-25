@@ -88,7 +88,13 @@ rc=0
 # `tools/dependents.py` derives the readers from the suites themselves.
 # It is advice, not a verdict — the exit status is still pytest's — and it
 # prints nothing at all on a clean tree.
-"$venv/bin/python" "$root/tools/dependents.py" --root "$root" --changed \
-  --exclude "$svc" --quiet-when-empty || true
+# …unless the GATE is what called us (ops/ralph/verify.sh, PLAN B70), which
+# derived this same list before it ran anything and is working through it: the
+# advice is for whoever chose a suite by hand, and printing it once per step
+# would have the gate urging the reader to run the suites it is running.
+if [ "${RALPH_GATE:-}" != "1" ]; then
+  "$venv/bin/python" "$root/tools/dependents.py" --root "$root" --changed \
+    --exclude "$svc" --quiet-when-empty || true
+fi
 
 exit $rc

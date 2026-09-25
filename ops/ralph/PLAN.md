@@ -1696,24 +1696,64 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       mutations, 17 caught. The standing caveat is now Rust, which really has
       nothing to derive from. Raised while doing it: **B71**.)
 
-- [ ] B70. **The notice is advice, and whether it should be a verdict is a
-      cost question the loop should not answer alone.** `runtests.sh` now
-      names the other suites that read what you changed and keeps pytest's
-      exit status, so an iteration can still read the line and not run them.
-      Making it binding is one flag (`--with-dependents`, or a gate script
-      that runs every named suite and ANDs the statuses), and the reason it
-      was not taken is cost: `tools` is 5 s, but a change to
-      `services/pylib/jarvis_bus/` honestly names all ten — every service runs
-      on the bus — and one of them spawns the real broker. That is
-      minutes per iteration, every iteration, to catch a mistake that has
-      happened three times in ninety. Three shapes: (a) bind it always;
-      (b) bind it only when the named set is small (say <= 3 suites) and print
-      a loud warning otherwise; (c) leave it advisory and let the journal's
-      test line be the evidence, which is where it stands. Raised by B68.
-      **B69 priced half of it**: a HUD change names `tools` (5 s),
-      `qmltest.sh` (~14 s) and `hudshots.sh` (~53 s) — about 70 s, which is
-      the shape (b) was invented for. The expensive case is still
-      `services/pylib/jarvis_bus/`.
+- [x] B70. **The notice is a verdict, and the cost question was answered by
+      measuring it.** — (this iteration)
+      (`ops/ralph/verify.sh` + `tools/verify.py`: ask the worktree what
+      changed, ask `dependents` who reads it, run every one of them, exit
+      non-zero if ANY is red. The author no longer picks the suites.
+      **The measurement the decision was missing**, one suite at a time on
+      warm venvs: pylib 1.6 s · jv-hud-bridge 1.6 s · jv-compat 2.7 s ·
+      harness 3.4 s · jv-guard 3.9 s · jv-context 11.4 s · tools 12.2 s ·
+      jv-voice 23.0 s · jv-brain 36.3 s · jv-ears **145.8 s** — all ten
+      **241.7 s**. So the expensive case is four minutes, ONCE, for the one
+      change in the repo that names every suite, and 60% of it is jv-ears
+      alone. Shape **(a)**, and (b) was rejected on an argument rather than a
+      price: a `<= 3 suites` cutoff is not a cheaper (a), it is (a) with the
+      `services/pylib/` case removed, and that case is the only one where the
+      author could not possibly have guessed the readers. A rule that drops
+      coverage exactly where coverage is the point is not a compromise.
+      Four decisions worth their own line. Every step runs even after one
+      fails — fail-fast hands back the partial picture this replaces and
+      costs a second full run. Output is NOT captured: a 146 s suite behind a
+      pipe cannot be told from a hang. The Rust caveat became a step, because
+      "a change under a directory with a Cargo.toml is that crate" is a rule
+      and a rule can be run — read off the directory, so a third crate needs
+      no edit. And an empty plan exits **2**, not 0: the gate runs before the
+      commit, so being asked about a clean tree means it was asked after, and
+      that is 5a3f1e9 exactly — `--since HEAD~1` is how you ask about what a
+      commit actually took. The verdict names the paths it covers for the
+      same reason: nothing here can see the index.
+      `runtests.sh` keeps its notice to itself under `RALPH_GATE=1`, or a
+      ten-step run would urge the reader ten times to run the suites it is in
+      the middle of running. PROMPT.md STEP 3 now names one command.
+      The gate found a bug in its own first real run: the `RALPH_GATE` it
+      exports reaches the suites it spawns, and B68's test for the notice
+      read it — that test now states which half of the pair it is.
+      Tests: `runtests.sh tools` **372** (was 347); 11 mutations, 10 caught
+      on the first pass. The survivor was the spawn-failure branch: the test
+      for it deleted the SCRIPT, and bash starts fine and exits 127, so
+      nothing ever reached the `except OSError` that stands between "one step
+      could not run" and "no verdict at all". Re-graded 1/1. Raised while
+      doing it: **B72**.)
+
+- [ ] B72. `verify.sh` plans Python, QML and Rust, and cannot plan the two
+      gates that are neither. `ops/ralph/nixtest.sh` asserts what a module
+      OPTION does to the unit text ares gets — a change to `modules/*.nix`
+      or `hosts/ares/*` today names only `tools` (which reads them as text
+      for the fonts check) and never the gate built to read them, because a
+      NixOS evaluation is not a file naming a path and there is no syntax to
+      derive from. `ops/ralph/hudscreens.sh` is the same shape one level
+      further out: it photographs the REAL `.#jv-hud` through a real
+      compositor, so what it reads is a nix derivation and not a set of QML
+      imports, and it needs a compositor to run at all. Two honest shapes:
+      write them down as `QML_GATES` is written down (a small table of
+      path prefixes per script, checked against the script itself by a test,
+      which is what `test_dependents.py` already does for the hudshots
+      staging), or leave them out and say so where the plan is printed —
+      which is what it does today, badly, by saying nothing. The first is
+      cheap for `nixtest.sh` and wrong for `hudscreens.sh`, which cannot run
+      in this sandbox and must not become a step that always fails.
+      Discovered in B70.
 
 - [x] B71. `mutate.sh` no longer leaves the mutation applied when it is
       killed. — c007204

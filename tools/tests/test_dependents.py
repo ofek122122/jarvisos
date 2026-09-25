@@ -890,12 +890,20 @@ def test_the_gate_still_reports_pytests_verdict_and_asks_anyway(tmp_path):
         f'set -euo pipefail\nvenv="{tmp_path}"\nroot="{ROOT}"\nsvc=tools\n' + tail
     )
 
+    # RALPH_GATE is stripped deliberately: `verify.sh` sets it for every step
+    # it spawns (B70), so when this suite is run BY the gate it inherits it and
+    # the notice this test is about stands down. That is the gate behaving
+    # correctly and this test asserting the other half, so it states which
+    # half it is in rather than reading whatever ran it.
     for verdict in (0, 1):
         done = subprocess.run(
             ["bash", "-c", script],
             capture_output=True,
             text=True,
-            env={**os.environ, "STUB_PYTEST": str(verdict)},
+            env={
+                **{k: v for k, v in os.environ.items() if k != "RALPH_GATE"},
+                "STUB_PYTEST": str(verdict),
+            },
         )
         assert done.returncode == verdict, (verdict, done.stdout, done.stderr)
         assert "ASKED" in done.stdout, (verdict, done.stdout, done.stderr)

@@ -12,10 +12,20 @@ An autonomous builder that runs for days on branch `ralph/auto`, building Jarvis
 - `JOURNAL.md` — append-only log of every successful iteration.
 - `updates.sh` — "stop and give me updates" — the delta reporter.
 
+## The test gate
+```
+bash ops/ralph/verify.sh          # every suite and gate that reads what you changed
+bash ops/ralph/verify.sh --list   # …and what that will cost, before you pay it
+```
+You do not choose what it runs: it asks the worktree what you touched, derives
+the readers (below), runs all of them and exits non-zero if ANY is red. The
+other half of the gate is `nixos-rebuild build --flake .#ares`, which is not a
+suite derived from a path and is run beside it.
+
 ## Test runners (the loop's inner loop)
-The gate is always `nixos-rebuild build --flake .#ares`; these run the suites
-against the WORKTREE source, fast, so a red/green loop does not rebuild the
-world. One per language the repo actually has:
+These run one suite each against the WORKTREE source, fast, so a red/green
+loop does not rebuild the world. They are NOT the gate — `verify.sh` is, and
+it calls them. One per language the repo actually has:
 ```
 bash ops/ralph/runtests.sh jv-voice   # Python services (+ pylib, tools, harness)
 bash ops/ralph/cargotest.sh jarvisd   # Rust crates
@@ -52,9 +62,20 @@ script opens — names the sheet too. WHERE that QML is assembled is the one
 thing written down rather than derived: `hudshots.sh` stages a copy of the
 shell with two singletons replaced, so `QML_GATES` in `tools/dependents.py`
 holds that staging and `test_dependents.py` checks every directory of it
-against the script itself. What is left unseen is Rust — `jarvisd` and
-`jv-act` keep their tests inside the source they test — and that is now the
-standing caveat.
+against the script itself. What is left unseen by the DERIVATION is Rust —
+`jarvisd` and `jv-act` keep their tests inside the source they test, so there
+is no third file naming a path — but the caveat's own sentence is a rule, and
+`verify.sh` runs it: a changed file under a directory with a `Cargo.toml` is
+that crate's `cargotest.sh`.
+
+`verify.sh` (B70) is that notice with a verdict on it, because advice is what
+had already failed. The price, measured: ten suites is 242 s and 60% of it is
+jv-ears; a service change is that service plus `tools`, seconds; a HUD change
+is about 80 s. Every step prints its own seconds so the figure can be
+re-measured. Under the gate `runtests.sh` keeps its notice to itself
+(`RALPH_GATE=1`) — it would otherwise urge the reader, once per step, to run
+the suites the gate is running. What `verify.sh` still cannot plan is
+`nixtest.sh` and `hudscreens.sh`: PLAN B72.
 
 ## Grading the tests themselves
 Every journal entry claims a number like "six mutations, six caught" — the
