@@ -210,6 +210,31 @@ def _module_path(root: Path, top: str, bases: Sequence[str]) -> str | None:
 
     Nothing for `json` or `pytest` — this asks the repo, not the interpreter,
     so a name it does not own is simply not a dependency.
+
+    Resolved in TWO passes, because `<top>/` with no `__init__.py` is still a
+    module (PEP 420) and `services/jv-ears/jv_ears` is this repo's one of
+    those — setuptools ships it regardless, its pyproject discovery defaulting
+    to `namespaces = true`, so nothing ever complained. Asking only for
+    `__init__.py` made `import jv_ears` resolve to NOTHING: the closure walk
+    stopped at the first edge and a change to that package planned every gate
+    except the 136-test suite that runs it (PLAN B86, and it is B68 with the
+    roles reversed).
+
+    Two passes and not one, because such a directory is a namespace *portion*
+    and the interpreter does not stop at it either — it remembers it, keeps
+    searching the rest of the path, and lets a real package or a plain module
+    found anywhere later win. Resolving eagerly, on the accident of which base
+    is listed first, would aim an import at source Python does not read: a
+    wrong suite, which is worse than none.
+
+    NARROWER than the interpreter in one place: any directory at all is a
+    portion to Python, and a portion is taken here only when it has Python
+    UNDER it — which is to say, only when `_module_files` would find the
+    resolution something to read. A stray `import docs` must not claim every
+    PNG in the repo, because this tool's one forbidden answer is "run every
+    suite". Not narrower than that, though: `*.py` directly inside would have
+    refused the shape namespace packages are usually FOR, a `foo/` whose only
+    modules are in `foo/bar/`, and refusing costs a missed reader.
     """
     if not top or not top.isidentifier():
         return None
@@ -219,6 +244,10 @@ def _module_path(root: Path, top: str, bases: Sequence[str]) -> str | None:
             return stem
         if (root / f"{stem}.py").exists():
             return f"{stem}.py"
+    for base in bases:
+        stem = f"{base}/{top}" if base else top
+        if (root / stem).is_dir() and _module_files(root, stem):
+            return stem
     return None
 
 

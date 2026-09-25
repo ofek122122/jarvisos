@@ -260,6 +260,111 @@ def test_a_module_that_is_a_single_file_resolves_to_that_file(tmp_path):
     assert reads_of(root, "tools") == frozenset({"tools/atool.py"})
 
 
+def test_a_package_with_no_init_is_still_importable(tmp_path):
+    """B86, the class. `import <top>` was resolved by looking for
+    `<top>/__init__.py` or `<top>.py`, and PEP 420 made the first of those
+    optional twelve years ago: a directory of `*.py` with no `__init__.py` is
+    a namespace package and imports exactly like any other. This repo has one
+    — `services/jv-ears/jv_ears` — and setuptools ships it because
+    `[tool.setuptools.packages.find]` defaults to `namespaces = true`, so
+    nothing anywhere complained. The closure walk just stopped at the first
+    edge, silently, and the 136-test suite that executes that package was
+    never named for a change to it."""
+    root = mkrepo(tmp_path)
+    (root / "services/svc-c/pkg_c").mkdir(parents=True)
+    write(root, "services/svc-c/pkg_c/mod.py", "")
+    write(root, "tools/tests/test_atool.py", "import pkg_c\n")
+    assert reads_of(root, "tools") == frozenset({"services/svc-c/pkg_c"})
+    got = dependents.readers(root, ["services/svc-c/pkg_c/mod.py"])
+    assert got == {"tools": ["services/svc-c/pkg_c/mod.py"]}, got
+
+
+def test_a_package_with_an_init_wins_over_a_namespace_found_earlier(tmp_path):
+    """Being generous about what resolves must not change WHAT resolves. The
+    interpreter treats a directory with no `__init__.py` as a *portion*: it
+    remembers it, keeps searching the rest of the path, and lets a real
+    package or module found LATER win. Resolving the portion eagerly — on the
+    accident of which base came first — would retarget an import at source
+    Python does not read, which is worse than the bug being fixed, because a
+    wrong suite is more confident than a missing one.
+
+    The decoys go at the repo root on purpose. `_package_bases` puts `""`
+    first and the services in sorted order, so a decoy under `svc-c` loses to
+    `svc-a` even when the passes are merged, and the first version of this
+    test proved nothing: the merged rule survived it (graded, not guessed)."""
+    root = mkrepo(tmp_path)
+    (root / "pkg_a").mkdir()
+    write(root, "pkg_a/decoy.py", "")
+    write(root, "tools/tests/test_atool.py", "import pkg_a\n")
+    assert reads_of(root, "tools") == frozenset({"services/svc-a/pkg_a"})
+
+    # And the same contest against a single-file module, which also wins.
+    (root / "atool").mkdir()
+    write(root, "atool/decoy.py", "")
+    write(root, "tools/tests/test_atool.py", "import atool\n")
+    assert reads_of(root, "tools") == frozenset({"tools/atool.py"})
+
+
+def test_a_directory_with_no_python_under_it_is_not_a_module(tmp_path):
+    """Where the new rule is narrowed, and exactly how far. Any directory at
+    all is a portion to the interpreter, so one stray `import docs` would
+    claim every PNG beneath it — the "run every suite" answer this tool exists
+    to avoid. A portion is taken only when there is Python under it to read.
+
+    ANYWHERE under it, though, and not directly inside: `foo/` whose only
+    modules are `foo/bar/`'s is the shape namespace packages are mostly FOR,
+    and `import foo.bar` arrives here as the top name `foo`. Refusing it would
+    cost a missed reader, which is the expensive direction. And a directory
+    whose only Python is a stale `__pycache__` is not a module either — that
+    is one rule, not two, because both ask `_module_files`, the same function
+    that decides what a resolved import brings in."""
+    root = mkrepo(tmp_path)
+    write(root, "tools/tests/test_atool.py", "import docs\n")
+    assert reads_of(root, "tools") == frozenset()
+
+    write(root, "docs/pics/deep.py", "")
+    assert reads_of(root, "tools") == frozenset({"docs"})
+
+    root2 = mkrepo(tmp_path / "two")
+    (root2 / "docs/__pycache__").mkdir(parents=True)
+    write(root2, "docs/__pycache__/stale.py", "")
+    write(root2, "tools/tests/test_atool.py", "import docs\n")
+    assert reads_of(root2, "tools") == frozenset()
+
+    # And a portion is a DIRECTORY. `_module_files` answers a second question
+    # too — what one resolved import brings in — and for a plain file its
+    # answer is that file, whatever the file is. Asking it alone would make an
+    # extensionless script beside a package importable under its own name,
+    # which no interpreter agrees with. (This one survived its first grading.)
+    write(root2, "tools/helper", "#!/bin/sh\n")
+    write(root2, "tools/tests/test_atool.py", "import helper\n")
+    assert reads_of(root2, "tools") == frozenset()
+
+
+def test_every_service_suite_reads_the_source_of_the_service_it_tests():
+    """B86, the instance, and the one assertion that would have caught it.
+    Whatever the mechanism, a service's own suite reads its own service's
+    package: that is the cheapest true reading in this repo and the one an
+    author already assumes. jv-ears was not reading a single one of its eight
+    modules — iteration 105 changed `jv_ears/audio.py`, and the gate went
+    green in 35.8 s having planned `runtests.sh tools` and nothing else.
+    B68's failure with the roles reversed, and silent in the worse direction:
+    a suite that is never named cannot report that it was skipped."""
+    for suite in dependents.suites(ROOT):
+        service = suite.tests.parent
+        if service.parent.name != "services":
+            continue  # `tools` and `harness` test no single service
+        for pkg in sorted(service.iterdir()):
+            if not pkg.is_dir() or pkg.name == "tests" or not list(pkg.glob("*.py")):
+                continue
+            for mod in sorted(pkg.glob("*.py")):
+                rel = mod.relative_to(ROOT).as_posix()
+                assert dependents.is_read(suite.reads, rel), (
+                    f"{suite.name}'s own suite does not read {rel} — "
+                    "a change to it would plan every gate but that one"
+                )
+
+
 def test_a_comment_names_nothing(tmp_path):
     """This repo's suites carry more prose than code, and a great deal of it
     names other services while asserting nothing about them (`# jv-compat's
