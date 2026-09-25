@@ -10187,3 +10187,89 @@ a reader with no renderer.
   human-blocked (A47 -> A55 and the growth checks; A13/A27/A38;
   A21/A22/A25; A73's re-shoot; B10/A28), and A76/A77/A81/A82 and
   B62/B67/B76/B77/B78 are raised-but-undecided.
+
+## 2026-09-25 — iteration 103 — B79: the confirmation, as one sentence
+
+Three UI iterations in a row (A75, A78, A79), so the ladder says take a
+feature. B79 was the obvious one: it is the B-track half of the reader
+A79 just shipped, and the A track is human-blocked almost everywhere.
+
+**What was wrong.** A confirmation is two `action.confirm` frames on one
+topic threaded by a `request_id`, with a human's silence in between. The
+question carries `tool`, `summary` and `window_s`; the answer carries
+`granted` and `answered_by`. Neither carries the other, and nothing on
+the wire carries the wait. So `jv tap` printed two JSON blobs seconds
+apart and said nothing about the pair, and `jv tap --latency` — which
+prints hop lines instead of frames — printed two topic names. The one
+sentence the stream can make about a destructive tool was a correlation
+the reader did by hand, in a scrollback.
+
+    >>> confirm req-4: fs.delete -> granted (cli, 0.2s)
+
+**What it decides: nothing.** This is the whole design of it. What a
+denial IS was argued in `core/ConfirmState.qml` one iteration ago, and a
+second reader that disagreed would be worse than one that only prints
+fields — so the three refusals are kept verbatim rather than re-derived:
+
+- *Only a question this tap SAW asked.* An answer for a request_id we
+  never heard opened is a verdict out of nowhere — and it could not name
+  a tool anyway, since `tool` is request-only in the frozen schema. This
+  is also, for free, what deduplicates jv-act's ECHO of the answer it
+  acted on: every confirmed tool puts two answer frames on the wire, and
+  the second one is a stranger's answer to a question already closed.
+- *Only from an answer FRAME.* Nothing here times a window out. The tap
+  has a cap, not a clock, so a question whose answer never comes is
+  eventually dropped in silence rather than reported as an ending the
+  machine never stated. That silence is the limit this shipped with, and
+  it is B81.
+- *`granted` decides and nothing else does.* Absent, or not a msgpack
+  boolean, reads `unknown` — **including under `answered_by: "timeout"`**,
+  for the reason ConfirmState gives: the schema's prose says a timeout is
+  a denial and jv-act publishes `granted: false` when it times out, so
+  inferring it off the route would be a second copy of a rule the frame
+  already states (A14). `get_bool` is strict for the same reason: a `1`
+  or a `"true"` is a producer writing a different schema, and reading it
+  as a yes would be the CLI reporting an authorization nobody gave.
+
+**Two choices worth naming.** Seconds, not the milliseconds every turn
+line uses: the turn ladder decomposes ONE latency and its terms have to
+be comparable with each other, while this number is a person deciding —
+it is the same span `Turn::confirm_line` calls `you=`, and the reason
+that one is in ms is that it is a share of a ms whole. And the `summary`
+is omitted: 80 columns holds the tool or jv-act's spoken sentence, and
+the tool is the name the same event goes by in `intent.action`, in the
+audit and in `jv act-log`, so it is the one a reader can follow between
+them. Under `--latency` that omission costs something real, which is B80.
+
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over the 3 changed
+  paths, 78.9 s: `runtests.sh pylib` 37.7 s, `runtests.sh tools` 35.1 s,
+  `cargotest.sh jarvisd` 6.1 s (140 unit, was 129; 40 integration, was
+  39). The gate verify names but does not run: `bash
+  ops/ralph/hudscreens.sh` GREEN, 179.4 s, 7/7 matching HEAD — the right
+  answer for a change no pixel of the HUD can see. All 11 new tests were
+  RED before the type existed, and the integration test was re-run with
+  the `println!` removed and went red, so it is load-bearing on the
+  binary and not only on the unit. Mutations: 10 graded, 10 caught —
+  a stranger's answer as a verdict, the timeout route read as a denial,
+  the echo reported twice, an unknown route read aloud, a backwards clock
+  as `abs()`, an unbounded memory, an id asked twice as two questions, an
+  invented tool, a non-answer frame closing a question, an integer
+  `granted` coerced.
+- build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins — both fields have been in
+  `schemas/action.confirm.json` since v1.
+- files: services/jarvisd/src/cli.rs, services/jarvisd/src/bin/jv.rs,
+  services/jarvisd/tests/cli.rs, ops/ralph/PLAN.md
+- commits: ca95b21 (the line)
+- next: **B78** is now the last unbuilt half of the A78/A79 pair and the
+  cheaper of the two remaining B items — `jv tap` can see a restart
+  because it holds state across frames while `jv health` is a snapshot,
+  and the same caution applies (the freshness window and the monotonicity
+  argument live in `core/HealthState.qml` and must not be re-derived).
+  **B80** and **B81** are this iteration's own limits and are both
+  questions about what `jv tap` is for rather than patches. On the A
+  track: **A22** is a design decision with the reader already under it,
+  **A83** belongs with it, and **A80**'s gate crosses two elements.
+  Otherwise unchanged: Track A is human-blocked (A47 -> A55 and the
+  growth checks; A13/A27/A38; A21/A22/A25; A73's re-shoot; B10/A28), and
+  A76/A77/A81/A82 and B62/B67/B76/B77 are raised-but-undecided.

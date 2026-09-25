@@ -3323,7 +3323,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       ending that can only say "GRANTED" names nothing. Belongs with A22.
       Discovered in A79.
 
-- [ ] B79. The terminal has the same half-story A79 just closed for the
+- [x] B79. The terminal has the same half-story A79 just closed for the
       HUD, and jv-act already keeps the other half. `jv act-log` reads the
       audit (services/jv-act/src/audit.rs records `granted` and
       `answered_by`) and is the record AFTER the fact; `jv tap` watches
@@ -3336,7 +3336,48 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       a question we saw asked, only an answer frame, `granted` and never
       the route), and a second reader that disagreed about what a denial
       is would be worse than one that only prints fields. Discovered in
-      A79.
+      A79. — ca95b21
+      (`cli::Confirmations` holds the question half until the answer lands
+      and prints `confirm req-4: fs.delete -> granted (cli, 0.2s)`. It
+      decides nothing: the three `ConfirmState` refusals are kept verbatim
+      — only a question this tap saw asked, only an answer FRAME (nothing
+      here times a window out), `granted` and never the route, so an
+      absent or non-boolean `granted` is `unknown` even under
+      `answered_by: "timeout"`. Seconds, not the ladder's ms, because this
+      number is a person deciding. jv-act's echo of the answer is
+      deduplicated by the same rule that drops a stranger's answer. 11
+      tests (140 unit + 40 integration), 10 mutations, 10 caught. Raised:
+      B80, B81.)
+
+- [ ] B80. **The `summary` — the words the user actually HEARD — is on no
+      line the tap writes, and under `--latency` it is nowhere at all.**
+      B79 prints the tool and not jv-act's spoken question, because eighty
+      columns holds one of them and the tool is the name the same event
+      goes by in `intent.action`, in the audit and in `jv act-log`. In
+      plain `jv tap` that is defensible: the request frame is printed
+      verbatim two lines up. Under `--latency` it is not — that mode
+      prints hop lines instead of frames, so "Delete 3 files from
+      Downloads" exists in the process and is discarded. The honest ways
+      out are a SECOND line under the confirm line (the shape the turn
+      ladder already uses for a span it divides) or a `--wide` that stops
+      pretending 80 columns is the budget, and both are choices about what
+      `jv tap` is for rather than patches. Discovered in B79.
+
+- [ ] B81. **A question nobody answered is the one case this prints
+      nothing for, and it is jv-act dying mid-window.** B79 writes a line
+      only when an answer frame closes a question, on purpose: timing a
+      window out here would be the tap inventing an ending the machine
+      never stated, which is exactly the refusal `ConfirmState` makes
+      (`expired` settles nothing). But the consequence is that a jv-act
+      which asked and then died leaves `jv tap` silent about the most
+      alarming confirmation there is — the question sits in
+      `Confirmations` until the cap pushes it out, unreported. The HUD has
+      the same hole and answers it with a backstop it OWNS and labels as
+      its own (`windowFallbackS`); the tap's equivalent would be a line at
+      the summary, "1 question was never answered", which is a report
+      about the TAP's own observation and not a verdict about the tool.
+      That is a different kind of line from every `>>>` the tap writes
+      today, which is why it is a proposal. Discovered in B79.
 
 - [ ] A56. The sequence suite runs in `ops/ralph/hudshots.sh` and NOT in
       `nix build .#jv-hud`, so the strongest assertion about what the HUD
