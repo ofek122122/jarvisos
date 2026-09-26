@@ -103,6 +103,45 @@ ShellRoot {
 
       // ---- the motion, all of it -------------------------------------------
 
+      // ONE CLOCK, AND WHY IT IS A NUMBER (PLAN E8). Both cycles below used to
+      // be animations of their own — a `SequentialAnimation` on the glow's
+      // opacity and a `RotationAnimation` on the comet's — and a surface
+      // animated that way has no moment anybody can NAME. That is what stopped
+      // this shell having a contact sheet: the other three sheets photograph
+      // STATES, reached by feeding a model and waiting for it to settle, and a
+      // phase is not a state. `wait(14000)` is not one either — it is a
+      // different picture on every machine.
+      //
+      // So both cycles are bindings on one number, and the number is the only
+      // thing that moves. `tools/wallshots/scene/tst_shots.qml` sets it and
+      // grabs; nothing waits for anything.
+      //
+      // WHAT IS ON SCREEN DID NOT CHANGE, and that is arithmetic rather than a
+      // claim. `Easing.InOutSine` is (1 - cos(πx))/2, and it is symmetric:
+      // e(1-x) == 1-e(x). So a 0.25 → 1.0 InOutSine over 7 s followed by a
+      // 1.0 → 0.25 InOutSine back is, at every instant, one cosine of the
+      // whole 14 s — 0.625 - 0.375·cos(2π·phase/14000) — and a `RotationAnimation`
+      // 0 → 360 is linear by default, which is 360·(phase mod 96000)/96000.
+      // `tools/tests/test_wallshots.py` checks that algebra against a dense
+      // sample of the pair this replaced rather than taking it on trust — in
+      // Python, because the one deterministic way to compare two easing curves
+      // is to compare the curves, and sampling a running animation would be
+      // measuring this machine's frame timing instead.
+      //
+      // The lap is 672 s because that is where the two cycles agree again
+      // (lcm(14, 96) = 672): the wrap from the end of one lap back to zero is a
+      // continuous instant in BOTH of them, so nothing on screen jumps once
+      // every eleven minutes.
+      readonly property int lapMs: 672000
+      property real phaseMs: 0
+      NumberAnimation on phaseMs {
+        running: shell.motion
+        loops: Animation.Infinite
+        from: 0
+        to: surface.lapMs
+        duration: surface.lapMs
+      }
+
       // 1. the ember glow, breathing (14 s round trip)
       Rectangle {
         id: glow
@@ -112,7 +151,10 @@ ShellRoot {
         height: surface.ir * 2
         radius: glow.width / 2
         visible: shell.motion
-        opacity: 0.25
+        // The breath. Dimmest at the start of every 14 s round trip, brightest
+        // 7 s in — the value the SequentialAnimation this replaced held at the
+        // same instant, for the reason spelled out above `phaseMs`.
+        opacity: 0.625 - 0.375 * Math.cos(2 * Math.PI * surface.phaseMs / 14000)
         // Ember, fading to the same ember at zero alpha rather than to
         // `transparent` — which is transparent BLACK, and interpolating to it
         // would drag a grey through the middle of the gradient.
@@ -126,13 +168,6 @@ ShellRoot {
             color: Qt.rgba(Theme.ember.r, Theme.ember.g, Theme.ember.b, 0.0)
           }
         }
-
-        SequentialAnimation on opacity {
-          running: shell.motion
-          loops: Animation.Infinite
-          NumberAnimation { to: 1.0; duration: 7000; easing.type: Easing.InOutSine }
-          NumberAnimation { to: 0.25; duration: 7000; easing.type: Easing.InOutSine }
-        }
       }
 
       // 2. the comet head, drifting around the outer ring (96 s per lap)
@@ -141,6 +176,10 @@ ShellRoot {
         x: surface.ix
         y: surface.iy
         visible: shell.motion
+        // Drift, not spin: one lap of the outer ring every 96 s, linear,
+        // because a head that sped up and slowed down is a thing the eye
+        // follows.
+        rotation: 360 * (surface.phaseMs % 96000) / 96000
 
         Rectangle {
           id: head
@@ -151,14 +190,6 @@ ShellRoot {
           opacity: 0.85
           x: -head.width / 2
           y: -surface.ir - head.height / 2
-        }
-
-        RotationAnimation on rotation {
-          running: shell.motion
-          loops: Animation.Infinite
-          from: 0
-          to: 360
-          duration: 96000 // drift, not spin
         }
       }
     }

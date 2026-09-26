@@ -632,6 +632,35 @@ QML_GATES = (
         ),
         also=("tools/hudsheet.py", "tools/qmlerrors.py", "docs/bar"),
     ),
+    # And the wallpaper's (PLAN E8), which makes it one harness per shell for
+    # all four. Fourth script for the fourth shell, same argument as the three
+    # above: what is derived from a path is which gate runs, and a change to a
+    # toast must not re-photograph the desktop.
+    QmlGate(
+        script="ops/ralph/wallshots.sh",
+        entry="tools/wallshots/scene",
+        mounts=(
+            # The driver and the staged field sit together in `$stage/shots`…
+            (".", ("tools/wallshots/scene", "tools/qmlprobe")),
+            # …and `$stage` itself is the shell, with the ONE singleton that
+            # imports Quickshell replaced: `Motion`, which reads the session
+            # override through Quickshell.env. This shell has no second one —
+            # it has no vocabulary of its own at all — so the stage is the
+            # smallest of the four. `shell.qml` is deleted from it and is not a
+            # type, so nothing reaches it from here.
+            ("..", ("shell/jv-wall", "tools/wallshots/stub")),
+        ),
+        # `pkgs/jarvis-wallpaper` is the one entry here no other harness has:
+        # most of every pixel on this sheet is that package's art, rasterized
+        # from its own SVG, so a change to the drawing moves the sheet exactly
+        # as surely as a change to the shell over it.
+        also=(
+            "tools/hudsheet.py",
+            "tools/qmlerrors.py",
+            "docs/wall",
+            "pkgs/jarvis-wallpaper",
+        ),
+    ),
 )
 
 # `module`, `depends`, `plugin`… — qmldir lines that declare no type.

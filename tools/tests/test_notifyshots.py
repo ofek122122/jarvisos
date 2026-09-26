@@ -98,7 +98,12 @@ def stack_of(text: str, opener: str = "Column {") -> list[tuple[int, str]]:
             # (`Toast {`) rather than a binding (`onX: { … }`, an object
             # literal) or a value assigned to one (`mask: Region {}`, which is
             # a property of the surface and not something drawn in it).
-            head = re.search(r"([A-Z]\w*)\s*$", body[:i])
+            # The lookbehind is what keeps this from reading INTO an
+            # identifier. `NumberAnimation on phaseMs {` ends in an uppercase
+            # letter followed by a lowercase one, and without it the walk
+            # reports a child called `Ms` — an animation attached to a property
+            # counted as an element of the composition (PLAN E8).
+            head = re.search(r"(?<![\w.])([A-Z]\w*)\s*$", body[:i])
             before = body[:i].rstrip()
             valued = re.search(r":\s*[A-Z]\w*\s*$", body[:i])
             if head and not before.endswith(":") and not valued:

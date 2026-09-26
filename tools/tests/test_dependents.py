@@ -1078,6 +1078,52 @@ def test_the_qml_gate_reaches_every_file_of_the_notifier_that_a_test_can_load():
     }, sorted(ours - seen)
 
 
+def test_the_qml_gate_reaches_every_file_of_the_wallpaper_that_a_test_can_load():
+    """The same sweep for `shell/jv-wall` (PLAN D10), and since E8 there is a
+    gate for it to be a sweep OVER.
+
+    This shell had NO QML gate at all — not one, which is a distinction none of
+    the other three ever held. `nix build .#jv-wall` ran qmllint over it and
+    `shellload.sh` proved it started, and between them they could say the files
+    parse and the shell maps. Where the comet was, which of
+    pkgs/jarvis-wallpaper's renders an output resolved, whether the fallback
+    fired: nothing asked. `ops/ralph/wallshots.sh` closed it by staging the shell
+    and photographing the real field at real monitor sizes, and what is left out
+    is now exactly what the other three leave out — `shell.qml`, and the
+    singleton the stage replaces because no other engine can resolve it. There is
+    one of those here rather than two, because this shell has no vocabulary of
+    its own: a wallpaper needs the switch and the theme and nothing else."""
+    ours = {
+        p.relative_to(ROOT).as_posix()
+        for d in ("shell/jv-wall", "tools/wallshots")
+        for p in (ROOT / d).rglob("*.qml")
+    }
+    seen: set[str] = set()
+    for gate in dependents.QML_GATES:
+        seen |= dependents.qml_reads(ROOT, gate)
+    assert ours - seen == {
+        "shell/jv-wall/shell.qml",  # Quickshell: gated by `nix build .#jv-wall`
+        "shell/jv-wall/Motion.qml",  # Quickshell: the session override (D18)
+        # And one this shell alone leaves out. `Ease.qml` is generated into
+        # every shell — it is the §06 fade, written once — and this is the only
+        # surface with nothing to fade: a wallpaper's motion is two cycles that
+        # never start or stop. Unreached because it is unused, which is a fact
+        # about the wallpaper rather than a hole in the gate.
+        "shell/jv-wall/Ease.qml",
+    }, sorted(ours - seen)
+
+
+def test_the_art_the_wallpapers_sheet_is_made_of_names_that_sheet():
+    """The one thing this gate reads that no other shot harness has. Most of
+    every pixel in docs/wall belongs to `pkgs/jarvis-wallpaper` — it rasterizes
+    the art from an SVG at build time — so a change to the drawing moves the
+    sheet exactly as surely as a change to the shell over it, and a palette edit
+    moves both at once. Nothing in the QML names that package: the store path
+    arrives through a symlink the script makes."""
+    got = dependents.qml_readers(ROOT, ["pkgs/jarvis-wallpaper/default.nix"])
+    assert "ops/ralph/wallshots.sh" in got, got
+
+
 def test_a_notify_element_names_only_the_notifiers_gates():
     """Four scripts now, and the claim is the one it was at two: a change to
     what a toast does must not be verified by the bar's tests.

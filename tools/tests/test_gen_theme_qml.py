@@ -452,13 +452,13 @@ def test_a_build_sandbox_is_never_asked_for_the_stand_in(tmp_path):
 # Quickshell and has to stage a Motion it can; a shell nothing photographs
 # needs none, and saying so here is what keeps "three harnesses for three
 # shells" from being the only thing checked.
-UNPHOTOGRAPHED = {
-    "jv-wall": (
-        "the wallpaper has no contact sheet yet (PLAN E8). It is the one shell "
-        "whose whole surface is a PNG rendered outside QML, so a sheet of it "
-        "photographs pkgs/jarvis-wallpaper's art plus two slow animations — "
-        "worth having, and a harness of its own rather than a line here."
-    ),
+UNPHOTOGRAPHED: dict[str, str] = {
+    # Empty, and it is worth saying why rather than deleting the table. E8 took
+    # the last entry out of it: `jv-wall` is photographed by
+    # ops/ralph/wallshots.sh now, so every shell this generator writes has a
+    # harness. The table stays because the NEXT shell will not, and an excuse
+    # that has to be written down beside the gap is what stopped this one being
+    # invisible for as long as it was.
 }
 
 def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeypatch):
@@ -478,10 +478,13 @@ def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeyp
 
     There used to be a third half — jv-bar, which carried no stand-in at all and
     so had to write none of them. D13 gave it one, and for three shells the
-    tables were equal. `jv-wall` is the fourth and it brings the "none" case
-    back, so the equality is now a PAIR of tables that must cover `SHELLS`
+    tables were equal. `jv-wall` was the fourth and brought the "none" case
+    back, so the equality became a PAIR of tables that must cover `SHELLS`
     between them without overlapping — the same contract COLOUR_EXCEPTIONS has,
     and for the same reason: an excuse must not outlive the gap it excuses.
+    E8 photographed the wallpaper and emptied the second table, which is that
+    rule doing the thing it is for; the pair stays, because the shell after this
+    one will arrive without a harness too.
     """
     photographed = {s.shell for s in gen.STANDINS}
     assert photographed <= set(gen.SHELLS), (

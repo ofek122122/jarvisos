@@ -648,16 +648,17 @@ class Standin:
     script: str
 
 
-# The three harnesses that photograph a shell — one per shell, now that the
-# bar has one too (PLAN D13). Each stages its own stand-in
+# The four harnesses that photograph a shell — one per shell, now that the
+# wallpaper has one too (PLAN E8). Each stages its own stand-in
 # because `import "."` resolves inside ONE directory and each harness assembles
 # its own stage; the FILES are generated from one body, which is the whole
-# point of D29 — and what made the second harness (D20) and the third (D13) a
-# one-line table entry each rather than another hand copy.
+# point of D29 — and what made the second harness (D20), the third (D13) and the
+# fourth (E8) a one-line table entry each rather than another hand copy.
 STANDINS = (
     Standin("jv-hud", ROOT / "tools" / "hudshots" / "stub", "ops/ralph/hudshots.sh"),
     Standin("jv-notify", ROOT / "tools" / "notifyshots" / "stub", "ops/ralph/notifyshots.sh"),
     Standin("jv-bar", ROOT / "tools" / "barshots" / "stub", "ops/ralph/barshots.sh"),
+    Standin("jv-wall", ROOT / "tools" / "wallshots" / "stub", "ops/ralph/wallshots.sh"),
 )
 
 

@@ -66,6 +66,7 @@ SCRIPTS = (
     "ops/ralph/hudshots.sh",
     "ops/ralph/notifyshots.sh",
     "ops/ralph/barshots.sh",
+    "ops/ralph/wallshots.sh",
 )
 
 # A green run of the notification corner's harness, verbatim, including the
@@ -276,16 +277,17 @@ def test_every_shot_harness_hands_the_runners_output_to_this():
         assert "--stage" in text, f"{script} does not tell the scanner where it staged"
 
 
-def test_the_three_shot_gates_read_this_scanner_and_no_other_qml_gate_does():
+def test_the_four_shot_gates_read_this_scanner_and_no_other_qml_gate_does():
     """`tools/verify.py` derives which gates to run from what changed, and the
     only way it can learn that a shot harness now reads a Python file is the
     `also` table in `dependents`. A scanner whose change ran no shot harness
     would be a scanner nobody could safely edit.
 
-    There is a FOURTH reader since D39 — `hudscreens.sh`, the only gate that
+    There is a FIFTH reader since D39 — `hudscreens.sh`, the only gate that
     loads `shell.qml` at all — and it is not here because it is not derived
     from any import graph: it is a declared gate, and the test for it is at
-    the foot of this file."""
+    the foot of this file. The fourth of the derived ones is `wallshots.sh`
+    (PLAN E8), which is the sheet of the wallpaper."""
     got = dependents.qml_readers(ROOT, ["tools/qmlerrors.py"])
     assert set(got) == set(SCRIPTS), got
 
@@ -305,7 +307,9 @@ def test_the_three_shot_gates_read_this_scanner_and_no_other_qml_gate_does():
 #     PASS   : qmltestrunner::Probeb::initTestCase()
 #
 # So which surface of a harness D36 covers was decided by a filename, and the
-# uncovered one is `tst_fit`, `tst_settle`, `tst_settle`. The other half is a
+# uncovered one is `tst_fit`, `tst_settle`, `tst_settle`, `tst_shots` — the
+# wallpaper's harness has ONE driver, so the uncovered surface there is the
+# whole of it. The other half is a
 # different ENGINE: `tools/qmlprobe/Probe.qml` loads the same staged scene
 # under plain `qml`, which installs no handler and writes the engine's line
 # bare. Same rule reads both, because the discriminator was never the prefix.
@@ -392,8 +396,8 @@ def test_each_harness_has_a_probe_document_the_test_runner_will_not_run():
         assert "subject:" in body, f"{doc} gives the probe nothing to count"
 
 
-def test_the_three_gates_read_the_shared_probe_body():
-    """`tools/qmlprobe/Probe.qml` is staged into all three harnesses and lives
+def test_the_four_gates_read_the_shared_probe_body():
+    """`tools/qmlprobe/Probe.qml` is staged into all four harnesses and lives
     in none of them, so nothing about its path says which gates open it. The
     mount table in `dependents` is what says so, and this is what holds the
     table to it — a change to the probe that ran no harness would be a change
