@@ -313,21 +313,28 @@ def test_the_shells_are_told_to_use_wayland():
 # ---------------------------------------------------- the notifier's client
 
 
-def test_the_one_shell_nothing_wakes_is_the_bar_and_the_reason_is_its_wrapper():
-    """Two of the three are given something real to do: the notifier a D-Bus
-    client, the HUD a broker and eleven frames (PLAN D43). The bar is the one
-    with no cheap answer, and the reason is not a gap in imagination —
-    `JV_BAR_NIRI` is `--set` into its wrapper, so its event stream cannot be
-    pointed at a fake without staging the shell, which is the one thing this
-    gate refuses.
+def test_the_shells_nothing_wakes_are_the_bar_and_the_wallpaper():
+    """Two of the four are given something real to do: the notifier a D-Bus
+    client, the HUD a broker and eleven frames (PLAN D43). The other two are
+    dark for two DIFFERENT reasons, and neither is a gap in imagination:
+
+    · the bar has no cheap answer — `JV_BAR_NIRI` is `--set` into its wrapper,
+      so its event stream cannot be pointed at a fake without staging the
+      shell, which is the one thing this gate refuses.
+    · the wallpaper has no question — its only input is a directory of PNGs,
+      also pinned into its wrapper, and its two animations start themselves.
+      There is nothing a waker could hand it that it does not already have, so
+      "loaded on every output with nothing in its log" is the whole claim.
 
     Pinned because it is the limit the header states, and a header that said
     "the bar runs blind" over a bar somebody had since woken would be the
     coverage claim nobody re-read."""
     dark = [s.attr for s in shells.SHELLS if not s.wake]
-    assert dark == ["jv-bar"]
+    assert dark == ["jv-bar", "jv-wall"]
     wrapper = (ROOT / "pkgs" / "jv-bar" / "default.nix").read_text("utf-8")
     assert "--set JV_BAR_NIRI" in wrapper
+    wall = (ROOT / "pkgs" / "jv-wall" / "default.nix").read_text("utf-8")
+    assert "--set JV_WALL_DIR" in wall
 
 
 def test_every_way_of_waking_a_shell_is_one_the_driver_can_carry_out():
@@ -816,8 +823,18 @@ def test_a_shell_whose_zero_is_only_a_control_asks_for_nothing():
             continue
         # It asks for nothing. The one of the three the gate CAN see, and only
         # while the other two also hold — which is why it is pinned here rather
-        # than left to the run.
+        # than left to the run. This half is asked of the wallpaper too: it is
+        # the only one of the four properties that is about moving a window
+        # rather than about floating over one.
         assert not window_declares_a_zone(shell), (shell.attr, window_zone(shell))
+        if shell.fills_background:
+            # The three pins below are a rule about surfaces that draw OVER
+            # windows, and the wallpaper draws under all of them: it is mapped
+            # for as long as the session and anchored to all four edges on
+            # purpose. Its own shape is pinned in the test after this one, and
+            # reading its absence as a fault here would have been this gate
+            # asking the desktop to look like a corner.
+            continue
         # It is not mapped unless it has something to say, so a zone it grew
         # would be published at a moment the compositor was not listening.
         assert not window_always_mapped(shell), (shell.attr, window_visibility(shell))
@@ -834,11 +851,10 @@ def test_a_shell_whose_zero_is_only_a_control_asks_for_nothing():
         assert frozenset(window_anchors(shell)) in DISCARDED_ANCHORS, sorted(
             window_anchors(shell)
         )
-    # Both of them, or the loop above is a rule about an empty list.
-    assert [s.attr for s in shells.SHELLS if not s.reserves_top] == [
-        "jv-hud",
-        "jv-notify",
-    ]
+    # The two floating ones, or the loop above is a rule about an empty list.
+    assert [
+        s.attr for s in shells.SHELLS if not s.reserves_top and not s.fills_background
+    ] == ["jv-hud", "jv-notify"]
     # The corners they are anchored to are the two §06 assigns them, and they
     # are different corners: two surfaces in one corner is the one arrangement
     # neither of them can detect (shell/jv-notify/shell.qml says so).
@@ -846,6 +862,39 @@ def test_a_shell_whose_zero_is_only_a_control_asks_for_nothing():
     notify = next(s for s in shells.SHELLS if s.attr == "jv-notify")
     assert window_anchors(notify) == {"bottom", "right"}
 
+
+def test_the_shell_that_fills_the_screen_is_the_one_underneath_every_window():
+    """The other side of the rule above, for the surface it is not about.
+
+    `jv-wall` is the desktop: four anchors, mapped for as long as the session,
+    and none of that is the fault the loop above hunts, because it draws BELOW
+    every window instead of over one. The properties that make that safe are
+    different properties, and they are worth pinning for the same reason the
+    corners are — each is one plausible-looking edit away from a wallpaper that
+    resizes every window on the machine to show itself:
+
+    · `WlrLayer.Background`, which is what "underneath" means. On any other
+      layer this surface is a full-screen pane over the whole desktop.
+    · all four anchors, which is what makes it the whole screen rather than a
+      2560-wide strip somewhere in it.
+    · always mapped, which for THIS shell is the honest shape: a wallpaper that
+      unmapped itself when nothing moved would show the compositor's black.
+    · and still no `exclusiveZone` — asserted in the loop above, where it
+      belongs, because that one is the claim both kinds of surface make.
+
+    Invariant 10's floating-surface half does not apply and the reason is
+    written down rather than left as a shell that quietly skipped a gate.
+    """
+    background = [s for s in shells.SHELLS if s.fills_background]
+    assert [s.attr for s in background] == ["jv-wall"], [s.attr for s in background]
+    for shell in background:
+        text = (ROOT / shell.root / "shell.qml").read_text("utf-8")
+        assert "WlrLayer.Background" in text, shell.attr
+        assert window_anchors(shell) == {"top", "bottom", "left", "right"}, sorted(
+            window_anchors(shell)
+        )
+        assert window_always_mapped(shell), (shell.attr, window_visibility(shell))
+        assert not window_declares_a_zone(shell), (shell.attr, window_zone(shell))
 
 def test_the_compositor_is_asked_over_its_own_socket():
     """`swaymsg` needs SWAYSOCK, which is a different socket from the wayland

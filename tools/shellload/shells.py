@@ -134,7 +134,7 @@ class Shell:
 
     `env` is the variable the script hands the realized binary over in, and
     `wake` NAMES what gives this shell something real to do once it has
-    loaded, or is "" for the one shell nothing can. Two of the three have one:
+    loaded, or is "" for the two shells nothing can. Two of the four have one:
     the notifier gets a D-Bus client (see NOTIFY) and the HUD gets a broker
     and eleven frames (see HUD_FRAMES). It is a name rather than a bool
     because the two wakings share nothing at all — one is a `gdbus call`, the
@@ -158,6 +158,15 @@ class Shell:
     (and the anchors); `exclusionMode` is about whose zones this surface is
     positioned around. All three `shell.qml` say otherwise in a comment
     (PLAN D45).
+
+    `fills_background` is whether this surface IS the desktop — anchored to all
+    four edges, on `WlrLayer.Background`, always mapped — which only the
+    wallpaper is. It exists because the floating shells' rule ("not mapped
+    unless it has something to say, anchored to a bare corner") is a rule about
+    surfaces that draw OVER windows, and reading its absence as a fault would
+    make the one surface that is supposed to cover the screen look like the
+    thing invariant 10 forbids. What both kinds still share is the part that
+    matters: neither declares an `exclusiveZone`, so neither moves a window.
     """
 
     attr: str
@@ -165,12 +174,19 @@ class Shell:
     env: str
     wake: str = ""
     reserves_top: bool = False
+    fills_background: bool = False
 
 
 SHELLS = (
     Shell(attr="jv-hud", root="shell/jv-hud", env="JV_HUD_BIN", wake="hud"),
     Shell(attr="jv-bar", root="shell/jv-bar", env="JV_BAR_BIN", reserves_top=True),
     Shell(attr="jv-notify", root="shell/jv-notify", env="JV_NOTIFY_BIN", wake="notify"),
+    # The wallpaper (PLAN E1/E6). Nothing wakes it and it reserves nothing: its
+    # whole surface is a PNG and two animations that start themselves, so
+    # "loaded on every output with no faults in the log" is the entire claim
+    # there is to make about it — and it is a claim nothing else makes, because
+    # no shot harness can stage a ShellRoot.
+    Shell(attr="jv-wall", root="shell/jv-wall", env="JV_WALL_BIN", fills_background=True),
 )
 
 
@@ -180,7 +196,7 @@ SHELLS = (
 # ares' — the compositor is real and the monitors are not.
 #
 # THREE of them, and that is the load-bearing part rather than the sizes: all
-# three shells build one surface per `Quickshell.screens` entry, so a single
+# four shells build one surface per `Quickshell.screens` entry, so a single
 # output would load one delegate and call it a shell. D37's fault (every plate
 # in the corner rebuilt when any one of them changed) and D32's (a row sized
 # against the wrong monitor's width) are both per-surface.

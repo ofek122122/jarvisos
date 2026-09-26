@@ -434,6 +434,36 @@ def test_every_installable_package_resolves_to_its_own_source():
     assert found >= 8, f"expected this repo's eight packages, found {found}"
 
 
+def test_the_repo_wide_duplicate_definition_scan_names_all_three_python_trees():
+    """D78's decision, checked by its mechanism rather than argued in prose.
+
+    `tools/tests/test_gen_theme_qml.py` holds the one scan that reads every
+    Python module in this repo for a shadowed module-level `def`, and it is in
+    the `tools` suite because `tools` is this repo's third-party-to-everything
+    suite (Invariant 1). That decision is only real if `dependents.py` can SEE
+    the three trees, and whether it can is a property of how they are spelled:
+    `PY_TREES = (ROOT / "tools", ROOT / "services", ROOT / "harness")` is three
+    `/` chains and is visible, while the obvious tidy-up —
+    `for name in ("tools", "services", "harness"): (ROOT / name)` — is a
+    computed segment plus three bare words, and `_chain` yields nothing for the
+    first while `_candidates` refuses the rest for having no slash. The suite
+    would then stop being named for a `harness/` change with every assertion in
+    it still green, which is precisely the silent-skip this repo keeps finding
+    (B86, B87).
+
+    This file's own contribution is what is asked, not the whole suite's read
+    set: `test_hudshots.py` claims `services/**` through
+    `(ROOT / "services").iterdir()` and would satisfy the `services` half of
+    this on its own.
+    """
+    named = dependents.names(ROOT, ROOT / "tools" / "tests" / "test_gen_theme_qml.py")
+    for tree in ("tools", "services", "harness"):
+        assert (ROOT / tree).is_dir()
+        assert tree in named, (
+            f"the duplicate-definition scan reads {tree}/ and dependents.py "
+            "cannot see that it does — check how PY_TREES spells it"
+        )
+
 def test_the_two_suite_directories_that_install_nothing_are_bases_anyway():
     """`tools` and `harness` carry no `pyproject.toml` — `harness` has no
     `__init__.py` either, which makes it this repo's second namespace package

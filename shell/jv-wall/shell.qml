@@ -10,8 +10,26 @@
 // sharp edges, nothing that pulls the eye, and nothing that competes with the
 // HUD's ember — the one accent that means "Jarvis is doing something". It is
 // composed PER OUTPUT (the PNG is rendered at each monitor's own size, so
-// nothing is cropped or stretched), and JV_MOTION=0 freezes it back to exactly
-// the old static wallpaper.
+// nothing is cropped or stretched), and either switch below freezes it back to
+// exactly the old static wallpaper.
+//
+// THE TWO SWITCHES, AND WHY NEITHER IS THE OTHER (PLAN E6). §06 says motion is
+// off under prefers-reduced-motion, and this shell used to honour that NOWHERE:
+// it read a `JV_MOTION` of its own and nothing else, so the versioned
+// preference in personality/theme.toml and the session override every other
+// shell obeys both left the glow breathing. `Motion` is that one desktop-wide
+// gate — declared preference, JV_REDUCED_MOTION, and the machine states as
+// sources appear behind it — and it is the reason this directory is a
+// registered shell in tools/gen_theme_qml.py at all: a wallpaper with no
+// vocabulary of its own still needs the switch, and the switch is generated.
+// `JV_MOTION=0` stays as the NARROWER one: stop the wallpaper without telling
+// the rest of the desktop to go still.
+//
+// Colour comes from the generated Theme singleton (invariant 9) like every
+// other surface: the glow and the comet are `Theme.ember` at the alpha each
+// one needs, so the accent that means "Jarvis is doing something" is the same
+// colour here as in the HUD's corner by construction rather than by matching
+// hex codes.
 //
 // Every id referenced from inside a Variants delegate is qualified, and
 // ComponentBehavior: Bound makes those lookups lexical. The package lints this
@@ -21,12 +39,16 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import "."
 
 ShellRoot {
   id: shell
 
-  // The desktop-wide motion switch. JV_MOTION=0 → the static wallpaper.
-  readonly property bool motion: Quickshell.env("JV_MOTION") !== "0"
+  // May the wallpaper move? Both switches, and `Motion.animate` first because
+  // it is the one §06 requires: a human who asked this machine for less motion
+  // has already answered this question for every shell on it.
+  readonly property bool motion: Motion.animate
+                                 && Quickshell.env("JV_MOTION") !== "0"
   readonly property string wallDir: Quickshell.env("JV_WALL_DIR")
 
   Variants {
@@ -50,7 +72,15 @@ ShellRoot {
       focusable: false
       mask: Region {}
 
-      anchors { top: true; bottom: true; left: true; right: true }
+      // All four, spelled one per line like the other three shells: the
+      // gate's parsers read this block, and a one-line form is a surface whose
+      // anchors they read as none at all.
+      anchors {
+        top: true
+        bottom: true
+        left: true
+        right: true
+      }
       color: "transparent"
 
       // The per-output still, rendered at this monitor's exact geometry by
@@ -83,9 +113,18 @@ ShellRoot {
         radius: glow.width / 2
         visible: shell.motion
         opacity: 0.25
+        // Ember, fading to the same ember at zero alpha rather than to
+        // `transparent` — which is transparent BLACK, and interpolating to it
+        // would drag a grey through the middle of the gradient.
         gradient: Gradient {
-          GradientStop { position: 0.0; color: "#1AF0714A" }
-          GradientStop { position: 1.0; color: "#00F0714A" }
+          GradientStop {
+            position: 0.0
+            color: Qt.rgba(Theme.ember.r, Theme.ember.g, Theme.ember.b, 0.10)
+          }
+          GradientStop {
+            position: 1.0
+            color: Qt.rgba(Theme.ember.r, Theme.ember.g, Theme.ember.b, 0.0)
+          }
         }
 
         SequentialAnimation on opacity {
@@ -108,7 +147,7 @@ ShellRoot {
           width: 10
           height: 10
           radius: head.width / 2
-          color: "#F0714A"
+          color: Theme.ember
           opacity: 0.85
           x: -head.width / 2
           y: -surface.ir - head.height / 2

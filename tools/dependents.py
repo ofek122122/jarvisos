@@ -959,7 +959,7 @@ DECLARED_GATES = (
     ),
     DeclaredGate(
         script="ops/ralph/shellload.sh",
-        # The three shells, as the derivations that build them — and this one
+        # The four shells, as the derivations that build them — and this one
         # IS a step (PLAN D41). It is the cheap half B75 asked `hudscreens.sh`
         # for: one headless sway, one real quickshell per shell, a wait on
         # `Configuration Loaded` and the D39 scan of what each one said. 25 s,
@@ -981,6 +981,7 @@ DECLARED_GATES = (
             "pkgs/jv-bar",
             "pkgs/jv-hud",
             "pkgs/jv-notify",
+            "pkgs/jv-wall",
             # THE BUS, which this gate deliberately did not read until D43.
             # The old reason was good and is no longer true: nothing here
             # started a broker, so the HUD ran blind and a change to the bus
@@ -998,6 +999,7 @@ DECLARED_GATES = (
             "shell/jv-bar",
             "shell/jv-hud",
             "shell/jv-notify",
+            "shell/jv-wall",
             # The reader that turns two running brokers into a verdict (D51).
             # Everything this gate concludes about the HUD is a reading of what
             # a `jarvisd` did, and a broker that refused the bridge reads from

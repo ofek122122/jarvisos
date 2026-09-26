@@ -157,16 +157,32 @@ if [ -x "$script" ]; then
   else bad "$t" "$(grep -m1 exec "$script")"; fi
 
   # The one claim neither half of the test suite can make alone: two
-  # surfaces, two modules, one image. The wallpaper unit hands swaybg a PNG
-  # and the lock screen shows one, and if they ever stop being the same file
-  # the screen you lock stops being the desktop you were looking at.
-  t='the lock screen shows the same image the wallpaper unit paints'
+  # surfaces, two modules, one set of art. The lock screen shows a PNG, and if
+  # it ever stops being art the desktop draws, the screen you lock stops being
+  # the desktop you were looking at.
+  #
+  # ONE HOP LONGER THAN IT USED TO BE, because the wallpaper stopped being
+  # swaybg. The unit handed swaybg the PNG on its command line, so the file was
+  # in the ExecStart and this was a `grep` of one string against another. It now
+  # starts `jv-wall`, a Quickshell shell that picks its own file PER OUTPUT out
+  # of a directory `--set` into its wrapper — so the unit names no PNG at all,
+  # and the honest question became "is the lock screen's image art THIS
+  # wallpaper would draw" rather than "is it the same string". The directory is
+  # read out of the built wrapper rather than out of pkgs/jv-wall, for the same
+  # reason every other check here reads the built bytes: an interpolation that
+  # evaluated to the wrong store path looks right in the source.
+  t='the lock screen shows art the wallpaper unit would draw'
   wallpaper_unit=$(unit jarvis-wallpaper.service '')
-  png=$(grep -o '/nix/store/[^ ]*\.png' <<<"$wallpaper_unit" | head -1)
+  wall_bin=$(grep -o '/nix/store/[^ ]*/bin/jv-wall' <<<"$wallpaper_unit" | head -1)
+  art=""
+  [ -r "$wall_bin" ] && art=$(grep -o "JV_WALL_DIR='[^']*'" "$wall_bin" | head -1 | cut -d"'" -f2)
+  lock_png=$(grep -o '/nix/store/[^ ]*\.png' "$script" | head -1)
   if ! is_unit "$wallpaper_unit"; then bad "$t" "no wallpaper unit: $(tail -3 <<<"$wallpaper_unit")"
-  elif [ -z "$png" ]; then bad "$t" "the wallpaper unit names no png: $(grep ExecStart <<<"$wallpaper_unit")"
-  elif grep -qF -- "$png" "$script"; then ok "$t"
-  else bad "$t" "unit paints $png; the lock screen shows $(grep -o '/nix/store/[^ ]*\.png' "$script" | head -1)"; fi
+  elif [ -z "$wall_bin" ]; then bad "$t" "the wallpaper unit does not start jv-wall: $(grep ExecStart <<<"$wallpaper_unit")"
+  elif [ -z "$art" ]; then bad "$t" "$wall_bin sets no JV_WALL_DIR, so nothing says which art it draws"
+  elif [ -z "$lock_png" ]; then bad "$t" "the lock screen names no png: $(grep -m1 -- --image "$script")"
+  elif [ "$(dirname "$lock_png")" = "$art" ]; then ok "$t"
+  else bad "$t" "the wallpaper draws out of $art; the lock screen shows $lock_png"; fi
 fi
 
 # swaylock is not setuid: it asks PAM under its own service name, and with no

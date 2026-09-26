@@ -446,6 +446,21 @@ def test_a_build_sandbox_is_never_asked_for_the_stand_in(tmp_path):
             q.unlink() if q.is_file() else q.rmdir()
 
 
+# The shells NO render harness photographs, and why — the other half of
+# `gen.STANDINS`, which is one entry per harness. A stand-in exists because a
+# contact sheet runs the shell under a QML engine that cannot resolve
+# Quickshell and has to stage a Motion it can; a shell nothing photographs
+# needs none, and saying so here is what keeps "three harnesses for three
+# shells" from being the only thing checked.
+UNPHOTOGRAPHED = {
+    "jv-wall": (
+        "the wallpaper has no contact sheet yet (PLAN E8). It is the one shell "
+        "whose whole surface is a PNG rendered outside QML, so a sheet of it "
+        "photographs pkgs/jarvis-wallpaper's art plus two slow animations — "
+        "worth having, and a harness of its own rather than a line here."
+    ),
+}
+
 def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeypatch):
     """WHICH shell carries the stand-in is a coupling, and it was stated only in
     a comment. A mutation sweep found it ungraded: pointing `STUB_SHELL` at
@@ -462,14 +477,26 @@ def test_the_stand_in_goes_out_with_the_shell_it_stands_in_for(tmp_path, monkeyp
     entirely.
 
     There used to be a third half — jv-bar, which carried no stand-in at all and
-    so had to write none of them. D13 gave it one, so every shell carries one
-    now and the "none" case has no example left. What is checked instead is the
-    count: three harnesses for three shells, so a fourth stand-in is a
-    deliberate edit here rather than a table that grew unnoticed.
+    so had to write none of them. D13 gave it one, and for three shells the
+    tables were equal. `jv-wall` is the fourth and it brings the "none" case
+    back, so the equality is now a PAIR of tables that must cover `SHELLS`
+    between them without overlapping — the same contract COLOUR_EXCEPTIONS has,
+    and for the same reason: an excuse must not outlive the gap it excuses.
     """
-    assert {s.shell for s in gen.STANDINS} == set(gen.SHELLS), (
-        "every shell this generator writes is photographed by a harness that "
-        "stages a stand-in Motion over it, and the table no longer says so"
+    photographed = {s.shell for s in gen.STANDINS}
+    assert photographed <= set(gen.SHELLS), (
+        "a stand-in names a shell this generator does not write: "
+        f"{sorted(photographed - set(gen.SHELLS))}"
+    )
+    assert photographed | set(UNPHOTOGRAPHED) == set(gen.SHELLS), (
+        "every shell this generator writes is either photographed by a harness "
+        "that stages a stand-in Motion over it, or named in UNPHOTOGRAPHED "
+        "with the reason — and neither table mentions "
+        f"{sorted(set(gen.SHELLS) - photographed - set(UNPHOTOGRAPHED))}"
+    )
+    assert not photographed & set(UNPHOTOGRAPHED), (
+        "these shells have a harness AND an excuse for having none; drop the "
+        f"excuse: {sorted(photographed & set(UNPHOTOGRAPHED))}"
     )
     monkeypatch.setattr(gen, "SHELL_DIR", tmp_path / "shell")
     moved = tuple(
@@ -2387,42 +2414,141 @@ def test_stripping_comments_never_moves_a_line_or_drops_a_brace():
     assert stripped.count("{") == 1 and stripped.count("}") == 1
     assert stripped.splitlines()[1].strip() == ""
 
+# Every tree in this repo that holds Python (D78). Named one literal at a time,
+# and as `/` expressions rather than bare words, because that is the only form
+# `tools/dependents.py` can see: a path built with `/` is a path by
+# construction, while a bare `"services"` is a word that happens to be a
+# directory and `_candidates` refuses it. `test_dependents.py` checks that this
+# file's names really do reach the `tools` read set, which is what makes the
+# scan below run for a change under any of the three.
+PY_TREES = (ROOT / "tools", ROOT / "services", ROOT / "harness")
 
-def test_no_module_under_tools_defines_the_same_name_twice():
-    """The shape of the D76 trap, wherever it appears next.
+# `dependents.SKIP_DIRS` minus `.git`, which the dot rule below covers. Spelled
+# here rather than imported on purpose: `import dependents` would put this
+# file's read set through that module's docstring, which names half the repo in
+# prose, and this file's read set is exactly what test_dependents.py checks
+# about PY_TREES.
+NOT_SOURCE = {"__pycache__", "target", "result"}
+
+
+def _repo_python() -> list[str]:
+    """Every Python file in the repo, walked from the root by hand so the
+    completeness claim below is not PY_TREES asserting itself."""
+    out = []
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT)
+        if NOT_SOURCE & set(rel.parts) or any(p.startswith(".") for p in rel.parts):
+            continue
+        out.append(rel.as_posix())
+    return out
+
+
+def test_no_python_module_in_this_repo_defines_the_same_name_twice():
+    """The shape of the D76 trap, everywhere in this repo it can appear (D78).
 
     A second module-level `def` or `class` of a name silently replaces the
     first, and nothing — not pytest, not a linter this repo runs — says a word.
-    In a helper module (this one is imported by four other suites) the cost is
-    a reader believing the wrong definition; in a `test_*` name the cost is
+    In a helper module (this one is imported by six other suites) the cost is a
+    reader believing the wrong definition; in a `test_*` name the cost is
     worse, because the shadowed test still LOOKS collected and covered in the
     file and never runs at all.
 
-    Module level only, on purpose, and that narrowness was measured rather
-    than assumed: widening the walk to every node in the tree (`ast.walk`)
-    reports four modules here, and every one of them is legitimate — `__init__`
-    on two classes of the same file, and a helper nested inside two different
-    tests. A `def` under `try`/`except ImportError` or `if TYPE_CHECKING` is a
-    deliberate fallback for the same reason, and none of them are siblings in
-    the module body.
+    WHICH SUITE OWNS IT was the real question in D78, not the scan, so the
+    answer is written down here. The trap is not a property of `tools/`: 93 of
+    this repo's 121 Python modules are under `services/` and `harness/` and
+    carry it identically, so the scan has to be repo-wide — and a repo-wide
+    claim has one honest home. Invariant 1 forbids one service importing
+    another, so every claim this repo makes about a RELATION between two of its
+    parts is made by a THIRD suite that reads them both as source text, and
+    `tools` is that suite. The two alternatives were rejected for reasons, not
+    taste:
+    · **the same scan inside each service suite** is the one shape that cannot
+      see a tree nobody wrote a suite for — which is the trap's own failure
+      mode restated (B87: a suite that is never named cannot report that it was
+      skipped), and it would be nine copies of one walk.
+    · **a suite of its own** buys a `runtests.sh` target and a cached venv for
+      a single assertion, and would still need the gate below saying it names
+      every tree.
+    The cost is also not the one the item feared. `tools` ALREADY claims
+    `services/**` wide, through `(ROOT / "services").iterdir()` in
+    `test_hudshots.py`, so `dependents.py` already runs this 63-second suite
+    for a change under any service — measured, not assumed: it names `tools`
+    even for a `services/...` path that does not exist. The marginal price of
+    this widening is therefore `harness/` alone: ten modules whose changes now
+    also run this suite.
+
+    Module level only, and that narrowness was re-measured at the new scope
+    rather than carried over from `tools/`: widening the walk to every node in
+    the tree (`ast.walk`) reports 24 of the 121 modules, and all 24 are
+    legitimate — `__init__` on two classes of one file, a method name two
+    classes share, a helper nested inside two different tests. A `def` under
+    `try`/`except ImportError` or `if TYPE_CHECKING` is a deliberate fallback
+    for the same reason, and none of those are siblings in a module body.
     """
     duplicates: dict[str, list[str]] = {}
-    scanned = []
-    for path in sorted((ROOT / "tools").rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        scanned.append(str(path.relative_to(ROOT)))
-        defined: collections.Counter[str] = collections.Counter()
-        for node in ast.parse(path.read_text("utf-8")).body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                defined[node.name] += 1
-        again = sorted(name for name, count in defined.items() if count > 1)
-        if again:
-            duplicates[str(path.relative_to(ROOT))] = again
-    # A scan that reads nothing passes, so say what it read: this very file has
-    # to be in it, and a tools/ that suddenly holds three modules means the walk
-    # broke rather than that the trap is gone.
-    assert "tools/tests/test_gen_theme_qml.py" in scanned and len(scanned) >= 20, scanned
+    scanned: dict[str, list[str]] = {}
+    for tree in PY_TREES:
+        where = tree.relative_to(ROOT).as_posix()
+        scanned[where] = []
+        for path in sorted(tree.rglob("*.py")):
+            rel = path.relative_to(ROOT)
+            if NOT_SOURCE & set(rel.parts):
+                continue
+            scanned[where].append(rel.as_posix())
+            defined: collections.Counter[str] = collections.Counter()
+            for node in ast.parse(path.read_text("utf-8")).body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    defined[node.name] += 1
+            again = sorted(name for name, count in defined.items() if count > 1)
+            if again:
+                duplicates[rel.as_posix()] = again
+    # A scan that reads nothing passes, so say what it read — and say it PER
+    # TREE, because a walk that quietly stopped covering one of the three is
+    # the exact failure this widening exists to prevent. One witness each, and
+    # each is nested, so a `glob` in place of the `rglob` is red rather than a
+    # tree that reads its own top level.
+    for where, paths in sorted(scanned.items()):
+        assert paths, f"the scan read no Python under {where}/ — the walk broke"
+    assert "tools/tests/test_gen_theme_qml.py" in scanned["tools"]
+    assert "services/pylib/jarvis_bus/client.py" in scanned["services"]
+    assert "harness/tests/test_session_format.py" in scanned["harness"]
+    # A floor, not an equality: adding a module must never be a red test. 121
+    # today, and the number that matters is that it is the whole repo, which is
+    # the test below.
+    assert sum(len(p) for p in scanned.values()) >= 110, scanned
     assert not duplicates, "each of these names is defined twice; the first is dead:\n" + "\n".join(
         f"{path}: {', '.join(names)}" for path, names in sorted(duplicates.items())
     )
+
+
+def test_the_duplicate_definition_scan_names_every_python_tree_in_the_repo():
+    """PY_TREES is a list of three, and a list falls behind the repo in
+    silence — a fourth tree (`bench/`, a `shell/jv-hud/tools/`, a second
+    library beside `pylib`) would simply never be scanned, and no test would
+    say so. That is B87's failure by a third mechanism: there the search path
+    was written down, in B86 the file was, and here it is the trees. So the
+    scan above does not get to define its own scope; the repo does.
+
+    `_package_bases` in `dependents.py` answers the same question by DERIVING
+    the list, and that is not available here: "where does Python live" has no
+    mechanism to derive it from, only a walk. A walk that must then agree with
+    the list is the next best thing, and it fails loudly in the one direction
+    that matters."""
+    named = [t.relative_to(ROOT).as_posix() for t in PY_TREES]
+    found = _repo_python()
+    # Vacuously true if the walk found nothing, so pin the walk first.
+    assert len(found) >= 110, found
+    outside = [
+        p for p in found if not any(p == t or p.startswith(t + "/") for t in named)
+    ]
+    assert not outside, (
+        "these Python files are under no tree the duplicate-definition scan "
+        "reads, so a second `def` of a name in them is invisible — add their "
+        f"tree to PY_TREES:\n" + "\n".join(outside)
+    )
+    # And the other direction: a name in the list that holds no Python is a
+    # claim on a tree that moved, which would leave the scan reading nothing
+    # while the assertions above still pass on the other two.
+    for tree, where in zip(PY_TREES, named):
+        assert tree.is_dir(), f"PY_TREES names {where}, which is not a directory"
+        assert any(p.startswith(where + "/") for p in found), where

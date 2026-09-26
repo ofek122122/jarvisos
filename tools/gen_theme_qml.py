@@ -222,6 +222,28 @@ NOTIFY_CORE = (
 )
 
 
+# shell/jv-wall — the animated wallpaper (PLAN D10/E1): the BACKGROUND layer
+# on every monitor. A fourth Quickshell process, and the one with no vocabulary
+# of its own at all — everything on screen is `shell.qml` and the four files
+# this script writes into every shell. The three empty tables are here anyway,
+# because a shell with no tables and a shell that was never registered look the
+# same from the outside, and only one of them gets a Theme.
+#
+# WHY IT IS REGISTERED AT ALL, given that it has nothing to register. Because
+# it MOVES: an ember glow breathing and a comet head drifting. §06 says motion
+# is off under prefers-reduced-motion, and a wallpaper that gated its two
+# animations on an env var of its own honoured the versioned preference
+# NOWHERE. Registering it is what hands it `Motion` — and with it the session
+# override and the machine states — instead of a second switch to remember.
+WALL_SINGLETONS: tuple[tuple[str, str], ...] = ()
+
+WALL_COMPONENTS: tuple[tuple[str, str], ...] = ()
+
+# No core/ types of its own, which is not the same as no core/ directory: every
+# shell gets `core/MotionPolicy.qml` by existing, because the stillness rule
+# applies to a shell for being a shell.
+WALL_CORE: tuple[tuple[str, str], ...] = ()
+
 @dataclasses.dataclass(frozen=True)
 class Shell:
     """One QML shell that consumes the tokens, and what its qmldirs list.
@@ -284,6 +306,7 @@ SHELLS = {
             NOTIFY_COMPONENTS,
             NOTIFY_CORE,
         ),
+        _shell("jv-wall", "the wallpaper's", "WALL_", WALL_SINGLETONS, WALL_COMPONENTS, WALL_CORE),
     )
 }
 

@@ -129,8 +129,11 @@ in
   # Two things swaybg could not do: render the art PER OUTPUT (swaybg scaled
   # one 1440p PNG onto the 1080p panels and cropped the instrument — PLAN D10),
   # and carry the small amount of motion §06 allows (the glow breathing, the
-  # comet drifting). JV_MOTION=0 freezes it back to the static image, and so
-  # does prefers-reduced-motion.
+  # comet drifting). Either switch freezes it back to the static image:
+  # JV_MOTION=0 for this surface alone, or the desktop-wide one every shell
+  # obeys through its generated `Motion` — `reduced_motion` in
+  # personality/theme.toml, or JV_REDUCED_MOTION=1 for this session. The second
+  # half of that sentence was here before the shell could honour it (PLAN E6).
   systemd.user.services.jarvis-wallpaper = {
     description = "JarvisOS wallpaper (animated, per-output)";
     unitConfig.ConditionUser = "ofek";

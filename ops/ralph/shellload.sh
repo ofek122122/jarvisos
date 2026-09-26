@@ -130,9 +130,9 @@
 #      green — red for the wrong reason, which is still worth knowing.
 #
 # reads: flake.lock flake.nix personality/theme.toml pkgs/jv-bar pkgs/jv-hud
-#        pkgs/jv-notify services/jarvisd services/jv-hud-bridge services/pylib
-#        shell/jv-bar shell/jv-hud shell/jv-notify tools/brokerlog.py
-#        tools/qmlerrors.py tools/shellload
+#        pkgs/jv-notify pkgs/jv-wall services/jarvisd services/jv-hud-bridge
+#        services/pylib shell/jv-bar shell/jv-hud shell/jv-notify shell/jv-wall
+#        tools/brokerlog.py tools/qmlerrors.py tools/shellload
 #
 # Declared, like the other two nix gates (PLAN B72): what it reads is a set of
 # flake attributes, and an attribute is not a path any syntax tree names. The

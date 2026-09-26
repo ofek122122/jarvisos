@@ -15,6 +15,24 @@
 # Mod+Enter and friends behave exactly as before — this adds a gesture rather
 # than taking one away.
 { config, lib, pkgs, ... }:
+let
+  theme = builtins.fromTOML (builtins.readFile ../personality/theme.toml);
+
+  # The same helper modules/theme.nix and modules/fonts.nix use, for the same
+  # reason: a face is identity (invariant 9), so it is named in
+  # personality/theme.toml, bound to a package in modules/fonts.nix, and only
+  # SPENT here. This menu is a second fuzzel instance beside the launcher in
+  # modules/theme.nix, and a second config file is exactly where a face comes
+  # to be spelled by hand and drift — it said `Archivo` until a tools gate
+  # caught it.
+  face =
+    role:
+    theme.type."family_${role}" or (throw ''
+      modules/super-menu.nix sets a font for the role "${role}", and [type] in
+      personality/theme.toml names no family_${role}.'');
+
+  sansFamily = face "sans";
+in
 {
   # ---------------------------------------------------------------- the tap
   #
@@ -68,7 +86,7 @@
   # keyd tap stay the same, so that swap is invisible to muscle memory.
   environment.etc."xdg/fuzzel/jarvis-menu.ini".text = ''
     [main]
-    font=Archivo:size=14
+    font=${sansFamily}:size=14
     icon-theme=Papirus-Dark
     terminal=alacritty -e
     prompt="  "
