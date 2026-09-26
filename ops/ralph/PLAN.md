@@ -1504,7 +1504,7 @@ human-reviewed step.
       "a process that EXITED is reported as itself rather than waited out"
       right for the same reason. Raised by D41.
 
-- [ ] D35. **A monitor narrower than the corner the HUD reserves gets an
+- [x] D35. **A monitor narrower than the corner the HUD reserves gets an
       unbounded row.** `roomPx` negative means "nobody has said" — the right
       default, since a row that hid labels before its surface had a width would
       hide them in the first frame of every session — but the surfaces compute
@@ -1515,6 +1515,67 @@ human-reviewed step.
       surface, which is where the arithmetic is), and the reason it is not done
       is that both answers want the one shot nobody can take: a picture of a
       bar on a monitor that does not exist to photograph. Raised by D32.
+      DONE — and the shot WAS takeable, which is the part this item had
+      wrong: `tools/barshots` renders one surface into a box the driver
+      chooses, so a 320 px output is a `"screen": 320` on the sheet and
+      nothing else. `docs/bar/12-no-room.png` is that picture — two colours
+      in the whole PNG, the ground and the hairline — and it is the same
+      desk on the same output as `09-narrow.png`, so the only thing that
+      differs between the two is the width.
+      · **The clamp is in both surfaces**, which is where the arithmetic is:
+        `Math.max(0, …)` in `shell/jv-bar/shell.qml` and in the staged
+        `tools/barshots/scene/Strip.qml` that `test_barshots.py` pins to it.
+        Only a surface knows how wide its monitor is, so only a surface can
+        tell "no room" from "not yet measured".
+      · **A clamp alone was not the fix**, and that is the half this item did
+        not see. `RowFit` at exactly 0 took the last branch — the one that
+        holds back the workspace you are ON and elides it to the room there
+        is — and `elidePx` is only set when the label is wider than the room,
+        so a room of 0 came out as "not elided", which the delegate reads as
+        "draw it whole". The one case that could not afford a pixel was the
+        one case that took its full width. Zero is answered first now: a row
+        that cannot legally paint paints nothing, and the `+N` goes with the
+        names, because a count is a label too. The pre-existing zero test
+        passed `keepIndex: -1` and so never met it.
+      · **`hudOverflowPx` ignores an empty row.** The row is anchored one
+        inset from the left edge whether or not it draws anything, so on an
+        output narrower than the reserve its ORIGIN is inside the corner:
+        12 px of "overflow" for a row with no glyphs is reporting the inset.
+      · All 11 existing shots came out byte-identical, which is the evidence
+        that nothing moved at any width a real monitor has. 6 mutations, 6
+        caught (3 graded by `mutate.sh --runner qml bar`, 3 by hand against
+        `barshots.sh` and the tools suite, each restored and diffed). Raised:
+        **D65**, **D66**. — 895e6e5
+
+- [ ] D65. **The bar on that monitor is an empty strip, and it still takes
+      31 px of it.** D35 makes the row honest — no room, so nothing drawn —
+      but the surface underneath it is unchanged: `exclusionMode` is Normal
+      and `exclusiveZone: implicitHeight`, so an output narrower than the
+      HUD's corner loses a strip of its height to a bar that can never put
+      anything in it. On a 320 px capture sink that is 31 of 1080 px spent on
+      ground and a hairline. The argument for leaving it is real and is why
+      this is an item rather than a fix: the strip is the bar's identity, a
+      surface that vanished when it went quiet would resize every window on
+      the monitor to do it (shell.qml says exactly that), and "narrow" is not
+      a state the bar is in and out of. The argument against is that this
+      particular emptiness is not earned, it is structural — nothing will
+      ever be drawn there, at any time, on that output. Wants a human: it is
+      a question about what a bar IS, and the answer changes how windows tile
+      on a monitor nobody has yet. Raised by D35.
+
+- [ ] D66. **Nothing has asked what the HUD does on that monitor.** D35 was
+      the BAR's side of the 320 px output, and the HUD is the other process
+      in the same corner: `implicitWidth: Theme.hudCornerPx` is 300 px on a
+      320 px screen, plus `Theme.insetPx` of anchor margin, so the corner is
+      wider than the space it has. Its plates are `implicitWidth`-driven rows
+      of monospace text, and what a plate does when its surface is narrower
+      than the word it holds is not a question `hudshots.sh` has ever asked —
+      every scene driver renders into `hud_surface_box()`, which is the token
+      and never a real screen. The cheap version is one more scene width in
+      the fit driver (`tst_fit.qml` already computes the stack's total) and
+      the assertion is the same one the bar now has: nothing is laid out
+      where it cannot be read. The expensive version is a `hudscreens.sh`
+      output of that size, which is 3 m and a compositor. Raised by D35.
 
 - [ ] D33. **Two copies of the HUD's box survive D16, and both are outside a
       shell.** The corner's width is one token now and both shells read it —

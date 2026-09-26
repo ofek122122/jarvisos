@@ -13964,3 +13964,88 @@ is not worth chasing.)
   shrink D58 measured: `READY_TIMEOUT_S` first, `STOP_TIMEOUT_S` only after
   one stop is measured), then **D61**, **D57**, **D56**, **D64**, **D55**,
   **D62**, **D48**, **D45**.
+
+## 2026-09-26 — D35: the one width with no room was the width that drew everything
+
+- built: the workspaces row's budget on a monitor narrower than the corner
+  the HUD reserves, and the picture of it. `shell/jv-bar/shell.qml` computes
+  `(clock or width - hudReserve) - inset - gap` and hands it to the row as
+  `roomPx`; below ~340 px that subtraction goes NEGATIVE, and negative is
+  how `core/RowFit.qml` spells **"nobody has said how wide this surface
+  is"** — the sentinel that deliberately draws every label, so a row does
+  not hide workspaces in the first frame of a session before its own words
+  have been measured. So the one width at which the row had no right to
+  paint was the width at which it painted everything, one label deep into
+  the corner another process puts its plates in. The HUD sets
+  `ExclusionMode.Ignore` and draws over this strip; neither surface can
+  detect the other, so nothing on this machine could have reported it.
+- why now: D35 has been open since D32 and it said the fix wanted "the one
+  shot nobody can take: a picture of a bar on a monitor that does not exist
+  to photograph". That was wrong, and cheaply: `tools/barshots` renders ONE
+  surface into a box its driver chooses, so a 320 px output is a
+  `"screen": 320` on the sheet and nothing else. The item was blocked on a
+  constraint it did not have.
+- the three parts, because it was not one fix:
+  · **Both surfaces clamp at zero** — `shell.qml` and the staged
+    `tools/barshots/scene/Strip.qml`, which `test_barshots.py` pins to it
+    character for character. Only a surface knows how wide its monitor is,
+    so only a surface can tell "no room" from "not yet measured"; the row
+    cannot, and the row is where the two were being spelled the same.
+  · **A clamp alone would not have fixed it**, which is the half the item
+    did not see and the reason the unit test was written first. At exactly
+    0, `RowFit` fell through to its last branch — the one that holds back
+    the workspace you are ON and elides it to the room there is — and
+    `elidePx` is only set when the label is WIDER than the room, so a room
+    of exactly 0 came out as "not elided", which the delegate reads as
+    `width: implicitWidth`, i.e. draw it whole. The one case that could not
+    afford a pixel was the one case that took its full width. The
+    pre-existing `test_a_row_with_no_room_at_all_draws_nothing` passes
+    `keepIndex: -1` and so had never met it. Zero is now answered before
+    anything else: a row that cannot legally paint paints nothing, and the
+    `+N` goes with the names, because a count is a label too.
+  · **`hudOverflowPx` ignores an empty row.** The row is anchored one inset
+    from the left edge whether or not it draws anything, and an empty `Row`
+    is 0 px wide — so on a 320 px output the right edge this metric measures
+    IS that origin, 12 px inside a corner that starts at x=4. Reporting that
+    as overflow is reporting the inset rather than a label; the overflow
+    that matters is painted, and a row with no glyphs cannot have put one
+    anywhere.
+- the shot: `docs/bar/12-no-room.png`, 320 px against a 316 px reserve. It
+  is the strip with its ground and its hairline and nothing else — decoded,
+  two distinct colours in the whole PNG, `#090d12` and `#212b32` on the
+  bottom row. Same desk, same output as `09-narrow.png`, so the ONLY thing
+  that differs between the two pictures is the width: at 640 the clock goes
+  and the label stays, at 320 the budget is -20 px and there is no honest
+  label left to draw. It is the only empty strip on this sheet that is empty
+  for want of room rather than for want of anything to say, and the README
+  section says so beside it.
+- **all 11 existing shots came out byte-identical.** That is the evidence
+  that the clamp changed nothing at any width a real monitor has — the
+  claim "nothing moved" is a comparison the sheet made, not one this entry
+  is making.
+- 6 mutations, 6 caught. Three graded by `mutate.sh --runner qml bar`
+  (zero re-spelled as a number nothing sends; zero folded back into the
+  sentinel; zero sparing the workspace you are on after all), three by hand
+  with a backup and a `diff` proving the restore byte-identical: the bar
+  unclamped while the staged strip stayed clamped (the tools pin, 1 failed
+  / 743 passed), both unclamped (`12-no-room` draws `1:active`), and the
+  empty-row guard removed (`12-no-room` reports 12 px into the corner).
+- tests: `bash ops/ralph/verify.sh --since HEAD~1` **GREEN** — 4 gates over
+  8 paths, 123.1 s: tools 744 pass, bartest 60 pass, barshots 12 shots read
+  back against HEAD, shellload 4 runs. `hudscreens.sh` was not named: no
+  file this commit touches is one it reads. build: `nixos-rebuild build
+  --flake .#ares` green. No schema change, no jv-act, no boot path, no
+  pins. Never tested, never switched.
+- files: shell/jv-bar/core/RowFit.qml, shell/jv-bar/shell.qml,
+  shell/jv-bar/tests/tst_rowfit.qml, tools/barshots/scene/Strip.qml,
+  tools/barshots/scene/tst_shots.qml, tools/tests/test_barshots.py,
+  docs/bar/12-no-room.png, docs/bar/README.md, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- next: **D66** (raised here — the HUD is the OTHER process in that corner
+  and nothing has ever asked what a 300 px surface does on a 320 px screen;
+  one more width in `tst_fit.qml` is the cheap half), then **B88** (the
+  whole-repo reader census, measured 0 unread, a green test waiting to be
+  written), then **B95**, **D63**, **D61**, **D57**, **D56**, **D64**,
+  **D55**, **D62**, **D48**, **D45**. **D65** is raised here too but wants a
+  human: whether a bar that can never draw anything on an output should
+  still take 31 px of it is a question about what a bar IS.
