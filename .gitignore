@@ -27,3 +27,7 @@ __pycache__/
 # model weights (fetched, never committed)
 models-cache/
 *.egg-info/
+
+# loop-run.sh pause signal: a local, per-checkout flag, never repo state.
+# Committed once, it would stop the loop on every future clone.
+.ralph-STOP

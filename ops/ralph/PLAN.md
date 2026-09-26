@@ -134,7 +134,7 @@ the top unchecked item unless it is blocked.
       configs/{root,home}`, `jv-snapshots-init`, `system-path` for `jv-
       snapshot-restore`). Never switched. No schema, no jv-act, no boot path,
       no pins, no disko.nix touched.
-- [ ] F4. **Game-launch VRAM handoff.** The blueprint specifies "game launch →
+- [B] F4. **Game-launch VRAM handoff.** The blueprint specifies "game launch →
       brain unloads"; it was never built. Detect a game starting (gamemode's
       D-Bus signal is the clean hook), have jv-brain release the model, and
       reload when the game exits. This touches the VRAM ladder, so design it
@@ -151,7 +151,7 @@ the top unchecked item unless it is blocked.
       needs to change in `jv-brain`/`jv-llm-launch` once the trigger and the
       privilege exist — they already report whatever rung a VRAM-starved
       launch lands on (`tests/test_vram_guard.py`).**
-- [ ] F5. **Dictation anywhere.** Hold a key → speak → text is typed into the
+- [B] F5. **Dictation anywhere — the injector half only.** Hold a key → speak → text is typed into the
       focused window. Reuse jv-ears' existing Whisper path (do not add a second
       ASR); inject via `wtype`/virtual keyboard. Must be push-to-talk, must show
       a HUD indicator while recording (invariant 10: the mic state is never
@@ -164,7 +164,19 @@ the top unchecked item unless it is blocked.
       tool, build everything else" shape PLAN J1 already prescribes).
       **Blocked on human review for the injector; do not build the tool
       autonomously.** The push-to-talk/Whisper/HUD-indicator half is still
-      open for a future iteration, gated on a fake injector.
+      open for a future iteration, gated on a fake injector — split out as F5b
+      so the `[B]` on the injector does not block the buildable three quarters.
+- [ ] F5b. **Dictation anywhere — everything except the injector.** The half
+      F5's own review found buildable today: push-to-talk key detection (a
+      `keyd`/niri bind, the mechanism `modules/super-menu.nix` already uses for
+      the Super tap), reuse of jv-ears' existing Whisper path (NO second ASR),
+      and a HUD recording indicator driven by a real mic-open bus fact —
+      invariant 10, never fakeable. Everything downstream terminates in a
+      **fake injector**, the same shape PLAN J1 prescribes for jv-act-adjacent
+      work, so adopting the real `input.type_text` tool later is a one-call
+      change. Gate: tests on a WAV fixture asserting the right keystrokes reach
+      the fake sink, plus the indicator following the real mic fact. Do NOT
+      create anything under `services/jv-act/` — that is F5, and it is `[B]`.
 
 ### Track G — system comfort
 - [H] G1. **Bluetooth.** DONE (this commit): `modules/bluetooth.nix` declares
