@@ -28,18 +28,20 @@ as coverage:
 
   · It is not a picture. Nothing here looks at a pixel. A surface that loaded
     cleanly and drew in the wrong corner passes this and fails `hudscreens.sh`.
-  · A shell with NOTHING TO SAY evaluates almost none of its own QML. The HUD
-    runs with no jarvisd, so every plate is unmapped and `Bus` is blind; the
-    bar runs with no niri, so `linkUp` is false and the workspaces row builds
-    no delegates. What this covers for those two is the outermost file, the
-    per-screen `Variants` delegate, and every binding that is evaluated
-    whatever the state — which is where D34's and D39's faults both were, and
-    is not the same as the whole shell.
-  · The notifier is the exception, and deliberately: it has a real client
-    here. `NOTIFY` below is sent to it over the private bus by an ordinary
-    D-Bus caller, so the corner maps, the `Repeater` builds a `Toast`, and
-    the scan covers the plate. It is also the only thing in this repo that
-    has ever proved the D-Bus name is claimed and answered (PLAN D22).
+  · A shell with NOTHING TO SAY evaluates almost none of its own QML — and
+    the BAR is now the only one of the three in that state. It runs with no
+    niri, so `linkUp` is false and the workspaces row builds no delegates;
+    what this covers for it is the outermost file, the per-screen `Variants`
+    delegate, and every binding that is evaluated whatever the state — which
+    is where D34's and D39's faults both were, and is not the same as the
+    whole shell. The reason it stays that way is in `Shell.wake` below.
+  · The other two are woken, deliberately, and each by the only thing that
+    can reach it. `NOTIFY` below is sent to the notifier over the private bus
+    by an ordinary D-Bus caller, so the corner maps, the `Repeater` builds a
+    `Toast`, and the scan covers the plate — which is also the only thing in
+    this repo that has ever proved the D-Bus name is claimed and answered
+    (PLAN D22). `HUD_FRAMES` goes onto a real jarvisd, through the HUD's own
+    read-only bridge, and lights ten of its eleven plates (PLAN D43).
   · It says nothing about frames, GPU cost, or how anything reads. Software
     rendering on a headless backend, exactly as `hudscreens.sh` disclaims.
 """
@@ -86,8 +88,18 @@ class Shell:
     working tree is exactly how this would stop being a gate on what ships.
 
     `env` is the variable the script hands the realized binary over in, and
-    `wake` is whether anything gives this shell something real to do once it
-    has loaded. Only the notifier has one — see NOTIFY.
+    `wake` NAMES what gives this shell something real to do once it has
+    loaded, or is "" for the one shell nothing can. Two of the three have one:
+    the notifier gets a D-Bus client (see NOTIFY) and the HUD gets a broker
+    and eleven frames (see HUD_FRAMES). It is a name rather than a bool
+    because the two wakings share nothing at all — one is a `gdbus call`, the
+    other is a second process publishing onto a bus — and a flag would have
+    left `load.py` deciding which by looking at `attr`.
+
+    The bar is the one with no cheap answer, and that is measured rather than
+    unexplored: `JV_BAR_NIRI` is `--set` into the wrapper, so its event stream
+    cannot be pointed at a fake without staging the shell, which is the one
+    thing this gate refuses (PLAN D43).
 
     `reserves_top` is whether this surface takes a strip off the top of every
     monitor, which only the bar does. It is what the mapping check below asks
@@ -106,14 +118,14 @@ class Shell:
     attr: str
     root: str
     env: str
-    wake: bool = False
+    wake: str = ""
     reserves_top: bool = False
 
 
 SHELLS = (
-    Shell(attr="jv-hud", root="shell/jv-hud", env="JV_HUD_BIN"),
+    Shell(attr="jv-hud", root="shell/jv-hud", env="JV_HUD_BIN", wake="hud"),
     Shell(attr="jv-bar", root="shell/jv-bar", env="JV_BAR_BIN", reserves_top=True),
-    Shell(attr="jv-notify", root="shell/jv-notify", env="JV_NOTIFY_BIN", wake=True),
+    Shell(attr="jv-notify", root="shell/jv-notify", env="JV_NOTIFY_BIN", wake="notify"),
 )
 
 
@@ -437,3 +449,327 @@ def capabilities(out: str) -> list[str]:
     if not inner:
         return []
     return [word.strip().strip("'\"") for word in inner.split(",") if word.strip()]
+
+
+# ------------------------------------------------------------------ the HUD
+#
+# THE HUD'S HALF (PLAN D43), and the hole it fills is one this file used to
+# state as a limit two paragraphs up. The HUD with no jarvisd has nothing to
+# say: `Bus` is blind, every plate refuses to guess, `visible: selfTest ||
+# stack.anyLit` is false — so no wl_surface of its is ever CREATED, the mapping
+# reading D44 added asks the compositor about a shell that is not there, and
+# what the D39 scan covers is the outermost file and the bindings that evaluate
+# whatever the state. Every plate, every state machine under it and every
+# binding that only runs on a real frame was outside this gate.
+#
+# A broker is milliseconds and eleven frames are bytes, so the whole of that is
+# bought for about a second of run time: `ops/ralph/shellload.sh` starts a real
+# `jarvisd` on this run's own socket, `tools/shellload/publish.py` puts the
+# frames below on it at 1 Hz, and the HUD's own read-only bridge — the one
+# pkgs/jv-hud pins into the wrapper — carries them into the plates.
+#
+# COMPOSED FRAMES RATHER THAN A REPLAY, and D43 asked for the replay, so the
+# reason is worth stating. `harness/replay.py` would have been less code, but
+# every recorded session in `harness/fixtures/sessions` carries exactly three
+# topics — audio.vad, audio.wake, audio.transcript — because they are
+# recordings of a MICROPHONE. Replaying one lights two plates. The point of
+# coming here at all is the plates, so the frames are composed, which is also
+# what `tools/hudscreens/sheet.py` had to do for the same reason.
+#
+# AND THEY ARE THAT FILE'S FRAMES, restated. Eight of the eleven below are
+# byte-equal to a named frame in `sheet.py`, and
+# `test_the_frames_this_gate_publishes_are_the_screen_sheets_own` holds them
+# so — a third file reading both, which is what invariant 1 asks. Restated and
+# not imported for the reason `OUTPUTS` is: `sheet.py` is a declared read of a
+# 3-minute harness, and importing it would make every edit to that harness's
+# noise floor wake this gate. The three that are new are new because nothing
+# in this repo had ever composed them — jv-guard refusing a binary, jv-compat
+# failing an install, and jv-brain running out of room — so those three plates
+# had never been fed a real frame by anything.
+
+# What is published, IN THIS ORDER, and the order is load-bearing in two
+# places. Both are the same shape: a plate that stops being shown when Jarvis
+# starts TALKING about it.
+#
+#   · `heard` goes dark once `speech.state` is stamped after the words
+#     (core/HeardState.qml latches `answering`), because by then the user is
+#     hearing the answer and the answer is the better report on whether they
+#     were heard right.
+#   · `action` goes dark the same way (core/ActionState.qml `noteExplained`),
+#     because Jarvis explaining the failure out loud is what the plate was
+#     standing in for.
+#
+# So `speech.state` goes FIRST and everything else is newer than it. What that
+# makes the corner is a barge-in mid-answer: jv-voice is speaking, and the
+# words jv-ears just took down are the next thing the user said over the top of
+# it. Every frame is true on its own and the two elements are doing exactly
+# what they were written to do.
+#
+# `conf` is 1.0 on all but the transcript, and that is not decoration: six of
+# the state machines require an UNHEDGED envelope (`conf >= 1`) before they
+# will read a frame at all, and `audio.transcript` is the one topic whose
+# confidence is the ASR's own.
+HUD_FRAMES = (
+    # jv-voice, mid-sentence. First, per the order rule above.
+    {
+        "topic": "speech.state",
+        "src": "jv-voice",
+        "body": {"state": "speaking", "say_id": "say-6c1d0f42"},
+    },
+    # jv-voice speaking into whatever the system calls the default sink,
+    # which is what lets `output` say the room is not hearing it: a HUD that
+    # could not tell a pinned device from the default one would be blaming
+    # the mixer for a sink nobody is listening to.
+    {
+        "topic": "sys.health",
+        "src": "jv-voice",
+        "body": {
+            "service": "jv-voice",
+            "state": "ok",
+            "uptime_s": 1847.0,
+            "period_s": 5.0,
+            "metrics": {"output_device_pinned": 0.0},
+        },
+    },
+    # jv-ears with the device open and dropping chunks: the counters
+    # core/MicState.qml reads for the recording light, on a heartbeat that
+    # is `degraded` and therefore also the one service `health` reports.
+    # Two plates from one frame, and it is the frame `hudscreens.sh`
+    # photographs for 06-lossy.
+    {
+        "topic": "sys.health",
+        "src": "jv-ears",
+        "body": {
+            "service": "jv-ears",
+            "state": "degraded",
+            "uptime_s": 1847.0,
+            "period_s": 5.0,
+            "metrics": {
+                "mic_open": 1,
+                "capture_age_s": 0.02,
+                "captured_s": 1846.4,
+                "capture_stall_s": 1.0,
+                "capture_loss_age_s": 0.3,
+                "capture_loss_window_s": 1.0,
+            },
+            "notes": "microphone losing audio: jv-ears dropped 0.4s and 1 "
+            "device overrun (length unknown) since start",
+        },
+    },
+    # The mixer muted, from jv-context's 1 Hz snapshot. This is the frame the
+    # republishing below exists for: core/OutputState.qml calls a snapshot
+    # older than 3 s stale, which is correct for a reading that arrives every
+    # second and is why `publish.py` is a loop rather than one pass.
+    {
+        "topic": "context.system",
+        "src": "jv-context",
+        "body": {
+            "net_online": True,
+            "load1": 1.9,
+            "mem_used_pct": 37.5,
+            "audio_volume": 0.62,
+            "audio_muted": True,
+        },
+    },
+    # What jv-ears took down. The one frame here whose `conf` is not 1.0 —
+    # it is the ASR's own confidence, and invariant 4 says the producer
+    # publishes it rather than the consumer assuming it.
+    {
+        "topic": "audio.transcript",
+        "src": "jv-ears",
+        "conf": 0.88583,
+        "body": {
+            "kind": "final",
+            "utterance_id": "9d2c71b4-6e05-4a3a-9f1e-0b7c5d84aa10",
+            "text": "Jarvis, empty my downloads folder into the trash.",
+            "lang": "en",
+            "t0": 0.0,
+            "t1": 2.9,
+        },
+    },
+    # The destructive thing jv-act has stopped in front of. It can only be
+    # read here: the surface takes no input at all, so nothing this gate does
+    # could answer it even if it wanted to.
+    {
+        "topic": "action.confirm",
+        "src": "jv-act",
+        "body": {
+            "kind": "request",
+            "request_id": "req-4f21",
+            "tool": "fs.trash",
+            "summary": "move 14 files in ~/Downloads to the trash — yes or no?",
+            "window_s": 15.0,
+        },
+    },
+    # The intent, then its outcome. Both, because `action` names the TOOL
+    # that failed and the only thread between an outcome and a tool name is
+    # the request id — an id-less pair would light the plate with no name on
+    # it, which is a different plate from the one this is meant to cover.
+    {
+        "topic": "intent.action",
+        "src": "jv-brain",
+        "body": {
+            "request_id": "req-4f21",
+            "tool": "fs.trash",
+            "args": {"path": "~/Downloads"},
+            "capability": "destructive",
+            "needs_confirmation": True,
+            "utterance_id": "9d2c71b4-6e05-4a3a-9f1e-0b7c5d84aa10",
+        },
+    },
+    {
+        "topic": "action.result",
+        "src": "jv-act",
+        "body": {
+            "request_id": "req-4f21",
+            "ok": False,
+            "duration_ms": 412.0,
+            "error": "execution_failed",
+            "detail": "3 of 14 entries could not be moved: Permission denied",
+        },
+    },
+    # NEW HERE, and each of these three is a plate no gate in this repo had
+    # ever put a real frame in front of.
+    #
+    # jv-guard refusing a Windows binary (invariant 8). `blocked` rather than
+    # `suspicious`: blocked is final, and suspicious is the one that may be
+    # overridden through the confirmation flow, which is a different plate's
+    # story. Only the hash ever leaves this machine (invariant 7) and the
+    # hash is the only thing here that would.
+    {
+        "topic": "guard.verdict",
+        "src": "jv-guard",
+        "body": {
+            "sha256": "3b1f9c0d5a4e7268bd1c04f7e9a2358c6d0b7e41f582a93cd7e6b40158a2c9f3",
+            "verdict": "blocked",
+            "reasons": ["matched ClamAV signature Win.Trojan.Agent-1234567"],
+            "scanned_by": ["clamav"],
+            "path": "/home/ofek/Downloads/setup.exe",
+        },
+    },
+    # jv-compat getting further and then failing: the one thing on this bus
+    # that takes minutes, and the one the user walks away from.
+    {
+        "topic": "compat.install",
+        "src": "jv-compat",
+        "body": {
+            "event": "failed",
+            "app": "notepad-plus-plus",
+            "sha256": "9f4c2e7b8a10d35f6c9e0b47a25d18f3e6c04b9d7a318e25f0c6b4a97d3e152b",
+            "path": "/home/ofek/Downloads/npp-installer.exe",
+            "installer": "nsis",
+            "arch": "x64",
+            "error": "the installer exited 1 after the prefix was created",
+        },
+    },
+    # jv-brain running out of room mid-answer — the one outcome of a turn
+    # with no other route to a screen, because a finished reply is its own
+    # report and a brain that could not answer at all arrives as a degraded
+    # heartbeat instead. Published LAST: core/ReplyState.qml drops the
+    # truncation the moment an `audio.wake` or a `brain.request` is stamped
+    # after it, and neither is on this bus.
+    {
+        "topic": "brain.response",
+        "src": "jv-brain",
+        "body": {
+            "text": "The files in ~/Downloads are mostly installers from the "
+            "last three weeks, and the largest of them is the Windows "
+            "toolchain archive you pulled down on the",
+            "finish_reason": "length",
+            "conversation_id": "conv-7f2a",
+            "model": "llama-3.1-8b-instruct-q4_k_m.gguf",
+            "backend": "gpu",
+            "latency_ms": 2140.0,
+        },
+    },
+)
+
+# WHY IT REPUBLISHES, and it is one plate's requirement rather than a habit.
+# `context.system` is jv-context's 1 Hz snapshot and core/OutputState.qml calls
+# one older than 3 s stale — correctly, because a mixer reading from ten
+# seconds ago is not a reading of this room. A single pass would light
+# `output` and lose it again before the compositor had been asked anything.
+#
+# The WHOLE set goes out each round rather than just that one frame, and that
+# is deliberate: a bus has no backlog, so a frame published before the HUD's
+# bridge had subscribed is simply gone, and there is nothing this driver can
+# ask that would tell it when the subscription landed. Republishing makes the
+# race stop mattering instead of trying to win it.
+#
+# Re-sending the whole set in order is SAFE for the two latching plates above,
+# and the mechanism is worth writing down because it looks like it would not
+# be. Round 2's `speech.state` IS newer than round 1's transcript, so
+# `answering` latches — and then round 2's transcript arrives, its
+# `transcriptKey` (`seq@ts`) changes, and `onTranscriptKeyChanged` clears the
+# latch and re-checks against the words it now holds. `action` recovers the
+# same way through `apply()`. The flicker is the width of a few milliseconds
+# of publishing and it converges every round.
+HUD_ROUND_S = 0.5
+
+# Which plates the corner must name, in the stack's own order. Held equal to
+# `shell/jv-hud/shell.qml`'s own `PlateStack` — minus the one below — by
+# `test_every_plate_the_hud_stacks_is_lit_by_this_gate`, so a plate added to
+# that stack fails this gate rather than quietly never being loaded.
+HUD_PLATES_LIT = (
+    "confirm",
+    "state",
+    "output",
+    "heard",
+    "reply",
+    "action",
+    "guard",
+    "install",
+    "mic",
+    "health",
+)
+
+# And the one that cannot be here, which is not an omission but the shape of
+# what it reports. `LinkPlate` is on screen exactly while the HUD CANNOT see
+# the bus, so it is mutually exclusive with every plate above: lighting it
+# would mean taking the broker away, and then there would be no frames.
+# `shell/jv-hud/shell.qml` says the same thing about its own box — "in
+# practice it can never share the surface". It is covered instead by the
+# no-broker state this gate used to be entirely made of: see D43's entry in
+# `ops/ralph/PLAN.md` for why that is a separate run and not a longer one.
+HUD_PLATES_DARK = ("link",)
+
+# How long the corner is given to name them all. Generous against a cold Qt
+# on a cold font cache, and bounded — `test_the_gate_still_costs_seconds_and_
+# not_minutes` holds the worst case of every wait in this file together.
+HUD_LIT_TIMEOUT_S = 20.0
+
+
+def hud_corner_line(monitor: str, plates: tuple[str, ...] | list[str]) -> str:
+    """The line `shell/jv-hud/shell.qml` logs when its corner changes.
+
+    A COPY of the QML's own template, and
+    `test_the_corner_line_this_gate_reads_is_the_one_the_hud_writes` holds the
+    two equal by reading both files — the invariant-1 shape `bar_strip_px()`
+    already uses, because there is nothing to import: the string only exists
+    inside a running QML engine.
+
+    Empty is spelled `nothing` rather than left blank so that a corner going
+    dark is a line somebody can grep for, not an absence.
+    """
+    names = " ".join(plates) if plates else "nothing"
+    return f"jv-hud: corner on {monitor} shows {names}"
+
+
+def hud_corner_plates(said: str, monitor: str) -> list[str] | None:
+    """The plates the NEWEST corner line for `monitor` named, or None.
+
+    The newest rather than any, because the corner is a sequence: the plates
+    arrive over a round or two and the interesting state is the one it settled
+    on. None is "this monitor never wrote a line at all", which is a different
+    failure from "it wrote one naming nine plates" — a surface that was never
+    built versus a plate that never lit — and the report says which.
+
+    Parsed here rather than in the driver so the writing and the reading of
+    this line are one file apart from each other and nothing else.
+    """
+    prefix = hud_corner_line(monitor, ())[: -len("nothing")]
+    found = [line for line in said.splitlines() if prefix in line]
+    if not found:
+        return None
+    names = found[-1].split(prefix, 1)[1].strip()
+    return [] if names == "nothing" else names.split(" ")

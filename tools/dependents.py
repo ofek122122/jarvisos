@@ -925,6 +925,20 @@ DECLARED_GATES = (
             "pkgs/jv-bar",
             "pkgs/jv-hud",
             "pkgs/jv-notify",
+            # THE BUS, which this gate deliberately did not read until D43.
+            # The old reason was good and is no longer true: nothing here
+            # started a broker, so the HUD ran blind and a change to the bus
+            # could not move the verdict. The HUD's half of this gate IS that
+            # broker now — `jarvisd` on the run's own socket, eleven composed
+            # frames at 1 Hz, and ten of the HUD's eleven plates lit — so all
+            # three paths that carry a frame from the bus into a plate are
+            # here: the broker, the client library both the publisher and the
+            # bridge speak through, and the bridge itself, which is the child
+            # process pkgs/jv-hud pins into the wrapper. Any one of them can
+            # turn ten lit plates into none.
+            "services/jarvisd",
+            "services/jv-hud-bridge",
+            "services/pylib",
             "shell/jv-bar",
             "shell/jv-hud",
             "shell/jv-notify",
@@ -934,9 +948,6 @@ DECLARED_GATES = (
             "tools/qmlerrors.py",
             "tools/shellload",
         ),
-        # NOT `services/jarvisd`: nothing here starts a broker, so the HUD runs
-        # blind and a change to the bus cannot move this verdict. Binding it
-        # would spend these seconds on every Rust edit to learn that.
     ),
 )
 

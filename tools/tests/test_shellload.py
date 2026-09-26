@@ -17,6 +17,8 @@ it is a step in `verify.sh` (25 s) precisely so they run. What IS here is
 everything that would make that step assert nothing while still exiting 0.
 """
 
+import ast
+import json
 import re
 import sys
 from pathlib import Path
@@ -265,13 +267,32 @@ def test_the_shells_are_told_to_use_wayland():
 # ---------------------------------------------------- the notifier's client
 
 
-def test_exactly_one_shell_is_given_something_real_to_do():
-    """And it is the notifier, because its whole input is the session bus and
-    a D-Bus client is therefore the whole of its world. The other two would
-    need a broker and a compositor this gate deliberately does not start —
-    which is the limit the header states and this pins."""
-    woken = [s.attr for s in shells.SHELLS if s.wake]
-    assert woken == ["jv-notify"]
+def test_the_one_shell_nothing_wakes_is_the_bar_and_the_reason_is_its_wrapper():
+    """Two of the three are given something real to do: the notifier a D-Bus
+    client, the HUD a broker and eleven frames (PLAN D43). The bar is the one
+    with no cheap answer, and the reason is not a gap in imagination —
+    `JV_BAR_NIRI` is `--set` into its wrapper, so its event stream cannot be
+    pointed at a fake without staging the shell, which is the one thing this
+    gate refuses.
+
+    Pinned because it is the limit the header states, and a header that said
+    "the bar runs blind" over a bar somebody had since woken would be the
+    coverage claim nobody re-read."""
+    dark = [s.attr for s in shells.SHELLS if not s.wake]
+    assert dark == ["jv-bar"]
+    wrapper = (ROOT / "pkgs" / "jv-bar" / "default.nix").read_text("utf-8")
+    assert "--set JV_BAR_NIRI" in wrapper
+
+
+def test_every_way_of_waking_a_shell_is_one_the_driver_can_carry_out():
+    """`wake` names the waker rather than flagging that there is one, so a
+    name nothing implements would be a shell this gate silently loaded cold.
+    The driver refuses one at runtime; this refuses it at test time."""
+    driver = DRIVER.read_text("utf-8")
+    for shell in shells.SHELLS:
+        if not shell.wake:
+            continue
+        assert f'shell.wake == "{shell.wake}"' in driver, shell.attr
 
 
 def test_the_notification_is_sent_by_a_client_and_not_by_the_shell():
@@ -544,12 +565,16 @@ def test_the_monitors_the_compositor_really_has_are_checked_before_any_shell():
 
 def test_the_gate_still_costs_seconds_and_not_minutes():
     """The whole argument for this being a step rather than a named command.
-    The compositor is polled, and a poll with a generous timeout is how a 25 s
-    gate becomes a 3-minute one — so the ceiling is bounded and small, and the
-    worst case is one timeout per reading per shell."""
+    Everything here is polled, and a poll with a generous timeout is how a 25 s
+    gate becomes a 3-minute one — so every ceiling is bounded and small, and
+    the worst case is one timeout per reading per shell plus the HUD's two."""
     worst = shells.MAPPED_TIMEOUT_S * 3 * len(shells.SHELLS)
-    assert worst <= 90, worst
+    worst += shells.HUD_LIT_TIMEOUT_S * 2
+    assert worst <= 150, worst
     assert 0 < shells.MAPPED_POLL_S <= 0.25
+    # And the frames go out faster than the plate that needs them goes stale,
+    # or the ceiling above is spent waiting for a corner that keeps dimming.
+    assert 0 < shells.HUD_ROUND_S <= 1.0
 
 
 # ------------------------------------------------------------- the wiring
@@ -579,10 +604,378 @@ def test_the_gate_is_run_here_unlike_the_one_that_takes_photographs():
         assert "ops/ralph/shellload.sh" not in unrun, shell.attr
 
 
-def test_the_gate_does_not_read_the_broker_it_never_starts():
-    """The deliberate narrowing. Nothing here starts a jarvisd — the HUD runs
-    blind, which is the header's second limit — so a change to the bus cannot
-    move this verdict, and binding it would spend these seconds on every Rust
-    edit to learn that."""
-    got = dependents.commands(ROOT, ["services/jarvisd/src/main.rs"])
-    assert "bash ops/ralph/shellload.sh" not in got, sorted(got)
+def test_the_gate_is_planned_for_everything_that_carries_a_frame_to_a_plate():
+    """The inverse of what this test used to say, and the reason is D43.
+
+    Until the HUD was woken, nothing here started a broker: the HUD ran blind,
+    a change to the bus could not move the verdict, and binding these seconds
+    to every Rust edit would have bought nothing. The HUD's half of this gate
+    IS that broker now, so all three paths a frame travels are declared — the
+    broker, the client library the publisher and the bridge both speak, and the
+    bridge itself, which is the child process `pkgs/jv-hud` pins into the
+    wrapper and the only thing in this repo that carries a frame into a plate.
+    """
+    for path in (
+        "services/jarvisd/src/broker.rs",
+        "services/pylib/jarvis_bus/client.py",
+        "services/jv-hud-bridge/jv_hud_bridge/bridge.py",
+    ):
+        got = dependents.commands(ROOT, [path])
+        assert "bash ops/ralph/shellload.sh" in got, (path, sorted(got))
+
+
+# ------------------------------------------------- the HUD's frames (D43)
+#
+# The HUD used to be the shell here with nothing to say: `Bus` blind, every
+# plate refusing to guess, `visible: selfTest || stack.anyLit` false — so no
+# wl_surface of its was ever created and every plate was outside this gate. It
+# gets a real broker and eleven real frames now. These are the checks on the
+# frames and on the census that reads the result; the measurement itself needs
+# a compositor and is the gate.
+
+
+def hud_shell_text() -> str:
+    return strip_qml_comments(
+        (ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8")
+    )
+
+
+def stacked_plate_names() -> list[str]:
+    """The `plateName` of every plate in `shell/jv-hud/shell.qml`'s stack, in
+    stack order, read out of the plates' own files.
+
+    Two hops on purpose. The stack names TYPES (`ConfirmPlate`) and the corner
+    logs NAMES (`confirm`), and the mapping between them lives in each plate —
+    so a test that assumed `XxxPlate` -> `xxx` would agree with a plate that
+    had renamed itself and disagree with nothing.
+    """
+    body = hud_shell_text()
+    start = body.index("PlateStack {")
+    names = []
+    for kind in re.findall(r"^\s{8}([A-Z][A-Za-z]*Plate) \{", body[start:], re.M):
+        plate = strip_qml_comments(
+            (ROOT / "shell" / "jv-hud" / f"{kind}.qml").read_text("utf-8")
+        )
+        found = re.search(r'plateName:\s*"([a-z]+)"', plate)
+        assert found, f"{kind}.qml no longer declares a plateName"
+        names.append(found.group(1))
+    return names
+
+
+def test_every_plate_the_hud_stacks_is_lit_by_this_gate_or_named_as_dark():
+    """The drift guard, and the whole reason the lit list is worth stating.
+
+    A twelfth plate lands in the stack, nothing adds it here, and the gate goes
+    on reporting that the HUD's corner lights — over a plate no frame in this
+    repo has ever reached. Both lists are in stack order because the corner
+    logs in stack order, so this also pins the sequence the census matches.
+    """
+    stacked = stacked_plate_names()
+    assert stacked, "no plates found in shell/jv-hud/shell.qml's stack"
+    assert [n for n in stacked if n not in shells.HUD_PLATES_DARK] == list(
+        shells.HUD_PLATES_LIT
+    ), (stacked, shells.HUD_PLATES_LIT)
+    for dark in shells.HUD_PLATES_DARK:
+        assert dark in stacked, dark
+
+
+def test_the_plate_that_cannot_be_lit_here_is_the_one_about_the_bus_itself():
+    """And it is not an omission. `LinkPlate` is on screen exactly while the
+    HUD cannot SEE the bus, so lighting it would mean taking the broker away —
+    and then there would be no frames for anything else. `shell.qml` makes the
+    same observation about its own box: in practice it can never share the
+    surface."""
+    assert shells.HUD_PLATES_DARK == ("link",)
+    link = strip_qml_comments(
+        (ROOT / "shell" / "jv-hud" / "LinkPlate.qml").read_text("utf-8")
+    )
+    assert "shown: root.link.blind" in link
+
+
+def test_the_corner_line_this_gate_reads_is_the_one_the_hud_writes():
+    """The copy, and the third file that holds both ends equal.
+
+    `hud_corner_line()` restates the template `shell/jv-hud/shell.qml` logs,
+    because there is nothing to import — the string only exists inside a
+    running QML engine. Assembled here out of the QML's own literals, so a
+    reworded line fails this rather than turning the census into a wait that
+    times out with no explanation.
+    """
+    body = hud_shell_text()
+    parts = re.findall(r'console\.info\((.*?)\);', body, re.S)
+    assert len(parts) == 1, parts
+    literals = re.findall(r'"([^"]*)"', parts[0])
+    # The template, in the order the QML concatenates it: prefix, the joiner
+    # between the monitor and the plates, the separator inside the list, and
+    # the word for an empty corner.
+    assert literals == [
+        "jv-hud: corner on ",
+        " shows ",
+        " ",
+        "nothing",
+    ], literals
+    assert shells.hud_corner_line("HEADLESS-1", ("a", "b")) == (
+        literals[0] + "HEADLESS-1" + literals[1] + "a" + literals[2] + "b"
+    )
+    assert shells.hud_corner_line("HEADLESS-1", ()) == (
+        literals[0] + "HEADLESS-1" + literals[1] + literals[3]
+    )
+
+
+def test_the_corner_is_read_on_every_monitor_and_not_just_somewhere():
+    """`Variants` builds one surface per screen and each one's plates decide
+    for themselves — D32's fault was a row sized against the wrong monitor's
+    width. A census that accepted one line would pass a shell that had quietly
+    stopped building the third surface, so the driver asks each monitor by
+    name and this holds the parser to answering per monitor."""
+    said = "\n".join(
+        shells.hud_corner_line(out["name"], shells.HUD_PLATES_LIT)
+        for out in shells.OUTPUTS[:-1]
+    )
+    for out in shells.OUTPUTS[:-1]:
+        assert shells.hud_corner_plates(said, out["name"]) == list(
+            shells.HUD_PLATES_LIT
+        ), out["name"]
+    missed = shells.OUTPUTS[-1]["name"]
+    assert shells.hud_corner_plates(said, missed) is None, missed
+    driver = code_lines(DRIVER)
+    assert "for out in shells.OUTPUTS" in driver
+
+
+def test_a_corner_that_never_spoke_is_told_apart_from_one_that_went_dark():
+    """Two different repairs. None is a surface that was never built; an empty
+    list is a surface that is there and has nothing to say, which is the
+    ordinary state of this HUD and must never read as the same failure."""
+    dark = shells.hud_corner_line("HEADLESS-1", ())
+    assert shells.hud_corner_plates(dark, "HEADLESS-1") == []
+    assert shells.hud_corner_plates(dark, "HEADLESS-2") is None
+
+
+def test_the_newest_line_is_the_one_read_because_a_corner_is_a_sequence():
+    """The plates arrive over a round or two — `output` needs jv-context's
+    snapshot, `heard` needs the transcript after the speaking frame — so the
+    corner names a growing set. Reading the first line would grade the HUD on
+    the instant it woke up."""
+    said = "\n".join(
+        [
+            shells.hud_corner_line("HEADLESS-1", ()),
+            shells.hud_corner_line("HEADLESS-1", ("mic", "health")),
+            shells.hud_corner_line("HEADLESS-1", shells.HUD_PLATES_LIT),
+        ]
+    )
+    assert shells.hud_corner_plates(said, "HEADLESS-1") == list(shells.HUD_PLATES_LIT)
+
+
+def test_the_corner_names_the_plates_and_never_what_they_say():
+    """Structural, not tidy (invariant 7). The corner's account reaches
+    journald on a real machine, and `plateName` is one word per element — so
+    what is recorded is WHICH readings were on screen and never the words
+    jv-ears took down, the question jv-act asked or the file jv-guard
+    refused."""
+    body = hud_shell_text()
+    found = re.search(r"console\.info\((.*?)\);", body, re.S)
+    assert found
+    logged = found.group(1)
+    assert "litNames" in logged
+    # Nothing in the logged expression may reach into a plate's own content.
+    for reach in ("text", "summary", "body", "transcript", "verdict", "file"):
+        assert reach not in logged, reach
+
+
+def test_the_frames_this_gate_publishes_are_the_screen_sheets_own():
+    """Eight of the eleven are byte-equal to a named frame in
+    `tools/hudscreens/sheet.py`, and this is the third file that says so.
+
+    Restated rather than imported for the reason `OUTPUTS` is: `sheet.py` is a
+    declared read of a 3-minute harness, and importing it would make every edit
+    to that harness's noise floor wake this gate. A copy with a test is the
+    shape invariant 1 asks for; a copy without one is drift.
+    """
+    shared = {
+        "speech.state": sheet.VOICE_SPEAKING,
+        "context.system": sheet.SINK_MUTED,
+        "audio.transcript": sheet.HEARD_FINAL,
+        "action.confirm": sheet.CONFIRM_REQUEST,
+        "intent.action": sheet.TRASH_INTENT,
+        "action.result": sheet.TRASH_FAILED,
+    }
+    mine = {f["topic"]: f for f in shells.HUD_FRAMES}
+    for topic, theirs in shared.items():
+        spec = theirs["publish"]
+        assert mine[topic]["src"] == spec["src"], topic
+        assert mine[topic]["body"] == spec["body"], topic
+        assert mine[topic].get("conf", 1.0) == spec.get("conf", 1.0), topic
+    # The two `sys.health` beats, which share a topic and so are keyed by src.
+    beats = {f["src"]: f for f in shells.HUD_FRAMES if f["topic"] == "sys.health"}
+    assert beats["jv-ears"]["body"] == sheet.MIC_LOSSY["publish"]["body"]
+    assert beats["jv-voice"]["body"] == sheet.VOICE_DEFAULT_SINK["publish"]["body"]
+
+
+def test_the_three_new_frames_are_the_three_plates_nothing_had_ever_fed():
+    """jv-guard refusing a binary, jv-compat failing an install, and jv-brain
+    running out of room. Nothing in this repo had ever composed one, which is
+    why those three plates had never seen a real frame — so the claim is worth
+    pinning the other way round: these topics are NOT in the screen sheet."""
+    sheet_topics = {
+        f["publish"]["topic"]
+        for shot in sheet.SHOTS
+        for f in shot.get("frames", [])
+        if "publish" in f
+    }
+    for topic in ("guard.verdict", "compat.install", "brain.response"):
+        assert topic in {f["topic"] for f in shells.HUD_FRAMES}, topic
+        assert topic not in sheet_topics, topic
+
+
+def test_every_frame_is_a_body_the_frozen_schema_allows():
+    """`schemas/` is bus law (invariant 2), and a harness that publishes an
+    illegal body is lighting a plate over a machine that cannot exist. Three
+    of these are hand-written here for the first time."""
+    for frame in shells.HUD_FRAMES:
+        schema = json.loads(
+            (ROOT / "schemas" / f"{frame['topic']}.json").read_text("utf-8")
+        )
+        body = frame["body"]
+        missing = set(schema["required"]) - set(body)
+        assert not missing, f"{frame['topic']}: body is missing {sorted(missing)}"
+        extra = set(body) - set(schema["properties"])
+        assert not extra, f"{frame['topic']}: body has unknown keys {sorted(extra)}"
+        for key, value in body.items():
+            enum = schema["properties"][key].get("enum")
+            if enum is not None:
+                assert value in enum, f"{frame['topic']}.{key}={value!r} not in {enum}"
+
+
+def test_only_the_transcript_hedges_its_confidence():
+    """Six of the HUD's state machines refuse a frame whose envelope is not
+    UNHEDGED (`conf >= 1`), so a composed frame that quietly carried less would
+    light nothing and look like a plate that had broken. `audio.transcript` is
+    the one topic whose confidence is the producer's own (invariant 4)."""
+    hedged = [f["topic"] for f in shells.HUD_FRAMES if f.get("conf", 1.0) < 1.0]
+    assert hedged == ["audio.transcript"]
+    for state in ("Guard", "Install", "Reply", "Action", "Confirm", "Output"):
+        text = (ROOT / "shell" / "jv-hud" / "core" / f"{state}State.qml").read_text(
+            "utf-8"
+        )
+        assert "envelope.conf >= 1" in text, state
+
+
+def test_the_frames_are_ordered_so_the_two_latching_plates_survive_a_round():
+    """The one thing about this list that is not interchangeable. `heard` goes
+    dark once `speech.state` is stamped after the words (HeardState latches
+    `answering`) and `action` goes dark the same way (ActionState's
+    `noteExplained`) — so the speaking frame goes FIRST and everything else is
+    newer than it. Republishing the set in order is what keeps that true every
+    round."""
+    order = [f["topic"] for f in shells.HUD_FRAMES]
+    assert order.index("speech.state") == 0, order
+    assert order.index("speech.state") < order.index("audio.transcript")
+    assert order.index("speech.state") < order.index("action.result")
+    # And the intent before the outcome it names, or the plate lights with no
+    # tool on it: the request id is the only thread between the two.
+    assert order.index("intent.action") < order.index("action.result")
+    for state, latch in (("Heard", "answering"), ("Action", "noteExplained")):
+        text = (ROOT / "shell" / "jv-hud" / "core" / f"{state}State.qml").read_text(
+            "utf-8"
+        )
+        assert latch in text, state
+
+
+def code_lines(path: Path) -> str:
+    """One Python file with its comments and its docstrings taken out.
+
+    The same reading `executed_lines()` takes of the bash: a rule about what a
+    file may not DO has to be a rule about what it runs, or the prose
+    explaining the rule trips it. Docstrings are dropped through `ast` rather
+    than by pattern, because a triple quote inside a comment is exactly the
+    shape that would defeat one.
+    """
+    text = path.read_text("utf-8")
+    tree = ast.parse(text)
+    drop = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef)):
+            continue
+        body = node.body
+        if body and isinstance(body[0], ast.Expr) and isinstance(
+            body[0].value, ast.Constant
+        ) and isinstance(body[0].value.value, str):
+            drop.update(range(body[0].lineno, body[0].end_lineno + 1))
+    return "\n".join(
+        line
+        for n, line in enumerate(text.splitlines(), start=1)
+        if n not in drop and not line.strip().startswith("#")
+    )
+
+
+def test_the_publisher_only_ever_publishes():
+    """A read-only consumer is what the HUD is; a write-only client is what
+    this gate's half must be. A publisher that subscribed could report that a
+    frame arrived, which is a claim about the bus and not about the HUD — and
+    the HUD's own account of its corner is the only census here worth having.
+    """
+    text = code_lines(ROOT / "tools" / "shellload" / "publish.py")
+    for forbidden in ("subscribe", "next_frame", "next_event"):
+        assert forbidden not in text, forbidden
+    assert ".publish(" in text
+
+
+def test_the_publisher_is_a_process_and_the_driver_keeps_no_event_loop():
+    """The reason it is next door rather than inline: the bus client is
+    asyncio, the driver is not, and a driver that grew an event loop to keep
+    one plate fresh would be taking its measurements inside somebody else's
+    scheduler."""
+    driver = code_lines(DRIVER)
+    assert "asyncio" not in driver
+    assert "publish.py" in driver
+    assert "PUBLISH" in driver
+
+
+def test_the_frames_keep_coming_because_one_plate_needs_them_to():
+    """`output` reads jv-context's 1 Hz snapshot and core/OutputState.qml calls
+    one older than 3 s stale — correctly, because a mixer reading from ten
+    seconds ago is not a reading of this room. A single pass would light the
+    plate and lose it again before the compositor had been asked anything."""
+    out = (ROOT / "shell" / "jv-hud" / "core" / "OutputState.qml").read_text("utf-8")
+    found = re.search(r"property real snapshotS:\s*([0-9.]+)", out)
+    assert found, "core/OutputState.qml no longer declares a snapshotS"
+    assert shells.HUD_ROUND_S < float(found.group(1)), (
+        f"the publisher republishes every {shells.HUD_ROUND_S}s and the "
+        f"snapshot goes stale at {found.group(1)}s"
+    )
+    assert "output" in shells.HUD_PLATES_LIT
+
+
+def test_the_broker_is_realized_from_the_flake_and_started_by_the_script():
+    """Same rule as the shells: `nix build` is the one thing in this harness
+    that is not a measurement, so it lives in the script and the driver cannot
+    reach it. A driver that could build a broker could build a different one.
+    """
+    assert 'nix build "$root#jarvisd"' in script_text()
+    assert (ROOT / "services" / "jarvisd" / "Cargo.toml").is_file()
+    for half in (DRIVER, ROOT / "tools" / "shellload" / "publish.py"):
+        text = code_lines(half)
+        assert "nix build" not in text, half.name
+        assert "jarvisd" not in text, half.name
+
+
+def test_the_bus_is_this_runs_own_socket_and_not_the_machines():
+    """The same rule the session bus gets, for the same reason. The real one is
+    `/run/jarvis/bus.sock`; a gate that published eleven composed frames onto
+    the bus of a live desktop would put a confirmation nobody asked for in
+    front of the user."""
+    lines = [ln for ln in executed_lines() if "JARVIS_BUS" in ln]
+    assert lines, "the gate never sets JARVIS_BUS"
+    assert any('JARVIS_BUS="$stage/' in ln for ln in lines), lines
+    assert not any("/run/jarvis" in ln for ln in executed_lines())
+
+
+def test_the_broker_is_killed_with_everything_else():
+    """A jarvisd left behind holds a socket in a directory the trap is about
+    to delete, and the next run's HUD would link to a broker nobody is
+    publishing on — which reads as a HUD that ignored its frames."""
+    text = script_text()
+    trap = text[text.index("cleanup()") : text.index("trap cleanup EXIT")]
+    assert "buspid" in trap
+    assert "buspid=$!" in text

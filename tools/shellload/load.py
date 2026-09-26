@@ -7,11 +7,20 @@ file decides — which shells, which monitors, which notification — is next do
 in `shells.py`, where a test with no compositor can read it.
 
 What it does per shell, and it is deliberately the whole of it: start the
-shipped binary, wait for quickshell's own `Configuration Loaded`, give the
-notifier its one real message, hold for a beat, ask the compositor what the
-surface reserved, stop it. The log goes to `$JV_SHELLLOAD_STAGE/<attr>.log`
-and the SCAN is the script's — one `tools/qmlerrors.py` per shell, because
-each one needs its own `--prefix`.
+shipped binary, wait for quickshell's own `Configuration Loaded`, wake it if
+anything here can, hold for a beat, ask the compositor what the surface
+reserved, stop it. The log goes to `$JV_SHELLLOAD_STAGE/<attr>.log` and the
+SCAN is the script's — one `tools/qmlerrors.py` per shell, because each one
+needs its own `--prefix`.
+
+TWO OF THE THREE ARE WOKEN, each by the only thing that can reach it. The
+notifier gets a D-Bus client, because the session bus is the whole of its
+world. The HUD gets a real broker and eleven real frames (PLAN D43): the
+script starts `jarvisd` on this run's own socket, `publish.py` puts
+`shells.HUD_FRAMES` on it at 1 Hz, and the HUD's own read-only bridge carries
+them into the plates. Before that the HUD here had nothing to say, so no
+wl_surface of its was ever created and every plate, every state machine under
+it and every binding that only runs on a real frame was outside this gate.
 
 THE COMPOSITOR IS ASKED TWO THINGS, and both are here because a log line
 cannot answer either (PLAN D44). First, ONCE, that sway really has the three
@@ -44,6 +53,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import shells  # noqa: E402
+
+PUBLISH = Path(__file__).resolve().parent / "publish.py"
 
 
 class Fail(Exception):
@@ -278,6 +289,84 @@ def wake_notifier() -> None:
     log(f"  notify: one message accepted as id {ident}")
 
 
+# ---------------------------------------------------------------- the HUD
+
+
+def wake_hud(stage: Path) -> Proc:
+    """Put real frames on the bus and wait for the corner to name its plates.
+
+    Returns the publisher, for the caller to stop: it republishes at 1 Hz for
+    as long as it runs, which is what keeps `output` alive (jv-context's
+    snapshot goes stale at 3 s) and what makes the subscription race stop
+    mattering — a bus has no backlog, so a frame sent before the HUD's bridge
+    subscribed is simply gone.
+
+    THE CENSUS IS THE HUD'S OWN ACCOUNT, and it has to be. Nothing this driver
+    can ask sway or the bus would reveal whether the frames reached the plates:
+    the HUD reserves no space, takes no focus and — with `ExclusionMode.Ignore`
+    and no zone — changes nothing a compositor reports when it maps. So
+    `shell/jv-hud/shell.qml` logs one line per surface naming the plates on it,
+    and this waits for the line every monitor has to write. A publisher that
+    graded itself on what it had just sent would be grading the bus.
+
+    Per monitor, and that is the part worth having: `Variants` builds one
+    surface per screen and each one's plates decide for themselves, so a shell
+    that quietly stopped building the third surface fails here rather than
+    reporting that the HUD lit.
+    """
+    pub = Proc("publish", [sys.executable, str(PUBLISH)], stage / "hud-frames.log")
+    try:
+        # One whole round out before anything is expected of the corner: until
+        # then a HUD that named nothing is a HUD nobody has told anything.
+        pub.wait_for("round 1", shells.HUD_LIT_TIMEOUT_S)
+        want = list(shells.HUD_PLATES_LIT)
+        hudlog = stage / "jv-hud.log"
+        deadline = time.monotonic() + shells.HUD_LIT_TIMEOUT_S
+        got: dict[str, list[str] | None] = {}
+        while time.monotonic() < deadline:
+            if pub.p.poll() is not None:
+                raise Fail(
+                    f"the publisher exited with {pub.p.returncode}:\n{pub.tail()}"
+                )
+            said = hudlog.read_text("utf-8", "replace")
+            got = {
+                out["name"]: shells.hud_corner_plates(said, out["name"])
+                for out in shells.OUTPUTS
+            }
+            if all(plates == want for plates in got.values()):
+                log(f"  jv-hud: the corner names {len(want)} plates on every monitor")
+                return pub
+            time.sleep(shells.MAPPED_POLL_S)
+        # Named per monitor and per plate, because the two ways this fails are
+        # different repairs: a monitor that never wrote a line at all is a
+        # surface that was never built, and one naming nine plates is one plate
+        # that never lit.
+        report = []
+        for name, plates in got.items():
+            if plates == want:
+                continue
+            if plates is None:
+                report.append(f"{name}: never said anything about its corner")
+                continue
+            short = [p for p in want if p not in plates]
+            extra = [p for p in plates if p not in want]
+            report.append(
+                f"{name}: showed [{' '.join(plates) or 'nothing'}]"
+                + (f", missing {short}" if short else "")
+                + (f", unexpected {extra}" if extra else "")
+                + ("" if short or extra else " — in the wrong order")
+            )
+        raise Fail(
+            f"after {shells.HUD_LIT_TIMEOUT_S:.0f}s of "
+            f"{len(shells.HUD_FRAMES)} frames at {1 / shells.HUD_ROUND_S:.0f} Hz, "
+            f"the corner should have been showing [{' '.join(want)}] on every "
+            "monitor. " + "; ".join(report)
+        )
+    except Exception:
+        pub.stop()
+        raise
+
+
 # ----------------------------------------------------------------- the run
 
 
@@ -290,18 +379,31 @@ def load(shell: shells.Shell, stage: Path) -> None:
     # be handing this one its verdict.
     check_zone(shell, "before", up=False)
     proc = Proc(shell.attr, [binary], logpath)
+    woken: Proc | None = None
     try:
         took = proc.wait_for(shells.READY, shells.READY_TIMEOUT_S)
         log(f"  {shell.attr}: loaded in {took:.2f} s")
-        if shell.wake:
+        # Whatever can reach this shell, reaches it. Dispatched on the name in
+        # `shells.py` rather than on `attr`, so the list of shells stays the
+        # only place that decides which of them is given something to do.
+        if shell.wake == "notify":
             wake_notifier()
+        elif shell.wake == "hud":
+            woken = wake_hud(stage)
+        elif shell.wake:
+            raise Fail(f"{shell.attr} declares wake={shell.wake!r}, which is nothing")
         # A beat, so a binding queued behind the first frame gets the frame.
         time.sleep(shells.HOLD_S)
         check_zone(shell, "while", up=True)
         # Said as what was measured rather than as what it implies. "Took
-        # nothing" is true of a surface that was never created, and for the
-        # HUD with no jarvisd that is exactly what happened — see the D44
-        # section in `shells.py`.
+        # nothing" is also true of a surface that was never created, which is
+        # what the notifier's reading still is — its `PanelWindow` is
+        # conditionally visible and a zone declared while it was invisible
+        # never reaches the compositor (the D44 section in `shells.py`). The
+        # HUD's used to be the same sentence about the same nothing and is
+        # not any more: with the frames above in it, the corner is lit on
+        # every monitor before this is asked, so a surface really is there
+        # and really does leave every screen whole (PLAN D43).
         log(
             f"  {shell.attr}: "
             + (
@@ -311,6 +413,8 @@ def load(shell: shells.Shell, stage: Path) -> None:
             )
         )
     finally:
+        if woken is not None:
+            woken.stop()
         proc.stop()
     # And the third: it gave the screens back. For the two that reserve
     # nothing this is a second reading of the same nothing; for the bar it is

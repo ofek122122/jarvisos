@@ -329,6 +329,42 @@ ShellRoot {
         }
       }
 
+      // WHAT THIS CORNER IS SHOWING, in its own words (PLAN D43).
+      //
+      // The HUD is unmapped most of the time and draws nothing the rest of
+      // it, so until now this machine kept no record of what the corner
+      // ever said. "Jarvis never showed me the confirmation" and "Jarvis
+      // showed it and I looked away" are the same empty screen afterwards,
+      // and the journal had nothing to separate them. This is the surface's
+      // own account: one line per change, per monitor, naming the plates
+      // that were on it.
+      //
+      // NAMES ONLY, and that is structural rather than tidy (invariant 7).
+      // `plateName` is one word per element — `confirm`, `heard`, `guard` —
+      // so what reaches the log is WHICH readings were on screen and never
+      // what they said. The words jv-ears took down, the question jv-act
+      // asked and the file jv-guard refused all stay inside the process.
+      //
+      // Per surface, not per shell, because the surfaces can genuinely
+      // differ: `Variants` builds one per monitor and each one's plates
+      // decide for themselves (D32's fault was a row sized against the
+      // wrong monitor). A shell that quietly stopped building a surface for
+      // the third screen says so here by never naming it.
+      //
+      // It is also what makes `ops/ralph/shellload.sh` able to ask whether
+      // the plates lit at all (D43): that gate puts a real broker and real
+      // frames under a real quickshell, and before this line the only thing
+      // it could observe about the result was that nothing threw — which is
+      // also what a HUD that ignored every frame looks like.
+      Connections {
+        target: stack
+
+        function onLitNamesChanged(): void {
+          console.info("jv-hud: corner on " + surface.modelData.name + " shows "
+            + (stack.litNames.length > 0 ? stack.litNames.join(" ") : "nothing"));
+        }
+      }
+
       // Built only under the self-test, in the opposite corner: it is a
       // developer marker, and it must never sit where a sensor state does.
       Loader {

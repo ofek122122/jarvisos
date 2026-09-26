@@ -36,17 +36,27 @@
 #     The other two are a refutation and a NARROW one; the measured reason is
 #     in the D44 section of tools/shellload/shells.py and is worth reading
 #     before anybody counts this as coverage of the HUD.
-#   · A shell with nothing to say evaluates almost none of its own QML. The
-#     HUD runs with no jarvisd (every plate unmapped, the bus blind) and the
-#     bar with no niri (`linkUp` false, no workspace delegates). What this
-#     covers for those two is the outermost file, the per-screen `Variants`
+#   · A shell with nothing to say evaluates almost none of its own QML, and
+#     the BAR is now the only one of the three in that state: it runs with no
+#     niri, so `linkUp` is false and the workspaces row builds no delegates.
+#     What this covers for it is the outermost file, the per-screen `Variants`
 #     delegate, and every binding evaluated whatever the state — which is
 #     where D34's and D39's faults both were, and is not the whole shell.
-#   · The notifier is the exception, deliberately: it gets a real client.
-#     `tools/shellload/load.py` asks the running daemon what it can do and
-#     then sends it one notification over the private bus, so the corner maps
-#     and the Repeater builds a Toast. That is also the first thing in this
-#     repo ever to prove the D-Bus name is claimed and answers (PLAN D22).
+#     `JV_BAR_NIRI` is `--set` into the wrapper, so its event stream cannot
+#     be pointed at a fake without staging the shell, which is the one thing
+#     this gate refuses (PLAN D43).
+#   · The other two ARE woken, each by the only thing that can reach it.
+#     `tools/shellload/load.py` asks the notification daemon what it can do
+#     and then sends it one notification over the private bus, so the corner
+#     maps and the Repeater builds a Toast — the first thing in this repo ever
+#     to prove the D-Bus name is claimed and answers (PLAN D22). And the HUD
+#     gets a real broker: `jarvisd` on this run's own socket below,
+#     `tools/shellload/publish.py` putting eleven composed frames on it at
+#     1 Hz, and the HUD's own read-only bridge carrying them in. Ten of its
+#     eleven plates light, the surface is CREATED (with no jarvisd it never
+#     was), and the corner says which plates it is showing so this gate can
+#     tell a HUD that received the frames from one that ignored them
+#     (PLAN D43).
 #
 # TWO THINGS THE ENVIRONMENT MUST DO, both measured, neither optional:
 #   1. DBUS_SESSION_BUS_ADDRESS is REPLACED, not inherited. Run without that,
@@ -65,8 +75,9 @@
 #      `hudscreens.sh` carries, for the same reason.
 #
 # reads: flake.lock flake.nix personality/theme.toml pkgs/jv-bar pkgs/jv-hud
-#        pkgs/jv-notify shell/jv-bar shell/jv-hud shell/jv-notify
-#        tools/qmlerrors.py tools/shellload
+#        pkgs/jv-notify services/jarvisd services/jv-hud-bridge services/pylib
+#        shell/jv-bar shell/jv-hud shell/jv-notify tools/qmlerrors.py
+#        tools/shellload
 #
 # Declared, like the other two nix gates (PLAN B72): what it reads is a set of
 # flake attributes, and an attribute is not a path any syntax tree names. The
@@ -75,9 +86,15 @@
 # argument `hudscreens.sh` makes for its own: a shell loaded against a
 # different Qt or a different quickshell is a different shell.
 #
-# It does NOT read `services/jarvisd`. Nothing here starts a broker — see the
-# second limit above — so a change to the bus cannot move this verdict, and
-# binding it would spend this gate's seconds on every Rust edit to learn that.
+# IT NOW READS THE BUS, and it deliberately did not until D43. The old reason
+# was that nothing here started a broker, so a change to the bus could not move
+# this verdict and binding it would spend these seconds on every Rust edit to
+# learn that. The HUD's half of this gate is that broker, so the three paths it
+# runs on are in the list: `services/jarvisd` is the broker, `services/pylib`
+# is the client both the publisher and the bridge speak through, and
+# `services/jv-hud-bridge` is the child process the HUD's own wrapper pins —
+# the one thing that carries a frame from the bus into a plate. Every one of
+# them can turn ten lit plates into none, which is what this gate now asks.
 #
 # NOTE — the paths above are the shells, and this script may not name them.
 # `tools/shellload/shells.py` holds the three roots, and
@@ -104,13 +121,17 @@ sway=$(nixpkgs sway)
 dbus=$(nixpkgs 'dbus.out')
 # The notifier's one real client. `glib.bin` is where gdbus lives.
 glib=$(nixpkgs 'glib.bin')
-# stdlib only, on purpose: this harness measures nothing and needs no numpy.
-py=$(nixpkgs python3)
+# msgpack and nothing else on top of the stdlib. The bus speaks MessagePack, so
+# `tools/shellload/publish.py` cannot put a frame on it without the one library
+# `services/pylib` imports; everything else here is stdlib, and in particular
+# there is still no numpy — this harness measures no pixels.
+py=$(nixpkgs 'python3.withPackages (ps: [ ps.msgpack ])')
 
 stage=$(mktemp -d)
 cleanup() {
   [ -n "${swaypid:-}" ] && kill "$swaypid" 2>/dev/null || true
   [ -n "${dbuspid:-}" ] && kill "$dbuspid" 2>/dev/null || true
+  [ -n "${buspid:-}" ] && kill "$buspid" 2>/dev/null || true
   rm -rf "$stage"
 }
 trap cleanup EXIT
@@ -186,6 +207,34 @@ export QT_QPA_PLATFORM=wayland
 # See limit 2 in the header. Load-bearing: without it every line of every log
 # below is unprefixed noise to the scanner.
 export NO_COLOR=1
+
+# THE BUS, this run's own, on a socket inside the stage (PLAN D43). The HUD's
+# whole view of the machine comes through it: `Bus.qml` runs `jv-hud-bridge` as
+# a child, the bridge subscribes, and without a broker to subscribe TO every
+# plate is unmapped and the surface is never created. It is realized from the
+# flake like the shells, because the broker this gate runs must be the one the
+# flake declares — and it is started here rather than in the driver for the same
+# reason the shells are: `nix build` is the one thing in this harness that is
+# not a measurement, and the driver must never be able to produce a binary.
+#
+# `--health-period` is left at its default. A heartbeat from the broker itself
+# is not something any plate reads — `core/HealthState.qml` keys on the service
+# NAMED in the body and refuses one that disagrees with the sender — so the
+# cadence changes nothing here, and a number chosen by this gate would be a
+# number the real jarvisd does not run at.
+jarvisd=$(nix build "$root#jarvisd" --no-link --print-out-paths)
+export JARVIS_BUS="$stage/bus.sock"
+"$jarvisd/bin/jarvisd" --bus "$JARVIS_BUS" > "$stage/jarvisd.log" 2>&1 &
+buspid=$!
+for _ in $(seq 1 100); do
+  [ -S "$JARVIS_BUS" ] && break
+  sleep 0.1
+done
+[ -S "$JARVIS_BUS" ] || {
+  echo "shellload: jarvisd never created $JARVIS_BUS" >&2
+  sed -n 1,40p "$stage/jarvisd.log" >&2
+  exit 1
+}
 
 export JV_SHELLLOAD_STAGE="$stage"
 export GDBUS_BIN="$glib/bin/gdbus"
