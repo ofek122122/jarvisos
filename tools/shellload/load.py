@@ -37,6 +37,14 @@ set, so a plate that latched on forever — a permanent NO BUS over a healthy
 machine, which teaches the user to ignore the one plate that qualifies all the
 others — passes the blind census exactly as the shipped HUD does.
 
+AND A THIRD, because letting go of the plate is only half a cycle (PLAN D52).
+The recovered HUD is shown the same eleven frames on that late broker and its
+corner has to light the same ten plates — on an engine whose `BusModel` caches
+and `HealthState` roster were emptied by every one of the link-downs it sat
+through, and whose surface was destroyed when the corner went empty. A HUD that
+came back LINKED and never accepted another frame passes the act above exactly:
+the corner goes dark because the SOCKET came back, and nothing watched traffic.
+
 THE COMPOSITOR IS ASKED TWO THINGS, and both are here because a log line
 cannot answer either (PLAN D44). First, ONCE, that sway really has the three
 monitors `shells.OUTPUTS` declares — every shell builds one surface per
@@ -339,7 +347,11 @@ def wake_hud(stage: Path) -> Proc:
     try:
         # One whole round out before anything is expected of the corner: until
         # then a HUD that named nothing is a HUD nobody has told anything.
-        pub.wait_for("round 1", shells.HUD_LIT_TIMEOUT_S)
+        # On its own budget rather than the corner's — starting a python
+        # process and connecting to a bound socket is not a cold Qt, and the
+        # two waits stopped being one number when D52 gave this gate a second
+        # publisher.
+        pub.wait_for("round 1", shells.HUD_PUBLISH_TIMEOUT_S)
         corner_census(
             shells.hud_shell().attr,
             stage / "jv-hud.log",
@@ -631,8 +643,72 @@ def relink(stage: Path, hud: Proc) -> None:
             # refused the bridge — are different repairs and read the same
             # from the corner alone.
             raise Fail(f"{exc}\nthe broker said:\n{broker.tail(600)}") from None
+        # And then it has to WORK again, which is the other half of the cycle.
+        recover(stage, hud, broker)
     finally:
         broker.stop()
+
+
+def recover(stage: Path, hud: Proc, broker: Proc) -> None:
+    """Show the recovered HUD real frames, and require the corner to light (D52).
+
+    The third act, and without it this run walks half a cycle: blind, says so,
+    lets go — and stops. The engine that was blind is never shown a frame, and
+    the ten-plate census belongs to a DIFFERENT quickshell, one that had a
+    broker from the moment it started. So nothing anywhere proved that a HUD
+    which survived an outage can still light a plate.
+
+    NOT THE SAME CLAIM TWICE, and the difference is state rather than code.
+    This engine has been told the link is DOWN half a dozen times — once per
+    failed connect on the bridge's doubling backoff, against the frames run's
+    one — and every one of those emptied both of `core/BusModel.qml`'s caches
+    and `core/HealthState.qml`'s roster of services. Then `LinkPlate` was the
+    only thing on the surface, and then the surface went away entirely
+    (`visible: selfTest || stack.anyLit`, and the corner said `nothing`).
+
+    The fault this act is really for is a HUD that is LINKED, SILENT, and
+    certain it is fine: the corner going dark is a reading of the SOCKET, since
+    `core/LinkState.qml` watches `Bus.linkUp` rather than the traffic, so a HUD
+    that came back linked and never accepted another frame passes the census
+    above exactly as the shipped one does. Measured — see the D52 section in
+    `shells.py` for the injection and what stayed green under it.
+
+    The same publisher and the same census as the frames run, on the broker
+    `relink` has already started, against `shells.HUD_PLATES_LIT` itself rather
+    than a copy of it: the recovered corner has to be the SAME corner.
+
+    `alive` is the publisher rather than the broker, and it covers both — a
+    broker that dies takes the publisher's connection with it, and a publisher
+    that cannot publish is the only reason to stop waiting on a corner.
+    """
+    pub = Proc(
+        shells.HUD_RECOVER_LOG,
+        [sys.executable, str(PUBLISH)],
+        stage / f"{shells.HUD_RECOVER_LOG}.log",
+        # The late bus, which is the only thing about this publisher that
+        # differs from the frames run's: `jarvis_bus.default_addr()` reads
+        # `JARVIS_BUS`, and the one inherited here is the SCRIPT's broker —
+        # a publisher that used it would light this corner from a bus the
+        # blind HUD has never been able to see.
+        env=dict(os.environ, JARVIS_BUS=str(stage / shells.HUD_BLIND_BUS)),
+    )
+    try:
+        pub.wait_for("round 1", shells.HUD_PUBLISH_TIMEOUT_S)
+        corner_census(
+            shells.HUD_BLIND_LOG,
+            hud.logpath,
+            list(shells.HUD_PLATES_LIT),
+            shells.HUD_RECOVER_TIMEOUT_S,
+            because=(
+                f"{len(shells.HUD_FRAMES)} frames at "
+                f"{1 / shells.HUD_ROUND_S:.0f} Hz on the bus it just got back"
+            ),
+            alive=pub,
+        )
+    except Fail as exc:
+        raise Fail(f"{exc}\nthe broker said:\n{broker.tail(600)}") from None
+    finally:
+        pub.stop()
 
 
 def main() -> int:

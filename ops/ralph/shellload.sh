@@ -73,6 +73,16 @@
 #     to ignore the one plate that qualifies all the others. A real broker is
 #     started on the very socket that HUD has been failing to reach, the bridge
 #     retries forever by design, and the corner has to go DARK again.
+#   · AND THEN IT HAS TO WORK AGAIN (PLAN D52), which is what turns two
+#     readings into a cycle: blind → says so → lets go → reports the machine.
+#     The recovered HUD is shown the same eleven frames on that late broker and
+#     its corner has to light the same ten plates — on an engine whose
+#     `BusModel` caches the outage emptied and whose link went down, repeatedly,
+#     before it came back. Measured, by making `BusModel.ingest` drop frames
+#     after a second link-down: the frames run stays green, the dark census
+#     above stays green, this one goes red, and all 721 of the HUD's own
+#     headless QML tests pass. It is the only reading in this repo that can see
+#     a HUD which is linked, silent, and certain it is fine.
 #
 # TWO THINGS THE ENVIRONMENT MUST DO, both measured, neither optional:
 #   1. DBUS_SESSION_BUS_ADDRESS is REPLACED, not inherited. Run without that,

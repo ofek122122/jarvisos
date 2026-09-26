@@ -958,21 +958,49 @@ human-reviewed step.
       well. Note the frames run's broker is the SCRIPT's and its log is next to
       the stage's, so this is one reader over two files. Raised by D49.
 
-- [ ] D52. **The corner comes back empty and nothing proves it ever fills
-      again.** D49 takes the blind HUD from `link` to `nothing`, which is the
-      latch it was written for — but the engine that was blind is never shown a
-      frame. The ten-plate census runs on a DIFFERENT quickshell, one that had
-      a broker from the moment it started, so nothing anywhere proves that a
-      HUD which survived an outage can still light a plate: every cache in
-      `core/BusModel.qml` was emptied on the drop, `HealthState` threw away its
-      roster of lives, and the subscription that carries frames is the
-      bridge's second one rather than its first. The shape is cheap and it is
-      already built: `publish.py` against the late broker, then
-      `corner_census(..., HUD_PLATES_LIT)` on the blind engine's own log — the
-      same publisher, the same census, about 2 s and one more `Proc`. It would
-      make the blind run the only place in this repo where the whole outage
-      cycle (blind → says so → recovers → reports the machine again) is walked
-      end to end. Raised by D49.
+- [x] D52. **The corner comes back empty and nothing proves it ever fills
+      again.** (Done — `recover()` in `tools/shellload/load.py`, called from
+      inside `relink()` while its broker is still up.) The blind run now walks
+      the whole outage cycle end to end, and it is the only place in this repo
+      that does: **blind → says so → lets go → reports the machine again**.
+      Measured, in that order, on one engine's own log:
+      `1 plate` → `nothing` → `10 plates`.
+      · **The fault it is for is a HUD that is LINKED, SILENT and certain it
+        is fine.** The corner going dark is a reading of the SOCKET —
+        `core/LinkState.qml` watches `Bus.linkUp`, never the traffic — so a
+        HUD that came back linked and then never accepted another frame passes
+        D49's census exactly as the shipped one does, and would have been a
+        corner that reports a healthy machine as silence forever.
+      · **And that is not the frames run's claim again.** This engine has been
+        told the link is DOWN half a dozen times (one `{"t":"link","up":false}`
+        per failed connect on the bridge's doubling backoff, against the frames
+        run's one), every one of which emptied both `BusModel` caches and
+        `HealthState`'s roster; then `LinkPlate` was the only thing on the
+        surface; then the surface was DESTROYED, because `visible: selfTest ||
+        stack.anyLit` and the corner said `nothing`. The ten plates have to
+        come back on a surface that was torn down and rebuilt.
+      · **Both halves were injected and both went red**, and the second is the
+        measurement worth keeping. Pointing the late publisher at the inherited
+        `JARVIS_BUS` (the script's broker, not the one the blind HUD can see)
+        ends the run 1 — so the census really reads that engine on that bus.
+        And making `core/BusModel.qml` drop frames after a SECOND link-down —
+        a HUD that survives one outage and not two — ends it 1 while **the
+        frames run stays green, D49's dark census stays green, and all 721 of
+        the HUD's own headless QML tests pass**. One outage is all any of them
+        ever stages.
+      · **`HUD_PLATES_LIT` itself, not a copy**: the recovered corner has to be
+        the SAME corner, and a third reading of one tuple is the point of it
+        being a tuple.
+      · **One number was split, and it is a correctness fix rather than a
+        saving.** The publisher's `round 1` wait borrowed `HUD_LIT_TIMEOUT_S`,
+        which is about a cold Qt building eleven plates; starting a python
+        process and connecting to a socket that is already bound is the other
+        kind of wait, and there are two publishers now. `HUD_PUBLISH_TIMEOUT_S`
+        is 4 s — deliberately not 5, which is `LinkState`'s grace and which
+        `test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate`
+        refuses here so that a read stays a read.
+      · Cost: **34.8 s**, unchanged — the third act is sub-second. Ceilings:
+        the blind engine is now **98 s of 100** (D53 is where the headroom is).
 
 - [ ] D53. **The first quickshell pays for a cold Qt and the other three do
       not, and all four are given 30 s for it.** `READY_TIMEOUT_S` is written
@@ -985,7 +1013,41 @@ human-reviewed step.
       MEASURED load time. Worth doing only with the D50 arithmetic in front of
       you — this is a bound on a hung engine, not a budget, so the value of
       shrinking it is that the bound stays honest rather than that the gate
-      gets faster. Raised by D50.
+      gets faster. Raised by D50. **Now load-bearing:** D52 took the blind
+      engine to 98 of its 100 s ceiling, so this is the item that has to happen
+      before that run grows a fourth act. 30 s of its 98 is a cold-font-cache
+      argument that is false of every engine but the first.
+
+- [ ] D54. **The compositor is never asked about the surface that came
+      BACK.** `load_blind` reads the screens three times — before, while, after
+      (D44) — and the `while` is taken when the corner is showing `link`. Then
+      D52's cycle destroys that surface (`visible: selfTest || stack.anyLit`,
+      and the dark census requires `nothing` on every monitor) and builds a new
+      one for the ten plates, and nobody asks sway anything about it. The HUD
+      reserves no space, so that reading is a refutation rather than a proof —
+      but it is the one this gate has, and a HUD whose rebuilt surface came
+      back with an exclusive zone on it would take a strip off all three
+      monitors and pass. One more `check_zone(shell, "while", up=True)` inside
+      `recover()`, after the census, is the whole of it; the arithmetic is the
+      catch (`engine_ceilings()` has 2 s of room and `MAPPED_TIMEOUT_S` is 8),
+      so this is D53's dependent rather than a free addition. Raised by D52.
+
+- [ ] D55. **A plate that came back LIT and EMPTY passes the new census.**
+      `test_the_corner_names_the_plates_and_never_what_they_say` states the
+      limit deliberately and D52 inherits it whole: the corner line is a list
+      of names, so `health` counts as recovered the moment it decides to show
+      itself, whatever it has to show. That matters more after an outage than
+      before one, because `core/HealthState.qml`'s roster is the thing the drop
+      really destroyed — `publishersOf` is rebuilt from heartbeats, and a
+      roster that came back with one service in it instead of two lights the
+      same plate. The gate cannot read content without either the corner line
+      growing a payload (which makes every plate's internals this harness's
+      business) or `hudscreens.sh` photographing the recovered corner (3 m, and
+      it does not stage an outage). The cheap third option is the one worth
+      weighing: a second line the HUD already has the standing to write — how
+      many services the health plate is naming — is one number, it is the one
+      the outage is most likely to have eaten, and it is a real signal rather
+      than a test hook. Raised by D52.
 
 - [ ] D48. **A lit corner threw 25,992 times in about two seconds and nobody
       knows which of two things that measures.** The D43 injection put a
@@ -1053,10 +1115,13 @@ human-reviewed step.
         `READY_TIMEOUT_S` entirely — 30 s per engine, 120 s of the run — and a
         quickshell that comes up and then says nothing is exactly the run a
         ceiling is for. It was the one run the ceiling did not cover.
-      · The per-engine numbers today: 54 s for the bar and the notifier
-        (`READY` + three mapped readings), 94 s for the frames run (the
-        publisher's first round and the ten-plate census), 87 s for the blind
-        run (the grace, the socket, the corner going dark). `RUN_CEILING_S` is
+      · The per-engine numbers today (moved by D52, which split the
+        publisher's wait off the corner's and added a third act): 54 s for the
+        bar and the notifier (`READY` + three mapped readings), 78 s for the
+        frames run, 98 s for the blind run — the grace, the socket, the corner
+        going dark, then a publisher and the corner lighting again. That last
+        is 2 s from the limit: **the next act added to the blind engine does
+        not fit, and D53 is where the room is.** `RUN_CEILING_S` is
         asserted too, and only to keep it exactly four times the per-engine
         bound: the engines are sequential, so a per-engine ceiling is not a
         ceiling on the run, and a reader who saw only the small number would be

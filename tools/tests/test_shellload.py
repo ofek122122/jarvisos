@@ -607,15 +607,25 @@ def engine_ceilings() -> dict[str, float]:
     base = shells.READY_TIMEOUT_S + shells.MAPPED_TIMEOUT_S * 3
     out = {shell.attr: base for shell in shells.SHELLS}
     # The frames run waits for the publisher's first round and then for the
-    # corner to name ten plates.
-    out[shells.hud_shell().attr] = base + shells.HUD_LIT_TIMEOUT_S * 2
-    # And the blind run waits out the grace, then the socket, then the corner
-    # going dark again (PLAN D49).
+    # corner to name ten plates. Two different waits on two different numbers
+    # since D52 — the publisher's is about a process starting, the corner's
+    # about a cold Qt, and they were one number only because there was one
+    # publisher.
+    out[shells.hud_shell().attr] = (
+        base + shells.HUD_PUBLISH_TIMEOUT_S + shells.HUD_LIT_TIMEOUT_S
+    )
+    # And the blind run is three acts: it waits out the grace, then the socket
+    # and the corner going dark again (PLAN D49), then a second publisher and
+    # the corner lighting back up (PLAN D52). It is this gate's most expensive
+    # engine by some way, and the next act added to it does not fit — see
+    # PLAN D53, which is where the headroom is.
     out[shells.HUD_BLIND_LOG] = (
         base
         + shells.HUD_BLIND_TIMEOUT_S
         + shells.HUD_RELINK_BUS_TIMEOUT_S
         + shells.HUD_RELINK_TIMEOUT_S
+        + shells.HUD_PUBLISH_TIMEOUT_S
+        + shells.HUD_RECOVER_TIMEOUT_S
     )
     return out
 
@@ -1103,9 +1113,7 @@ def test_the_only_thing_changed_about_the_blind_run_is_the_bus():
     bridge in the wrapper and the theme all have to be identical to the run
     that lit ten plates, or what this measures is not "the bus is gone". So
     the environment is this process's own with exactly one key replaced."""
-    text = DRIVER.read_text("utf-8")
-    blind = text[text.index("def load_blind("):text.index("def main(")]
-    found = re.search(r"env = dict\(os\.environ, (\w+)=([^)]+)\)", blind)
+    found = re.search(r"env = dict\(os\.environ, (\w+)=([^)]+)\)", blind_text())
     assert found, blind
     assert found.group(1) == "JARVIS_BUS"
     assert "shells.HUD_BLIND_BUS" in found.group(2)
@@ -1133,7 +1141,10 @@ def test_the_bus_the_blind_run_is_given_is_one_nothing_creates_in_time():
     assert shells.HUD_BLIND_BUS not in "\n".join(executed_lines())
     driver = code_lines(DRIVER)
     assert shells.HUD_BLIND_BUS not in driver
-    assert driver.count("shells.HUD_BLIND_BUS") == 2
+    # Three uses, and they are the three acts of this run: the HUD's own
+    # environment, the broker `relink` starts on it, and the publisher `recover`
+    # speaks on it (PLAN D52).
+    assert driver.count("shells.HUD_BLIND_BUS") == 3
 
 
 def test_the_blind_corner_must_name_the_dark_plate_and_nothing_else():
@@ -1142,9 +1153,11 @@ def test_the_blind_corner_must_name_the_dark_plate_and_nothing_else():
     and a refusal draws the same nothing a calm machine does — so no picture
     can tell them apart. A corner naming exactly `link` can: a plate that had
     started guessing would be named beside it."""
-    text = DRIVER.read_text("utf-8")
-    blind = text[text.index("def load_blind("):text.index("def main(")]
+    blind = blind_text()
     assert "list(shells.HUD_PLATES_DARK)" in blind
+    # And the ten are not expected HERE. They are expected of this same engine
+    # two acts later, once the bus is back (PLAN D52) — which is a different
+    # function and the reason `blind_text()` stops where it does.
     assert "HUD_PLATES_LIT" not in blind
     # The two lists cannot overlap, or the expectation is unsatisfiable in one
     # of the two runs.
@@ -1158,7 +1171,10 @@ def test_every_reading_of_the_corner_is_the_same_reading():
     The third caller is D49's: the same blind HUD once the bus arrives."""
     text = DRIVER.read_text("utf-8")
     assert text.count("def corner_census(") == 1
-    assert text.count("corner_census(") == 4  # the definition and three callers
+    # The definition and four callers: ten plates on a HUD that always had a
+    # bus, one on a HUD that never did, none on that same HUD once it does
+    # (D49), and the ten again on that same HUD once it is fed (D52).
+    assert text.count("corner_census(") == 5
 
 
 def test_the_blind_run_outlasts_the_grace_it_is_about():
@@ -1201,6 +1217,28 @@ def test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate():
 # act that do not need a compositor.
 
 
+def blind_text() -> str:
+    """`load_blind()` alone, without the two acts it calls into.
+
+    It used to run to `def main(`, which was the same thing until D49 and D52
+    put `relink()` and `recover()` between the two — and `recover` expects the
+    ten LIT plates, which is exactly what the blind census must not."""
+    text = DRIVER.read_text("utf-8")
+    return text[text.index("def load_blind(") : text.index("def relink(")]
+
+
+def relink_text() -> str:
+    """`relink()` alone, and NOT the rest of the driver under it.
+
+    It used to be everything from `def relink(` to the end of the file, which
+    was the same thing until D52 put a third act below it. The two are now
+    different questions — what the relink does on a bus nobody has published
+    on, and what `recover()` does once somebody has — and a slice that ran to
+    the end of the file would answer the first with the second."""
+    text = DRIVER.read_text("utf-8")
+    return text[text.index("def relink(") : text.index("def recover(")]
+
+
 def test_the_blind_run_does_not_end_with_the_hud_still_saying_no_bus():
     """The fault this act exists for, stated as the shape of the driver: the
     blind census is not the last thing that happens to that HUD. The broker
@@ -1225,12 +1263,13 @@ def test_the_corner_that_comes_back_is_empty_and_that_is_an_expectation():
     assert shells.hud_corner_plates(
         shells.hud_corner_line("HEADLESS-1", ()), "HEADLESS-1"
     ) == list(shells.HUD_PLATES_RELINKED)
-    # And nothing on this broker publishes a frame, so no other plate has
-    # anything to say: the publisher is the frames run's alone.
-    relink = DRIVER.read_text("utf-8")
-    relink = relink[relink.index("def relink(") :]
-    assert "PUBLISH" not in relink
-    assert "HUD_FRAMES" not in relink
+    # And nothing has published a frame on this broker YET, so no other plate
+    # has anything to say. Read over the relink alone rather than to the end of
+    # the file: D52 hands the same broker to a publisher immediately afterwards,
+    # and the whole reason THAT reading means something is that this one came
+    # first, on a bus nobody had spoken on.
+    assert "PUBLISH" not in relink_text()
+    assert "HUD_FRAMES" not in relink_text()
 
 
 def test_the_empty_corner_is_only_read_after_the_hud_said_it_was_blind():
@@ -1302,9 +1341,7 @@ def test_the_late_broker_is_not_graded_as_a_qml_engine():
     ]
     assert shells.HUD_RELINK_BROKER_LOG not in [s.attr for s in shells.SHELLS]
     assert shells.HUD_RELINK_BROKER_LOG != shells.HUD_BLIND_LOG
-    relink = DRIVER.read_text("utf-8")
-    relink = relink[relink.index("def relink(") :]
-    assert "broker.tail(" in relink
+    assert "broker.tail(" in relink_text()
 
 
 def test_the_late_broker_is_stopped_by_the_driver_that_started_it():
@@ -1312,8 +1349,7 @@ def test_the_late_broker_is_stopped_by_the_driver_that_started_it():
     a socket in a directory about to be deleted is the shape of a leak this
     harness has had before, so it is stopped in a `finally` like the publisher —
     on the failing path too, which is the one that matters."""
-    relink = DRIVER.read_text("utf-8")
-    relink = relink[relink.index("def relink(") :]
+    relink = relink_text()
     assert "finally:" in relink
     assert relink.index("finally:") < relink.index("broker.stop()")
 
@@ -1333,6 +1369,121 @@ def test_the_blind_runs_log_is_scanned_like_every_other_engines():
     assert shells.HUD_BLIND_LOG not in [s.attr for s in shells.SHELLS]
     assert "shells.scan_targets()" in script_text()
     assert "$stage/$logname.log" in script_text()
+
+
+# ------------------------------------- and then it works again (PLAN D52)
+#
+# The third act of the blind run, which is what turns two readings into a
+# CYCLE: blind → says so → lets go → reports the machine again. These are the
+# checks on it that do not need a compositor.
+
+
+def recover_text() -> str:
+    """`recover()` alone, the same way `relink_text()` is the relink alone."""
+    text = DRIVER.read_text("utf-8")
+    return text[text.index("def recover(") : text.index("def main(")]
+
+
+def test_the_hud_that_survived_the_outage_has_to_light_a_plate_again():
+    """The hole D52 is about. D49 ends with an empty corner, which proves the
+    plate let go and nothing else — the engine that was blind is never shown a
+    frame, and the ten-plate census belongs to a different quickshell that had
+    a broker from birth. So the recovered corner is read too, on the SAME
+    engine's log, against the SAME ten plates."""
+    text = DRIVER.read_text("utf-8")
+    assert "def recover(" in text
+    assert "recover(stage, hud, broker)" in relink_text()
+    recover = recover_text()
+    # The blind engine's own log and the blind engine's own name, or this is a
+    # census of the HUD that was never blind.
+    assert "hud.logpath" in recover
+    assert "shells.HUD_BLIND_LOG" in recover
+    # And the expectation is the frames run's tuple itself rather than a copy:
+    # the recovered corner has to be the same corner.
+    assert "list(shells.HUD_PLATES_LIT)" in recover
+
+
+def test_the_recovered_corner_is_only_read_after_the_corner_went_dark():
+    """What makes the reading mean anything, and it is D49's own argument one
+    act further on. `hud_corner_plates` reads the NEWEST line, and the relink
+    census has already required that line to be `nothing` on every monitor — so
+    ten plates here can only be a line the HUD wrote after the bus came back.
+    Order is load-bearing, which is why `recover` is called from inside
+    `relink` rather than being a run of its own: the broker has to still be
+    alive, and the dark census has to have already happened."""
+    relink = relink_text()
+    assert relink.index("HUD_PLATES_RELINKED") < relink.index("recover(stage, hud, broker)")
+    said = "\n".join(
+        [
+            shells.hud_corner_line("HEADLESS-1", ("link",)),
+            shells.hud_corner_line("HEADLESS-1", ()),
+            shells.hud_corner_line("HEADLESS-1", shells.HUD_PLATES_LIT),
+        ]
+    )
+    assert shells.hud_corner_plates(said, "HEADLESS-1") == list(shells.HUD_PLATES_LIT)
+
+
+def test_the_late_publisher_speaks_on_the_bus_the_blind_hud_can_see():
+    """The one thing about this publisher that differs from the frames run's,
+    and getting it wrong would be the worst kind of pass here.
+    `jarvis_bus.default_addr()` reads `JARVIS_BUS`, and the value this process
+    inherited is the SCRIPT's broker — the one the frames run used. A publisher
+    that took the inherited one would light the corner from a bus the blind HUD
+    has never been able to reach, which is a green run that measures nothing."""
+    recover = recover_text()
+    assert "JARVIS_BUS=str(stage / shells.HUD_BLIND_BUS)" in recover
+    assert "env=dict(os.environ," in recover
+    # And it is the same socket `relink` gave the broker, or the two halves of
+    # this act are about two different buses.
+    assert "shells.HUD_BLIND_BUS" in relink_text()
+
+
+def test_the_late_publisher_is_stopped_and_is_not_graded_as_a_qml_engine():
+    """Its own log, for `Proc.wait_for` to quote when it dies — and NOT a scan
+    target, for the reason the late broker is not one: `tools/qmlerrors.py`
+    reads what a QML engine said, and a publisher is not one, so over its log
+    it would report "nothing threw" whatever it said.
+
+    And stopped in a `finally` like every other process this driver starts: it
+    republishes forever by design, and the stage directory is about to be
+    deleted out from under it."""
+    scanned = [name for name, _ in shells.scan_targets()]
+    assert shells.HUD_RECOVER_LOG not in scanned
+    assert shells.HUD_RECOVER_LOG not in [s.attr for s in shells.SHELLS]
+    assert shells.HUD_RECOVER_LOG != shells.HUD_RELINK_BROKER_LOG
+    assert shells.HUD_RECOVER_LOG != shells.HUD_BLIND_LOG
+    recover = recover_text()
+    assert "finally:" in recover
+    assert recover.index("finally:") < recover.index("pub.stop()")
+
+
+def test_the_publisher_wait_is_its_own_number_and_not_the_corners():
+    """D52's one change to the act above it, and it is a correctness one rather
+    than a saving. `HUD_LIT_TIMEOUT_S` is a cold Qt building a scene of eleven
+    plates; the publisher's round is a python process starting and connecting
+    to a socket that is already bound. They were one number because there was
+    one publisher, and there are two now — so the number that is about a corner
+    is spent on corners."""
+    assert shells.HUD_PUBLISH_TIMEOUT_S < shells.HUD_LIT_TIMEOUT_S
+    assert shells.HUD_PUBLISH_TIMEOUT_S >= 2
+    text = DRIVER.read_text("utf-8")
+    for wait in re.findall(r'wait_for\("round 1", ([^)]+)\)', text):
+        assert wait == "shells.HUD_PUBLISH_TIMEOUT_S", wait
+    # Both publishers, or one of them is bounded by a number about something
+    # else.
+    assert text.count('wait_for("round 1"') == 2
+
+
+def test_the_recovered_corner_is_given_less_time_than_the_cold_one():
+    """Not a budget and not a saving: a statement about what each wait waits
+    ON. The frames run's twenty seconds cover a cold Qt AND a bridge that has
+    to spawn, connect and subscribe. This engine has been up for half a minute
+    and D49's census has already proved its bridge is connected, so what is
+    left is the frames travelling — which is one round and change."""
+    assert shells.HUD_RECOVER_TIMEOUT_S < shells.HUD_LIT_TIMEOUT_S
+    # But comfortably more than a round, or the gate fails a HUD that was
+    # about to light.
+    assert shells.HUD_RECOVER_TIMEOUT_S >= shells.HUD_ROUND_S * 8
 
 
 def test_the_blind_run_is_counted_in_the_verdict_and_not_only_logged():

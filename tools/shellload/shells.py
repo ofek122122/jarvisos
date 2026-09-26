@@ -737,9 +737,26 @@ HUD_PLATES_LIT = (
 HUD_PLATES_DARK = ("link",)
 
 # How long the corner is given to name them all. Generous against a cold Qt
-# on a cold font cache, and bounded — `test_the_gate_still_costs_seconds_and_
-# not_minutes` holds the worst case of every wait in this file together.
+# on a cold font cache, and bounded — `test_no_single_engine_can_hang_this_gate_
+# for_minutes` holds the worst case of every wait ONE engine can spend.
 HUD_LIT_TIMEOUT_S = 20.0
+
+# And how long the PUBLISHER gets to put its first round out, which is a
+# different wait about a different thing and used to borrow the number above.
+# Separated by D52, because that item gives this gate a second publisher and a
+# borrowed number is only one number until somebody needs it to be two.
+#
+# The two are bounded by different physics, which is the whole argument. The
+# corner above is a cold Qt scene building eleven plates; this is a python
+# process starting, importing msgpack and connecting to a unix socket that is
+# already bound — the same asymmetry `HUD_RELINK_BUS_TIMEOUT_S` is written on.
+# A publisher that has not managed a round in four seconds is not slow, it is
+# broken, and `Proc.wait_for` already reports one that DIED as itself rather
+# than waiting it out. The same four seconds the broker gets to bind, for the
+# same reason, and deliberately NOT five: `core/LinkState.qml`'s grace is 5.0
+# and `test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate`
+# refuses any constant here that equals it, so that a read stays a read.
+HUD_PUBLISH_TIMEOUT_S = 4.0
 
 
 def hud_corner_line(monitor: str, plates: tuple[str, ...] | list[str]) -> str:
@@ -898,6 +915,61 @@ HUD_RELINK_BUS_TIMEOUT_S = 4.0
 # `test_the_relink_wait_outlasts_the_backoff_it_is_about` holds it above that
 # maximum, read out of the bridge rather than copied.
 HUD_RELINK_TIMEOUT_S = 16.0
+
+
+# ------------------------------- and then it has to work again (PLAN D52)
+#
+# THE THIRD ACT, and without it this run walks half a cycle. D49 takes the HUD
+# from `link` to `nothing`, which proves the plate lets go — and then the run
+# ends. The engine that was blind is never shown a frame, and the ten-plate
+# census above happens on a DIFFERENT quickshell, one that had a broker from
+# the moment it started. So nothing anywhere proved that a HUD which SURVIVED
+# an outage can still light a plate.
+#
+# That is not the same claim twice, and the difference is state rather than
+# code. This engine is not a fresh HUD:
+#
+#   · `core/BusModel.qml` emptied every cache it holds when the bridge died,
+#     so every plate above is reading a model that has been through a drop.
+#   · `core/HealthState.qml` threw away its roster of services — the `health`
+#     plate's whole content is a list it has to rebuild from heartbeats.
+#   · And it has been told the link is DOWN, repeatedly. The bridge retries
+#     on a doubling backoff and emits one `{"t":"link","up":false}` per failed
+#     attempt, so `BusModel.applyLink(false, …)` runs half a dozen times here
+#     against the frames run's one. Every one of them empties both caches.
+#
+# That last one is the fault this act is really for, and it is the shape a
+# reconnecting client gets wrong: a HUD that is LINKED, SILENT, and certain it
+# is fine. The corner going dark is a reading of the SOCKET — `LinkState`
+# watches `Bus.linkUp`, not the traffic — so a HUD that came back linked and
+# never accepted another frame passes D49 exactly as the shipped one does.
+#
+# MEASURED, by making `core/BusModel.qml` drop frames after a second
+# link-down: the frames run stays green, the D49 census stays green, this one
+# goes red, and all 721 of the HUD's own headless QML tests pass. One outage is
+# all any of them ever stages.
+#
+# It costs one publisher and one census, both already built, on the broker D49
+# already started. The expectation is `HUD_PLATES_LIT` itself, unchanged and
+# not a copy: the recovered corner has to be the SAME corner, and a third
+# reading of one tuple is the whole point of it being a tuple.
+
+# Where the late publisher's output goes, as a basename under the stage. Its
+# own file, and — like the late broker's and for the same reason — deliberately
+# NOT in `scan_targets()`: `tools/qmlerrors.py` reads what a QML engine said,
+# and `publish.py` is not one. What it is for is `Proc.wait_for`, which quotes
+# it when the publisher dies instead of saying a round.
+HUD_RECOVER_LOG = "late-frames"
+
+# How long the recovered corner gets to name its ten plates. SHORTER than
+# `HUD_LIT_TIMEOUT_S`, which covers the same ten, and the asymmetry is a
+# statement about what each one waits on rather than a saving. That one is a
+# cold Qt building a scene for the first time and a bridge that has to spawn,
+# connect and subscribe. This engine has been up for half a minute, its scene
+# is built, and D49's census has already proved its bridge is connected — so
+# what is left is the frames travelling and the plates deciding, which is one
+# round and change.
+HUD_RECOVER_TIMEOUT_S = 8.0
 
 
 def bridge_path() -> pathlib.Path:

@@ -13374,3 +13374,92 @@ is not worth chasing.)
   **D51** (two brokers, neither log read — and `qmlerrors.py` is the wrong
   reader for a Rust log, so over one it says "nothing threw" whatever it says),
   then **D48**, then **D45**.
+
+## 2026-09-26 — iteration 133 — and then it had to work again (PLAN D52)
+
+- built: the third act of `ops/ralph/shellload.sh`'s blind run. The HUD that
+  was blinded, said so, and let go of the plate is now SHOWN REAL FRAMES on the
+  broker that came back, and its corner has to light the same ten plates the
+  frames run lights. One engine's own log, in order, measured:
+  `1 plate` → `nothing` → `10 plates`. That is the whole outage cycle — blind →
+  says so → recovers → reports the machine again — and this is the only place
+  in the repo where it is walked end to end.
+- why, and it is one fault rather than a tidiness argument. **A HUD that is
+  LINKED, SILENT, and certain it is fine.** The corner going dark is a reading
+  of the SOCKET: `core/LinkState.qml` watches `Bus.linkUp` and never the
+  traffic. So a HUD that came back linked and then never accepted another frame
+  passes D49's census exactly as the shipped one does — and what the user gets
+  is a corner reporting a healthy machine as silence, forever, with no plate
+  qualifying it because the plate that would have is the one that just went
+  out.
+- **it is not the frames run's claim again, and the difference is state.** This
+  engine has been told the link is DOWN half a dozen times — one
+  `{"t":"link","up":false}` per failed connect on the bridge's doubling
+  backoff, against the frames run's one — and every one of them emptied both
+  `core/BusModel.qml` caches and `core/HealthState.qml`'s roster of services.
+  Then `LinkPlate` was the only thing on the surface. Then the SURFACE WAS
+  DESTROYED: `visible: selfTest || stack.anyLit`, and the dark census requires
+  `nothing` on all three monitors. The ten plates have to come back on a
+  surface that was torn down and rebuilt, on a model that has been emptied
+  repeatedly. Nothing here had ever asked for that.
+- **the corrected claim, because the first one I wrote was wrong.** D49's
+  plan entry says the subscription carrying these frames is the bridge's
+  SECOND. It is not: `Bus.qml` only respawns the bridge if the PROCESS stops,
+  and in this run it never does — it retries internally and its first
+  successful subscribe is the one after the broker arrives. The repeated
+  link-down lines above are what is really different, and they are what the
+  comments and the PLAN now say.
+- **both halves were injected, and the second is the measurement worth
+  keeping.**
+  · Pointing the late publisher at the INHERITED `JARVIS_BUS` — the script's
+    broker, which the blind HUD has never been able to see — ends the run 1
+    with `showed [nothing], missing [...]` on all three monitors. So the census
+    really reads that engine, on that bus.
+  · Making `core/BusModel.qml` drop frames after a SECOND link-down — a HUD
+    that survives one outage and not two, which is an ordinary reconnect bug —
+    ends the run 1 **while the frames run stays green, D49's dark census stays
+    green, and all 721 of the HUD's own headless QML tests pass**. One outage
+    is all any of them ever stages. Both injections reverted; `git status` was
+    clean of them before the verify run.
+- **`HUD_PLATES_LIT` itself, not a copy.** The recovered corner has to be the
+  SAME corner, and a third reading of one tuple is the point of it being a
+  tuple. `corner_census` now has four callers and still one definition.
+- **one number was split, and it is a correctness fix rather than a saving.**
+  The publisher's `round 1` wait borrowed `HUD_LIT_TIMEOUT_S`, which is about a
+  cold Qt building eleven plates. Starting a python process and connecting to a
+  socket that is already bound is the other kind of wait — the same asymmetry
+  `HUD_RELINK_BUS_TIMEOUT_S` already argues — and there are two publishers now,
+  so `HUD_PUBLISH_TIMEOUT_S` states it once for both. 4 s and deliberately not
+  5: the grace in `core/LinkState.qml` is 5.0 and
+  `test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate`
+  refuses any constant here that equals it, so that a read stays a read.
+- **the ceiling moved and the next act does not fit.** D50's per-engine bounds
+  are now 54 s (bar, notifier), 78 s (frames run — the split above took 16 s
+  off it), 98 s (blind run, three acts). 98 of 100. That is stated in
+  `engine_ceilings()` and in the PLAN rather than worked around: **D53 is now
+  load-bearing**, because 30 s of the blind engine's 98 is a cold-font-cache
+  argument that is false of every engine but the first.
+- **no QML changed and no shell.** The whole slice is the harness: one function
+  in the driver, two constants and a section in `shells.py`, six tests, and two
+  slicing helpers (`blind_text()`, `relink_text()`) that stop where the acts do
+  — the old slices ran to the end of the file, which was the same thing until
+  there was a third act under them.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths (tools **707
+  pass**, 6 of them new; `shellload.sh` **34.9 s** against 34.8 s before — the
+  third act is sub-second). `hudscreens.sh` was NOT named by the gate and did
+  not need to be: no shell QML is touched, so there are no pixels to
+  re-photograph. build: `nixos-rebuild build --flake .#ares` green. No schema
+  change, no jv-act, no boot path, no pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/load.py,
+  tools/shellload/shells.py, tools/tests/test_shellload.py, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- next: **D51** — this gate starts two brokers and reads neither of their logs.
+  A broker that accepted the bridge and then rejected every subscription, or
+  one logging a decode error per frame, is invisible: the run reads as a HUD
+  that ignored its frames, which is the wrong repair by a whole process. And
+  D52 makes that worse in the useful way — there are now two ways for the
+  recovered corner to stay dark and the broker's log is the only thing that
+  tells them apart. `qmlerrors.py` cannot be pointed at it (it knows
+  quickshell's `WARN scene:` prefixes; over a Rust tracing line it says
+  "nothing threw" whatever it says), so the shape is a second small reader over
+  two files. Then **D53** (which D54 waits on), then **D48**, then **D45**.
