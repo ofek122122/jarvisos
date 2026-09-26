@@ -1051,21 +1051,53 @@ human-reviewed step.
       · Cost: **34.8 s**, unchanged — the third act is sub-second. Ceilings:
         the blind engine is now **98 s of 100** (D53 is where the headroom is).
 
-- [ ] D53. **The first quickshell pays for a cold Qt and the other three do
-      not, and all four are given 30 s for it.** `READY_TIMEOUT_S` is written
-      against the cold-font-cache argument, which is true of engine one and
-      false of engines two, three and four — they load 0.40 s after their
-      predecessor on a warm cache, measured on every run in the journal. That
-      one number is 120 s of the run's 289 s pathological ceiling (D50), and
-      it is the cheapest place to shrink it: a first-engine timeout and a
-      warm-engine timeout, or a ceiling derived from the previous engine's
-      MEASURED load time. Worth doing only with the D50 arithmetic in front of
-      you — this is a bound on a hung engine, not a budget, so the value of
-      shrinking it is that the bound stays honest rather than that the gate
-      gets faster. Raised by D50. **Now load-bearing:** D52 took the blind
-      engine to 98 of its 100 s ceiling, so this is the item that has to happen
-      before that run grows a fourth act. 30 s of its 98 is a cold-font-cache
-      argument that is false of every engine but the first.
+- [x] D53. **The first quickshell pays for a cold Qt and the other three do
+      not, and all four were given 30 s for it.** (Done: `ReadyBudget` in
+      `tools/shellload/load.py`, one object for the whole run, handed to both
+      `load()` and `load_blind()`.) The first engine keeps
+      `READY_TIMEOUT_COLD_S = 30`; every engine after it is bounded by
+      `shells.warm_ready_timeout(slowest_so_far)` — four times the slowest load
+      the run has measured, floored at 6 s and capped at 12.
+      · **The premise was half wrong, and the measurement is why the derived
+        form was taken rather than a second constant.** ALL FOUR engines load
+        in 0.40 s on ares, the first included: the font cache is warm across
+        runs, so this gate has never once paid the cost its generous number is
+        written against and cannot make itself pay it. What survives is the
+        ORDERING claim — whatever engine one warmed is warm for the rest — so
+        the honest bound for a later engine is the run's own measurement, not
+        a second guess at a cold cost nobody here has seen.
+      · **The slowest so far, not the previous one:** a bound that has learned
+        the machine is slow must not un-learn it on the next fast engine.
+      · **The cap is the limit.** It only starts answering once the first
+        engine took more than 3 s — a machine seven times slower than this —
+        and a machine uniformly slow enough that a WARM engine needs more than
+        12 s fails this gate. So the failure NAMES its derivation and the
+        constant to raise, because there the repair really is a number.
+      · Every run now prints which bound each engine got and what it spent of
+        it (`loaded in 0.40 s of a cold 30s` / `of a derived 6s`), so the D53
+        measurement is re-made on every machine this ever runs on.
+      · The ceiling arithmetic (`engine_load_bounds()`, split out of
+        `engine_ceilings()` so the claim is about the one wait D53 is about):
+        78 s for the frames run (unchanged — it is the cold engine), 36 s for
+        the bar and the notifier, **80 s for the blind run against 98 before**.
+        D54 fits now; before it did not.
+      · Cost: unchanged at 34.8 s. Nothing here was ever spending the 30 s.
+
+- [ ] D58. **The other real-quickshell gate has the same 30 s, six times over,
+      and it spends it on a broker too.** `tools/hudscreens/shoot.py` holds its
+      own `READY_TIMEOUT_S = 30.0` as the DEFAULT of `Proc.wait_for`, and that
+      harness starts at least five quickshells and four `jarvisd` in one run —
+      so every engine after the first gets the cold-Qt bound D53 just showed
+      nothing pays, and so does every broker, which is a Rust process binding a
+      unix socket and has no Qt in it at all. Two different repairs and only
+      one of them is D53's: the engines want `ReadyBudget` (which is D42's
+      question, since `Proc` already exists twice and this would be the third
+      caller), and the broker's wait wants a number of its own, the way
+      `shells.HUD_RELINK_BUS_TIMEOUT_S` is 4 s for exactly that reading. The
+      catch is that `hudscreens.sh` has NO ceiling test at all — 3m15s is its
+      measured cost and nothing anywhere bounds its pathological one — so the
+      honest first half is `engine_ceilings()`' equivalent over that harness,
+      and the shrink is second. Raised by D53.
 
 - [ ] D54. **The compositor is never asked about the surface that came
       BACK.** `load_blind` reads the screens three times — before, while, after
@@ -1077,9 +1109,10 @@ human-reviewed step.
       but it is the one this gate has, and a HUD whose rebuilt surface came
       back with an exclusive zone on it would take a strip off all three
       monitors and pass. One more `check_zone(shell, "while", up=True)` inside
-      `recover()`, after the census, is the whole of it; the arithmetic is the
-      catch (`engine_ceilings()` has 2 s of room and `MAPPED_TIMEOUT_S` is 8),
-      so this is D53's dependent rather than a free addition. Raised by D52.
+      `recover()`, after the census, is the whole of it; the arithmetic was the
+      catch (`engine_ceilings()` had 2 s of room and `MAPPED_TIMEOUT_S` is 8).
+      **Unblocked by D53**, which took the blind engine to 80 s: the 8 s fits
+      now, with 12 to spare. Raised by D52.
 
 - [ ] D55. **A plate that came back LIT and EMPTY passes the new census.**
       `test_the_corner_names_the_plates_and_never_what_they_say` states the
@@ -1161,16 +1194,17 @@ human-reviewed step.
       true as runs are added: this gate starts a fresh quickshell per reading
       and no one of them may hang for minutes.
       · **AND THE OLD SUM WAS NOT THE WORST CASE.** It left out
-        `READY_TIMEOUT_S` entirely — 30 s per engine, 120 s of the run — and a
+        the READY wait entirely — 30 s per engine, 120 s of the run — and a
         quickshell that comes up and then says nothing is exactly the run a
         ceiling is for. It was the one run the ceiling did not cover.
       · The per-engine numbers today (moved by D52, which split the
-        publisher's wait off the corner's and added a third act): 54 s for the
+        publisher's wait off the corner's and added a third act, and then by
+        D53, which stopped giving every engine the cold-Qt bound): 36 s for the
         bar and the notifier (`READY` + three mapped readings), 78 s for the
-        frames run, 98 s for the blind run — the grace, the socket, the corner
+        frames run, 80 s for the blind run — the grace, the socket, the corner
         going dark, then a publisher and the corner lighting again. That last
-        is 2 s from the limit: **the next act added to the blind engine does
-        not fit, and D53 is where the room is.** `RUN_CEILING_S` is
+        was 98 s and 2 s from the limit until D53 took the un-payable 30 s out
+        of three of the four engines. `RUN_CEILING_S` is
         asserted too, and only to keep it exactly four times the per-engine
         bound: the engines are sequential, so a per-engine ceiling is not a
         ceiling on the run, and a reader who saw only the small number would be

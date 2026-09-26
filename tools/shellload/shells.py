@@ -65,10 +65,54 @@ READY = "Configuration Loaded"
 # `hudscreens.sh` is that it costs seconds instead of minutes.
 HOLD_S = 2.0
 
-# How long a shell may take to say READY before this gives up. Generous: the
-# first quickshell of a run pays for a cold Qt and a cold font cache, and a
-# timeout that fires on a slow machine is a gate that gets switched off.
-READY_TIMEOUT_S = 30.0
+# How long a shell may take to say READY before this gives up, and it is not
+# one number, because the cost it is written against is paid ONCE per machine
+# rather than once per engine (PLAN D53).
+#
+# THE COLD ONE, for the first engine a run starts. A quickshell that is the
+# first on this machine to scan Qt's plugins and build a font cache pays for
+# both, and a timeout that fires on a slow machine is a gate that gets switched
+# off — so it is generous, and it is a guess, and it has to be: this gate
+# cannot make itself pay that cost. Measured here, the first engine of a run
+# loads in the same 0.40 s the other three do, because the caches have been
+# warm on ares for as many runs as there have been runs.
+READY_TIMEOUT_COLD_S = 30.0
+
+# AND THE WARM ONE IS DERIVED, from what this run has already measured, which
+# is the only honest thing available: whatever the first engine warmed is warm
+# for every engine after it, so a later one cannot be waiting on the cold cost
+# and handing it the cold number gives a HUNG engine thirty seconds of a reason
+# it cannot have. Four times the slowest load this run has seen — floored, so a
+# fast first engine cannot make the bound brittle, and capped, so the worst
+# case stays a static number `engine_ceilings()` can add up.
+#
+# The floor is fifteen times the 0.40 s this gate measures, and it is there so
+# that one fast reading cannot make the bound brittle: a first engine clocked at
+# a twentieth of a second would otherwise bound the next one at a fifth of one.
+# The cap is thirty times it, and it only starts answering once the first engine
+# took more than three seconds — a machine already seven times slower than this.
+#
+# THE CAP IS THE LIMIT AND IT IS WORTH STATING. A machine uniformly slow enough
+# that a WARM engine needs more than twelve seconds, after another quickshell in
+# the same run has already done it, fails this gate. `ReadyBudget` makes that
+# failure say so and name this constant, because the repair for it is a number
+# rather than a shell.
+READY_WARM_FACTOR = 4.0
+READY_WARM_FLOOR_S = 6.0
+READY_WARM_CEILING_S = 12.0
+
+
+def warm_ready_timeout(slowest_so_far: float) -> float:
+    """How long the NEXT engine may take, given the slowest one so far.
+
+    The slowest rather than the previous: a bound that has learned the machine
+    is slower than it thought must not un-learn it on the next fast engine.
+    Monotone in its argument for the same reason.
+    """
+    return min(
+        READY_WARM_CEILING_S,
+        max(READY_WARM_FLOOR_S, slowest_so_far * READY_WARM_FACTOR),
+    )
 
 
 @dataclasses.dataclass(frozen=True)

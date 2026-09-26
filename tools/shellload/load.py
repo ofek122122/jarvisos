@@ -154,6 +154,82 @@ class Proc:
         )
 
 
+class ReadyBudget:
+    """How long each engine of THIS run may take to say READY (PLAN D53).
+
+    One number was wrong in a way that only showed up in the arithmetic.
+    `READY_TIMEOUT_COLD_S` is written against a cold Qt and a cold font cache,
+    which is a cost paid once and then not again — so giving it to all four
+    engines put 120 s of un-payable wait into the run's pathological ceiling,
+    and 30 of the blind engine's 98 s (D50/D52). That mattered because the
+    ceiling is a BOUND rather than a budget: a bound nobody could reach is a
+    bound that stopped describing the run.
+
+    So the first engine gets the cold number and every engine after it gets one
+    derived from what the run has already measured. Shared across `load` and
+    `load_blind` rather than kept per call, because "the first engine of the
+    run" is the whole of the distinction and a per-shell budget would hand the
+    cold number to all four again.
+
+    It is deliberately NOT a stopwatch on the gate. Nothing here is expected to
+    spend any of it; what this bounds is the engine that comes up and then holds
+    still forever.
+    """
+
+    def __init__(self) -> None:
+        # None until one engine of this run has loaded, which is exactly the
+        # condition "nothing on this machine has been measured yet".
+        self.slowest: float | None = None
+        # And what the engine that just ran was GIVEN, which is not the same
+        # question a moment later: `wait` records the load before anything is
+        # printed, so asking `timeout()` after it answers about the NEXT engine.
+        self.spent: float | None = None
+        self.spent_cold = False
+
+    def timeout(self) -> float:
+        if self.slowest is None:
+            return shells.READY_TIMEOUT_COLD_S
+        return shells.warm_ready_timeout(self.slowest)
+
+    def wait(self, proc: Proc) -> float:
+        """Wait for READY on this engine's own bound, and remember the cost."""
+        warm = self.slowest
+        self.spent, self.spent_cold = self.timeout(), warm is None
+        try:
+            took = proc.wait_for(shells.READY, self.spent)
+        except Fail as exc:
+            if warm is None:
+                raise
+            # A derived bound has to say what it was derived FROM, or a run
+            # that failed on a slow machine reads as a shell that did not load.
+            # The repair for this failure is a constant, and it is named.
+            raise Fail(
+                f"{exc}\nthat bound is derived (PLAN D53): the slowest engine "
+                f"this run had already loaded took {warm:.2f} s, and nothing "
+                f"after the first pays for a cold Qt again. If a WARM engine "
+                f"really needs longer on this machine, the number to raise is "
+                f"shells.READY_WARM_CEILING_S "
+                f"(now {shells.READY_WARM_CEILING_S:.0f}s)."
+            ) from None
+        self.slowest = took if warm is None else max(warm, took)
+        return took
+
+    def spell(self, took: float) -> str:
+        """`loaded in 0.40 s of a derived 6s` — the cost AND the bound on it.
+
+        Printed on every run because this is the only place a reader can watch
+        the rule decide: the numbers in `shells.py` say what the rule IS, and
+        every line here says what it did to one engine. It is also how the D53
+        measurement gets made again on every machine this ever runs on — a
+        first engine that really is slower than the rest says so in the log
+        rather than in an argument.
+        """
+        return (
+            f"loaded in {took:.2f} s of "
+            f"{'a cold' if self.spent_cold else 'a derived'} {self.spent:.0f}s"
+        )
+
+
 # ---------------------------------------------------------- the compositor
 #
 # Two questions, both of them things no log line can answer. See the D44
@@ -450,7 +526,7 @@ def corner_census(
 # ----------------------------------------------------------------- the run
 
 
-def load(shell: shells.Shell, stage: Path) -> None:
+def load(shell: shells.Shell, stage: Path, ready: ReadyBudget) -> None:
     binary = need(shell.env)
     logpath = stage / f"{shell.attr}.log"
     # The control, and the first of the three readings: whatever this shell
@@ -461,8 +537,8 @@ def load(shell: shells.Shell, stage: Path) -> None:
     proc = Proc(shell.attr, [binary], logpath)
     woken: Proc | None = None
     try:
-        took = proc.wait_for(shells.READY, shells.READY_TIMEOUT_S)
-        log(f"  {shell.attr}: loaded in {took:.2f} s")
+        took = ready.wait(proc)
+        log(f"  {shell.attr}: {ready.spell(took)}")
         # Whatever can reach this shell, reaches it. Dispatched on the name in
         # `shells.py` rather than on `attr`, so the list of shells stays the
         # only place that decides which of them is given something to do.
@@ -502,7 +578,7 @@ def load(shell: shells.Shell, stage: Path) -> None:
     check_zone(shell, "after", up=False)
 
 
-def load_blind(stage: Path) -> None:
+def load_blind(stage: Path, ready: ReadyBudget) -> None:
     """The same HUD again, with no bus at all, until it says so (PLAN D47).
 
     `LinkPlate` is the one plate the run above cannot light: it is on screen
@@ -536,8 +612,8 @@ def load_blind(stage: Path) -> None:
         env=env,
     )
     try:
-        took = proc.wait_for(shells.READY, shells.READY_TIMEOUT_S)
-        log(f"  {shells.HUD_BLIND_LOG}: loaded in {took:.2f} s, with no bus")
+        took = ready.wait(proc)
+        log(f"  {shells.HUD_BLIND_LOG}: {ready.spell(took)}, with no bus")
         corner_census(
             shells.HUD_BLIND_LOG,
             proc.logpath,
@@ -724,10 +800,14 @@ def main() -> int:
         log(f"  FAILED: {exc}")
         return 1
     bad = 0
+    # One budget for the whole run: the cold Qt the generous bound is written
+    # against is paid by whichever engine starts first, and by none of the rest
+    # (PLAN D53).
+    ready = ReadyBudget()
     for shell in shells.SHELLS:
         log(f"shellload: {shell.attr}")
         try:
-            load(shell, stage)
+            load(shell, stage, ready)
         except Fail as exc:
             log(f"  FAILED: {exc}")
             bad += 1
@@ -737,7 +817,7 @@ def main() -> int:
     log(f"shellload: {shells.HUD_BLIND_LOG}")
     runs = len(shells.SHELLS) + 1
     try:
-        load_blind(stage)
+        load_blind(stage, ready)
     except Fail as exc:
         log(f"  FAILED: {exc}")
         bad += 1

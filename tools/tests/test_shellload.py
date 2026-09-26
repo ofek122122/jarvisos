@@ -161,10 +161,13 @@ def test_every_shell_is_waited_for_before_anything_is_scanned():
     assert "wait_for(shells.READY" in text
     # And the wait is not optional for any engine: one `load` for the three
     # shells, one `load_blind` for the HUD's second run (PLAN D47), and one
-    # wait on READY inside each.
+    # wait on READY inside each. Both go through `ReadyBudget.wait` since D53,
+    # which is the only place the string `shells.READY` is waited on — a second
+    # one would be an engine outside the run's budget.
     assert text.count("def load(") == 1
     assert text.count("def load_blind(") == 1
-    assert text.count("proc.wait_for(shells.READY") == 2
+    assert text.count("ready.wait(proc)") == 2
+    assert text.count("wait_for(shells.READY") == 1
 
 
 def test_a_shell_that_never_loads_is_a_failure_and_not_a_skip():
@@ -585,6 +588,23 @@ ENGINE_CEILING_S = 100.0
 RUN_CEILING_S = 300.0
 
 
+def engine_load_bounds() -> dict[str, float]:
+    """The worst READY wait of each engine, in the order `main` starts them.
+
+    Its own function because D53's whole claim is about this one wait: the cold
+    bound belongs to whichever engine touches Qt first and to none of the rest,
+    and a reader who could only see the totals below could not tell a run with
+    one cold engine from a run with four.
+    """
+    names = [shell.attr for shell in shells.SHELLS] + [shells.HUD_BLIND_LOG]
+    return {
+        name: (
+            shells.READY_TIMEOUT_COLD_S if i == 0 else shells.READY_WARM_CEILING_S
+        )
+        for i, name in enumerate(names)
+    }
+
+
 def engine_ceilings() -> dict[str, float]:
     """The worst case of every wait ONE engine of this gate can spend.
 
@@ -593,26 +613,36 @@ def engine_ceilings() -> dict[str, float]:
     honest addition rather than on a cost problem — D47 took it from 136 to 148
     against a limit of 150, so the D49 relink would have read as expensive when
     it is nine seconds of waiting on a corner. And what it summed was not the
-    worst case: `READY_TIMEOUT_S` was left out entirely, which is 30 s per
-    engine of pathological wait — a quickshell that maps nothing and says
-    nothing is exactly the run a ceiling exists for, and it was the one run the
-    ceiling did not cover.
+    worst case: the load wait was left out entirely, which is 30 s per engine
+    of pathological wait — a quickshell that maps nothing and says nothing is
+    exactly the run a ceiling exists for, and it was the one run the ceiling
+    did not cover.
 
     Stated as an argument about ONE ENGINE because that is the claim that stays
     true as runs are added: this gate starts a fresh quickshell per reading, and
     no one of them may hang for minutes.
+
+    And the load wait is not the same number for all four since D53. The cold
+    one is paid by whichever engine the run starts first — `shells.SHELLS[0]`,
+    because `main` walks that list and then runs the blind HUD — and every
+    engine after it is bounded by what the run measured, whose worst case is
+    `READY_WARM_CEILING_S`. That is where the blind engine's headroom came
+    from: 98 s of ceiling to 80.
     """
     # Every engine pays for these: the load, and the three compositor readings
     # around it (before / while / after, PLAN D44).
-    base = shells.READY_TIMEOUT_S + shells.MAPPED_TIMEOUT_S * 3
-    out = {shell.attr: base for shell in shells.SHELLS}
+    zones = shells.MAPPED_TIMEOUT_S * 3
+    out = {name: load + zones for name, load in engine_load_bounds().items()}
+    base = out[shells.HUD_BLIND_LOG]
     # The frames run waits for the publisher's first round and then for the
     # corner to name ten plates. Two different waits on two different numbers
     # since D52 — the publisher's is about a process starting, the corner's
     # about a cold Qt, and they were one number only because there was one
     # publisher.
     out[shells.hud_shell().attr] = (
-        base + shells.HUD_PUBLISH_TIMEOUT_S + shells.HUD_LIT_TIMEOUT_S
+        out[shells.hud_shell().attr]
+        + shells.HUD_PUBLISH_TIMEOUT_S
+        + shells.HUD_LIT_TIMEOUT_S
     )
     # And the blind run is three acts: it waits out the grace, then the socket
     # and the corner going dark again (PLAN D49), then a second publisher and
@@ -649,6 +679,102 @@ def test_no_single_engine_can_hang_this_gate_for_minutes():
     # And the frames go out faster than the plate that needs them goes stale,
     # or the ceiling above is spent waiting for a corner that keeps dimming.
     assert 0 < shells.HUD_ROUND_S <= 1.0
+
+
+def budget_text() -> str:
+    """`ReadyBudget` alone, the way `relink_text()` is one function alone: the
+    rules about a derived bound are that class's, and a slice that ran on into
+    `load()` would answer them with the caller."""
+    text = DRIVER.read_text("utf-8")
+    return text[text.index("class ReadyBudget") : text.index("def swaymsg(")]
+
+
+def test_only_one_engine_of_a_run_is_given_the_cold_bound():
+    """D53, and it is the arithmetic above rather than a saving.
+
+    `READY_TIMEOUT_COLD_S` is written against a cold Qt and a cold font cache.
+    That cost is paid by whichever engine touches this machine first and by
+    none of the three after it — so four engines holding it put 120 s of
+    un-payable wait into the run's worst case, which is a ceiling that had
+    stopped describing the run. Exactly one engine may hold it now."""
+    bounds = engine_load_bounds()
+    cold = [
+        name
+        for name, worst in bounds.items()
+        if worst == shells.READY_TIMEOUT_COLD_S
+    ]
+    assert cold == [shells.SHELLS[0].attr], cold
+    # And it is the FIRST engine `main` starts, which is the only way the
+    # driver could have spent it — a cold bound on engine three would be a
+    # ceiling nobody could reach from a run nobody runs.
+    assert list(bounds) == [s.attr for s in shells.SHELLS] + [shells.HUD_BLIND_LOG]
+    # And the warm bound really is the smaller one, or the split is a rename.
+    assert shells.READY_WARM_CEILING_S < shells.READY_TIMEOUT_COLD_S
+
+
+def test_the_warm_bound_is_derived_from_what_this_run_measured():
+    """The reason it is a function and not a fifth constant. A second static
+    number would be a second guess at a cost nobody has measured; this one is
+    the run's own slowest load with room on it, so a machine three times slower
+    than ares gets three times the bound without anybody editing a file."""
+    warm = shells.warm_ready_timeout
+    # Monotone: a bound that has learned the machine is slow must not un-learn
+    # it, which is also why `ReadyBudget` keeps the SLOWEST rather than the last.
+    seen = [warm(x / 10) for x in range(0, 300)]
+    assert seen == sorted(seen)
+    # Floored, so a fast first engine cannot make the bound brittle...
+    assert warm(0.0) == shells.READY_WARM_FLOOR_S
+    # ...and capped, so `engine_ceilings()` has a static number to add up.
+    assert warm(1e6) == shells.READY_WARM_CEILING_S
+    assert shells.READY_WARM_FLOOR_S < shells.READY_WARM_CEILING_S
+    # In between it is the measurement, multiplied.
+    assert warm(2.0) == 2.0 * shells.READY_WARM_FACTOR
+    assert shells.READY_WARM_FACTOR >= 2
+
+
+def test_the_warm_bound_covers_the_load_this_gate_actually_measures():
+    """The failure direction that matters: a bound that fires on a healthy run
+    is a gate that gets switched off, which is the sentence the cold number was
+    written under and it applies to this one too.
+
+    Measured on ares, every engine of the run — including the first, because
+    the caches are warm across runs — says `Configuration Loaded` in 0.40 s.
+    The floor alone is twelve times that before the derivation adds anything."""
+    measured = 0.40
+    assert shells.warm_ready_timeout(measured) >= measured * 10
+    # And the engine that sets the bound is covered by the bound it sets, which
+    # is what makes the derivation safe: a warm load cannot exceed the cold one
+    # it followed, so any first load the cap does not bind on is covered too.
+    for first in [0.1, 0.4, 1.0, shells.READY_WARM_CEILING_S / shells.READY_WARM_FACTOR]:
+        assert shells.warm_ready_timeout(first) > first
+
+
+def test_the_ready_budget_is_one_object_for_the_whole_run():
+    """"The first engine" is the whole of the distinction, so a budget built
+    per shell would hand the cold number to all four again — which is the bug
+    D53 is about, reintroduced by a constructor in the wrong place."""
+    text = DRIVER.read_text("utf-8")
+    assert text.count("ReadyBudget()") == 1
+    built = text[text.index("ReadyBudget()") :]
+    assert built.index("for shell in shells.SHELLS") < built.index("load_blind(stage, ready)")
+    # Both runs are handed it rather than making their own.
+    assert "def load(shell: shells.Shell, stage: Path, ready: ReadyBudget)" in text
+    assert "def load_blind(stage: Path, ready: ReadyBudget)" in text
+
+
+def test_a_warm_engine_that_runs_out_says_where_its_bound_came_from():
+    """A derived bound is a worse report than a constant one unless it says so.
+    `jv-bar never said 'Configuration Loaded' in 5s` over a 30 s constant sends
+    a reader to the shell; over a number this run computed it has to send them
+    to the measurement and to the constant that capped it, because on a slow
+    enough machine the repair really is the constant."""
+    budget = budget_text()
+    assert "READY_WARM_CEILING_S" in budget
+    assert "PLAN D53" in budget
+    # And the cold engine's failure is NOT dressed up with a derivation it did
+    # not have: there was nothing measured to derive it from.
+    assert "if warm is None:" in budget
+    assert budget.index("if warm is None:") < budget.index("raise Fail(")
 
 
 # ------------------------------------------------------------- the wiring
@@ -1491,7 +1617,7 @@ def test_the_blind_run_is_counted_in_the_verdict_and_not_only_logged():
     did not load — a run that reported its failure and returned 0 is the shape
     of a gate that quietly stopped asking half its question."""
     text = DRIVER.read_text("utf-8")
-    after = text[text.index("load_blind(stage)", text.index("def main(")):]
+    after = text[text.index("load_blind(stage, ready)", text.index("def main(")):]
     assert "bad += 1" in after[: after.index("if bad:")]
 
 

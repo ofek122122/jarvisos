@@ -13535,3 +13535,78 @@ is not worth chasing.)
   (this reader over `hudscreens.sh`'s broker, which is wiring only), then
   **D56** (the DEBUG half above, which is a decision about flakiness rather
   than a build), then **D48**, then **D45**.
+
+## 2026-09-26 — iteration 134 — all four engines were given a cold Qt to pay for
+
+- **what**: `ReadyBudget` in `tools/shellload/load.py` (PLAN D53) — one object
+  for the whole run, handed to `load()` and `load_blind()` alike. The first
+  engine a run starts keeps `shells.READY_TIMEOUT_COLD_S` (30 s); every engine
+  after it is bounded by `shells.warm_ready_timeout(slowest_so_far)`, which is
+  four times the slowest load the run has measured, floored at 6 s and capped
+  at 12.
+- **the premise was half wrong, and measuring it is what chose the shape.**
+  D53 was raised on "the first quickshell pays for a cold Qt and the other
+  three do not". Measured: **all four load in 0.40 s, the first included** —
+  the font cache on ares has been warm for as many runs as there have been
+  runs, so this gate has never once paid the cost its generous number is
+  written against and cannot make itself pay it. A second static constant
+  would therefore have been a second guess at an unobserved cost. What
+  survives the measurement is the ORDERING claim — whatever engine one warmed
+  is warm for the rest of the run — and that is a claim about a MEASUREMENT,
+  so the bound is derived from one.
+- **the slowest so far rather than the previous engine**, which is the other
+  half of D53's "or": a bound that has learned the machine is slower than it
+  thought must not un-learn it on the next fast engine. `warm_ready_timeout`
+  is monotone for the same reason, and a test walks it over 300 inputs.
+- **the cap is the limit and the failure says so.** The cap only starts
+  answering once the first engine took more than 3 s — a machine seven times
+  slower than this one — and a machine uniformly slow enough that a WARM
+  engine needs more than 12 s fails this gate. That is a real failure
+  direction, and the whole reason `ReadyBudget.wait` re-raises: a derived
+  bound is a WORSE report than a constant one unless it says where it came
+  from. `jv-bar never said 'Configuration Loaded' in 6s` over a constant sends
+  a reader to the shell; over a number this run computed it has to send them
+  to the measurement and to `shells.READY_WARM_CEILING_S`, and it now does,
+  quoting the load it derived from. The cold engine's failure is deliberately
+  NOT dressed up that way — there was nothing measured to derive it from.
+- **injected into the real gate, and both halves moved.** With the three warm
+  constants driven to 0.001 s: `jv-hud` still passed and printed `of a cold
+  30s`, and `jv-bar`, `jv-notify` AND `jv-hud-blind` all failed with the
+  derivation named. That last one is the load-bearing half — it proves the
+  budget is really shared across `load()` and `load_blind()`, because a
+  per-call budget would have handed the blind run a fresh cold 30 s and it
+  would have passed. Reverted from the backup before the verify run below.
+- **the derivation is printed on every run**, `loaded in 0.40 s of a cold 30s`
+  / `of a derived 6s`, because this is the only place a reader can watch the
+  rule decide — and because it re-makes the D53 measurement on every machine
+  this ever runs on. `spent` is its own field rather than a second call to
+  `timeout()`: `wait` records the load before anything is printed, so asking
+  the budget afterwards answers about the NEXT engine. That bug was written,
+  seen in the run output (`jv-hud: loaded in 0.40 s, of 6s`), and fixed.
+- **the arithmetic, which is what D53 was for.** `engine_load_bounds()` is
+  split out of `engine_ceilings()` so the claim is about the one wait this is
+  about, and a test asserts exactly one engine holds the cold bound and that
+  it is the first one `main` starts. Per engine: 78 s for the frames run
+  (unchanged — it IS the cold engine), 36 s for the bar and the notifier,
+  **80 s for the blind run against 98 before**. D54 is unblocked: its 8 s fits
+  with 12 to spare.
+- **`READY_WARM_FLOOR_S` is 6 s and not 5** — 5.0 is `LinkState`'s grace, and
+  `test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate`
+  refuses that value as a `shells` constant on purpose. Six is fifteen times
+  the load measured here, which is the argument the floor wanted anyway.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 3 paths (tools **731
+  pass**, 5 of them new; `shellload.sh` 34.8 s, unchanged, because nothing was
+  ever spending the 30 s). `hudscreens.sh` was not named and did not need to
+  be: no shell QML changed. build: `nixos-rebuild build --flake .#ares` green.
+  No schema change, no jv-act, no boot path, no pins. Never tested, never
+  switched.
+- files: tools/shellload/load.py, tools/shellload/shells.py,
+  tools/tests/test_shellload.py, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D54** — now that the blind engine has 20 s of headroom, ask the
+  compositor about the surface D52 REBUILT (`check_zone(shell, "while",
+  up=True)` inside `recover()`); a HUD whose recovered surface came back with
+  an exclusive zone would take a strip off all three monitors and pass today.
+  Then **D58** (raised here: `tools/hudscreens/shoot.py` holds the same 30 s as
+  a DEFAULT over five quickshells AND four brokers, and that harness has no
+  ceiling test at all — the bound comes first, the shrink second), then
+  **D57**, **D56**, **D48**, **D45**.
