@@ -1055,6 +1055,86 @@ def test_every_driver_renders_the_box_the_shell_asks_for():
         )
 
 
+def capped_plates() -> set[str]:
+    """The plates that cap their own text width, by type name."""
+    out = {
+        f.stem
+        for f in SHELL.glob("*Plate.qml")
+        if re.search(r"^\s*property int maxTextPx:", strip_qml_comments(f.read_text("utf-8")), re.M)
+    }
+    assert out, "no plate in shell/jv-hud caps its text any more"
+    return out
+
+
+def plates_handed_room(path: Path) -> set[str]:
+    """The plates a composing file hands `roomPx` to, by type name.
+
+    Both files declare each plate as a flat block — `anchors.right` and, for a
+    capped one, `roomPx` — so a brace-free body is the whole block.
+    """
+    text = strip_qml_comments(path.read_text("utf-8"))
+    return {
+        m.group(1)
+        for m in re.finditer(r"(\w+Plate)\s*\{([^{}]*)\}", text)
+        if re.search(r"^\s*roomPx:", m.group(2), re.M)
+    }
+
+
+def test_every_capped_plate_is_handed_the_room_it_has():
+    """D66. Six plates in shell/jv-hud cap their own text (`maxTextPx: 240`),
+    and a cap on its own is a number chosen for the 300 px corner ares' three
+    monitors give it. On an output narrower than that corner the cap lays the
+    text out past the edge of the screen — measured, at thirteen widths from
+    300 px down to 32, the crowd drew its confirmation plate 260 px wide at
+    every one of them. `core/PlateFit.qml` narrows a cap to the room, but only
+    for a plate that was HANDED the room, and the handing happens in the two
+    files that compose the stack: the shell, and the harnesses' Corner.qml.
+
+    A plate that gains a cap and is left out of either one is this item's own
+    failure mode, twice: it clips on a narrow output exactly as before, and
+    the fit driver next door cannot say so, because that driver builds
+    Corner.qml and never loads the shell. Equality in both directions, so that
+    room handed to a plate that cannot use it shows up as well — a binding
+    nothing reads is a binding a reader has to disprove.
+    """
+    capped = capped_plates()
+    for path in (SHELL / "shell.qml", CORNER):
+        assert plates_handed_room(path) == capped, (
+            f"{path.name} hands roomPx to {sorted(plates_handed_room(path))} and "
+            f"the plates that cap their text are {sorted(capped)}"
+        )
+
+
+def test_no_capped_plate_measures_its_text_against_the_cap_alone():
+    """The other half of D66, inside the plates. `maxTextPx` is the DECLARED
+    cap and `textPx` is that cap narrowed to the room `PlateFit` was handed;
+    the one that may reach a `Text.width` is the second. A plate that went
+    back to the first would still pass every check about the 300 px corner —
+    that is the width at which the two are equal — and would silently stop
+    clamping on every narrower one.
+    """
+    for name in sorted(capped_plates()):
+        path = SHELL / f"{name}.qml"
+        text = strip_qml_comments(path.read_text("utf-8"))
+        widths = re.findall(r"^\s*width:\s*(Math\.min\(.*)$", text, re.M)
+        assert widths, f"{name}.qml caps its text and lays out no capped width"
+        for expr in widths:
+            assert "maxTextPx" not in expr, (
+                f"{name}.qml measures a Text against the declared cap rather "
+                f"than the room it was handed: {expr.strip()}"
+            )
+            assert "textPx" in expr, (
+                f"{name}.qml caps a Text against something other than "
+                f"`root.textPx`: {expr.strip()}"
+            )
+        # And the one place the declared cap is still read: the binding that
+        # narrows it. A plate that stopped asking PlateFit would be a plate
+        # whose `textPx` is a second copy of the rule.
+        assert re.search(r"textPx:\s*root\.fit\.textPx\(root\.maxTextPx,", text), (
+            f"{name}.qml no longer derives textPx from core/PlateFit.qml"
+        )
+
+
 def test_the_drivers_know_every_plate_the_corner_stacks():
     """Two drivers carry `everyPlate`, a list of the names the plates call
     themselves — tst_sequence.qml checks no trajectory ever contains a name

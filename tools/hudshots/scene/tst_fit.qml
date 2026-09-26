@@ -45,6 +45,21 @@
 // `speaking` here because that is what makes `output` truthful, and a crowd
 // that traded one for the other would be a smaller crowd.
 //
+// AND THEN A SECOND WIDTH (PLAN D66). Every paragraph above measures the
+// corner against the 300 px surface ares' three monitors give it, which is the
+// only surface anything in this HUD had ever been asked about. It is not the
+// only surface a `Variants { model: Quickshell.screens }` can build one for: a
+// layer-shell panel anchored to one edge is granted the size it asks for
+// whether or not the output is that wide, so an output narrower than the corner
+// puts part of this surface off the left of the screen. Measured at thirteen
+// widths from 300 down to 32, before anything below existed: the crowd drew its
+// confirmation plate 260 px wide at EVERY one of them, so on a 32 px screen 228
+// px of a question jv-act is waiting on an answer to was laid out where the
+// screen is not. Nothing errored; nothing in the HUD had been told what it was
+// on. `shell.qml` measures the room now, `core/PlateFit.qml` is what a capped
+// plate does with it, and the checks at the bottom of this file are the ones
+// the bar's row got in D35: nothing is laid out where it cannot be read.
+//
 // WHY MOTION IS OFF. Same reason as tst_sequence.qml: a plate's `lit` is
 // `opacity > 0` through `Ease`, so with fades running, WHICH plates are in
 // the crowd is a question about a 140 ms animation on the render thread.
@@ -98,6 +113,29 @@ Item {
     // case the health plate has to survive, and every name in it is real.
     readonly property var roster: ["jarvisd", "jv-act", "jv-brain", "jv-compat", "jv-context", "jv-ears", "jv-guard", "jv-hud-bridge", "jv-voice"]
 
+    // The surface the shell declares, which is what `width` above is a copy
+    // of. Named here because the narrow checks put it back after moving it.
+    readonly property int surfacePx: 300
+
+    // The narrowest surface this corner is entirely readable on, in pixels —
+    // MEASURED, not chosen, and `test_the_floor_is_the_widest_row_no_plate_
+    // can_narrow` is what measures it. Below this the binding constraint stops
+    // being a capped plate and becomes `HealthPlate`, the one plate with no
+    // `maxTextPx` at all: its width is exactly its longest row, and every row
+    // on it is a service name this machine really has beside a word out of an
+    // enum, so there is nothing there to elide. 204.5 px of `jv-hud-bridge
+    // RESTARTED 99+x` between two 16 px insets is 236.5, and a surface cannot
+    // have half a pixel.
+    //
+    // What happens BELOW it is not this file's to assert and is written down
+    // in PLAN D67: a plate that cannot fit its own label has run out of things
+    // to elide, and the two ways out — clip it, or take the plate off a screen
+    // that cannot hold it — are a question about what the HUD owes a reader,
+    // not arithmetic. No monitor on this machine is within 1600 px of the
+    // floor; what makes it worth having a number at all is that the number
+    // moves when a plate does, and this is where it would be noticed.
+    readonly property int floorPx: 237
+
     function initTestCase() {
       Motion.policy.envOverride = "1";
     }
@@ -111,6 +149,10 @@ Item {
     function init() {
       Bus.reset();
       suite.seq = 0;
+      // The declared surface, back, because the checks below configure this
+      // one: a width left narrow by the test before would leave every other
+      // check in this file measuring a corner the shell never has.
+      root.width = suite.surfacePx;
     }
 
     // --- frames ---------------------------------------------------------
@@ -424,6 +466,105 @@ Item {
                kid.plateName + " is " + kid.width + " px wide, "
                + Theme.insetPx + " px in from a " + root.width + " px surface");
       }
+    }
+
+    // --- and on a surface the corner does not fit on ---------------------
+
+    // Lay the crowd out on a surface of `px` and answer with the widest plate
+    // on it. One helper for all three checks below, so "what the crowd
+    // measures at this width" is asked one way.
+    //
+    // `waitForRendering` for the same reason `crowd()` ends with one: a width
+    // is assigned in this frame and a LAYOUT happens on the next polish, so a
+    // check that read a size straight after the assignment would be reading
+    // the sizes from before it — passing, at the width it was already at.
+    function widestAt(px) {
+      root.width = px;
+      verify(waitForRendering(root), "the scene never rendered at " + px + " px");
+      const kids = stack.children;
+      let widest = null;
+      for (let i = 0; i < kids.length; i++) {
+        const kid = kids[i];
+        if (!(kid.shown || kid.lit))
+          continue;
+        if (widest === null || kid.width > widest.width)
+          widest = kid;
+      }
+      verify(widest !== null, "nothing was on screen at " + px + " px");
+      return widest;
+    }
+
+    // THE CHECK D66 IS ABOUT, and it is the same one the bar's row has: on
+    // every surface from the declared corner down to the floor, no plate is
+    // laid out where it cannot be read. `insetPx` twice, not once — §06 gives
+    // this corner that gap at the top and the right, and a plate ending flush
+    // against the left edge of a panel floating over every window reads as a
+    // crop whether or not it is one, which is the argument the box's HEIGHT
+    // already makes for the bottom edge.
+    //
+    // Nine widths rather than a sweep, because each one costs a rendered
+    // frame: the declared surface, the two either side of the point the cap
+    // stops binding, three in between, and the floor twice over. Before
+    // `plateRoomPx` existed every one of them measured 260 px.
+    function test_no_plate_is_wider_than_a_narrow_surface_either() {
+      suite.crowd();
+      const widths = [suite.surfacePx, 292, 288, 276, 260, 256, 240, 238, suite.floorPx];
+      for (let i = 0; i < widths.length; i++) {
+        const px = widths[i];
+        const widest = suite.widestAt(px);
+        verify(widest.width + Theme.insetPx * 2 <= px,
+               widest.plateName + " is " + widest.width + " px wide on a " + px
+               + " px surface — " + (widest.width + Theme.insetPx * 2 - px)
+               + " px past two " + Theme.insetPx + " px insets");
+      }
+    }
+
+    // WHERE THE FLOOR IS, and it is `floorPx` above or this fails with the
+    // number it really is. Handed a surface with no room at all, every capped
+    // plate elides to its label and the widest thing left on screen is the
+    // widest row that was never capped — so this measures the one plate the
+    // rule above cannot help, and the floor is that row between two insets.
+    //
+    // It is a PIN on a measurement, and what it pins is worth more than the
+    // number: add a row to `HealthPlate`, add a service to this machine with a
+    // longer name, or give another plate an uncapped line, and the narrowest
+    // readable surface moves. Nothing else in this repo would notice.
+    function test_the_floor_is_the_widest_row_no_plate_can_narrow() {
+      suite.crowd();
+      const widest = suite.widestAt(Theme.insetPx * 2);
+      compare(Math.ceil(widest.width) + Theme.insetPx * 2, suite.floorPx,
+              widest.plateName + " is the widest row the crowd cannot narrow, "
+              + "at " + widest.width + " px, so the floor is "
+              + (Math.ceil(widest.width) + Theme.insetPx * 2) + " px and this "
+              + "file says " + suite.floorPx);
+    }
+
+    // AND THE OTHER ZERO, which is the mistake this file caught while it was
+    // being written. `PlateFit` answers an unmeasured room with the plate's
+    // full cap — deliberately: a plate that elided in the first frame of every
+    // session, before its surface had been configured, would be hiding the
+    // news to protect a margin. A surface computing its room as a bare
+    // subtraction hands that same negative number down when it is NARROW, and
+    // then the narrowest screen draws the most: measured at 1 px, the crowd
+    // went back to a 260 px confirmation plate. It is D35's bug on the bar's
+    // row, one process over, and `core/RowFit.qml` says in as many words that
+    // the answer belongs to the surface.
+    //
+    // So both spellings are checked, and they have to disagree: a surface of
+    // zero width has said nothing and every plate keeps its cap, and a
+    // surface of one pixel has said everything and no plate keeps any of it.
+    function test_an_unmeasured_surface_and_an_empty_one_are_not_the_same() {
+      suite.crowd();
+      const unmeasured = suite.widestAt(0);
+      compare(unmeasured.width, unmeasured.maxTextPx + Theme.padPx * 2,
+              "a surface that has not been configured must leave the caps "
+              + "alone, and " + unmeasured.plateName + " is drawing "
+              + unmeasured.width + " px");
+      const empty = suite.widestAt(1);
+      verify(empty.maxTextPx === undefined || empty.width < empty.maxTextPx,
+             "a 1 px surface has no room to give and " + empty.plateName
+             + " is drawing " + empty.width + " px of a " + empty.maxTextPx
+             + " px cap — the surface handed its room down as a negative");
     }
   }
 }

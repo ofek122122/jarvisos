@@ -196,6 +196,43 @@ ShellRoot {
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
+      // HOW MUCH ROOM THE PLATES HAVE, which is not how much the surface
+      // asked for (PLAN D66). `implicitWidth` above is a DECLARED choice —
+      // 300 px of corner — and a layer-shell surface anchored to one edge is
+      // granted the size it asks for whether or not the output is that wide.
+      // On a monitor narrower than the corner this surface therefore extends
+      // off the left of the screen, which costs nothing at all — it is
+      // transparent, its input region is empty and it reserves no space —
+      // right up until a plate lays a sentence out in the part that is not
+      // there. Measured, before this line existed: at every surface width from
+      // 300 px down to 32, the crowded corner drew its confirmation plate 260
+      // px wide, so 228 px of a question jv-act was waiting on an answer to sat
+      // past the edge of a 32 px screen. Nothing errored, because nothing in
+      // the HUD had ever been told what it was on.
+      //
+      // So the room is the narrower of the two facts — what this surface got
+      // and what the output has — less the inset the stack is anchored by, at
+      // each edge. §06 gives the corner that gap at the top and the right; the
+      // left earns it here for the same reason the bottom has it in the height
+      // above, and `core/PlateFit.qml` is what the capped plates do with it.
+      //
+      // AND IT CLAMPS, which is the half a subtraction gets wrong. There are
+      // THREE facts here and only two of them are a room: a surface nobody has
+      // configured yet — before the first configure `width` is 0 — where each
+      // plate keeps its own cap, because a plate that elided in the first frame
+      // of every session would be hiding the news to protect a margin; a
+      // surface that HAS measured itself and has no room to give, where the
+      // text goes and the label stays; and a width. `Math.min(…) - insetPx * 2`
+      // spells the first two the same, and it was measured doing it: the 1 px
+      // case came out at -31 px, which `PlateFit` reads as "nobody has said"
+      // and answers with the full 260 px cap, so the narrowest surface in the
+      // sweep was the one that drew the most. That is D35's bug on the bar's
+      // row, one process over, and `core/RowFit.qml` says in as many words
+      // that the answer belongs to the surface. This is that clamp.
+      readonly property int plateRoomPx: surface.width > 0
+        ? Math.max(0, Math.min(surface.width, surface.modelData.width) - Theme.insetPx * 2)
+        : -1
+
       // Mapped only while something is genuinely on screen — including
       // while a plate is fading out, or the exit would be a surface
       // vanishing out from under it rather than an element evaporating.
@@ -228,6 +265,7 @@ ShellRoot {
         // themselves — a refusal and a calm machine draw the same nothing.
         LinkPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // The question Jarvis is waiting on, from jv-act's own
@@ -239,6 +277,7 @@ ShellRoot {
         // all — so answering stays with your voice and `jv confirm`.
         ConfirmPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // What Jarvis is doing, from speech.state + audio.wake + audio.vad.
@@ -265,6 +304,7 @@ ShellRoot {
         // better report on whether you were heard correctly.
         HeardPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // How the last answer ENDED, from jv-brain's own brain.response —
@@ -288,6 +328,7 @@ ShellRoot {
         // machine whose actions all worked it is never here at all.
         ActionPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // The Windows binary this machine refused to run, from jv-guard's
@@ -298,6 +339,7 @@ ShellRoot {
         // all. On a machine nobody hands .exe files to it is never here.
         GuardPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // The Windows app jv-compat could not finish installing, from its
@@ -309,6 +351,7 @@ ShellRoot {
         // or one that worked, draws nothing at all.
         InstallPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // Whether the microphone is open, from jv-ears' own capture

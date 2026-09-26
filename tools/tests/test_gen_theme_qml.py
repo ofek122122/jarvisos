@@ -1227,6 +1227,60 @@ def hud_surface_box() -> tuple[int, int]:
     return int(theme_tokens()["geometry"]["hud_corner_px"]), int(height.group(1))
 
 
+def test_the_hud_surface_measures_the_room_its_plates_have():
+    """D66. Six plates cap their own text at a number chosen for the 300 px
+    corner, and `core/PlateFit.qml` narrows that cap to the room the surface
+    really has. The surface is what MEASURES the room, and this is the only
+    gate that can look at it: `shell.qml` is the Quickshell half, so no QML
+    engine in this repo loads it and no mutation of it can be graded. Measured
+    — a mutation removing the clamp below survived every suite.
+
+    Three things have to be true of that expression, and each of them was a
+    real bug in the two hours this item took:
+
+      · it asks the SCREEN, not only itself. A layer-shell surface anchored to
+        one edge is granted the width it asks for whether or not the output is
+        that wide, so `surface.width` alone is 300 px on a 256 px monitor and
+        the room would come out 44 px too generous — with the difference off
+        the left of the screen.
+      · it CLAMPS at zero. `Math.min(...) - insetPx * 2` goes negative on a
+        narrow output, PlateFit reads a negative room as "nobody has measured
+        this surface", and the narrowest screen then draws the widest plate.
+        That is D35's bug on the bar's row, one process over.
+      · and zero still differs from unmeasured. Before the first configure
+        `width` is 0, and a plate that elided in the first frame of every
+        session would be hiding the news to protect a margin.
+
+    What proves the BEHAVIOUR is `tools/hudshots/scene/Corner.qml`, which
+    computes the same room for the harnesses and is driven through nine
+    surface widths by `tst_fit.qml`. This gate is what keeps the two from
+    drifting on the half that has no engine.
+    """
+    hud = strip_qml_comments((ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8"))
+    room = re.search(r"property\s+int\s+plateRoomPx:(.*?)(?=\n\n)", hud, re.S)
+    assert room, "shell/jv-hud/shell.qml no longer measures the room its plates have"
+    expr = " ".join(room.group(1).split())
+
+    assert "modelData.width" in expr, (
+        "the room has to be bounded by the OUTPUT's width as well as by the "
+        f"surface's own, or a narrow monitor is measured as a wide one: {expr}"
+    )
+    assert "Math.max(0," in expr, (
+        "the room has to be clamped at zero, or a surface narrower than two "
+        f"insets hands PlateFit a negative and every cap comes back: {expr}"
+    )
+    assert "-1" in expr and "surface.width > 0" in expr, (
+        "a surface nobody has configured yet has to stay distinguishable from "
+        f"one with no room to give: {expr}"
+    )
+    # The same inset, twice, and named rather than typed — §06 gives this
+    # corner that gap at the top and the right, and the plates earn it on the
+    # left for the reason the box's height already gives it to the bottom.
+    assert "Theme.insetPx * 2" in expr, (
+        f"the room should spend two `Theme.insetPx`, not a number: {expr}"
+    )
+
+
 def test_the_bar_leaves_the_corner_the_hud_draws_in():
     """Two processes, two layers, one corner — and nothing can see the clash.
 
