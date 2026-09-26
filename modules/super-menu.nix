@@ -17,6 +17,32 @@
 { config, lib, pkgs, ... }:
 {
   # ---------------------------------------------------------------- the tap
+  #
+  # keyd needs two things the module does not give it on this system, and
+  # WITHOUT EITHER IT FAILS SOFTLY — the daemon starts, logs one warning, and
+  # simply never emits the remapped key (observed: "failed to set effective
+  # group to keyd", and no virtual keyboard created). A silent no-op is the
+  # worst shape for an input daemon, so both are declared here:
+  #   1. the `keyd` group it drops privileges to, and
+  #   2. membership of `uinput`, which owns /dev/uinput — the device it must
+  #      open to create the virtual keyboard that carries F13.
+  users.groups.keyd = { };
+  systemd.services.keyd.serviceConfig = {
+    SupplementaryGroups = [ "uinput" "input" ];
+    # keyd setgid()s into the `keyd` group itself, and the module's hardened
+    # CapabilityBoundingSet (CAP_SYS_NICE, CAP_IPC_LOCK) strips the capability
+    # that needs — the daemon then dies with "setgid: Operation not permitted".
+    # Add CAP_SETGID/CAP_SETUID to the bounding set rather than loosening the
+    # rest of the sandbox.
+    CapabilityBoundingSet = [
+      "CAP_SYS_NICE"
+      "CAP_IPC_LOCK"
+      "CAP_SETGID"
+      "CAP_SETUID"
+    ];
+    AmbientCapabilities = [ "CAP_SETGID" "CAP_SETUID" ];
+  };
+
   services.keyd = {
     enable = true;
     keyboards.all = {
