@@ -601,11 +601,47 @@ the top unchecked item unless it is blocked.
       login shell and a real key stays loaded across terminals needs a human
       session — see `ops/ralph/HUMAN-VERIFY.md`. G7 continues at G7b (VPN
       support) and G7c (Syncthing), split out for the same reason F5 was.
-- [ ] G7b. **VPN support**, split from G7. NetworkManager VPN plugins
-      declared (openvpn/wireguard/openconnect) so a human can add a VPN
-      connection through nm-applet/nmcli with no further nix change; a real
-      `networking.wireguard.interfaces` peer config is Ofek's own (needs a
-      real endpoint + keys), not this loop's to invent.
+- [H] G7b. **VPN support**, split from G7. DONE (this commit): `modules/vpn.nix`
+      (new, imported by `hosts/ares/default.nix` right after `modules/ssh.nix`).
+      `networking.networkmanager.plugins = [ networkmanager-openvpn
+      networkmanager-openconnect ]` — without this list neither protocol is a
+      choice in nm-applet no matter how a connection is configured, since NM
+      loads VPN support as separate plugin packages at runtime. WireGuard
+      needed no plugin at all: checked the real evaluation
+      (`config.networking.networkmanager.package`) and confirmed it already
+      ships `org.freedesktop.NetworkManager.Device.WireGuard.xml` — WireGuard
+      has been a native NetworkManager device type since 1.16, so nm-applet/
+      `nmcli` already offer it; `wireguard-tools` (`environment.
+      systemPackages`) adds only the `wg`/`wg-quick` CLI for generating and
+      inspecting keys by hand. No `networking.wireguard.interfaces` peer and
+      no VPN connection profile of any kind is declared — a real endpoint,
+      keys or `.ovpn` file is Ofek's own to add through nm-applet/nmcli
+      (already installed: `networkmanagerapplet`, `modules/apps.nix`) once
+      this lands, with zero further nix change needed.
+      Gate: `ops/ralph/nixtest.sh` (+3 cases) reads the real evaluation:
+      both plugin packages reach `networking.networkmanager.plugins` (by
+      real `pname`, `NetworkManager-openvpn`/`NetworkManager-openconnect`,
+      not assumed from the nixpkgs attribute names) with
+      `networking.wireguard.interfaces` still empty (no peer config slipped
+      in), `wireguard-tools` reaches `environment.systemPackages`, and the
+      real NetworkManager package this machine would build already carries
+      the WireGuard device D-Bus interface file (proves the "no plugin
+      needed" claim against the actual derivation rather than nixpkgs docs).
+      `bash ops/ralph/verify.sh`: 2 gates over 3 paths (`hosts/ares/
+      default.nix`, `modules/vpn.nix`, `ops/ralph/nixtest.sh`), GREEN in
+      167.3s (tools 80.7, nixtest 86.6 — 56 prior + 3 new = 59).
+      `nixos-rebuild build --flake .#ares` -> ok (9 new store paths fetched:
+      NetworkManager-openvpn/-openconnect, libnma, openvpn, openconnect,
+      stoken, vpnc-scripts, wireguard-tools + its man page; the rebuilt
+      NetworkManager unit, `system-path`/`etc`/`system-units`/`user-units`/
+      toplevel). Never switched. No schema, no jv-act, no boot path, no pins,
+      no disko.nix touched.
+      `[H]` because whether OpenVPN/OpenConnect actually appear as protocol
+      choices in a real nm-applet window, and whether a real WireGuard
+      profile is accepted with no "unknown type" error, both need a human at
+      a real switched session — see `ops/ralph/HUMAN-VERIFY.md`. G7 is now
+      fully resolved (G7a/G7b `[H]`, G7c still `[ ]` — Syncthing); Track G
+      continues there.
 - [ ] G7c. **Syncthing**, split from G7. `services.syncthing.enable` for the
       `ofek` user, a declared `dataDir`; folder selection happens through its
       own web GUI (127.0.0.1-only by default) same as any first run.

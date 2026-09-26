@@ -808,5 +808,35 @@ if grep -q '^AddKeysToAgent yes$' <<<"$ssh_config" \
   ok "$t"
 else bad "$t" "$(tail -10 <<<"$ssh_config")"; fi
 
+# ------------------------------------------------------------------- vpn
+# PLAN G7b. NetworkManager already runs (hosts/ares/default.nix) and already
+# has a GUI (networkmanagerapplet, modules/apps.nix) — modules/vpn.nix adds
+# the protocol plugins NM needs before that GUI can offer OpenVPN/
+# OpenConnect at all, plus the WireGuard CLI (native NM device type since
+# 1.16 needs no plugin package, confirmed against the real evaluation
+# below rather than assumed from nixpkgs docs).
+
+t='vpn: OpenVPN and OpenConnect plugins reach NetworkManager, no peer config added'
+plugins=$(nix eval --json '.#nixosConfigurations.ares' --apply \
+  '(c: map (p: p.pname or p.name) c.config.networking.networkmanager.plugins)' 2>/dev/null)
+wg_ifaces=$(nix eval --json '.#nixosConfigurations.ares.config.networking.wireguard.interfaces' 2>/dev/null)
+if grep -qi 'networkmanager-openvpn' <<<"$plugins" \
+  && grep -qi 'networkmanager-openconnect' <<<"$plugins" \
+  && grep -qx '{}' <<<"$wg_ifaces"; then
+  ok "$t"
+else bad "$t" "plugins=$plugins wg_ifaces=$wg_ifaces"; fi
+
+t='vpn: wireguard-tools (wg/wg-quick CLI) reaches environment.systemPackages'
+pkgs_out=$(nix eval --json '.#nixosConfigurations.ares' --apply \
+  '(c: map (p: p.pname or p.name) c.config.environment.systemPackages)' 2>/dev/null)
+if grep -q 'wireguard-tools' <<<"$pkgs_out"; then ok "$t"
+else bad "$t" "$(tr ',' '\n' <<<"$pkgs_out" | grep -i wireguard || echo 'not found')"; fi
+
+t='vpn: NetworkManager itself already ships native WireGuard device support'
+nm_pkg=$(nix eval --raw '.#nixosConfigurations.ares.config.networking.networkmanager.package' 2>/dev/null)
+if [ -f "$nm_pkg/share/dbus-1/interfaces/org.freedesktop.NetworkManager.Device.WireGuard.xml" ]; then
+  ok "$t"
+else bad "$t" "no WireGuard device interface under $nm_pkg"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
