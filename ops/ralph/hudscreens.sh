@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ops/ralph/hudscreens.sh — photograph the REAL HUD, on a real compositor,
-# on ares' three monitors (PLAN A30).
+# on ares' three monitors (PLAN A30) — and on a fourth output narrower than
+# the HUD's own surface, which is not a monitor anybody has (PLAN D68).
 #
 # The sibling of hudshots.sh, and deliberately the opposite trade. That one
 # renders the plates with a plain QML engine into a 300x826 rectangle: the
@@ -37,7 +38,9 @@
 # measured here and "< 2 ms of GPU per frame" is not. It answers "is the
 # HUD on all three screens, in the right corner, asking to be drawn when
 # it has nothing to say" — which is exactly what A13/A27 are blocked on,
-# and not the same question as "does it look right".
+# and not the same question as "does it look right". Since D68 it answers
+# one more, on the fourth output: what a compositor GIVES a surface that
+# asks for 300 px of a 280 px screen, and what the HUD then draws in it.
 #
 # It then READS THE SHEET BACK (B74), the way hudshots.sh has since B52 —
 # every screen it just took, against the one committed at HEAD, through
@@ -54,8 +57,9 @@
 # nonzero, naming the screens that moved: that is the refresh telling you
 # what you changed, not a failure — look at the new PNGs and commit them.
 #
-# AND IT READS WHAT THE SHELL SAID (PLAN D39). Twelve real quickshells run in
-# a pass of this — one per shot, one per idle window — and every one of them
+# AND IT READS WHAT THE SHELL SAID (PLAN D39). Thirteen real quickshells run
+# in a pass of this — one per shot, one per idle window, one for the
+# granted-width probe (D68) — and every one of them
 # has written its output to a file since the first version of this harness,
 # where nothing has ever opened it. D36 made the three STAGED harnesses refuse
 # a run whose QML threw; this is the same rule over the only gate that loads
@@ -67,7 +71,7 @@
 # this scan clean forever. NO_COLOR below is that, and it is load-bearing.
 #
 # THE ANSWER, first time of asking: the real HUD says nothing that throws.
-# 7,170 lines across the twelve logs of a full pass, clean, in 0.1 s. It needs
+# 9,954 lines across the thirteen logs of a full pass, clean, in 0.1 s. It needs
 # no census the way the staged harnesses do — a scan of an empty log reads
 # clean, but this harness has already proved every one of those logs is being
 # written before it uses it: each shell is started and then WAITED for, on
@@ -77,8 +81,8 @@
 # AND THE INSTRUMENT IS LIVE, proved by injection rather than by reading the
 # code: a `property var injectedFault: modelData.noSuchThing.count` on the
 # PanelWindow — the D34 shape, invisible to qmllint — and this gate ends 1,
-# naming `shell/jv-hud/shell.qml:90` in all twelve logs, three times in each
-# (once per monitor). Everything else about that run was GREEN. Every probe
+# naming `shell/jv-hud/shell.qml:90` in every log of that run, three times in
+# each (once per monitor; four times each since D68 added an output). Everything else about that run was GREEN. Every probe
 # passed: the corner, the zone, the focus, the growth, the click, 0 commits
 # in every idle window. And all nine photographs still matched the sheet
 # committed at HEAD, to inside the noise floor — because a QML binding that
@@ -105,24 +109,27 @@
 #      one for a gate computing a plan from that tree.
 # Reason 1 is the one that still carries this on its own, and B75 asked the
 # obvious follow-up: is there a CHEAPER HALF? The probes (the corner, the
-# exclusive zone, the click, the idle frames) are verdicts a gate could
+# exclusive zone, the click, the idle frames, the granted width) are verdicts
+# a gate could
 # collect; the screens are not. So the run books its own seconds — every
 # phase, into one file both halves of this harness append to, classified in
 # `sheet.PHASES` as a cost a picture-less run would still pay or one only the
 # pictures need — and prints the table at the end. The answer is NO, and the
 # numbers are why (measured here, and the table re-measures them):
 #
-#     probe  154.8 s  79.4%   ·   sheet  39.9 s  20.5%   of 194.9 s
+#     probe  156.5 s  79.6%   ·   sheet  39.9 s  20.3%   of 196.6 s
 #
-# A run that kept no picture at all would still pay 2m35s of the 3m15s,
+# A run that kept no picture at all would still pay 2m37s of the 3m17s,
 # because the pictures are not what costs: `grim` and the PNG encodes
 # come to 1.1 s BETWEEN them, and almost the whole sheet half is the read-back
 # against HEAD (39.2 s). What costs is the idle probe — 97.7 s, 50% of
 # everything, five windows each deliberately holding still for ten seconds —
-# and that is the least skippable verdict in the file. Re-measured at D39,
-# which is the standing lesson of this paragraph: B74's comparison added 34 s
-# to the run and nobody re-measured the total, and D39's own scan — the one
-# addition since — costs 0.1 s of it.
+# and that is the least skippable verdict in the file. Re-measured at D39 and
+# again at D68, which is the standing lesson of this paragraph: B74's
+# comparison added 34 s to the run and nobody re-measured the total, while
+# the two additions since are 0.1 s (D39's scan) and 1.8 s (D68's
+# granted-width probe, which starts a thirteenth quickshell and reads one
+# line out of its socket log).
 # The path list above is in `DECLARED_GATES` in tools/dependents.py, held
 # equal to this one by tools/tests/test_dependents.py; `flake.lock` is in it
 # on this script's own argument, that a sheet rendered against a different Qt
@@ -208,10 +215,21 @@ EOF
 # Headless wlroots with software rendering: no DRM, no GPU, no seat. The
 # HUD is a Wayland client and cannot tell the difference; what it CAN tell
 # the difference about — layer-shell, exclusive zones, per-output surfaces
-# — is all compositor protocol and all real here.
+# — is all compositor protocol and all real here. Which is what makes the
+# 280 px output worth having (D68): the one thing a headless backend still
+# gives you honestly is what the compositor does with a surface that does
+# not fit.
 export WLR_BACKENDS=headless
 export WLR_RENDERER=pixman
-export WLR_HEADLESS_OUTPUTS=3
+# HOW MANY, from the sheet rather than from here (PLAN D68). The backend
+# makes this many outputs and the config above names them; a literal would
+# be a second copy of a number that has already changed once — the fourth
+# output is 280 px wide and is not a monitor, it is the screen narrower than
+# the HUD's own surface, and a compositor that made three of them would
+# leave that question unasked with every other check still green.
+export WLR_HEADLESS_OUTPUTS=$("$py/bin/python" -c "
+import sys; sys.path.insert(0, '$root/tools/hudscreens'); import sheet
+print(len(sheet.ALL_OUTPUTS))")
 unset WAYLAND_DISPLAY || true
 
 "$sway/bin/sway" -c "$stage/sway.conf" > "$stage/sway.log" 2>&1 &

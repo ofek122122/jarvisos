@@ -381,10 +381,17 @@ def test_the_idle_probe_actually_runs():
     )
 
 
-def test_the_idle_probe_reads_the_huds_own_wayland_log():
+def test_only_the_probes_that_read_the_socket_log_ask_for_one():
     """WAYLAND_DEBUG is how the HUD is made to say what it committed. With
     it unset the log is empty, every window reads zero, and the probe
     passes for a HUD animating on all three monitors.
+
+    Two probes read that log now — the idle windows count commits in it
+    (A34), and D68's asks it what size the compositor configured each
+    surface at — and nothing else in this harness may ask for one. The rule
+    is about the PICTURES: a shot taken of a HUD writing a protocol log for
+    every frame is a photograph of a machine nobody runs, and the shot loop
+    is where that would go unnoticed.
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
@@ -392,9 +399,24 @@ def test_the_idle_probe_reads_the_huds_own_wayland_log():
         "every jv-hud the idle probe starts must be started with "
         "WAYLAND_DEBUG=1, or the frames it is counting are not being logged"
     )
-    assert "WAYLAND_DEBUG" not in shoot.replace(probe, ""), (
-        "WAYLAND_DEBUG is set outside the idle probe — the photographs "
-        "should be of a HUD doing its job, not one writing a protocol log"
+    granted = shoot.split("\ndef probe_surface_granted(")[-1].split("\ndef ")[0]
+    assert granted.count('WAYLAND_DEBUG="1"') == 1, (
+        "the granted-width probe (D68) reads the configure event out of the "
+        "HUD's own Wayland log, so its one shell must be started with "
+        "WAYLAND_DEBUG=1 — without it the log is empty and the probe's census "
+        "fails rather than lying, which is the right way round and still not a "
+        "measurement"
+    )
+    assert shoot.count('WAYLAND_DEBUG="1"') == 6, (
+        "a jv-hud is started with WAYLAND_DEBUG=1 outside the two probes that "
+        "read that log — the photographs should be of a HUD doing its job, not "
+        "one writing a protocol log"
+    )
+    body = shoot.split("\ndef main(")[-1]
+    assert "WAYLAND_DEBUG" not in body, (
+        "the shot loop mentions WAYLAND_DEBUG: every PNG in docs/hud/screens "
+        "is taken of a HUD that is not being traced, and that is the half of "
+        "this rule the sheet depends on"
     )
 
 
@@ -2368,7 +2390,7 @@ def declared_boxes() -> dict[tuple[int, int], str]:
         (sheet.DESK_WIDTH, sheet.DESK_HEIGHT): "the whole desk",
         shot_box(): "the surface the committed PNGs were photographed against",
     }
-    for out in sheet.OUTPUTS:
+    for out in sheet.ALL_OUTPUTS:
         boxes.setdefault((out["width"], out["height"]), f"the {out['role']} monitor")
     return boxes
 
@@ -2944,8 +2966,10 @@ POLL_CEILING_S = 1.0
 STRETCH_CEILING_S = 300.0
 
 # And what the whole pass can cost if every one of them goes pathological:
-# twelve engines, six of them the shot loop, 1593 s — 26.6 minutes against a
-# measured 3m20s. So this is a bound on the run that never happens and not a
+# thirteen engines, six of them the shot loop, 1714 s — 28.6 minutes against a
+# measured 3m20s. (Twelve and 1593 s before D68's granted-width probe, which
+# is one more engine and 121 s of it: two process starts, a bounded wait for
+# the narrow output to draw, and two stops.) So this is a bound on the run that never happens and not a
 # budget for the one that does. Where it goes is the answer D58 was opened
 # for: 43% is `READY_TIMEOUT_S`, twenty-two waits of 30 s for a process to
 # say one line, and D53 measured that a warm engine here says it in 0.40 s.
@@ -2972,7 +2996,12 @@ CHARGED_HELPERS = {
 # The three functions of `shoot.py` that spend waits of their own rather than
 # lending them to a caller. Every wait site in them has to fall inside one of
 # the stretches below.
-WAITING_CALLERS = {"main", "probe_idle_frames", "probe_click_through"}
+WAITING_CALLERS = {
+    "main",
+    "probe_idle_frames",
+    "probe_click_through",
+    "probe_surface_granted",
+}
 
 
 def shoot_text() -> str:
@@ -3126,13 +3155,17 @@ def stretches() -> dict[str, tuple[int, int, str]]:
             if isinstance(n, ast.For) and ast.unparse(n.iter) == "sheet.SHOTS"
         )
     )
-    out["click"] = span(
-        next(
-            n
-            for n in tree.body
-            if isinstance(n, ast.FunctionDef) and n.name == "probe_click_through"
+    for fn, engine in (
+        ("probe_click_through", "click"),
+        ("probe_surface_granted", "granted"),
+    ):
+        out[engine] = span(
+            next(
+                n
+                for n in tree.body
+                if isinstance(n, ast.FunctionDef) and n.name == fn
+            )
         )
-    )
     return out
 
 
@@ -3252,10 +3285,10 @@ def test_no_engine_of_this_harness_can_hang_for_an_afternoon():
     for engine, worst in sorted(ceilings.items()):
         assert worst <= STRETCH_CEILING_S, (engine, worst)
     assert run_ceiling() <= RUN_CEILING_S, ceilings
-    # Twelve engines — six shots and six probes — so the run bound is not the
-    # sum of twelve stretch bounds. It is asserted below the product for the
-    # reason `shellload.sh`'s is: a reader who saw only the per-engine number
-    # would be reading a twelfth of the true worst case.
+    # Thirteen engines — six shots and seven probes — so the run bound is not
+    # the sum of thirteen stretch bounds. It is asserted below the product for
+    # the reason `shellload.sh`'s is: a reader who saw only the per-engine
+    # number would be reading a thirteenth of the true worst case.
     engines = len(sheet.SHOTS) + len(ceilings) - 1
     assert RUN_CEILING_S <= STRETCH_CEILING_S * engines
     # And the ceiling is a ceiling rather than a budget: the measured pass is
@@ -3439,3 +3472,173 @@ def test_the_ceiling_has_one_engine_for_every_shell_this_harness_starts():
         f"{started} quickshells are started and the ceiling has {len(spans)} "
         f"engines: {sorted(spans)}"
     )
+
+
+# ------------------- the output that is not a monitor, and what it is for (D68)
+#
+# D66 taught the HUD that a 300 px corner does not fit on every screen —
+# `plateRoomPx` is `min(surface.width, screen.width) - 2 x insetPx`, and the
+# plates are capped by it. Every word of that was measured in a QML engine,
+# against a plain `Item` whose `width` a test assigns, and the sentence it
+# rests on is about a COMPOSITOR: a layer-shell surface anchored to one edge
+# is granted the width it asks for whether or not the output is that wide.
+# This harness is the only place in the repo that can ask a compositor
+# anything, and until D68 it had three outputs, all of them wider than the
+# surface, so the question was never put.
+#
+# These gates hold the two halves of putting it: that the narrow output is
+# still narrow (and still outside the desk, so the nine older pictures are
+# untouched by it), and that the instrument which reads the answer is reading
+# the compositor's event rather than the client's request.
+
+
+def test_the_narrow_output_is_narrower_than_the_surface_it_asks_about():
+    """It has exactly one job. An output that grew past 300 px would leave
+    every check in `shoot.py` green with nothing anywhere asking what the HUD
+    does when the screen is smaller than the corner — and the picture would
+    still be committed, under a caption saying it was."""
+    assert sheet.NARROW["width"] == sheet.NARROW_W
+    assert sheet.NARROW_W < sheet.SURFACE_W, (
+        f"the narrow output is {sheet.NARROW_W}px and the surface asks for "
+        f"{sheet.SURFACE_W}px — it is not narrow, so it asks nothing"
+    )
+    # And wide enough to still be a corner: the plates are capped at the room
+    # the output leaves after both insets, and a photograph of nothing at all
+    # answers the question no better than a wide screen does.
+    assert sheet.NARROW_W - 2 * sheet.INSET > 0, (
+        "the narrow output leaves no room between the insets, so the HUD has "
+        "nowhere to draw and the shot is of an empty screen"
+    )
+
+
+def test_the_narrow_output_is_not_one_of_ares_monitors():
+    """The desk is `OUTPUTS` and ares is the desk. The narrow output is an
+    instrument, and the moment it joins that list `DESK_WIDTH` moves — which
+    re-photographs nine committed screens to answer a question about a tenth,
+    and makes `check_desk_is_bare` a claim about a machine nobody owns.
+    """
+    assert sheet.NARROW not in sheet.OUTPUTS
+    assert sheet.ALL_OUTPUTS == [*sheet.OUTPUTS, sheet.NARROW]
+    assert sheet.NARROW["x"] >= sheet.DESK_WIDTH, (
+        f"the narrow output starts at x={sheet.NARROW['x']} and the desk is "
+        f"{sheet.DESK_WIDTH}px wide — it is inside the desk capture, so every "
+        "desk shot in this sheet is now a picture of four screens"
+    )
+    roles = [o["role"] for o in sheet.ALL_OUTPUTS]
+    assert len(roles) == len(set(roles)), f"two outputs share a role: {roles}"
+
+
+def test_the_compositor_is_given_the_narrow_output_too():
+    """The config and the backend have to agree with each other, and neither
+    is written where the other can see it: `sway_config()` names the outputs
+    and `WLR_HEADLESS_OUTPUTS` says how many the backend makes. A config
+    naming four against a backend making three leaves the fourth unconfigured
+    at whatever size wlroots defaults to — which is a real screen, drawn on,
+    and not the one this asks about."""
+    line = (
+        f"output {sheet.NARROW['name']} mode "
+        f"{sheet.NARROW['width']}x{sheet.NARROW['height']} "
+        f"pos {sheet.NARROW['x']} 0"
+    )
+    assert line in sheet.sway_config(), f"the compositor is never told about {line!r}"
+    assert "len(sheet.ALL_OUTPUTS)" in driver_text(), (
+        "ops/ralph/hudscreens.sh writes its own WLR_HEADLESS_OUTPUTS instead "
+        "of asking the sheet how many outputs there are"
+    )
+    assert not re.search(r"^export WLR_HEADLESS_OUTPUTS=\d", driver_text(), re.M), (
+        "ops/ralph/hudscreens.sh still has a literal output count in it"
+    )
+
+
+# Verbatim from a real run of this harness: the four layer surfaces of one
+# jv-hud being configured, on a compositor with ares' three monitors and the
+# 280 px output. Kept as text for the reason the frame counter's sample is —
+# it is the thing the reader has to survive, and a hand-idealised line would
+# not be.
+GRANTED_LOG = """\
+[3395049.239] {Default Queue} zwlr_layer_surface_v1#22.configure(1, 300, 826)
+[3395049.301] {Default Queue} zwlr_layer_surface_v1#31.configure(2, 300, 826)
+[3395049.354] {Default Queue} zwlr_layer_surface_v1#38.configure(3, 300, 826)
+[3395049.402] {Default Queue} zwlr_layer_surface_v1#45.configure(4, 300, 826)
+"""
+
+
+def test_the_configure_reader_reads_a_real_wayland_log():
+    """The instrument D68 rests on. It is a regex over a debug log, which is
+    not a stable interface — and the way it fails is silent: a pattern that
+    stopped matching returns an empty dict, and "no surface was configured
+    wrongly" is true of one of those."""
+    sizes = sheet.layer_surface_sizes(GRANTED_LOG)
+    assert sizes == {22: (300, 826), 31: (300, 826), 38: (300, 826), 45: (300, 826)}
+    # Both separators, for COMMIT_RE's reason: libwayland has printed the
+    # object id as `@` and the build under this harness prints `#`.
+    assert sheet.layer_surface_sizes(
+        "[1.0] zwlr_layer_surface_v1@7.configure(1, 300, 826)"
+    ) == {7: (300, 826)}
+    # The LAST configure per surface, because a surface is reconfigured
+    # whenever anything about it changes and what the probe asks about is the
+    # size it settled at.
+    assert sheet.layer_surface_sizes(
+        "[1.0] zwlr_layer_surface_v1@7.configure(1, 300, 826)\n"
+        "[2.0] zwlr_layer_surface_v1@7.configure(2, 280, 826)\n"
+    ) == {7: (280, 826)}
+
+
+def test_the_configure_reader_reads_the_answer_and_not_the_question():
+    """The whole point is the difference between what the client asked for
+    and what the compositor gave it. A reader that counted `set_size` would
+    report `300x826` on every output forever — the HUD's own request, read
+    back as if it were the compositor agreeing to it, which is exactly the
+    assumption D68 exists to stop making."""
+    asked = (
+        "[1.0]  -> zwlr_layer_surface_v1@7.set_size(300, 826)\n"
+        "[1.1]  -> zwlr_layer_surface_v1@7.ack_configure(1)\n"
+        "[1.2]  -> zwlr_layer_shell_v1@6.get_layer_surface("
+        "new id zwlr_layer_surface_v1@7, wl_surface@5, wl_output@4, 2, \"jv-hud\")\n"
+    )
+    assert sheet.layer_surface_sizes(asked) == {}
+    # And nothing else on the socket. The idle probe's traffic is the busiest
+    # thing in these logs and none of it is a layer-surface configure.
+    assert sheet.layer_surface_sizes(REAL_WAYLAND_LOG) == {}
+
+
+def test_the_granted_probe_actually_runs():
+    """A probe nobody calls measures nothing, and this one has no picture to
+    be missing: the sheet would be complete and the question unasked."""
+    body = shoot_text().split("\ndef main(")[-1]
+    assert "probe_surface_granted(stage, background)" in body, (
+        "tools/hudscreens/shoot.py never calls probe_surface_granted, so "
+        "nothing in a run of this harness reads what width the compositor "
+        "granted (PLAN D68)"
+    )
+
+
+def test_the_granted_probe_counts_one_surface_per_output():
+    """The control. Every way of breaking this probe — a regex that stopped
+    matching, a shell that mapped nothing, a log nobody wrote — comes back as
+    an empty dict, and an empty dict has no surface configured at the wrong
+    size in it. So the census is the measurement: one layer surface per
+    output, or the probe says so and stops."""
+    probe = shoot_text().split("\ndef probe_surface_granted(")[-1].split("\ndef ")[0]
+    assert "len(sizes) != len(sheet.ALL_OUTPUTS)" in probe, (
+        "the granted-width probe no longer insists on one configured surface "
+        "per output, so it passes on a log it never read"
+    )
+    assert "sheet.layer_surface_sizes(" in probe
+
+
+def test_the_narrow_output_is_photographed():
+    """D68 is two claims and the probe above is one of them. The other is a
+    picture: what the corner LOOKS like when the screen is narrower than it
+    is, which no measurement substitutes for and which this sheet exists to
+    provide."""
+    shots = [s for s in sheet.SHOTS if "narrow" in s["captures"]]
+    assert shots, (
+        "no shot photographs the narrow output — the HUD on a screen smaller "
+        "than its own surface is measured and still never seen (PLAN D68)"
+    )
+    for shot in shots:
+        assert shot["lit"], (
+            f"{shot['file']} photographs the narrow output dark, which is a "
+            "picture of a bare desktop and says nothing about the corner"
+        )

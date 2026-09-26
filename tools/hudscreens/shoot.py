@@ -1,7 +1,8 @@
 """Photograph the REAL HUD on a real compositor, and measure what it drew.
 
 Driven by `ops/ralph/hudscreens.sh`, which is what puts a wlroots
-compositor with ares' three monitors underneath it (PLAN A30). This half
+compositor with ares' three monitors — and, since D68, one output narrower
+than the HUD's own surface — underneath it (PLAN A30). This half
 does the rest: for each shot in `sheet.py` it starts a real jarvisd, runs
 the real `jv-hud` — quickshell, layer-shell, its own read-only bridge —
 publishes the shot's frames onto the bus, photographs every monitor with
@@ -146,12 +147,18 @@ def usable_rects():
     return {w["output"]: w["rect"] for w in swaymsg("-t", "get_workspaces")}
 
 
-def check_outputs_are_ares_monitors() -> None:
+def check_the_outputs_are_the_ones_the_sheet_declares() -> None:
+    """Every output, which since D68 is not every monitor: ares' three plus
+    the 280 px one that exists to ask what the HUD does on a screen narrower
+    than its own surface. Exact equality in both directions — a fourth output
+    the compositor invented, or a narrow one it never made, would leave the
+    checks below measuring a machine the sheet does not describe.
+    """
     got = {
         o["name"]: (o["current_mode"]["width"], o["current_mode"]["height"], o["rect"]["x"])
         for o in swaymsg("-t", "get_outputs")
     }
-    want = {o["name"]: (o["width"], o["height"], o["x"]) for o in sheet.OUTPUTS}
+    want = {o["name"]: (o["width"], o["height"], o["x"]) for o in sheet.ALL_OUTPUTS}
     if got != want:
         raise Fail(f"compositor has outputs {got}, sheet declares {want}")
 
@@ -175,7 +182,11 @@ def check_no_space_reserved() -> None:
     with ExclusionMode.Auto took HEADLESS-1's usable area to 2560x880.
     """
     rects = usable_rects()
-    for out in sheet.OUTPUTS:
+    # Every output, not every monitor (D68). The narrow one is where an
+    # exclusive zone would do the most damage — 300 px of reserved corner on
+    # a 280 px screen is the whole screen — so it is the last output this
+    # check should skip.
+    for out in sheet.ALL_OUTPUTS:
         r = rects.get(out["name"])
         if r is None:
             raise Fail(f"{out['name']} has no workspace at all")
@@ -475,6 +486,31 @@ def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: boo
         raise Fail(
             f"{name}: right-hand gap is {gap}px, not the {sheet.INSET}px inset "
             "personality/theme.toml declares"
+        )
+    # AND THE OTHER EDGE, on a screen narrower than the corner (PLAN D68).
+    #
+    # The box check above is vacuous there and silently so: `left` comes out
+    # NEGATIVE on a 280 px output (280 - 300 - 16 = -36), because the surface
+    # really does hang off the left of the world and the check is written
+    # about the surface. What has to hold on such a screen is not a fact
+    # about the surface at all — it is D66's clamp: `plateRoomPx` is
+    # `min(surface.width, screen.width) - 2 x insetPx`, so a plate may reach
+    # to the inset and no further, and a plate that reached past it would be
+    # laying a sentence out in the part of the surface that is not on any
+    # screen. Same two pixels of anti-aliasing slack the right-hand gap gets.
+    #
+    # It is asserted on EVERY output rather than only the narrow one, because
+    # on a monitor wider than the corner it is a weaker restatement of the box
+    # check and costs nothing; the day it bites is the day a surface stops
+    # being granted what it asks for.
+    if x0 < sheet.INSET - 2:
+        raise Fail(
+            f"{name}: drew from x{x0}, inside the {sheet.INSET}px left inset of "
+            f"a {w}px screen. On an output narrower than the "
+            f"{sheet.SURFACE_W}px surface the plates are capped by "
+            "`plateRoomPx` and not by the surface, so this is that clamp "
+            "failing on a real compositor — the HUD is drawing where the "
+            "screen is not"
         )
 
 
@@ -1623,6 +1659,140 @@ def start_client(role: str, out: dict, stage: Path, clients: list) -> dict:
     raise Fail(f"the {role} window never appeared on {out['name']}")
 
 
+# ------------------------------------------- the granted-width probe (D68)
+
+
+def probe_surface_granted(stage: Path, background: np.ndarray) -> None:
+    """What size the compositor GAVE a surface that asked for 300 px on a
+    280 px screen (PLAN D68).
+
+    `shell.qml` declares a 300 px corner on every monitor it can see, and
+    since D66 it clamps its plates with
+    `min(surface.width, screen.width) - 2 x insetPx` — a line whose whole
+    reason for existing is that a layer-shell surface anchored to one edge is
+    granted the width it asks for whether or not the output is that wide, so
+    on a narrow screen the surface overhangs the left edge and the plates
+    have to know. That sentence is in three comments in this repo and had
+    never been observed. D66 measured the clamp in a QML engine, against a
+    plain `Item` whose `width` a test assigns, and a test assigning a width
+    is not a compositor configuring a surface.
+
+    PIXELS CANNOT ANSWER IT, which is why this is a probe and not another
+    photograph. A surface clamped by wlroots to 280 and a surface granted 300
+    over a 280 px screen leave the stack in exactly the same place: anchored
+    16 px off the right edge, 248 px of room, the same plate, the same
+    picture. The two readings differ in one place only — the `configure`
+    event the compositor sends — and the HUD's own WAYLAND_DEBUG log carries
+    it, the same log the idle probe counts commits in.
+
+    So: one shell, on all four outputs, lit by one real heartbeat, and every
+    layer surface it was given read back out of the socket log. The census is
+    the instrument's control — a regex that stopped matching, or a shell that
+    mapped nothing, both come back as an empty dict, and "no surface was
+    configured wrongly" is true of both. One surface per output, or this
+    probe says nothing.
+    """
+    log("granted probe: what the compositor gave a 300px surface on a 280px screen")
+
+    bus_addr = str(stage / "granted.sock")
+    broker = Proc(
+        "jarvisd",
+        [os.environ["JARVISD_BIN"]],
+        stage / "granted-jarvisd.log",
+        dict(os.environ, JARVIS_BUS=bus_addr),
+    )
+    hud = None
+    try:
+        broker.wait_for("jarvisd listening on")
+        hud = Proc(
+            "jv-hud",
+            [os.environ["JV_HUD_BIN"]],
+            stage / "granted-hud.log",
+            dict(os.environ, JARVIS_BUS=bus_addr, WAYLAND_DEBUG="1"),
+        )
+        hud.wait_for("Configuration Loaded")
+
+        # One open microphone. The narrowest thing this HUD can say — 164 px
+        # of `MIC` against 248 px of room — on purpose: the plate must not be
+        # the thing under test. What is under test is whether the SURFACE it
+        # sits on was given 300 px, and a plate that fitted with room to
+        # spare cannot be mistaken for evidence about the clamp.
+        publish_shot({"frames": [sheet.MIC_OPEN]}, bus_addr)
+
+        ppm = stage / "granted-narrow.ppm"
+        deadline = time.monotonic() + BLIND_TIMEOUT_S
+        box = None
+        while time.monotonic() < deadline:
+            capture("narrow", ppm)
+            img = read_ppm(ppm)
+            box = drawn_box(img, background)
+            if box is not None:
+                break
+            # The heartbeat again while we look, for `wait_for_drawing`'s
+            # reason: jv-ears declares `period_s: 5` and MicState believes a
+            # beat for two of them, which a slow capture loop can outlast.
+            feed_snapshots(1.0, [sheet.MIC_OPEN], bus_addr)
+        if box is None:
+            raise Fail(
+                f"the HUD drew nothing on the {sheet.NARROW_W}px output in "
+                f"{BLIND_TIMEOUT_S:.0f}s with the microphone open. Either the "
+                "surface never mapped there — which is its own news, since "
+                "`Variants` is supposed to give every screen one — or the "
+                "clamp left the plate with no room at all"
+            )
+        narrow = sheet.output_by_role("narrow")
+        check_corner(f"granted {narrow['name']}", img, background, True)
+        log(f"  the corner on {narrow['name']} ({narrow['width']}px): {box}")
+
+        sizes = sheet.layer_surface_sizes(hud.since(0))
+        if len(sizes) != len(sheet.ALL_OUTPUTS):
+            raise Fail(
+                f"{len(sizes)} layer surfaces were configured in the HUD's "
+                f"Wayland log and this compositor has {len(sheet.ALL_OUTPUTS)} "
+                f"outputs ({sizes}) — so this probe is not reading the traffic "
+                "it thinks it is, and whatever it says about the width below "
+                "is about a surface nobody can name"
+            )
+        asked = (sheet.SURFACE_W, sheet.SURFACE_H)
+        wrong = {oid: got for oid, got in sizes.items() if got != asked}
+        if wrong:
+            raise Fail(
+                f"the HUD asked for {asked[0]}x{asked[1]} on every output and "
+                f"the compositor configured {wrong} — so a layer surface is "
+                f"NOT granted the size it asks for, and the three comments "
+                "that say it is (shell.qml's `plateRoomPx`, sheet.py's "
+                "narrow output, this probe) are wrong. The clamp in "
+                "`plateRoomPx` is then doing nothing, because `surface.width` "
+                "is already the screen's"
+            )
+        # The line itself, once, because everything above is a count. A
+        # census that came back right for the wrong reason — a regex matching
+        # something else that happens to be four per run — is exactly the
+        # failure this probe is built against, and one verbatim line in the
+        # run's output is what lets a reader check the instrument rather than
+        # trust it. It is also where `tools/tests/test_hudscreens.py` gets
+        # the real text its reader is graded on.
+        sample = next(
+            (
+                line.strip()
+                for line in hud.since(0).splitlines()
+                if sheet.LAYER_CONFIGURE_RE.search(line)
+            ),
+            "",
+        )
+        log(f"  the line that says so: {sample}")
+        log(
+            f"  all {len(sizes)} surfaces configured {asked[0]}x{asked[1]} — "
+            f"granted as asked, including on the {narrow['width']}px output, "
+            f"so the surface overhangs its left edge by "
+            f"{sheet.SURFACE_W - narrow['width'] + sheet.INSET}px"
+        )
+    finally:
+        if hud is not None:
+            hud.stop()
+        broker.stop()
+
+
 # ---------------------------------------------------------------------- main
 
 
@@ -1673,9 +1843,12 @@ def main() -> int:
     )
 
     with cost.phase("checks"):
-        check_outputs_are_ares_monitors()
+        check_the_outputs_are_the_ones_the_sheet_declares()
         bare_focus = seat_focus()
-        log(f"three monitors up; the seat's keyboard is on {bare_focus}")
+        log(
+            f"three monitors and the narrow output up; the seat's keyboard is "
+            f"on {bare_focus}"
+        )
 
         # The desktop with no HUD on it at all. The quiet shot is compared
         # against THIS, not against an idea of what dark looks like.
@@ -1892,6 +2065,8 @@ def main() -> int:
         probe_idle_frames(stage, background)
     with cost.phase("click"):
         probe_click_through(stage, background)
+    with cost.phase("granted"):
+        probe_surface_granted(stage, background)
 
     expected = sheet.all_files()
     if written != expected:
