@@ -15149,3 +15149,85 @@ is not worth chasing.)
   for whoever runs next: this branch is hand-driven in parallel — check `git
   log` against the journal before assuming the tree is the one the last entry
   describes.
+
+## 2026-09-26 — E9: the drawing and the ember that moves over it
+
+- **what**: fixed both halves of E9 — `pkgs/jarvis-wallpaper` now COMPOSES a
+  render per geometry instead of rasterizing one drawing at five sizes, and
+  `shell/jv-wall` anchors its moving ember to where `PreserveAspectCrop`
+  actually put the art instead of to a percentage of its own surface.
+- **why it was wrong, measured rather than suspected.** The art was one
+  2560x1440 SVG. `resvg --width 2560 --height 1080` over an SVG with no
+  `viewBox` rasterizes 1:1 and keeps the top 1080 rows, so on a 21:9 panel the
+  drawn instrument stayed at y=980 while the shell anchored at 68.1% of an
+  1080 px surface — 245 px apart, the comet riding a ring that is not the drawn
+  one — and the wordmark at y=1330 was not in the file at all. On a geometry
+  with no bespoke render the crop scaled and centred the art and the moving head
+  landed 126 px beside the painted one. ares' three monitors are all 16:9, so
+  the two agreed by construction on every screen this machine has and nowhere
+  else. **E8's sheet is the only reason anybody knows.**
+- **the plan's own suggestion did not work, and this is why.** E9 said "an SVG
+  with a `viewBox` and a deliberate `preserveAspectRatio`". Neither value of
+  that attribute is the wallpaper: `meet` letterboxes a 16:9 drawing into 21:9
+  and leaves bands of nothing, `slice` covers and crops the wordmark off the
+  bottom, which is the defect again. A drawing whose composition is a FUNCTION
+  of the canvas is the only thing that loses nothing, so the SVG is generated
+  per geometry — which is also, exactly, E6's "render any geometry on demand"
+  minus the list.
+- **what is now shared, and where.** Three fractions —
+  `instrumentX`/`instrumentY`/`instrumentR` — are the one contract in this repo
+  between a Nix-generated SVG and a QML surface. `test_wallshots.py` reads them
+  out of `pkgs/jarvis-wallpaper/default.nix` and out of `shell.qml` and fails if
+  they differ. It has to be a third suite (invariant 1): every assertion the
+  sheet can make is about the shell's OWN anchor, so a wallpaper with two
+  instruments in it photographs perfectly and passes every check on it. That is
+  precisely what it did for a week.
+- **what the sheet gained.** One number that is not the shell's own: `paint`,
+  the size the art is actually painted at on that output. On six shots it is the
+  output's size; on `07-fallback.png` it is 1820x1024 of drawing on a 1280x1024
+  screen, which is a number no surface reading percentages of itself can
+  produce. That is what makes the shell half CHECKED rather than described — an
+  anchor that went back to `width * 0.734` would still pass everything else on
+  six of the seven.
+- **a visible, deliberate change on the 1080p panels.** Composed instead of
+  scaled means the wordmark is set at its own 46 px rather than at 0.75 of it
+  and the grid keeps its 64 px pitch instead of shrinking to 48. Type and
+  texture are physical sizes; only the composition is a fraction of the canvas.
+  `05-side.png` moved 17% for that reason and it is in the README.
+- **THE BUG THIS ITERATION SHIPPED FOR ONE BUILD, because it is the useful
+  part.** `awk -v sub=...` names a gawk builtin. gawk refused the whole program
+  with one line on stderr, `eval ""` set nothing, and every coordinate in the
+  drawing expanded to the empty string: `translate( )`, `r=""`, `y=""`. resvg
+  IGNORES an invalid attribute rather than failing, so it rendered a wallpaper
+  with the instrument collapsed into the top-left corner and **exited 0**, and
+  so did the package, and so did `nix build`. Nothing was red. What caught it
+  was running `wallshots.sh` and LOOKING at the PNG — the sheet doing the one
+  job a sheet has. `compose()` now refuses empty coordinates the way the font
+  check at the bottom of that file already refuses a substituted face; the
+  general hole, that no gate in this repo reads a pixel of the art, is raised as
+  **E11**.
+- **tests**: `tools` 834 passed (was 833); `bash ops/ralph/verify.sh` — 4 gates
+  over 13 paths, 181.6 s. Three green (tools, nixtest, shellload); `wallshots`
+  red before the commit and GREEN after it, which is what a deliberate change to
+  a photographed surface looks like — the gate compares against `HEAD:docs/wall`
+  and committing the new PNGs is the refresh. Every assertion inside that gate
+  passed in the red run; only the against-HEAD comparison differed. Re-ran it
+  after committing: "all 7 shots match the sheet committed at HEAD:docs/wall".
+  build: `nixos-rebuild build --flake .#ares` green. Never tested, never
+  switched. No schema, no jv-act, no boot path, no pins.
+- **files**: pkgs/jarvis-wallpaper/default.nix, shell/jv-wall/shell.qml,
+  tools/wallshots/scene/{Field.qml,tst_shots.qml}, tools/tests/test_wallshots.py,
+  docs/wall/{README.md,01..07*.png}, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- commit: 97d6cd9
+- next: **E11** (the art has no gate that looks at it; `hudsheet.py` already
+  decodes PNGs in pure Python, so sampling each render at the three fractions is
+  cheap and would have caught the gawk bug without a human), then **E10** (the
+  geometry list as a package argument `hosts/ares` fills, which is the honest
+  end of E6's second half), then **D82**, **D79**, **D71**, **B88**, **B95**,
+  **D63**, **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D48**,
+  **D45**. E6's remaining half is still the frame-count MEASUREMENT, which wants
+  a compositor and not a sheet. **D81** is the GUARDRAILS wording exit 3 needs
+  and it wants a HUMAN; **D67** and **D65**'s greeter half do too. NOTE for
+  whoever runs next: this branch is hand-driven in parallel — check `git log`
+  against the journal before assuming the tree is the one the last entry
+  describes.

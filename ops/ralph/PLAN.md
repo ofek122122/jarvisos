@@ -64,30 +64,60 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       sample a running animation.
       Raised by it: **E9** (below), which the sheet FOUND.
 
-- [ ] E9. **The motion's anchor and the art's instrument come apart on any
-      output the art is not composed for.** Found by E8's sheet, and
-      photographed in `docs/wall/06-ultrawide.png` and `07-fallback.png`.
-      `shell.qml` anchors the glow and the comet at 73.4% x 68.1% of the
-      SURFACE with a radius of `min(w,h) * 0.39`; that is the art's instrument
-      only while the art is rasterized 1:1 at this output's aspect ratio.
-      Measured, on the two geometries where it is not:
-      · **2560x1080** — `resvg --width 2560 --height 1080` over a drawing
-        composed at 2560x1440 rasterizes at 1:1 and keeps the TOP 1080 rows. So
-        the art's instrument stays at y=980 and the shell anchors at y=735:
-        245 px apart, and the comet rides a ring that is not the drawn one. The
-        wordmark, at y=1330, is not in the file at all.
-      · **1280x1024** (no bespoke render) — `PreserveAspectCrop` scales and
-        centres the primary art, and the moving head lands beside the painted
-        one instead of on it.
-      Two halves, and they are separable. The PACKAGE half is
-      `pkgs/jarvis-wallpaper`: an SVG with a `viewBox` and a deliberate
-      `preserveAspectRatio` renders any aspect without losing the wordmark, and
-      it is what E6's "render any geometry on demand" wants anyway. The SHELL
-      half is that the anchor should be derived from where the art actually
-      landed (the `PreserveAspectCrop` transform), not from a percentage of the
-      surface. ares' three monitors are all 16:9 and all fine, so this is
-      correctness for the machines this OS is not yet on — and `docs/wall` is
-      the gate that will prove either fix.
+- [x] E9. **The motion's anchor and the art's instrument came apart on any
+      output the art was not composed for** (97d6cd9). Found by E8's sheet,
+      photographed in `docs/wall/06-ultrawide.png` and `07-fallback.png`, and
+      both of those are now pictures of it fixed. Both halves landed, because
+      neither is sufficient:
+      · **the package** composes rather than scales. One `compose()` in
+        `pkgs/jarvis-wallpaper` writes an SVG laid out for exactly its canvas —
+        instrument at `instrumentX` x `instrumentY` of it, rings at
+        `instrumentR` of its shorter side, wordmark a fixed 110 px up from its
+        own bottom edge — and resvg rasterizes each at its own declared size.
+        There is no `--width`, no `--height` and no `preserveAspectRatio` left
+        anywhere in the package, and a test asserts that absence, because the
+        flag coming back is how this regresses: it builds, every file is the
+        right number of pixels, and the drawing inside two of them is cropped.
+      · **the shell** takes its anchor from `PreserveAspectCrop`'s painted rect,
+        asked of the engine, instead of from a percentage of its own surface.
+        Identical expression on every composed geometry; 1820x1024 of drawing on
+        a 1280x1024 screen on the one that falls back.
+      The three fractions are now the ONE contract this repo has between a
+      Nix-generated SVG and a QML surface, and `test_wallshots.py` reads them out
+      of both files. Nothing else could have: every assertion the sheet makes is
+      about the shell's own anchor, so a wallpaper with two instruments in it
+      photographs perfectly and passes. The sheet gained one number that is not
+      the shell's own — `paint`, the size the art landed at — which is what makes
+      the shell half checked rather than described.
+      Raised by it: **E10** and **E11** below.
+
+- [ ] E10. **The geometry list is still a list** — E6's remaining "render any
+      geometry on demand" half, and cheaper than it was. Every render is now
+      COMPOSED at its own canvas (E9), so adding a geometry to
+      `for geom in 2560x1440 1920x1080 3840x2160 2560x1080 1366x768` is a pure
+      data change rather than a new crop to think about. What is still true is
+      that an output not on the list gets the 2560x1440 primary art scaled and
+      cropped — correct now, since the shell anchors to where that landed, but
+      still not composed for it. Two ways out and they are not equal: make the
+      list a package ARGUMENT that `hosts/ares` fills from its own declared
+      outputs (declarative, fits D4/E5, still a list but the RIGHT list), or
+      rasterize on demand at runtime, which means jv-wall spawning resvg and
+      wants a human on invariant 3 first. Prefer the first.
+
+- [ ] E11. **Nothing in this repo reads a pixel of the art.** E9 shipped with a
+      bug in it for one build, and the way it was caught was a human looking at
+      a PNG. `-v sub=...` names a gawk builtin, gawk refused the whole program on
+      stderr, `eval ""` set nothing, and every coordinate in the drawing expanded
+      to the empty string — `translate( )`, `r=""`, `y=""`. resvg ignores an
+      invalid attribute rather than failing, so it rendered a wallpaper with the
+      instrument collapsed into the top-left corner, exited 0, and the package
+      built. `compose()` now refuses empty coordinates, which closes THAT hole;
+      the general one is that `pkgs/jarvis-wallpaper` has no gate that looks at
+      its output at all. `tools/hudsheet.py` already decodes PNGs in pure Python,
+      so a test could sample each render at `instrumentX` x `instrumentY` and
+      assert it is warm, and at a corner and assert it is `ground` — which is
+      exactly what the degenerate render failed. It would also be the first thing
+      in this repo that checks the art rather than the shell over it.
 
 - [ ] E7. **Creative — Jarvis-aware desktop**: let the desktop reflect the
       assistant. e.g. the wallpaper's ember reacting to speech.state, a
