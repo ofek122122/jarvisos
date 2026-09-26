@@ -165,17 +165,50 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       green on a mutation first — every `y` on ares is 0 — and now run the real
       function against a desk nobody owns.
 
-- [ ] E15. **Nothing checks that ares' declared monitors do not OVERLAP, and
-      the sheet's three do.** `test_the_monitors_are_ares_monitors` proves no
-      two of `sheet.OUTPUTS` overlap (E14), but that is a claim about the
-      headless harness; `hosts/ares/outputs.nix` itself has no such gate, and
-      with a `y` in hand two monitors can now be declared on top of each other
-      — which is a legal Nix file, a successful build, bespoke art composed for
-      both, and a doctor that PASSES if niri happens to lay them out the way
-      they were declared. The check belongs in `test_outputs.py` (pure
-      geometry, one pairwise loop) and wants a decision about GAPS, which are
-      legal and which ares has: the two 1080p panels leave 360 px of no screen
-      under them.
+- [x] E15. **Nothing checked that ares' declared monitors do not OVERLAP**
+      (e3e5561). E14 is what made the hole reachable: before the declaration
+      had a `y`, every monitor was implicitly at 0 and a collision needed two
+      equal `x`es; with a full corner any two entries can be declared on top of
+      each other, and it is a legal Nix file, a successful build, bespoke art
+      composed for both, and a `jarvis-doctor` that reports PASS — check 5
+      compares each connector's mode and corner on its own and never asks
+      whether the layout they add up to exists.
+      **The refusal is in `pkgs/jarvis-doctor`, not in the file that declares
+      the monitors**, and that is the decision: the wallpaper must NOT have it
+      (`tools/wallshots/outputs.nix` deliberately stacks a 21:9 CANVAS on the
+      primary — those entries are sizes to compose at, not monitors on a desk),
+      and a `let` around the declaration is a check every consumer can import
+      past. It reports the intersection as a RECTANGLE — "DP-1 and DP-2 overlap
+      by 1x1080 px at 4479,0" — because a 1 px collision from a mistyped `x`
+      and a panel declared inside another are different mistakes.
+      **The GAP decision the item asked for: gaps are legal, and ares has one**
+      (1.4 Mpx of the bounding box is no screen at all, the 360 px under each
+      1080p panel beside a 1440p primary), so a rule demanding the outputs tile
+      a rectangle would refuse this machine. Touching edges are legal too —
+      DP-1 begins at 2560, exactly where HDMI-A-1 ends — so the comparison is
+      strict and the gate probes the LEGAL desk as well as the illegal one.
+      Two scopes, two gates: `test_outputs.py` asks it of this declaration with
+      no nix (and runs the rule against desks nobody owns, because every `y` on
+      ares is 0 and a blind predicate is green on the real list), `nixtest.sh`
+      asks it of ANY declaration by overriding the package's `outputs` and
+      forcing `.outPath`. Its colliding pair is not adjacent in the list and
+      collides by one row, so a loop that only compares neighbours fails it.
+      9 mutations, 9 caught — including DP-2 declared one pixel into DP-1,
+      which now stops `nixos-rebuild build`.
+      Raised by it: **E16** below.
+
+- [ ] E16. **`x` and `y` are integers by nobody's check.** `width` and
+      `height` have a named refusal in `pkgs/jarvis-wallpaper` (E10: a quoted
+      "1920" renders fine and then stops de-duplicating two identical panels),
+      and the position has none. Before E15 a quoted `x = "2560"` was invisible
+      — `toString` produced the same TSV row — and now it is an error, but the
+      wrong kind: Nix says "cannot add a string to an integer" from inside the
+      overlap arithmetic, naming no output and no file. The fix is the same
+      shape as the wallpaper's, in `pkgs/jarvis-doctor` where the position is
+      spent: one throw naming the entry, and a `nixtest.sh` probe. Note also
+      what is deliberately NOT checked: a layout may be DISCONNECTED (a monitor
+      declared at x=9000 with nothing beside it is legal and E15's gate accepts
+      it), because a desk is any arrangement of rectangles that do not collide.
 
 - [x] E11. **Nothing in this repo read a pixel of the art** (774e7d1).
       `tools/artsample.py` + `tools/tests/test_artsample.py` (14 tests), called

@@ -15721,3 +15721,89 @@ is not worth chasing.)
   greeter half do too. Standing note: this branch is hand-driven in parallel, so
   check `git log` against the journal before assuming the tree is the one the
   last entry describes.
+
+## 2026-09-26 — E15: two monitors cannot be declared on the same pixel
+
+- **what**: `pkgs/jarvis-doctor` refuses, at evaluation time, an `outputs` list
+  in which any two entries' rectangles intersect, naming the pair and the
+  intersection: `DP-1 and DP-2 overlap by 1x1080 px at 4479,0`.
+  `tools/tests/test_outputs.py` (+4, 12 in the file) asks the same of ares'
+  own declaration with no nix, `ops/ralph/nixtest.sh` (+2 cases, 18) asks it of
+  any declaration by overriding the package's argument, and
+  `hosts/ares/outputs.nix` says in prose where its own gate lives.
+- **why**: E14 is what made the hole reachable. Before the declaration had a
+  `y`, every monitor was implicitly at 0 and a collision needed two equal
+  `x`es; with a full corner any two entries can be declared on top of each
+  other, and nothing in this repo noticed. It is a legal Nix file, a successful
+  build, bespoke art composed for both panels, and a `jarvis-doctor` reporting
+  PASS — because check 5 compares each connector's mode and corner on its OWN
+  and never asks whether the desk they add up to exists. That is the one
+  property no single entry in that list can be wrong about, which is exactly
+  the shape invariant 1 keeps producing: the claim needs a third reader.
+- **where it lives, and why not in the obvious place**: PLAN E15 proposed
+  `test_outputs.py`, and that alone would have been a claim about ares' three
+  monitors and nothing else. The refusal is in the package that SPENDS the
+  position instead. Not in the wallpaper: `tools/wallshots/outputs.nix`
+  deliberately stacks `SHEET-21x9` on the primary at x=0, and those entries are
+  CANVASES to compose art at rather than monitors on a desk — which is why they
+  carry no `y`, and why there is now a test that they never grow one. Not in
+  `hosts/ares/outputs.nix` either: a `let` around the data is a check every
+  consumer can import past, and it would have broken `declared_outputs()`, the
+  text parser that refuses any file it does not fully understand.
+- **the decision the item asked for — gaps**: legal, and ares HAS one. 1.4 Mpx
+  of the layout's bounding box is no screen at all (the 360 px under each 1080p
+  panel beside a 1440p primary), so a rule requiring the outputs to tile a
+  rectangle would refuse this machine's own monitors. Touching edges are legal
+  too — DP-1 begins at 2560, exactly where HDMI-A-1 ends — so the comparison is
+  strict, and the gate probes the legal desk as a separate case: a refusal that
+  also refuses ares is a refusal nobody can ship. Disconnected layouts are
+  accepted for the same reason and that is written down in E16, because
+  "nothing complained" is not a decision.
+- **the intersection is reported as a rectangle**, not as a yes. "DP-1 and DP-2
+  overlap" is a sentence somebody then has to go and measure; a 1 px collision
+  from a mistyped `x` and a panel declared entirely inside another are
+  different mistakes, and the message is the only place they are ever told
+  apart.
+- **the colliding probe is not adjacent in the list and collides by one row**
+  (A, B legal, C one pixel too far down, overlapping A by 1920x1). This is the
+  test's whole design: `x += width` was the old rule this repo used for a row
+  of monitors, a pairwise loop regresses to comparing neighbours, and a probe
+  whose bad pair sits side by side passes that regression. It also puts a
+  negative `y` through the arithmetic, which is the layout E14 wrote a `y` for.
+- **falsified**: 9 mutations, each caught by the claim it breaks — the refusal
+  deleted, the intersection made non-strict (which also stops the doctor
+  building for ares' OWN touching edges, so the existing declaration case goes
+  red too), the measurement dropped from the message, the loop reduced to
+  adjacent pairs (caught by `nixtest.sh` ALONE — the Python side cannot see
+  it), the predicate in the test made blind, made non-strict, and measured from
+  the wrong corner, the sheet's extra canvas given a `y`, and DP-2 declared one
+  pixel into DP-1. The last one was run against `nixos-rebuild build --flake
+  .#ares`, which stops on it now and printed the pair and the measurement.
+  Mutations were made against a `cp` in `$TMPDIR` and restored with `cp`, never
+  `git checkout --` (E10's reason).
+- **tests**: `bash ops/ralph/verify.sh` — 2 gates over 4 paths, GREEN in
+  115.3 s (tools 74.2, nixtest 40.2). tools 896 passed (+4 here; HEAD collects
+  892, so the E14 entry's "890" was already stale). `bash ops/ralph/nixtest.sh`
+  18 passed (+2), 40 s — each new case is one `nix eval … .outPath`, ~1.5 s,
+  and neither builds anything. Both edited Nix files are nixfmt-clean; there is
+  still no formatting gate. `nixos-rebuild build --flake .#ares` green. Never
+  tested, never switched. No schema, no jv-act, no boot path, no pins touched.
+  `hudscreens.sh` was not named by `verify.sh` and no picture could have moved.
+- **files**: pkgs/jarvis-doctor/default.nix, ops/ralph/nixtest.sh,
+  tools/tests/test_outputs.py, hosts/ares/outputs.nix, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- next: **E5** is still the item the position was declared for, and it is now
+  cheaper again — a niri rule generated from `hosts/ares/outputs.nix` inherits
+  the doctor's overlap refusal, so the layout it writes cannot be one no
+  compositor can produce. It needs **D4** (the niri config into the flake)
+  under it, which is the real first step and is not small; a `/etc/niri/
+  config.kdl` is inert while the user's own `~/.config/niri/config.kdl` exists,
+  so that migration is a human's call about which file wins, not the loop's.
+  **E16** (a named refusal for a non-integer `x`) is an hour at most and was
+  raised by this. Then **D82**, **D79**, **D71**, **B88**, **B95**, **D63**,
+  **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. E6's
+  remaining half is still the frame-count MEASUREMENT and wants a compositor.
+  **D81** is the GUARDRAILS wording exit 3 needs and wants a HUMAN; **D67** and
+  **D65**'s greeter half do too. Standing note: this branch is hand-driven in
+  parallel, so check `git log` against the journal before assuming the tree is
+  the one the last entry describes.
