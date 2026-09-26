@@ -1,0 +1,91 @@
+# The Super key opens the app menu, the way it does on Windows.
+#
+# WHY THIS NEEDS A DAEMON. niri cannot bind a lone modifier — `Super { ... }`
+# is rejected with "invalid key: Super", because a keybind needs a real key.
+# So the tap has to become a key before the compositor can see it:
+#
+#   keyd (kernel-level, compositor-agnostic):
+#     tap Super  -> F13   (a key no application uses)
+#     hold Super -> Super (every existing Mod+… bind keeps working, untouched)
+#   niri:
+#     F13        -> the JarvisOS app menu
+#
+# The overlap rule is what makes this safe: keyd only emits F13 if Super went
+# down and came back up with NOTHING pressed in between, so Mod+D, Mod+Q,
+# Mod+Enter and friends behave exactly as before — this adds a gesture rather
+# than taking one away.
+{ config, lib, pkgs, ... }:
+{
+  # ---------------------------------------------------------------- the tap
+  services.keyd = {
+    enable = true;
+    keyboards.all = {
+      ids = [ "*" ];
+      settings = {
+        main = {
+          # `overload(layer, key)`: held -> the layer (the real Super modifier),
+          # tapped -> the key. This is the whole mechanism.
+          leftmeta = "overload(meta, f13)";
+        };
+      };
+    };
+  };
+
+  # ------------------------------------------------------------- the menu
+  # A full-screen application grid: every installed .desktop entry with its
+  # real icon, searchable by typing. fuzzel already reads the desktop
+  # database and the icon theme, so the "grid" is a wide, tall, icon-ful
+  # instance of it — one config file, no new surface to maintain, and it
+  # inherits the §06 palette from modules/theme.nix.
+  #
+  # PLAN E4 replaces this with a Quickshell grid; the KEY BINDING and the
+  # keyd tap stay the same, so that swap is invisible to muscle memory.
+  environment.etc."xdg/fuzzel/jarvis-menu.ini".text = ''
+    [main]
+    font=Archivo:size=14
+    icon-theme=Papirus-Dark
+    terminal=alacritty -e
+    prompt="  "
+    # A grid, not a line: wide, many rows, large icons.
+    width=64
+    lines=16
+    tabs=4
+    horizontal-pad=40
+    vertical-pad=32
+    inner-pad=14
+    image-size-ratio=1.0
+    show-actions=yes
+    match-mode=fzf
+    sort-result=yes
+    list-executables-in-path=yes
+
+    [colors]
+    # One step deeper than a window so the menu reads as lying OVER the
+    # desktop; ember only on the selection and the match, as everywhere.
+    background=0c1116f7
+    text=9fadb7ff
+    match=f0714aff
+    selection=161d24ff
+    selection-text=e4eaeeff
+    selection-match=f0714aff
+    border=f0714aff
+    prompt=f0714aff
+
+    [border]
+    width=1
+    radius=14
+  '';
+
+  environment.systemPackages = [
+    # `jarvis-menu` is what the key is bound to — a named command, so the
+    # binding never has to change when the menu implementation does.
+    (pkgs.writeShellApplication {
+      name = "jarvis-menu";
+      runtimeInputs = [ pkgs.fuzzel ];
+      text = ''
+        # --config keeps the app grid separate from the plain Mod+D launcher.
+        exec fuzzel --config /etc/xdg/fuzzel/jarvis-menu.ini "$@"
+      '';
+    })
+  ];
+}

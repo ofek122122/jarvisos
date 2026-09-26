@@ -11,6 +11,7 @@
     ../../modules/theme.nix
     ../../modules/apps.nix
     ../../modules/store.nix
+    ../../modules/super-menu.nix
     ../../modules/audio.nix
     ../../modules/security.nix
     ../../modules/windows-compat.nix
