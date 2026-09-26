@@ -59,7 +59,10 @@ QtObject {
   //   roomPx    — how much room the row has. NEGATIVE means nobody has said,
   //               and then nothing is dropped: a row that hid labels because
   //               it had not yet been told how wide its surface is would hide
-  //               them in the first frame of every session.
+  //               them in the first frame of every session. ZERO is the other
+  //               fact — a surface that has said, and has none to give — and
+  //               it draws nothing at all. The two must not be spelled the
+  //               same, which is why the surfaces clamp (PLAN D35).
   //   keepIndex — the label that is never dropped (-1 for none). The caller's
   //               choice, and in this shell it is the workspace the output is
   //               showing, which is the focused one when the keyboard is
@@ -83,6 +86,29 @@ QtObject {
     };
     if (n === 0 || roomPx < 0)
       return whole;
+
+    // NO ROOM AT ALL, which is a different fact from the one above and is
+    // decided before anything else (PLAN D35). A monitor narrower than the
+    // corner the HUD reserves leaves this row zero pixels it is allowed to
+    // paint in — and zero is what the surfaces clamp their arithmetic to,
+    // because a negative budget would arrive here as the sentinel and draw
+    // every label, into another process's corner.
+    //
+    // Nothing is exempt, not even the workspace you are on. The last branch
+    // below holds that one back and elides it to the room there is, and the
+    // room there is is none: `elidePx` of 0 means "draw it whole" to the
+    // delegate, so the one case that cannot afford a pixel was the one case
+    // that took its full width. A row that cannot legally paint draws
+    // nothing, and the `+N` goes with the names — a count is a label too.
+    const nothing = {
+      "run": 0,
+      "marker": false,
+      "tail": -1,
+      "dropped": n,
+      "elidePx": 0
+    };
+    if (roomPx === 0)
+      return nothing;
 
     // Everything, with nothing spent on a marker nothing was dropped into.
     if (root.span(widths, n, gapPx, -1, 0) <= roomPx)
@@ -113,16 +139,10 @@ QtObject {
     // Not even the marker and one label. What is left is the label you are
     // on, alone — the COUNT is what gives way here and not the name, because
     // a workspace you can read beats a number about workspaces you cannot
-    // see. A row with nothing to hold back draws nothing at all, which is
-    // what a monitor narrower than the corner the HUD reserves would get.
+    // see. A row with nothing to hold back draws nothing at all. There is at
+    // least one pixel to draw it in: no room at all was answered above.
     if (keep < 0)
-      return {
-        "run": 0,
-        "marker": false,
-        "tail": -1,
-        "dropped": n,
-        "elidePx": 0
-      };
+      return nothing;
     return {
       "run": 0,
       "marker": false,

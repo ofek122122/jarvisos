@@ -207,6 +207,23 @@ Item {
       Niri.ingest(desk.recorded);
     }
 
+    // COMPOSED, and narrower still: an output narrower than the corner this
+    // strip reserves for the HUD (PLAN D35). 320 px against a 316 px reserve
+    // leaves the row a budget of 320 - 316 - inset - gap = -20 px, and the
+    // shot is here because a NEGATIVE budget is spelled the same way as
+    // "nobody has said how wide this monitor is" — which draws everything.
+    // Everything, on this output, is one label inside another process's
+    // corner, and the only surface that could have reported it is this one.
+    //
+    // ares has no such output and neither does anything else: 320 px is a
+    // capture device or a virtual sink, and the reason to photograph a
+    // monitor nobody has is that the strip's own arithmetic decides what
+    // happens at widths nobody chose. The same desk as 09 on the same output,
+    // so the ONLY thing that differs between the two pictures is the width.
+    function shot_no_room() {
+      Niri.ingest(desk.recorded);
+    }
+
     // A desk of ten named workspaces on one output, with the keyboard on the
     // `focus`th of them. More names than a 1920 px strip has room for, which
     // is the whole point of it — and every one of them is the kind of word
@@ -252,7 +269,12 @@ Item {
       // More names than the strip has room for, which is what the two numbers
       // in every caption above were counting down to (PLAN D32).
       { "file": "10-collapsed.png", "build": suite.shot_collapsed, "screen": 1920, "output": "DP-1", "desk": ["documentation:focused", "compositor:idle", "video-editing:idle", "correspondence:idle", "nixos-rebuild:idle", "measurements:idle", "screenshots:idle", "references:idle", "+2:idle"], "clock": "09:41", "overlap": 0 },
-      { "file": "11-collapsed-focus-last.png", "build": suite.shot_collapsed_focus_last, "screen": 1920, "output": "DP-1", "desk": ["documentation:idle", "compositor:idle", "video-editing:idle", "correspondence:idle", "nixos-rebuild:idle", "measurements:idle", "screenshots:idle", "+2:urgent", "scratch:focused"], "clock": "09:41", "overlap": 0 }
+      { "file": "11-collapsed-focus-last.png", "build": suite.shot_collapsed_focus_last, "screen": 1920, "output": "DP-1", "desk": ["documentation:idle", "compositor:idle", "video-editing:idle", "correspondence:idle", "nixos-rebuild:idle", "measurements:idle", "screenshots:idle", "+2:urgent", "scratch:focused"], "clock": "09:41", "overlap": 0 },
+      // Narrower than the corner the HUD reserves: the row has no pixels it
+      // is allowed to paint in, so it paints none. An empty strip, and the
+      // only empty strip on this sheet that is empty because there is no
+      // room rather than because there is nothing to say (PLAN D35).
+      { "file": "12-no-room.png", "build": suite.shot_no_room, "screen": 320, "output": "DP-2", "desk": [], "clock": "", "overlap": 0 }
     ]
 
     function test_the_sheet() {

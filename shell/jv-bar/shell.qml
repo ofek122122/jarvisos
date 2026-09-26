@@ -155,7 +155,16 @@ ShellRoot {
         // limit is the corner the HUD draws its plates over. One gap is left
         // between the row and whichever of the two it stops at — a label
         // touching the clock reads as one longer word.
-        roomPx: (face.visible ? face.x : surface.width - surface.hudReservePx) - Theme.insetPx - Theme.gapPx
+        //
+        // CLAMPED AT ZERO, and that is not tidiness (PLAN D35). A negative
+        // budget is how `RowFit` spells "nobody has said how wide this
+        // surface is", which draws every label — so on a monitor narrower
+        // than the reserve above, the subtraction turned "there is no room"
+        // into "there is no limit" and put the row inside the HUD's corner.
+        // Zero is the other fact, and this is the only place that knows it:
+        // the row cannot tell a budget that was never set from one that came
+        // out below nothing.
+        roomPx: Math.max(0, (face.visible ? face.x : surface.width - surface.hudReservePx) - Theme.insetPx - Theme.gapPx)
       }
 
       // Middle: the time. Centred on the SCREEN rather than on the space

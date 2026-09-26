@@ -180,4 +180,23 @@ TestCase {
     compare(plan.dropped, 4);
     compare(plan.elidePx, 0);
   }
+
+  function test_no_room_at_all_does_not_spare_the_one_you_are_on() {
+    // The same monitor with your keyboard on it, which is the half of that
+    // rule that was wrong (PLAN D35). Everywhere else the workspace you are
+    // on is held back and drawn after the marker — and it is held back HERE
+    // too, into a row with nothing to draw it in: `elidePx` is only set when
+    // the label is wider than the room, so a room of exactly 0 came out as
+    // "not elided", which the delegate reads as "draw it whole". One label,
+    // full width, inside the corner another process draws its plates over.
+    //
+    // There is no room, so there is no exception: a row that cannot paint a
+    // pixel legally paints nothing, and the count goes with it — a `+4` is
+    // no more affordable than a name.
+    const plan = suite.fit(suite.four, 0, 2);
+    compare(suite.drawn(plan), "");
+    compare(plan.marker, false);
+    compare(plan.dropped, 4);
+    compare(plan.elidePx, 0);
+  }
 }
