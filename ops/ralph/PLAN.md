@@ -91,22 +91,52 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       the shell half checked rather than described.
       Raised by it: **E10** and **E11** below.
 
-- [ ] E10. **The geometry list is still a list** — E6's remaining "render any
-      geometry on demand" half, and cheaper than it was. Every render is now
-      COMPOSED at its own canvas (E9), so adding a geometry to
-      `for geom in 2560x1440 1920x1080 3840x2160 2560x1080 1366x768` is a pure
-      data change rather than a new crop to think about. What is still true is
-      that an output not on the list gets the 2560x1440 primary art scaled and
-      cropped — correct now, since the shell anchors to where that landed, but
-      still not composed for it. Two ways out and they are not equal: make the
-      list a package ARGUMENT that `hosts/ares` fills from its own declared
-      outputs (declarative, fits D4/E5, still a list but the RIGHT list), or
-      rasterize on demand at runtime, which means jv-wall spawning resvg and
-      wants a human on invariant 3 first. Prefer the first.
-      **E11 landed while this was open and it covers whatever the list becomes**:
-      the pixel gate is pointed at the output DIRECTORY, not at a list of names,
-      so a geometry `hosts/ares` adds is sampled at the three fractions the day
-      it appears, with nobody remembering to add it anywhere.
+- [x] E10. **The geometry list was a list nobody declared** (this commit). It
+      is now an argument, and `hosts/ares/outputs.nix` is where the answer
+      lives: three entries, the monitors CLAUDE.md says this machine has, with
+      `refresh` and `x` on each for PLAN E5 to spend and `primary = true` on
+      exactly one. `pkgs/jarvis-wallpaper` composes one render per DISTINCT
+      declared geometry (ares' two 1080p panels are one composition) and the
+      primary art — the lock screen's image, and the fallback every undeclared
+      output is cropped from — at the primary's own size. The five sizes it used
+      to render are two; `3840x2160` and `1366x768` were art for monitors that
+      do not exist, and nothing would ever have reported them.
+      Chose the package ARGUMENT over runtime rasterization, as the item asked:
+      the second needs jv-wall to spawn resvg, which is invariant 3 and wants a
+      human. The argument has **no default** — `callPackage` supplying one
+      silently is the same guess one level up, and missing is an evaluation error.
+      Four throws refuse the five declarations that would otherwise BUILD: an empty
+      list, a non-integer size (`width = "1920"` renders fine and then stops
+      de-duplicating two identical panels), a zero size (resvg rasterizes a 0 px
+      canvas and exits 0), and no primary or several.
+      **The sheet's geometry moved out of the machine's art** rather than being
+      lost: `tools/wallshots/outputs.nix` is ares' list `++` one 21:9 canvas, and
+      `wallshots.sh` photographs `.#jarvis-wallpaper-sheet` built from it — so
+      docs/wall/06-ultrawide.png, the only place a composed non-16:9 render can
+      be looked at, still exists and its pixels did not move, while the desktop
+      stopped shipping it. The import is what makes "the sheet is taken at every
+      geometry ares really has" true by construction.
+      Two new gates, and the second is the one that matters: `test_outputs.py`
+      (8 tests) holds the declaration, the package, the flake, the sheet's list
+      and CLAUDE.md's prose to each other as text, and a new `nixtest.sh` case
+      lists the art directory out of the BUILT jv-wall wrapper and compares it
+      with the declaration — both directions, because a missing render is a
+      scaled panel and an extra one is the defect this item removed. Falsified
+      by pointing flake.nix at the sheet's list: red, naming both sets.
+      Raised by it: **E13** below.
+
+- [ ] E13. **`jarvis-doctor` still carries ares' monitors as a literal**, and
+      it is now the last place that does: `pkgs/jarvis-doctor/doctor.sh` greps
+      niri's output for `2560x1440 @ 14[0-9]` and counts one, which is the same
+      three monitors E10 moved into `hosts/ares/outputs.nix` said a fourth time
+      — in a regex, in a shell script, where the primary's 144.006 is a
+      character class. Generate the expectations from the declaration (the
+      doctor is a package, so they interpolate in like the wallpaper's do) and
+      the live check becomes "the machine is the machine this flake declares"
+      rather than "the machine is what somebody typed in August".
+      `tools/hudscreens/sheet.py` and `tools/tests/test_hudscreens.py` carry the
+      same numbers from CLAUDE.md's prose and want the same treatment; E10's
+      `declared_outputs()` in `tools/tests/test_outputs.py` is the parser.
 
 - [x] E11. **Nothing in this repo read a pixel of the art** (774e7d1).
       `tools/artsample.py` + `tools/tests/test_artsample.py` (14 tests), called

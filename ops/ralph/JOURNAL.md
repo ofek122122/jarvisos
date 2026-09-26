@@ -15407,3 +15407,125 @@ is not worth chasing.)
   the gate realizes what it reads. The FIRST half stands — this branch is
   hand-driven in parallel, so check `git log` against the journal before
   assuming the tree is the one the last entry describes.
+
+## 2026-09-26 — E10: the wallpaper stopped rendering art for monitors that do not exist
+
+- **what**: the geometry list became an argument and a declaration.
+  `hosts/ares/outputs.nix` (new) is the three monitors this machine has, as
+  data — `name`, `width`, `height`, `refresh`, `x`, and `primary = true` on
+  exactly one; `flake.nix` hands it to `pkgs/jarvis-wallpaper` as `outputs`;
+  the package composes one render per DISTINCT declared geometry and the
+  primary art at the primary's own size. Plus `tools/wallshots/outputs.nix`
+  (new) + a `.#jarvis-wallpaper-sheet` attribute, so the contact sheet keeps
+  the one geometry it needs and the desktop stops carrying it. Two new gates:
+  `tools/tests/test_outputs.py` (8 tests) and one `nixtest.sh` case.
+- **why**: `for geom in 2560x1440 1920x1080 3840x2160 2560x1080 1366x768` was
+  five sizes written inside a package by somebody guessing. Three of them are
+  monitors ares cannot display — 4K, 21:9, and a 1366x768 panel it never
+  will — and the machine built, shipped and pixel-checked all three every
+  rebuild. The inverse was the real cost: a monitor plugged in tomorrow is not
+  on the list, so it gets the primary art scaled and cropped. Correct since E9
+  (the shell anchors to where the crop landed) but not art composed for it, and
+  the fix is a data change nobody can make without editing a package. Now
+  `hosts/ares` says what it has and the art follows.
+- **the decisions, and what each one refuses**:
+  · **an argument, not runtime rasterization.** E10 named both ways out. The
+    second is jv-wall spawning resvg per output, which is a service mutating
+    state outside its own dir — invariant 3, and a human's call, not a loop's.
+  · **no default on the argument.** `outputs ? [ … ]` is the same guess one
+    level up and harder to see: `callPackage` would supply it in silence and
+    the host's real monitors would never reach the art, with every gate green.
+    Missing is an evaluation error. A test asserts the absence, because the
+    convenient version of this file is the one that comes back.
+  · **four throws for the five declarations that would otherwise BUILD.** Each
+    is a
+    silent success, which is the only kind of bug this package has ever had.
+    `width = "1920"` — easy to type in a file whose refresh rates are quoted —
+    interpolates to the same SVG and renders perfectly, and then `lib.unique`
+    stops collapsing ares' two identical 1080p panels because `1920` and
+    `"1920"` are different values, so the build does twice the work and nobody
+    can see why. `width = 0` reaches resvg, which rasterizes a zero-pixel PNG
+    and exits 0. No primary or two primaries decides which art the LOCK SCREEN
+    shows. And the empty list is checked in `declared`, the binding both of the
+    others go through, not beside either of them: an empty list has no primary
+    either, so the primary throw fired first and reported "0 outputs with
+    `primary = true`" about a declaration whose actual problem is that it
+    declares nothing. All five verified by `nix eval` against the real flake,
+    one at a time.
+  · **`primary = true` is declared, never inferred.** "The biggest output" is
+    the tempting rule and it would move the lock screen's image the day a
+    bigger panel is plugged in beside the one a human is looking at.
+  · **the sheet's 21:9 canvas moved rather than died.** This was the whole
+    difficulty. `docs/wall/06-ultrawide.png` is the only place in this repo a
+    render COMPOSED at a non-16:9 canvas can be looked at — it was the picture
+    of E9's defect and is now the picture of it fixed — and every output ares
+    declares is 16:9, so the right list for the machine is the wrong list for
+    the sheet. Keeping 2560x1080 in the machine's art to feed a doc gate is
+    exactly the guess E10 removes, so instead the sheet declares its own
+    outputs (`import ../../hosts/ares/outputs.nix ++ [ 2560x1080 ]`) and
+    `wallshots.sh` builds `.#jarvis-wallpaper-sheet` from them. Same package,
+    same SVG, same theme. The IMPORT is the point: "the sheet is taken at every
+    geometry ares really has" is now true by construction instead of by a test
+    remembering two lists, and `test_the_sheet_photographs_every_output_ares_
+    really_has` asks the declaration instead of carrying `{(2560,1440),
+    (1920,1080)}` as a literal. **Not one pixel of docs/wall moved** — checked,
+    which is the evidence that this is the same art and not a lookalike.
+- **the gate that makes it real is the nix one.** `test_outputs.py` can only
+  read text: this suite runs in a bare checkout, so it holds the declaration,
+  the package, the flake's two `callPackage`s, the sheet's list and CLAUDE.md's
+  prose to each other as source. What it cannot see is whether the declaration
+  ARRIVED. So `nixtest.sh` gained a case that reads `JV_WALL_DIR` out of the
+  built jv-wall wrapper — E12's file-not-string hop, one attribute further
+  along — lists that directory and compares it with what
+  `nix eval --file hosts/ares/outputs.nix` says ares declares. Both directions,
+  because they are different mistakes: a MISSING render is a panel quietly
+  showing a scaled crop, an EXTRA one is the defect this item removed and
+  nothing would ever report it. Falsified by pointing `flake.nix` at the
+  sheet's list — red, naming both sets. It costs one wrapper build; the renders
+  were already built for `.#jv-lock` earlier in the file.
+  It is deliberately NOT inside the `if [ -x "$script" ]` block:
+  `test_nixtest.py` lifts that block to the first unindented `fi` and runs it
+  against a fake `nix`, so a case added in there would be executed by the E12
+  harness as a side effect of being nearby.
+- **measured**: the machine's art went from six files to three (`jarvisos.png`
+  + `2560x1440` + `1920x1080`); the sheet's has four. `.#jarvis-wallpaper`'s
+  drv is `f56bb3km…`, and it is the same derivation before and after the
+  builder's comments were rewritten, which is how the accident below was
+  confirmed undone.
+- **the mistake, written down because the repo is the only memory**: to
+  red-test the new assertions I mutated a source file, ran the suite, and
+  restored it with `git checkout -- <path>`. On a dirty worktree that restores
+  from the INDEX, which here was HEAD — so it silently deleted every
+  uncommitted edit this iteration had made to `pkgs/jarvis-wallpaper/
+  default.nix`, not just the mutation. Reapplied from the transcript and
+  confirmed byte-identical by the drv hash above. **Mutate against a copy
+  (`cp file $tmp/`, restore with `cp`), never against the index.** Every
+  mutation was then re-run properly: 11 of them, each caught by the test whose
+  claim it breaks — a written geometry list, a default on the argument, a
+  deleted throw, a literal primary size, a fourth monitor, a second primary, a
+  quoted width, a rounded refresh rate, a sheet that stops importing ares, a
+  sheet whose extra canvas is 16:9, and a gate that photographs the desktop's
+  art again.
+- **tests**: `tools` 866 passed (was 858; +8 new). `bash ops/ralph/nixtest.sh`
+  15 passed (was 14). `bash ops/ralph/verify.sh` — 4 gates over 8 paths, GREEN
+  in 166.4 s (tools 73.0, wallshots 23.2, nixtest 29.4, shellload 40.8).
+  `bash ops/ralph/hudscreens.sh`, named because flake.nix moved: run, and no
+  shot moved. build: `nixos-rebuild build --flake .#ares` green. Never tested,
+  never switched. No schema, no jv-act, no boot path, no pins touched.
+- **files**: hosts/ares/outputs.nix (new), tools/wallshots/outputs.nix (new),
+  tools/tests/test_outputs.py (new), pkgs/jarvis-wallpaper/default.nix,
+  flake.nix, ops/ralph/wallshots.sh, ops/ralph/nixtest.sh,
+  tools/tests/test_wallshots.py, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **E13** (raised above — `jarvis-doctor`'s live monitor check is the
+  last copy of ares' monitors, as a regex; `tools/hudscreens/sheet.py` and
+  `test_hudscreens.py` carry the same numbers from CLAUDE.md's prose, and
+  `declared_outputs()` in test_outputs.py is the parser for all three), then
+  **D82**, **D79**, **D71**, **B88**, **B95**, **D63**, **D61**, **D57**,
+  **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. E6's remaining half is
+  still the frame-count MEASUREMENT and wants a compositor. **D81** is the
+  GUARDRAILS wording exit 3 needs and wants a HUMAN; **D67** and **D65**'s
+  greeter half do too. E5 is now cheaper than it was: the per-output niri rules
+  it wants have `refresh` and `x` waiting for them in hosts/ares/outputs.nix,
+  so it moves rules rather than re-deciding a layout. And the standing note
+  holds — this branch is hand-driven in parallel, so check `git log` against
+  the journal before assuming the tree is the one the last entry describes.
