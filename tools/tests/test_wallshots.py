@@ -62,6 +62,7 @@ SHEET_ENTRY = re.compile(
     r'.*?"phase":\s*(?P<phase>\d+)'
     r'.*?"screen":\s*\[(?P<screen>[^]]*)\]'
     r'.*?"art":\s*"(?P<art>[^"]*)"'
+    r'.*?"paint":\s*\[(?P<paint>[^]]*)\]'
     r'.*?"glow":\s*(?P<glow>[\d.]+)'
     r'.*?"lap":\s*(?P<lap>[\d.]+)'
     r'.*?"onScreen":\s*(?P<onscreen>true|false)',
@@ -72,7 +73,8 @@ SHEET_ENTRY = re.compile(
 def sheet() -> list[dict]:
     """Each shot as the scene declares it: the file, whether the wallpaper was
     allowed to move, the millisecond of the lap, the output, the render that
-    output must resolve, and the breath, the drift and the head as drawn."""
+    output must resolve and the size it is painted at, and the breath, the drift
+    and the head as drawn."""
     out = [
         {
             "file": m.group("file"),
@@ -80,6 +82,7 @@ def sheet() -> list[dict]:
             "phase": int(m.group("phase")),
             "screen": [int(n) for n in m.group("screen").split(",")],
             "art": m.group("art"),
+            "paint": [float(n) for n in m.group("paint").split(",")],
             "glow": float(m.group("glow")),
             "lap": float(m.group("lap")),
             "onScreen": m.group("onscreen") == "true",
@@ -219,24 +222,6 @@ def test_the_harness_draws_what_the_shell_draws():
     )
 
 
-def test_both_surfaces_anchor_the_motion_at_the_same_place():
-    """The three numbers that decide where every moving pixel on this desktop
-    goes. They are a percentage of the SURFACE, so they are written twice — once
-    per surface — and compared here with the id normalised away. A field that
-    anchored its instrument anywhere else would photograph a comet riding a ring
-    the real wallpaper's comet does not ride, and every assertion on the sheet
-    would agree with it."""
-    shell, field = shell_text(), field_text()
-    wanted = (
-        "readonly property real ix: @.width * 0.734",
-        "readonly property real iy: @.height * 0.681",
-        "readonly property real ir: Math.min(@.width, @.height) * 0.39",
-    )
-    for line in wanted:
-        assert line.replace("@", "surface") in shell, f"shell.qml no longer says {line}"
-        assert line.replace("@", "root") in field, f"the staged field no longer says {line}"
-
-
 def normalised(text: str, *ids: str) -> str:
     """`text` with the surfaces' own names and their line breaks taken out.
 
@@ -252,6 +237,175 @@ def normalised(text: str, *ids: str) -> str:
         text = text.replace(name + ".", "@.")
     return " ".join(text.split())
 
+
+ANCHOR = re.compile(
+    r"readonly property real ix: \(@\.width - @\.artW\) / 2 \+ @\.artW \* (?P<x>[\d.]+) "
+    r"readonly property real iy: \(@\.height - @\.artH\) / 2 \+ @\.artH \* (?P<y>[\d.]+) "
+    r"readonly property real ir: Math\.min\(@\.artW, @\.artH\) \* (?P<r>[\d.]+)"
+)
+
+
+def anchor_of(text: str, *ids: str) -> tuple[float, float, float]:
+    """The three fractions a surface anchors its moving ember at, read off the
+    file rather than assumed. Line breaks and the surface's own id are
+    normalised away first — the two files wrap these expressions in different
+    columns and call themselves different things, and neither is a difference."""
+    m = ANCHOR.search(normalised(text, *ids))
+    assert m, "no surface here anchors the motion at a fraction of the art"
+    return float(m.group("x")), float(m.group("y")), float(m.group("r"))
+
+
+def test_both_surfaces_anchor_the_motion_at_the_same_place():
+    """The three numbers that decide where every moving pixel on this desktop
+    goes, written once per surface because the staged field is a copy of
+    shell.qml's. A field that anchored its instrument anywhere else would
+    photograph a comet riding a ring the real wallpaper's comet does not ride,
+    and every assertion on the sheet would agree with it."""
+    assert anchor_of(shell_text(), "shell", "surface") == anchor_of(field_text(), "root"), (
+        "shell.qml and the staged field anchor the motion at "
+        f"{anchor_of(shell_text(), 'shell', 'surface')} and {anchor_of(field_text(), 'root')}"
+    )
+
+
+def test_both_surfaces_take_the_anchor_from_where_the_art_landed():
+    """PLAN E9, and the half of it that is in QML. The anchor has to be a
+    fraction of the PAINTED ART, not of the surface — those are the same
+    expression on every geometry pkgs/jarvis-wallpaper composes a render for, and
+    they come apart on every other one, which is a defect no shot of ares' own
+    three 16:9 monitors can find. docs/wall/07-fallback.png is the picture of it,
+    and `paintedWidth` under `PreserveAspectCrop` is the only thing that knows.
+
+    Spelled as a check on the TEXT because the alternative reads as correct: a
+    surface that went back to `width * 0.734` would still pass every assertion on
+    six of the seven shots."""
+    for name, text, ids in (
+        ("shell.qml", shell_text(), ("shell", "surface")),
+        ("the staged field", field_text(), ("root",)),
+    ):
+        flat = normalised(text, *ids)
+        assert "readonly property real artW: still.paintedWidth > 0" in flat, (
+            f"{name} no longer asks the Image how wide the art was actually painted"
+        )
+        assert "readonly property real artH: still.paintedHeight > 0" in flat, (
+            f"{name} no longer asks the Image how tall the art was actually painted"
+        )
+        assert "@.width * 0.734" not in flat and "@.height * 0.681" not in flat, (
+            f"{name} anchors the motion at a percentage of its own SURFACE again — "
+            "right on every output the art is composed for and wrong on every other "
+            "one (PLAN E9)"
+        )
+
+
+# ------------------------------------------------- the art under it, and where
+
+
+def art_text() -> str:
+    return ART.read_text("utf-8")
+
+
+def art_code() -> str:
+    """The package with its prose taken out — every line whose first character is
+    a `#`, which covers both the Nix comments and the bash and awk ones inside the
+    builder. The tests below assert on the ABSENCE of things, and this file
+    explains at length what it stopped doing and why: a check for "no --width
+    anywhere" reads that paragraph and fails on the explanation."""
+    return "\n".join(
+        line for line in art_text().splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def test_the_art_and_the_shell_put_the_instrument_in_the_same_place():
+    """THE CONTRACT E9 WAS MISSING, and the only claim in this repo that spans a
+    Nix-generated SVG and a QML surface.
+
+    pkgs/jarvis-wallpaper draws an instrument at a fraction of whatever canvas it
+    composes; shell/jv-wall moves an ember at a fraction of whatever the art was
+    painted at. If those fractions differ, the wallpaper has two instruments in
+    it — a drawn one and a moving one — and it looks entirely plausible in a PNG
+    and on the sheet, because every assertion the sheet can make is about the
+    shell's own anchor. Only a third suite reading both files can say it, and
+    before E9 nothing did: the two agreed at 16:9 by construction and nowhere
+    else, and `docs/wall/06-ultrawide.png` is what 245 px of disagreement looks
+    like."""
+    art = art_text()
+    drawn = {}
+    for token in ("instrumentX", "instrumentY", "instrumentR"):
+        m = re.search(rf"^  {token} = ([\d.]+);", art, re.M)
+        assert m, f"pkgs/jarvis-wallpaper no longer says where it puts {token}"
+        drawn[token] = float(m.group(1))
+    assert (drawn["instrumentX"], drawn["instrumentY"], drawn["instrumentR"]) == anchor_of(
+        shell_text(), "shell", "surface"
+    ), (
+        f"pkgs/jarvis-wallpaper draws its instrument at {drawn} and shell/jv-wall "
+        f"moves its ember at {anchor_of(shell_text(), 'shell', 'surface')} — the "
+        "wallpaper has two instruments in it"
+    )
+
+
+def test_the_art_is_composed_at_every_geometry_and_scaled_at_none():
+    """The PACKAGE half of E9. The defect was not that resvg was told the wrong
+    size; it was that ONE drawing was being rasterized at several, so an aspect
+    ratio it was not authored at lost whatever fell outside the canvas — on
+    2560x1080, the bottom 360 rows, which is where the wordmark is. Every render
+    is now laid out for its own geometry, which is why there is no `--width`,
+    no `--height` and no `preserveAspectRatio` anywhere in the package.
+
+    A test on the absence of a flag, because the flag coming back is exactly how
+    this regresses: it builds, it renders, every file is the right number of
+    pixels, and the drawing inside two of them is cropped."""
+    art = art_code()
+    assert "compose() {" in art, (
+        "pkgs/jarvis-wallpaper no longer composes its art per geometry"
+    )
+    for flag in ("--width", "--height", "preserveAspectRatio"):
+        assert flag not in art, (
+            f"pkgs/jarvis-wallpaper passes {flag} again — that is one drawing "
+            "rasterized at another size, which is the PLAN E9 defect"
+        )
+    # And every geometry in the list goes through it, including the primary art
+    # that an unlisted output falls back to.
+    geoms = re.search(r"for geom in ([\d x]+); do", art)
+    assert geoms, "pkgs/jarvis-wallpaper no longer lists the geometries it renders"
+    assert re.search(r'compose "\$w" "\$h"', art), (
+        "the per-output loop no longer composes; it is rasterizing something else"
+    )
+    assert re.search(r"compose (\d+) (\d+) wp\.svg", art), (
+        "the primary art — which is also the fallback — is no longer composed"
+    )
+
+
+def test_the_fallback_shot_is_painted_where_a_cover_crop_puts_it():
+    """The one shot whose art is NOT painted at the output's own size, and the
+    arithmetic behind the number its caption claims. `PreserveAspectCrop` scales
+    the source by whichever of the two ratios is larger, so the drawing covers
+    the surface and overflows one axis; the scene asserts that painted size
+    against Qt, and this asserts it against the primary art's real composed
+    geometry. Two halves of one claim: without this, a caption could name any
+    number and the sheet would agree with it as long as Qt did."""
+    primary = re.search(r"compose (\d+) (\d+) wp\.svg", art_text())
+    assert primary, "pkgs/jarvis-wallpaper no longer composes the primary art"
+    src = (int(primary.group(1)), int(primary.group(2)))
+
+    fell_back = [s for s in sheet() if s["art"] == "jarvisos.png"]
+    assert fell_back, "nothing on this sheet falls back to the primary art"
+    for shot in fell_back:
+        w, h = shot["screen"]
+        cover = max(w / src[0], h / src[1])
+        wanted = [src[0] * cover, src[1] * cover]
+        assert all(abs(a - b) < 0.1 for a, b in zip(shot["paint"], wanted)), (
+            f"{shot['file']} is a {w}x{h} output falling back to a {src[0]}x{src[1]} "
+            f"drawing, which PreserveAspectCrop paints at "
+            f"{wanted[0]:.1f}x{wanted[1]:.1f}; its caption says {shot['paint']}"
+        )
+    # …and every other shot's art is its own output, or the caption is claiming a
+    # bespoke render that is being scaled.
+    for shot in sheet():
+        if shot["art"] != "jarvisos.png":
+            assert shot["paint"] == [float(n) for n in shot["screen"]], (
+                f"{shot['file']} resolves {shot['art']} and claims it is painted at "
+                f"{shot['paint']} on a {shot['screen']} output — a bespoke render is "
+                "composed for its own geometry and is never scaled"
+            )
 
 def test_both_surfaces_pick_the_same_render_and_fall_back_the_same_way():
     """Which of pkgs/jarvis-wallpaper's files an output gets, and what happens

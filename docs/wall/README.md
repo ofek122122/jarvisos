@@ -49,10 +49,22 @@ shell puts over the art and where:
   and `jarvisos.png` when the package does not render one. No picture can tell
   those apart — both are a picture of the same drawing — so it is asserted.
 - **where the comet's head is.** `shell.qml` anchors the motion at 73.4% x 68.1%
-  of the surface "so it sits inside the rings, not out on the desk". Every shot
+  of the art "so it sits inside the rings, not out on the desk". Every shot
   asserts the head is exactly `ir` from that anchor.
+- **how big the art was painted here.** The output's own size on every geometry
+  the package composes a render for, and 1820x1024 on the 1280x1024 screen that
+  falls back to the 2560x1440 primary art and crops it. That number is what the
+  anchor above is read off (PLAN E9), so asserting it is what stops the anchor
+  quietly going back to a percentage of the *surface* — which would still be
+  right on six of these seven shots.
 - **whether the head is on the output at all.** For about a third of every lap
   it is below the bottom edge.
+
+The one thing the sheet still cannot ask is whether the *art's own* instrument is
+at those fractions: it is an SVG in another package and no property of a surface
+can see inside a PNG. `tools/tests/test_wallshots.py` reads the three numbers out
+of `pkgs/jarvis-wallpaper/default.nix` and out of `shell.qml` and fails if they
+differ, which is the other half of the same claim.
 
 **The lap.** `phaseMs` runs 0 → 672 000 ms and wraps. 672 s is where the two
 cycles agree again (lcm of 14 s and 96 s), so the wrap is a continuous instant in
@@ -115,7 +127,7 @@ the breath.
 
 ![05-side.png](05-side.png)
 
-1920x1080 (DP-1 / DP-2), phase 24 000. The same drawing rasterized for this
+1920x1080 (DP-1 / DP-2), phase 24 000. The same drawing **composed for** this
 panel rather than scaled onto it, which is the whole reason `jarvisos-<w>x<h>.png`
 exists (PLAN D10): `swaybg` filling the 1440p art onto a 1080p screen cropped the
 instrument and the wordmark by an amount nobody chose. Here the wordmark is
@@ -123,22 +135,34 @@ whole. It is also the clearest picture of the comet on the sheet — at 90° the
 head is out past the end of the art's painted arc, on the outer ring, where
 nothing else is.
 
-### 06-ultrawide.png — a 21:9 output, and a defect
+Composed rather than rasterized-and-scaled is a visible difference on this shot
+since E9, and a deliberate one: the wordmark is set at its own 46 px rather than
+at 0.75 of it, and the grid keeps its 64 px pitch instead of shrinking to 48.
+Type and texture are physical sizes — a 46 px face is 46 px on every monitor —
+and only the *composition* is a fraction of the canvas.
+
+### 06-ultrawide.png — a 21:9 output, and the defect it found, fixed
 
 ![06-ultrawide.png](06-ultrawide.png)
 
-2560x1080, phase 7 000. **This shot found something (PLAN E9).** `resvg`, given
-`--width 2560 --height 1080` for a drawing composed at 2560x1440, rasterizes at
-1:1 and keeps the top 1080 rows — so the art's instrument stays at y=980 and the
-wordmark at y=1330 is simply not in the file. The shell meanwhile anchors its
-motion at 68.1% of the *surface*, which is y=735. The two are 245 px apart, and
-you can see it: the comet rides a ring that is not the drawn one, and the
-wordmark is missing.
+2560x1080, phase 7 000. **This shot found something, and is now the picture of it
+fixed (PLAN E9).** It used to show two instruments. The art was one 2560x1440
+drawing, `resvg --width 2560 --height 1080` over it rasterized at 1:1 and kept
+the top 1080 rows, so the drawn instrument stayed at y=980 while the shell
+anchored its ember at 68.1% of an 1080 px *surface* — y=735, 245 px away — and
+the wordmark, at y=1330 of a drawing whose bottom 360 rows were gone, was simply
+not in the file.
 
-Nothing in the harness asserts otherwise — `headRadius` holds the head to the
-*shell's* anchor, and no property of this surface can see the art — so this is a
-caption on a defect rather than a passing check. ares has no 21:9 panel to find
-it on.
+Both halves are fixed and both are visible here. `pkgs/jarvis-wallpaper` now
+**composes** every render at its own geometry instead of rasterizing one drawing
+at several: the instrument is at 68.1% of *this* canvas and the wordmark is 110 px
+up from *this* bottom edge. And `shell.qml` takes its anchor from where the art
+was actually painted rather than from a percentage of itself. The comet rides the
+ring that is drawn.
+
+ares' three monitors are all 16:9, so this is the only place either half can be
+seen — which is the argument for photographing a geometry the machine does not
+have.
 
 ### 07-fallback.png — a geometry the package does not render
 
@@ -149,6 +173,11 @@ fails, `onStatusChanged` falls back to the primary art, and
 `PreserveAspectCrop` fits it to the screen rather than leaving a black desktop.
 That is the one error path this surface has and nobody had ever seen it fire.
 
-It is also the same defect as 06 from the other direction: the crop scales and
-centres the art, the anchor is a percentage of the surface, and at phase 0 the
-moving head lands *beside* the painted one instead of on it.
+It is also **the only shot on the sheet where the art is not painted at the
+output's own size**, which makes it the one that checks the shell's half of E9.
+The crop scales the 2560x1440 primary art until it covers a 1280x1024 screen, so
+1820x1024 of drawing is painted and 270 px of it goes off each side. The anchor
+is read off *that* rectangle — the instrument lands at 1066,697 instead of the
+940,697 a percentage of a 1280 px surface would give — and the moving head sits
+on the painted one at phase 0 instead of 126 px beside it, which is what this
+shot showed before.

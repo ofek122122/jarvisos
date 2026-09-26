@@ -53,11 +53,36 @@ Item {
   // whole point of this file is that the expression under it is the shell's.
   property string wallDir: ""
 
-  // The instrument sits at ~73.4% x 68.1% of the art; the motion is
-  // anchored there so it sits inside the rings, not out on the desk.
-  readonly property real ix: root.width * 0.734
-  readonly property real iy: root.height * 0.681
-  readonly property real ir: Math.min(root.width, root.height) * 0.39
+  // WHERE THE ART LANDED, which is not always this surface (PLAN E9). Under
+  // `PreserveAspectCrop` Qt scales the drawing until it covers the item and
+  // centres it, so `paintedWidth`/`paintedHeight` are the size of the SCALED
+  // drawing — larger than the surface in one axis by exactly the amount being
+  // cropped off both ends of it. Asked of the engine rather than worked out from
+  // `sourceSize`, because the question is where the crop actually put the picture.
+  //
+  // Zero until the Image has one, and then this surface's own size as the
+  // stand-in: a first frame with the anchor in the wrong place is a frame with no
+  // art under it to be wrong about.
+  readonly property real artW: still.paintedWidth > 0
+                               ? still.paintedWidth : root.width
+  readonly property real artH: still.paintedHeight > 0
+                               ? still.paintedHeight : root.height
+
+  // The instrument sits at 73.4% x 68.1% of THE ART, with its outer ring at 39%
+  // of the art's shorter side — the three fractions pkgs/jarvis-wallpaper
+  // composes every one of its renders to, held to that package by
+  // tools/tests/test_wallshots.py. The motion is anchored there so it sits inside
+  // the rings, not out on the desk.
+  //
+  // They used to be fractions of the SURFACE, which is the very same expression
+  // whenever the art is this output's own bespoke render — `artW` is then `width`,
+  // the overflow is zero and both halves of it vanish — and was 245 px wrong on a
+  // 21:9 panel and wrong on every geometry that falls back to the primary art
+  // instead (PLAN E9). docs/wall/06-ultrawide.png and 07-fallback.png are the
+  // before pictures.
+  readonly property real ix: (root.width - root.artW) / 2 + root.artW * 0.734
+  readonly property real iy: (root.height - root.artH) / 2 + root.artH * 0.681
+  readonly property real ir: Math.min(root.artW, root.artH) * 0.39
 
   // --- what the harness reads back -------------------------------------
 

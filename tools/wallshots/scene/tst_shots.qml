@@ -28,16 +28,28 @@
 // shell's side of a promise nothing else in this repo can check:
 //
 //   · `headRadius()`, how far the comet's head sits from the instrument's
-//     centre. shell.qml anchors the motion at ~73.4% x 68.1% of the SURFACE "so
-//     it sits inside the rings, not out on the desk" — which is a claim about a
-//     drawing this shell cannot see, rasterized from an SVG in another package.
-//     `headRadius` holds the head to the shell's own anchor and must be `ir` on
-//     every shot. It cannot hold the anchor to the ART, because no property of
-//     this surface knows where the art put anything — and the two last shots on
-//     this sheet are the pictures of them disagreeing (PLAN E9). A percentage of
-//     the surface is the drawing's centre only while the art is rasterized 1:1
-//     at this output's aspect ratio, which is true of ares' three monitors and
-//     of nothing else.
+//     centre. shell.qml anchors the motion at 73.4% x 68.1% of THE ART "so it
+//     sits inside the rings, not out on the desk", and `headRadius` holds the
+//     head to that anchor: it must be `ir` on every shot.
+//   · `artW` / `artH`, THE SIZE THE ART IS ACTUALLY PAINTED AT on this output,
+//     which is what closes the promise above (PLAN E9). It used to be open: the
+//     anchor was a percentage of the SURFACE, which is the drawing's centre only
+//     while the art is rasterized 1:1 at this output's aspect ratio, and the two
+//     last shots on this sheet were pictures of the two coming apart — 245 px on
+//     a 21:9 panel, and a head landing beside the painted one on a geometry that
+//     falls back. Both halves are fixed: pkgs/jarvis-wallpaper COMPOSES each
+//     render at its own geometry instead of cropping one drawing, and the shell
+//     takes its anchor from `PreserveAspectCrop`'s painted rect. Asserting that
+//     rect is what makes the second half checked rather than described — on six
+//     of these shots it is the output's own size, and on the fallback it is a
+//     1820x1024 drawing on a 1280x1024 screen, which is a number no surface
+//     reading percentages of itself could produce.
+//
+//     What still cannot be asked HERE is whether the art's own instrument is at
+//     those fractions: it is an SVG in another package and this surface cannot
+//     see inside a PNG. tools/tests/test_wallshots.py reads the three fractions
+//     out of both files and fails if they differ, which is the other half of the
+//     same claim.
 //
 // And one boolean that is a fact rather than a promise: `headOnScreen()`. The
 // instrument is deliberately three quarters off the bottom right of the field,
@@ -120,30 +132,37 @@ Item {
     // `motion` is the switch, `phase` is the millisecond of the 672 s lap, and
     // `screen` is the output. `art` is the file this geometry must resolve —
     // asserted, because it is the one thing about this surface a picture cannot
-    // show. `glow` and `lap` are the breath and the drift as DRAWN, to the
-    // precision a reader can check against the arithmetic in shell.qml. `onScreen`
-    // is whether the head is on this output at all.
+    // show — and `paint` is the size that file is actually PAINTED at here,
+    // which is the output's own size on every geometry the package composes for
+    // and something else entirely on the one it does not (PLAN E9). `glow` and
+    // `lap` are the breath and the drift as DRAWN, to the precision a reader can
+    // check against the arithmetic in shell.qml. `onScreen` is whether the head
+    // is on this output at all.
     readonly property var sheet: [
       // The desktop under prefers-reduced-motion, which is also the desktop
       // under `JV_MOTION=0` and the desktop this shell replaced: the art, with
       // nothing over it. §06's earned emptiness at its most literal, and the one
       // shot on this sheet where every pixel belongs to pkgs/jarvis-wallpaper.
       { "file": "01-still.png", "motion": false, "phase": 0, "screen": [2560, 1440],
-        "art": "jarvisos-2560x1440.png", "glow": 0.25, "lap": 0, "onScreen": true },
+        "art": "jarvisos-2560x1440.png", "paint": [2560, 1440],
+        "glow": 0.25, "lap": 0, "onScreen": true },
       // The start of a breath, on ares' primary monitor: the glow at its
       // dimmest, and the comet's head at twelve o'clock — which is exactly where
-      // pkgs/jarvis-wallpaper PAINTS a head, at `cx=0 cy=-560` of the
-      // instrument. Once every 96 s the moving one passes over the still one and
-      // the wallpaper has one comet again. That is not a coincidence to fix; it
-      // is what the anchor being right looks like.
+      // pkgs/jarvis-wallpaper PAINTS a head, at the top of the outer ring of its
+      // own instrument. Once every 96 s the moving one passes over the still one
+      // and the wallpaper has one comet again. That is not a coincidence to fix;
+      // it is what the anchor being right looks like — and until PLAN E9 it was
+      // only ever right on THIS shot's aspect ratio.
       { "file": "02-breath-low.png", "motion": true, "phase": 0, "screen": [2560, 1440],
-        "art": "jarvisos-2560x1440.png", "glow": 0.25, "lap": 0, "onScreen": true },
+        "art": "jarvisos-2560x1440.png", "paint": [2560, 1440],
+        "glow": 0.25, "lap": 0, "onScreen": true },
       // Seven seconds later: the breath at its brightest, which is the most this
       // surface is ever allowed to say. The head has moved 26.25° — a quarter of
       // a minute of arc-drift against a four-times-brighter glow, which is the
       // whole argument for two cycles at these two speeds.
       { "file": "03-breath-peak.png", "motion": true, "phase": 7000, "screen": [2560, 1440],
-        "art": "jarvisos-2560x1440.png", "glow": 1.0, "lap": 26.25, "onScreen": true },
+        "art": "jarvisos-2560x1440.png", "paint": [2560, 1440],
+        "glow": 1.0, "lap": 26.25, "onScreen": true },
       // Exactly half the 672 s lap, and the shot that says the quiet part out
       // loud: the head is at six o'clock, which on this composition is 562 px
       // BELOW an instrument centre that is already at 68% of a 1440 px screen.
@@ -157,40 +176,46 @@ Item {
       // other six o'clock, the glow is at 0.963 and the shot is indistinguishable
       // from the one above it.
       { "file": "04-head-below.png", "motion": true, "phase": 336000, "screen": [2560, 1440],
-        "art": "jarvisos-2560x1440.png", "glow": 0.25, "lap": 180, "onScreen": false },
+        "art": "jarvisos-2560x1440.png", "paint": [2560, 1440],
+        "glow": 0.25, "lap": 180, "onScreen": false },
       // ares' other two monitors, which are the reason `jarvisos-<w>x<h>.png`
       // exists at all (PLAN D10): swaybg scaling the 1440p art onto a 1080p
       // panel cropped the instrument and the wordmark by an amount nobody chose.
       // This is the same drawing, rasterized for this panel — so the wordmark is
       // whole, and the head is still on the ring.
       { "file": "05-side.png", "motion": true, "phase": 24000, "screen": [1920, 1080],
-        "art": "jarvisos-1920x1080.png", "glow": 0.708, "lap": 90, "onScreen": true },
+        "art": "jarvisos-1920x1080.png", "paint": [1920, 1080],
+        "glow": 0.708, "lap": 90, "onScreen": true },
       // A geometry pkgs/jarvis-wallpaper renders and nothing about which is 16:9
-      // — 21:9, and THE SHOT THAT FOUND SOMETHING (PLAN E9). resvg given
-      // `--width 2560 --height 1080` for a drawing composed at 2560x1440
-      // rasterizes it at 1:1 and keeps the top 1080 rows, so the art's
-      // instrument stays at y=980 and the wordmark at y=1330 is simply not in
-      // the file. The shell meanwhile anchors its motion at 68.1% of the
-      // SURFACE, which is y=735. The two are 245 px apart and the picture shows
-      // it: the comet rides a ring that is not the drawn one.
-      //
-      // Nothing here asserts otherwise — `headRadius` below is the head against
-      // the shell's own anchor, and no property of this surface can see the art
-      // — so this entry is a caption on a defect rather than a passing check.
-      // It is on the sheet because a picture is what there is, and ares has no
-      // 21:9 panel to find it on.
+      // — 21:9, and THE SHOT THAT FOUND SOMETHING and is now the shot that shows
+      // it fixed (PLAN E9). It used to be a caption on a defect: the art was one
+      // 2560x1440 drawing, `resvg --width 2560 --height 1080` over it rasterized
+      // at 1:1 and kept the top 1080 rows, so the drawn instrument stayed at
+      // y=980 while the shell anchored at 68.1% of an 1080 px SURFACE (y=735),
+      // 245 px away, and the wordmark at y=1330 was not in the file at all. The
+      // package now COMPOSES this render at 2560x1080 — same drawing, laid out
+      // for this canvas — so the instrument is at 68.1% of it, the wordmark is
+      // 110 px up from its own bottom edge, and the comet rides the ring that is
+      // actually drawn. ares has no 21:9 panel, and this is the only place the
+      // fix can be seen.
       { "file": "06-ultrawide.png", "motion": true, "phase": 7000, "screen": [2560, 1080],
-        "art": "jarvisos-2560x1080.png", "glow": 1.0, "lap": 26.25, "onScreen": true },
+        "art": "jarvisos-2560x1080.png", "paint": [2560, 1080],
+        "glow": 1.0, "lap": 26.25, "onScreen": true },
       // And a geometry it does NOT render: 5:4, which is a capture device or an
       // old panel and is not in the package's list. The Image fails, the shell
       // falls back to the primary art and crops it to fit rather than showing a
       // black screen — the one error path this surface has, and one nobody had
-      // ever seen. It is the same defect as the shot above from the other
-      // direction: `PreserveAspectCrop` scales and centres the art, the anchor
-      // is a percentage of the surface, and at phase 0 the moving head lands
-      // beside the painted one instead of on it (PLAN E9).
+      // ever seen. It is ALSO the only shot on this sheet where the art is not
+      // painted at the output's own size, which makes it the shot that checks
+      // the shell's half of PLAN E9: `PreserveAspectCrop` scales the 2560x1440
+      // primary art until it covers a 1280x1024 screen, so 1820x1024 of drawing
+      // is painted and 270 px of it is cropped off each side. The anchor is read
+      // off THAT rect rather than off the surface — 1066,697 instead of 940,697
+      // — which is why the moving head lands on the painted one here and used to
+      // land 126 px beside it.
       { "file": "07-fallback.png", "motion": true, "phase": 0, "screen": [1280, 1024],
-        "art": "jarvisos.png", "glow": 0.25, "lap": 0, "onScreen": true }
+        "art": "jarvisos.png", "paint": [1820.4, 1024],
+        "glow": 0.25, "lap": 0, "onScreen": true }
     ]
 
     function test_the_sheet() {
@@ -216,6 +241,23 @@ Item {
         // exercised rather than a race.
         tryVerify(() => field.artReady, 5000, shot.file + ": the art never loaded");
         compare(field.art, shot.art, shot.file + ": the render this output resolved");
+
+        // …AND AT WHAT SIZE IT LANDED (PLAN E9). The file name says which
+        // drawing; this says how much of the surface that drawing actually
+        // covers, which is the number the shell's anchor is now read off.
+        // `PreserveAspectCrop` scales the source until it covers the item and
+        // centres it, so on every geometry the package composes for this is the
+        // output's own size and on shot 07 it is 1820x1024 of drawing on a
+        // 1280x1024 screen. Asserting it is what stops the anchor quietly going
+        // back to being a percentage of the surface: that would still be right
+        // on six of these shots and wrong on the seventh, which is exactly the
+        // defect this sheet found.
+        fuzzyCompare(field.artW, shot.paint[0], 0.5,
+                     shot.file + ": the art is painted " + field.artW.toFixed(1)
+                     + " px wide");
+        fuzzyCompare(field.artH, shot.paint[1], 0.5,
+                     shot.file + ": the art is painted " + field.artH.toFixed(1)
+                     + " px tall");
 
         // EITHER BOTH MOVING THINGS ARE DRAWN OR NEITHER IS. One switch, and it
         // is the §06 one: a human who asked this machine for less motion gets
@@ -253,13 +295,17 @@ Item {
         }
 
         // The instrument's centre, said out loud rather than pinned: it is a
-        // percentage of an output, and the reason it is worth printing is that
-        // the art's own instrument is at 1880,980 of a 2560x1440 field. A reader
-        // comparing those two numbers is the only check there is that the shell
-        // and the SVG are talking about the same drawing.
+        // percentage of the ART, and the reason it is worth printing is that
+        // pkgs/jarvis-wallpaper composes its own instrument at the same three
+        // fractions — so on shots 01-06 this is 73.4% x 68.1% of the output, and
+        // on shot 07 it is 1066,697 rather than the 940,697 a percentage of a
+        // 1280 px surface would give. A reader comparing those numbers with the
+        // ones in the package is reading the E9 fix; a machine comparing them is
+        // tools/tests/test_wallshots.py.
         console.log(shot.file + ": the instrument is at " + field.ix.toFixed(0) + ","
-                    + field.iy.toFixed(0) + " r" + field.ir.toFixed(0) + " of "
-                    + root.screenW + "x" + root.screenH);
+                    + field.iy.toFixed(0) + " r" + field.ir.toFixed(0) + " of a "
+                    + field.artW.toFixed(0) + "x" + field.artH.toFixed(0)
+                    + " drawing on a " + root.screenW + "x" + root.screenH + " output");
 
         const img = grabImage(root);
         compare(img.width, Math.round(shot.screen[0] * root.sheetScale), shot.file + ": width");
