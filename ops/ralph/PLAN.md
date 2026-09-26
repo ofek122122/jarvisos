@@ -1990,6 +1990,27 @@ human-reviewed step.
       widening names are a legitimate `__init__` or a helper nested in two
       tests. Raised **D78**.
 
+- [ ] D79. **The bar is the third shell and the only one nothing has ever
+      measured against a screen.** D74 gave the HUD a declared floor and a
+      warn; D77 measured the notifier's maximum and found the cap already is
+      its floor. `jv-bar` has neither, and the D77 item said why: its surface
+      is a 31 px strip anchored top+left+right, so it has no HEIGHT question at
+      all. What it has is a WIDTH question — the workspaces row and the clock
+      are laid out against the monitor's width, and the right end is left empty
+      by exactly `hudCornerPx` for the HUD to draw over. That is D65, which is
+      open and predates all of this. What D77 adds is the SHAPE of the answer,
+      and it is the notifier's rather than the HUD's: before writing a warn or
+      a clamp, ask whether the thing is bounded already. The workspaces row is
+      not — niri can hold any number of desks and each one is a delegate — so
+      unlike `maxVisible` there is no cap to be the floor, and the honest
+      outcome is probably a real measurement of the widest strip a plausible
+      desk count produces against `sheet.py`'s 280 px narrow output. Note the
+      two harnesses' fourth outputs are already the right pair for this: the
+      shellload one asks height (1024x768), the hudscreens one asks width
+      (280x1080), and `test_each_harness_fourth_output_asks_one_question_and_not_the_others`
+      holds them apart. Do D65 with that framing rather than as bar polish.
+      Raised by D77.
+
 - [ ] D78. **The duplicate-definition scan D76 wrote stops at `tools/`, and
       the trap is not a property of `tools/`.** There are 93 more Python
       modules in this repo — `services/**`, `harness/`, `pkgs/` — and a second
@@ -2008,7 +2029,7 @@ human-reviewed step.
       shape that cannot see a service nobody wrote a suite for. Decide, write
       the reason down, then widen. Raised by D76.
 
-- [ ] D77. **The HUD is the only one of the three shells that declares a
+- [x] D77. **The HUD is the only one of the three shells that declares a
       floor, and the notifier is the only other one for which that is a
       question.** D74 gave `shell/jv-hud/shell.qml` a `minScreenHeightPx` and a
       warn, and D75 put a 768 px output under the load gate to read it. Neither
@@ -2040,6 +2061,29 @@ human-reviewed step.
       Do not add a warn to either shell before deciding which failure is the
       better one — D74's whole argument is that the question is WHICH crop, not
       whether to report one. Raised by D75.
+      **Done (67b9c92).** The item called the outcome and the arithmetic came
+      out where it guessed: no new code in any shell, one comment beside
+      `maxVisible`, and the notifier keeps no floor and no warn. What it did
+      NOT predict is where the measurement belongs. A sentence saying "the cap
+      is the floor" is a claim nothing checks, and the corner's height is a
+      font question, so the honest home for it is the SHEET:
+      `docs/notify/11-tallest.png` is the corner at its own maximum — three
+      plates, both rows elided on every one of them, under the `+N EARLIER`
+      line — and its PNG's HEIGHT is the reading. 470 px against the 768 px
+      output D75 added, so the corner at its worst leaves 298 px of that screen
+      empty. Three gates in `tools/tests/test_notifyshots.py`: the sheet must
+      photograph the worst case (or the number is the maximum of nothing), the
+      tallest PNG must fit the shortest output `shells.py` declares, and the
+      note's two numbers are read back from the picture and from that harness.
+      Eight mutants, eight reds. Two worth keeping: `png_size` pointed at the
+      wrong IHDR offset is caught by the NOTE gate and not by the fit gate,
+      which would have compared a width against a height and passed — the pair
+      is load-bearing, not the fit gate alone; and `maxVisible` raised to six
+      with every other gate satisfied gives 893 px, exactly the 47 + 141·6 the
+      rhythm predicts, with the fit gate the thing that says so. Measured on
+      the way past: the cap could go to FIVE and still fit, and a raised cap
+      that did not re-render the sheet goes red three shots earlier, in the
+      driver's own captions. Raised **D79**.
 
 - [ ] D71. **The crowded corner has never met the narrow screen.** D68's
       picture is `03-confirm`: two plates, one of them capped. What D66's

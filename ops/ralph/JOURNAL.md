@@ -14778,3 +14778,79 @@ is not worth chasing.)
   clean today, and the real question is which suite may own it), **D71**,
   **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**, **D55**,
   **D62**, **D48**, **D45**. **D67** and **D65** still want a human.
+
+## 2026-09-26 — D77: the corner that needed no floor, and the picture that says so
+
+- **what**: D74 gave `jv-hud` a declared `minScreenHeightPx` and a warn,
+  because its surface is a FIXED 300x826 box and a screen shorter than that
+  crops it. D77 asked the same question of the other two shells. The first
+  thing to write down is that it is not the same question: `jv-bar`'s strip is
+  31 px and fits anything (its real question is width — that is D65, and the
+  framing it should get is now **D79**), and `jv-notify`'s surface is DERIVED,
+  `stack.implicitHeight + inset*2`. So for the notifier "does it fit" is not a
+  property of the screen at all. It is a property of how tall the stack can be
+  made, and that is bounded twice: `NotifyModel.maxVisible` bounds the plates,
+  and `Toast`'s two-line summary and three-line body bound each plate.
+- **so the answer is arithmetic, and the arithmetic is 470 px.** The item
+  predicted the outcome — "the cap IS the floor, and this closes with no new
+  code in any shell" — and it was right about both. What it did not say is
+  where the measurement belongs. "The cap is the floor" written in a comment is
+  a claim nothing checks, and the corner's height is a FONT question, so the
+  honest home for it is the sheet: `docs/notify/11-tallest.png` is the corner
+  at its own maximum — three plates, both rows full and elided on every one of
+  them, under the `+N EARLIER` line that only appears once the cap is passed —
+  and its PNG's HEIGHT is the reading. Nothing a sender can do makes this
+  surface taller. Against the 768 px output D75 added, the corner at its worst
+  leaves 298 px of that screen empty.
+- **no warn in this shell, deliberately rather than by omission.** It would be
+  a warn that cannot fire. The note beside `maxVisible` says what to do if one
+  ever could, and it is not a clamp: this column grows UPWARD out of the bottom
+  corner, so the first thing a crop takes is the topmost element — the
+  `+N EARLIER` line, whose entire job is to say something is being hidden. That
+  is the HealthPlate argument sharpened, not copied.
+- **three gates, and the trio is the point.** The sheet must PHOTOGRAPH the
+  worst case (cap-many plates, both rows elided, an EARLIER line) or the number
+  below it is the maximum of nothing; the tallest PNG on the sheet must fit the
+  shortest output `tools/shellload/shells.py` declares (imported, never typed);
+  and the note's two numbers are read back, from the picture and from the
+  harness that owns the screen, so a comment explaining why this shell has no
+  floor cannot go on saying so after the corner has outgrown the screen.
+- **tests**: `bash ops/ralph/verify.sh --since HEAD~1` **GREEN** — 4 gates over
+  5 paths, 126.2 s (`runtests.sh tools` 779 passed, up from 776; notifytest;
+  notifyshots; shellload). The pre-commit run was red on exactly one thing — a
+  shot the committed sheet had never seen, which is the documented refresh flow
+  and which this commit is. Graded by mutation, eight mutants and eight reds:
+  the note off by one px; its screen changed to 1080; the note deleted;
+  `shells.py`'s short output dropped to 400 (red in the fit gate AND the note,
+  the same comparison from its other side); shot 11's captions stripped of
+  their ellipses; shot 11's EARLIER line removed; `png_size` pointed at the
+  wrong IHDR offset — **caught by the note gate and NOT by the fit gate**,
+  which would have compared a width against a height and passed, so the pair is
+  load-bearing and neither half is decoration; and the end-to-end one,
+  `maxVisible` raised to six with every other gate satisfied (driver captions
+  updated, whole sheet re-rendered), which comes out at 893 px — exactly the
+  47 + 141·6 the rhythm predicts — with the fit gate the thing that says it no
+  longer fits. Two things measured on the way past and written into the note:
+  the cap could go to FIVE and still fit, six is where it stops; and a raised
+  cap that did not re-render the sheet is caught three shots earlier, by the
+  driver's own captions.
+  build: `nixos-rebuild build --flake .#ares` green. Never tested, never
+  switched. No schema, no jv-act, no boot path, no pins; the only shell file
+  touched is a comment.
+- **one process note for the next iteration, because it cost real time.** The
+  mutation loop reverted each mutant with `git checkout -- <files>`, which
+  reverts to HEAD — so it threw away the iteration's own uncommitted work along
+  with the mutation, silently, after the first mutant. Everything was rewritten
+  from context and the readings above are all from a clean re-run, one mutant
+  per invocation. Back mutants up with `cp` to a temp dir, never with
+  `git checkout`, while the work is uncommitted.
+- **files**: docs/notify/11-tallest.png (new), docs/notify/README.md,
+  shell/jv-notify/core/NotifyModel.qml, tools/notifyshots/scene/tst_shots.qml,
+  tools/tests/test_notifyshots.py, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- commit: 67b9c92
+- next: **D78** (the duplicate-definition scan still stops at `tools/`; the
+  real question there is which suite may own the other 93 modules), then
+  **D79** (raised here: do D65 with D77's framing — ask what bounds the bar's
+  strip before writing it a warn), **D71**, **B88**, **B95**, **D63**, **D61**,
+  **D57**, **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. **D67** and
+  **D65**'s greeter half still want a human.
