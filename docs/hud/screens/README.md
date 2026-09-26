@@ -1,4 +1,4 @@
-# The HUD, on three monitors
+# The HUD, on three monitors (and one that is not)
 
 Photographs of the **real** `jv-hud` — quickshell, a layer-shell surface,
 its own read-only bridge, a real `jarvisd` — running on a real wlroots
@@ -63,12 +63,32 @@ QML engine can answer:
   the top-right, and the gap to the right edge is `inset_px`. *Verified it
   bites: anchoring the surface `left` instead of `right` fails; making one
   surface instead of one per screen fails.*
+- **And it earns its left inset on a screen it does not fit.** The 280 px
+  output has 248 px of room between the insets and the surface on it is
+  300 px wide, so the only thing standing between a plate and the part of
+  the surface that is off the screen is the HUD's own clamp. Nothing drawn
+  on any output may start inside the left inset. *Verified it bites: the
+  clamp measured in a QML engine (D66) is what this puts on a compositor.*
+- **A 300 px surface on a 280 px screen is granted 300 px.** Read out of
+  the HUD's own `WAYLAND_DEBUG` log — one `zwlr_layer_surface_v1.configure`
+  per output, all four `300x826`. The census is the control: a regex that
+  stopped matching, or a shell that mapped nothing, both come back empty,
+  and "nothing was configured wrongly" is true of an empty log.
 - **The keyboard never moves.** The seat's focused node is read with no
   HUD running and again while the HUD is drawing, and must be identical.
   *Verified: `WlrKeyboardFocus.Exclusive` fails.*
-- **Earned emptiness is real emptiness.** The quiet shot must come back
-  pixel-identical to the bare desktop, on all three monitors. *Verified: a
-  health plate that shows a well machine fails.*
+- **Earned emptiness is real emptiness** — two different darks, and both
+  are now measured on **every output the compositor has**, the three
+  monitors and the 280 px one. That screen sits outside the desk capture on
+  purpose, so each dark is asked about it through a second 0.3 Mpx exposure
+  of its own rather than through the 33 Mpx wide one. The **idle** dark is
+  no frames at all: nothing published, no surface mapped, every screen
+  pixel-identical to the bare desktop. The **quiet** dark is `01-quiet` —
+  frames arrive and every plate decides it has nothing true to say, which
+  is the case where a plate drawing a zero-height sliver or an empty
+  rectangle of glass would be a bug. Neither costs a picture: the narrow
+  exposure is read and thrown away, and the sheet stays at ten PNGs.
+  *Verified: a health plate that shows a well machine fails.*
 - **No space is reserved.** Each workspace's usable rect must still be the
   whole monitor. On today's corner-anchored surface this proves nothing —
   the protocol ignores an exclusive zone on a corner — and it is kept for
@@ -377,11 +397,16 @@ screens that moved.
 
 **Recorded** from a live bus with nothing published on it. jarvisd is up,
 the bridge is subscribed, and every plate has looked at the bus and
-decided it has nothing true to say — so all three surfaces stay unmapped
+decided it has nothing true to say — so all four surfaces stay unmapped
 and the screens are just the desktop. This is the HUD's ordinary state,
 and the fact that this picture is boring is the whole of §06's earned
 emptiness. It is also the control: every other shot here is measured
 against it.
+
+Four surfaces, three monitors, one picture. The fourth screen is the
+280 px output, which is outside this capture by design — so the run takes
+a second exposure of it for every desk shot and insists on the same
+verdict there, without writing an eleventh PNG of an empty screen.
 
 ### 02-heard-desk.png
 
@@ -434,6 +459,38 @@ The same composed request at real size on the primary. The summary is
 jv-act's own sentence, wrapped to the plate's width, over the tool id —
 and it can only be read: the surface takes no input at all, so answering
 stays with your voice or `jv confirm` (invariant 3).
+
+### 03-confirm-narrow.png
+
+![the same confirmation on a 280px screen, between two 16px insets](03-confirm-narrow.png)
+
+**Composed**, the same frames as the two above, on the one screen in this
+sheet that is not ares: a 280x1080 output narrower than the HUD's own
+300x826 surface. There is no monitor like it on this machine and there is
+not meant to be — it exists because `shell.qml` asks every screen for 300
+px of corner, and what a compositor does with that request on a smaller
+screen had been **assumed** in three comments and never once observed.
+
+It is granted as asked. All four of this run's layer surfaces are
+configured `300x826`, the narrow one included, so the surface really does
+hang 36 px off the left of that screen — measured from the HUD's own side
+of the Wayland socket, not inferred from this picture, because the picture
+cannot tell the two readings apart. What keeps a sentence from being laid
+out in the part that is not there is the HUD's own clamp: plate room is
+`min(surface width, screen width)` less an inset at each edge.
+
+You can see it do its work by putting this beside the primary shot above
+— the same request, the same wrap, 16 px from the right edge on both:
+
+| | the plate | the room it had |
+|---|---|---|
+| primary, 2560 px | 260 px | capped by `ConfirmPlate`'s own 260 px limit |
+| narrow, 280 px | 248 px | 280 less 16 px of inset at each edge |
+
+Twelve pixels, and they are the whole difference between a HUD that knows
+what screen it is on and one that draws 36 px of a question where no
+screen is. The left gap here is 16 px, the same inset §06 gives the top
+and the right.
 
 ### 04-unheard-primary.png
 

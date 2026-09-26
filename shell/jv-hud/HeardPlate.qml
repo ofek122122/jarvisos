@@ -57,6 +57,26 @@ Item {
   // number as ConfirmPlate, because they are the same box.
   property int maxTextPx: 240
 
+  // The room this plate really HAS, and -1 for as long as nothing has said
+  // (PLAN D66). The cap above is a choice about how much of the corner a
+  // sentence may take, made for the 300 px surface ares' monitors give it; on
+  // an output narrower than that corner the cap alone lays this text out past
+  // the left edge of the screen, which is where it cannot be read. Both files
+  // that compose the stack hand this down — `shell.qml` from the surface the
+  // compositor configured, `tools/hudshots/scene/Corner.qml` from the box its
+  // driver renders into — and `tools/tests/test_hudshots.py` fails if a plate
+  // that declares a cap is left out of either one.
+  property int roomPx: -1
+
+  // The cap, narrowed to that room. The rule is `core/PlateFit.qml` and not a
+  // `Math.min` here for one reason `tests/tst_platefit.qml` spells out: an
+  // unmeasured room has to leave the cap standing and a room of ZERO has to
+  // not, and the naive arithmetic answers both with the same negative number.
+  readonly property int textPx: root.fit.textPx(root.maxTextPx, root.roomPx, Theme.padPx)
+
+  // The rule itself, which owns no state and holds no reading.
+  readonly property PlateFit fit: PlateFit {}
+
   // How many lines are shown before it elides. Three is what a person
   // reads without stopping; past that, the sentence they just said is the
   // better copy anyway.
@@ -153,7 +173,7 @@ Item {
         // because on the rare occasion this plate is up it is the thing
         // the user is here to read.
         text: root.heard.text
-        width: Math.min(metrics.width, root.maxTextPx)
+        width: Math.min(metrics.width, root.textPx)
         wrapMode: Text.Wrap
         maximumLineCount: root.maxLines
         elide: Text.ElideRight

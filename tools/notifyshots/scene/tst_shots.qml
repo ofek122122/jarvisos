@@ -218,6 +218,40 @@ Item {
       suite.notify(zalgo, zalgo + " " + zalgo, zalgo);
     }
 
+    // THE TALLEST THIS CORNER CAN EVER BE (PLAN D77), which is a question the
+    // HUD had to answer with a declared floor and this shell does not.
+    //
+    // `jv-hud` asks the compositor for a FIXED 300x826 box, so on a screen
+    // shorter than that the corner is cropped and shell.qml says so in its log
+    // (D74, and `tools/shellload/shells.py` puts a 768 px output under it to
+    // hear the line). This surface is derived instead — `stack.implicitHeight
+    // + inset*2` — so the question is not "does it fit" but "how tall can the
+    // stack get", and the answer is bounded by `NotifyModel.maxVisible`: the
+    // cap-many plates, each at ITS own maximum (both rows full and elided,
+    // which is what `06-long` proves is really a maximum), under the
+    // `+N EARLIER` line that only appears once the cap is exceeded. Nothing a
+    // sender can do makes this corner taller — that is the whole of the fit
+    // argument, and the picture is what makes it a measurement instead of an
+    // assertion about arithmetic nobody ran.
+    //
+    // So this shot exists to be MEASURED rather than looked at:
+    // `tools/tests/test_notifyshots.py` reads its height back out of the PNG
+    // and holds it under the shortest screen any shell in this repo is loaded
+    // on. A theme with a bigger body size, a fourth line of body, or a raised
+    // cap all move this file, and the sheet gate is what says so.
+    //
+    // Five sent, like `shot_earlier` — anything past the cap draws the line,
+    // and one line is one line whatever number is on it. That the cap is three
+    // is not assumed here: the caption below says three plates and
+    // `+2 EARLIER`, so a model that raised its cap turns this shot red rather
+    // than quietly photographing a shorter corner than the one being claimed.
+    function shot_tallest() {
+      for (let i = 1; i <= 5; i++)
+        suite.notify("thunderbird",
+                     suite.rep("Re: the quarterly figures, as discussed at some length. ", 66),
+                     suite.rep("Sent from a device that does not know what a summary is. ", 21));
+    }
+
     // --- the sheet ----------------------------------------------------
 
     // name -> builder, in reading order. The file names carry the order so a
@@ -246,7 +280,14 @@ Item {
       { "file": "07-no-name.png", "build": suite.shot_no_name, "earlier": "", "plates": ["normal summary body"] },
       { "file": "08-markup.png", "build": suite.shot_markup, "earlier": "", "plates": ["normal name summary body"] },
       { "file": "09-long-name.png", "build": suite.shot_long_name, "earlier": "", "plates": ["normal name summary body"] },
-      { "file": "10-combining.png", "build": suite.shot_combining, "earlier": "", "plates": ["normal name summary body"] }
+      { "file": "10-combining.png", "build": suite.shot_combining, "earlier": "", "plates": ["normal name summary body"] },
+      // THE ONE SHOT ON THIS SHEET THAT IS A MEASUREMENT. Every ellipsis in
+      // every caption at once, under the `+N EARLIER` line: the cap-many
+      // plates each at their own maximum height, which is the tallest this
+      // surface can be made by anything a sender does. Its PNG's HEIGHT is
+      // the reading (PLAN D77) — `tools/tests/test_notifyshots.py` holds it
+      // under the shortest screen this repo loads a shell on.
+      { "file": "11-tallest.png", "build": suite.shot_tallest, "earlier": "+2 EARLIER", "plates": ["normal name summary… body…", "normal name summary… body…", "normal name summary… body…"] }
     ]
 
     function test_the_sheet() {

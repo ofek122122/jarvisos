@@ -95,6 +95,19 @@
 #     The rule is every line is one the broker wrote at INFO or below, plus a
 #     census — it has to have announced the socket this run told it to bind,
 #     which is what keeps a log nobody wrote from reading clean.
+#   · AND ONE OF THE OUTPUTS IS NOT A MONITOR (PLAN D75). The compositor is
+#     given a fourth screen, 768 px tall, which is under the floor
+#     `shell/jv-hud/shell.qml` declares its corner is for. D74 settled that
+#     question as a declared floor rather than as a clamp — the compositor
+#     crops the bottom of the stack, every plate is still drawn, and the shell
+#     SAYS SO — and until this output the saying-so was a regex over a file no
+#     engine in this repo loads. Here it is a behaviour: the warn has to arrive
+#     naming that screen and its own height, the corner there has to name the
+#     same ten plates as everywhere else (a HUD that had grown a height clamp
+#     would name nine), and the three monitors have to be left out of it. The
+#     assertion is in `tools/shellload/load.py` and not in the scan below,
+#     because `tools/qmlerrors.py` wants a source location and an ECMAScript
+#     error name: a warning is invisible to it by design.
 #
 # TWO THINGS THE ENVIRONMENT MUST DO, both measured, neither optional:
 #   1. DBUS_SESSION_BUS_ADDRESS is REPLACED, not inherited. Run without that,
@@ -220,7 +233,15 @@ EOF
 # compositor protocol and all real here.
 export WLR_BACKENDS=headless
 export WLR_RENDERER=pixman
-export WLR_HEADLESS_OUTPUTS=3
+# HOW MANY, from `shells.py` rather than from here (PLAN D75). The backend
+# makes this many outputs and the config above names them, and the two are one
+# number: a config naming four against a backend making three leaves the fourth
+# at whatever size wlroots defaults to — a real screen, drawn on, and not the
+# 768 px one this gate added in order to ask what the HUD does on a screen
+# shorter than its own corner.
+export WLR_HEADLESS_OUTPUTS=$("$py/bin/python" -c "
+import sys; sys.path.insert(0, '$tool'); import shells
+print(len(shells.ALL_OUTPUTS))")
 unset WAYLAND_DISPLAY || true
 
 "$sway/bin/sway" -c "$stage/sway.conf" > "$stage/sway.log" 2>&1 &

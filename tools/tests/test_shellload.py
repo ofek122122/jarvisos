@@ -25,7 +25,13 @@ from pathlib import Path
 
 import pytest
 
-from test_gen_theme_qml import ROOT, strip_qml_comments, theme_tokens
+from test_gen_theme_qml import (
+    ROOT,
+    hud_min_screen_height,
+    hud_surface_box,
+    strip_qml_comments,
+    theme_tokens,
+)
 
 sys.path.insert(0, str(ROOT / "tools" / "shellload"))
 import shells  # noqa: E402
@@ -161,10 +167,13 @@ def test_every_shell_is_waited_for_before_anything_is_scanned():
     assert "wait_for(shells.READY" in text
     # And the wait is not optional for any engine: one `load` for the three
     # shells, one `load_blind` for the HUD's second run (PLAN D47), and one
-    # wait on READY inside each.
+    # wait on READY inside each. Both go through `ReadyBudget.wait` since D53,
+    # which is the only place the string `shells.READY` is waited on — a second
+    # one would be an engine outside the run's budget.
     assert text.count("def load(") == 1
     assert text.count("def load_blind(") == 1
-    assert text.count("proc.wait_for(shells.READY") == 2
+    assert text.count("ready.wait(proc)") == 2
+    assert text.count("wait_for(shells.READY") == 1
 
 
 def test_a_shell_that_never_loads_is_a_failure_and_not_a_skip():
@@ -203,16 +212,51 @@ def test_there_are_three_monitors_and_the_compositor_is_given_all_of_them():
     calls it a shell. D37's fault and D32's are both per-surface."""
     assert len(shells.OUTPUTS) == 3
     config = shells.sway_config()
-    for out in shells.OUTPUTS:
+    for out in shells.ALL_OUTPUTS:
         assert f"output {out['name']} mode {out['width']}x{out['height']}" in config
-    assert "WLR_HEADLESS_OUTPUTS=3" in script_text()
+
+
+def test_the_compositor_is_given_the_short_output_too():
+    """The config and the backend have to agree with each other, and neither is
+    written where the other can see it: `sway_config()` names the outputs and
+    `WLR_HEADLESS_OUTPUTS` says how many the backend makes. A config naming four
+    against a backend making three leaves the fourth unconfigured at whatever
+    size wlroots defaults to — which is a real screen, drawn on, and not the one
+    D75 added it to be."""
+    line = (
+        f"output {shells.SHORT['name']} mode "
+        f"{shells.SHORT['width']}x{shells.SHORT['height']} "
+        f"pos {shells.SHORT['x']} 0"
+    )
+    assert line in shells.sway_config(), f"the compositor is never told about {line!r}"
+    assert "len(shells.ALL_OUTPUTS)" in script_text(), (
+        "ops/ralph/shellload.sh writes its own WLR_HEADLESS_OUTPUTS instead of "
+        "asking shells.py how many outputs there are"
+    )
+    assert not re.search(r"^export WLR_HEADLESS_OUTPUTS=\d", script_text(), re.M), (
+        "ops/ralph/shellload.sh still has a literal output count in it"
+    )
+
+
+def test_the_short_output_sits_beside_the_monitors_and_not_over_one():
+    """Every output the compositor is given needs its own place in the layout,
+    or the fourth lands on top of a monitor and `check_outputs` fails on an `x`
+    nobody chose. To the RIGHT of all three, which is also what keeps it out of
+    every reading that is about ares."""
+    edges = []
+    for out in shells.ALL_OUTPUTS:
+        edges.append((out["x"], out["x"] + out["width"]))
+    edges.sort()
+    for (_, ends), (starts, _) in zip(edges, edges[1:]):
+        assert ends <= starts, edges
+    assert shells.SHORT["x"] == max(o["x"] + o["width"] for o in shells.OUTPUTS)
 
 
 def test_the_compositor_config_comes_from_the_one_place_that_declares_it():
     """The script may not write its own monitor list: a size that drifted
     between the two would make the checks be about a machine nobody ran."""
     assert "shells.sway_config()" in script_text()
-    for out in shells.OUTPUTS:
+    for out in shells.ALL_OUTPUTS:
         assert out["name"] not in "\n".join(executed_lines())
 
 
@@ -489,10 +533,15 @@ def test_the_usable_area_is_the_monitor_minus_the_strip_on_every_one():
     """Every monitor, not the first. The bar builds one surface per
     `Quickshell.screens` entry, so a strip reserved on one output and missing
     from the other two is exactly the per-surface fault D32 and D37 both
-    were."""
+    were.
+
+    Every OUTPUT since D75, which is one more than the monitors: a strip is a
+    property of the bar's surface, so the short screen is owed one too, and on
+    that output it is arithmetic rather than a decision — 31 px shorter than
+    itself, like all the rest."""
     whole = shells.usable_areas(0)
     assert whole == {
-        out["name"]: (out["width"], out["height"]) for out in shells.OUTPUTS
+        out["name"]: (out["width"], out["height"]) for out in shells.ALL_OUTPUTS
     }
     strip = shells.usable_areas(31)
     assert set(strip) == set(whole)
@@ -508,6 +557,294 @@ def test_the_shell_that_reserves_nothing_is_asked_the_same_question():
     assert shells.usable_areas(0) != shells.usable_areas(
         shells.bar_strip_px(shells.theme_toml_path().read_text("utf-8"))
     )
+
+
+def window_body(shell: shells.Shell) -> str:
+    """This shell's own layer-shell window, from its declaration down.
+
+    The window, not the plates inside it: all three `shell.qml` declare their
+    `PanelWindow` at one indent under `Variants`, so its own properties are the
+    ones two spaces further in. A `visible:` on an element deeper than that is a
+    plate deciding whether it has anything to say, which is the opposite
+    question.
+    """
+    text = (ROOT / shell.root / "shell.qml").read_text("utf-8")
+    return text[text.index("    PanelWindow {") :]
+
+
+def window_visibility(shell: shells.Shell) -> str | None:
+    """The `visible:` binding on that window, or None if it has none."""
+    found = re.findall(r"^      visible: (.+)$", window_body(shell), re.MULTILINE)
+    assert len(found) <= 1, (shell.attr, found)
+    return found[0] if found else None
+
+
+def window_always_mapped(shell: shells.Shell) -> bool:
+    """Whether that window exists for as long as the shell does.
+
+    Absent is the shipped way of saying so — `PanelWindow.visible` defaults to
+    true — and the literal is the same statement written down, so both count.
+    What matters is whether the window was ever INVISIBLE, not the spelling.
+    """
+    gate = window_visibility(shell)
+    return gate is None or gate.strip() == "true"
+
+
+def window_zone(shell: shells.Shell) -> str | None:
+    """The `exclusiveZone:` binding on that window, or None if it has none.
+
+    Absent is the load-bearing case rather than an omission: `exclusiveZone`
+    defaults to 0, and 0 is layer-shell for "reserve nothing". Two of the three
+    shells say it that way, which is why this returns None rather than "0".
+    """
+    found = re.findall(
+        r"^      exclusiveZone: (.+?)(?: //.*)?$", window_body(shell), re.MULTILINE
+    )
+    assert len(found) <= 1, (shell.attr, found)
+    return found[0] if found else None
+
+
+def window_declares_a_zone(shell: shells.Shell) -> bool:
+    """Whether that window asks for any screen space at all.
+
+    Spelled as the ZONE rather than as `exclusionMode`, because the two are not
+    the same question and the difference is measured: the bar built with
+    `ExclusionMode.Ignore` and this binding left alone STILL reserved all 31 px
+    (PLAN D45). What a surface asks for is `exclusiveZone`; `exclusionMode` is
+    about whose zones it is positioned around.
+    """
+    zone = window_zone(shell)
+    return zone is not None and zone.strip() not in ("0", "-1")
+
+
+def window_anchors(shell: shells.Shell) -> set[str]:
+    """Which screen edges that window is anchored to."""
+    body = window_body(shell)
+    block = body[body.index("      anchors {") : body.index("      }")]
+    return set(re.findall(r"^        (\w+): true$", block, re.MULTILINE))
+
+
+# Which anchor sets sway honours an exclusive zone for: ONE edge, or an edge plus
+# both perpendicular ones. `apply_exclusive` in sway matches an anchor mask
+# against exactly those two shapes per edge and drops the zone otherwise — which
+# is why a corner-anchored surface can declare any zone it likes and take
+# nothing.
+#
+# EVERY ENTRY IS MEASURED, and six of the eight were not until D60 — they were
+# this rule written out by hand and believed. That mattered because the list is
+# the load-bearing conjunct of both tests below: a wrong entry is a
+# `reserves_top` the biconditional accepts, which is this gate reporting three
+# whole monitors as a PROOF that a discarded zone takes nothing. Each one is a
+# run of the real gate, `ops/ralph/shellload.sh`, with `jv-notify` anchored that
+# way and nothing else changed — `ExclusionMode.Normal`, `exclusiveZone: 100`,
+# `visible: true`, every other shell shipped. The note against each is what the
+# compositor then reported on all three monitors, against a shipped 2560x1440
+# and 1920x1080. The D44 section in `tools/shellload/shells.py` is where the
+# whole record lives; this is the ledger the tests read.
+ZONED_ANCHORS = {
+    frozenset({"top"}): "2560x1340 and 1920x980 — 100 off the height (D60)",
+    frozenset({"bottom"}): "2560x1340 and 1920x980 — 100 off the height (D60)",
+    frozenset({"left"}): "2460x1440 and 1820x1080 — 100 off the width (D60)",
+    frozenset({"right"}): "2460x1440 and 1820x1080 — 100 off the width (D60)",
+    frozenset({"top", "left", "right"}): (
+        "the bar's own 31 px strip, off every monitor, on every run of this "
+        "gate — the one entry a shipped shell exercises (D44)"
+    ),
+    frozenset({"bottom", "left", "right"}): (
+        "2560x1340 and 1920x980, workspace `y: 0`, so off the bottom (D59 run B)"
+    ),
+    frozenset({"left", "top", "bottom"}): "2460x1440 and 1820x1080 (D60)",
+    frozenset({"right", "top", "bottom"}): "2460x1440 and 1820x1080 (D60)",
+}
+
+# And the shapes whose zone the compositor was watched DISCARDING, which is the
+# other direction and the one a list of accepted shapes cannot state. Same
+# injection throughout: a real zone, a mapped surface, and the whole 35-second
+# gate GREEN anyway.
+DISCARDED_ANCHORS = {
+    frozenset({"top", "right"}): "the HUD's corner — every monitor whole (D54)",
+    frozenset({"bottom", "right"}): (
+        "the notifier's corner, the shape that ships — every monitor whole "
+        "(D59 run A)"
+    ),
+    frozenset({"top", "bottom", "left", "right"}): (
+        "ALL FOUR EDGES, which is the shape a full-screen overlay takes and the "
+        "one nobody would expect to be dropped: `apply_exclusive` compares the "
+        "mask for EQUALITY against one edge or one triplet, and four edges is "
+        "neither — every monitor whole (D60)"
+    ),
+}
+
+
+def test_the_shapes_sway_zones_are_the_rule_they_claim_to_be():
+    """`ZONED_ANCHORS` is sway's `apply_exclusive` written out, so it is
+    generated here and compared rather than proof-read.
+
+    Two failures this refuses, and they are different failures. A MISSING or
+    misspelled entry — `{"left", "top", "bottom"}` typed as `{"left", "top"}` —
+    is a shell whose zone really does come off a monitor being called a control,
+    which is invariant 10 broken by a typo in a test. A SPURIOUS entry is the
+    same mistake pointing the other way: a discarded zone read as a proof of
+    mapping, so a bar that stopped mapping altogether keeps its green.
+
+    The generator is the rule in eight words — one edge, or an edge plus both
+    perpendiculars — and the list is 8 entries because there are four edges and
+    two shapes each. What it cannot check is that sway's rule IS this rule; that
+    is what the measurement against every entry is for, and this test also
+    refuses an entry that carries no measurement, because an unmeasured entry
+    added later would inherit the confidence of the eight that were run.
+
+    The flake pins a sway BINARY and not a checkout, so deriving the list from
+    its source is not available here — which is the whole reason these are
+    measurements and not a citation."""
+    perpendicular = {
+        "top": {"left", "right"},
+        "bottom": {"left", "right"},
+        "left": {"top", "bottom"},
+        "right": {"top", "bottom"},
+    }
+    rule = {frozenset({edge}) for edge in perpendicular} | {
+        frozenset({edge} | others) for edge, others in perpendicular.items()
+    }
+    assert set(ZONED_ANCHORS) == rule, sorted(
+        map(sorted, set(ZONED_ANCHORS) ^ rule)
+    )
+    assert len(rule) == 8
+    for shape, measurement in ZONED_ANCHORS.items():
+        assert measurement.strip(), sorted(shape)
+    # And the refutations are shapes the rule really does reject, or one of the
+    # two ledgers is describing a compositor the other one is not.
+    assert not set(DISCARDED_ANCHORS) & rule, sorted(
+        map(sorted, set(DISCARDED_ANCHORS) & rule)
+    )
+    for shape, measurement in DISCARDED_ANCHORS.items():
+        assert measurement.strip(), sorted(shape)
+
+
+def test_the_only_shell_whose_zone_is_proven_is_configured_for_it():
+    """What the three zone readings are worth, as a rule rather than a
+    paragraph — and every conjunct of it is a run of the real gate.
+
+    A surface takes screen space off a monitor only when THREE things are true
+    at once, and D59 is the 2x2 that separated the last two. All four cells are
+    the notifier, through `ops/ralph/shellload.sh`, `ExclusionMode.Normal` and
+    `exclusiveZone: 100` throughout:
+
+      anchors           visible:                  reserved
+      bottom+right      true                      nothing          (D59 run A)
+      bottom+left+right true                      100 px, bottom   (D59 run B)
+      bottom+left+right Notifications.anyLit      nothing          (D59 run C)
+      bottom+right      Notifications.anyLit      nothing    (what ships today)
+
+    Only the cell with both bites, and it bit to the pixel — 2560x1340 and
+    1920x980 on all three monitors, workspace `y: 0`, so the 100 px really did
+    come off the BOTTOM edge it is anchored to.
+
+    SO THE TWO EARLIER ATTRIBUTIONS WERE EACH HALF RIGHT, which is what D59 was
+    raised to settle. D44 watched a 100 px zone come off the notifier and put it
+    down to conditional visibility; D54 watched the HUD's identical zone be
+    discarded with `visible: true` set and put it down to the corner anchor. Run
+    C says D44's mechanism is real (a `PanelWindow` publishes its zone at
+    creation, and one declared while the window was invisible never reaches the
+    compositor). Run A says D54's is real on the notifier too (a bare corner is
+    neither one edge nor an edge plus both perpendiculars, so `apply_exclusive`
+    drops the zone whatever its value). Neither harness was wrong about its own
+    cause; each had found only one of two, and the D44 record's own error was
+    narrower than either — that run had widened the anchors and did not say so,
+    which run B reproduces exactly.
+
+    So `reserves_top` is a claim about a CONFIGURATION and not about a QML
+    property: this gate may call a reading a proof only for a shell that asks
+    for a zone, is mapped when it asks, and is anchored in a shape sway zones.
+    The bar is that shell, and the other two miss on all three counts — which is
+    the point of `test_a_shell_whose_zero_is_only_a_control_asks_for_nothing`
+    below, because a zero reading cannot tell you which of the three saved it.
+
+    What this refuses is a `reserves_top` that drifted from the QML: a corner
+    told to reserve a strip would have its zone discarded by the compositor and
+    this gate would report three whole monitors as a PROOF that it takes
+    nothing."""
+    for shell in shells.SHELLS:
+        reserves = (
+            window_declares_a_zone(shell)
+            and window_always_mapped(shell)
+            and frozenset(window_anchors(shell)) in ZONED_ANCHORS
+        )
+        assert reserves == shell.reserves_top, (
+            shell.attr,
+            window_zone(shell),
+            window_visibility(shell),
+            sorted(window_anchors(shell)),
+        )
+    # And it is the bar, alone — or the rule above is a tautology over a list
+    # with one kind of entry in it.
+    assert [s.attr for s in shells.SHELLS if s.reserves_top] == ["jv-bar"]
+    # The bar's strip is the one number this gate proves, so the QML that
+    # publishes it has to be the QML that says so.
+    bar = next(s for s in shells.SHELLS if s.reserves_top)
+    assert window_anchors(bar) == {"top", "left", "right"}
+    body = window_body(bar)
+    assert "exclusionMode: ExclusionMode.Normal" in body
+    assert "exclusiveZone: surface.implicitHeight" in body
+
+
+def test_a_shell_whose_zero_is_only_a_control_asks_for_nothing():
+    """The other two shells miss the rule above on ALL THREE counts, and that
+    is defence in depth rather than a description of today's QML.
+
+    The gate reads one number for each of them — every monitor whole, while the
+    shell is up — and D59's 2x2 is the measurement that says what that number
+    can and cannot see. Three separate things are keeping it at zero, the
+    reading cannot tell you which, and two of the three are invisible to it
+    entirely: run A and run C are both `exclusiveZone: 100` on a shipped shell
+    with the expensive gate GREEN. So a zone declared on the notifier's corner
+    today is a strip taken off every monitor the day somebody widens its anchors
+    for a full-width toast, or drops the `visible:` gate to stop the corner
+    rebuilding — and each of those is a reasonable-looking commit of its own, in
+    which the 35-second gate stays green and nothing names the combination.
+
+    Pinning all three closes that: every single-property step towards a surface
+    that reserves space is a red line in a 0.1-second test, on the commit that
+    takes it, and the author has to move `reserves_top` deliberately instead of
+    discovering it on a monitor. Invariant 10 is the reason it is worth a red
+    that a compositor would not give: the HUD and the notifier float over every
+    window on this machine and their whole license to do so is that they cannot
+    push one around.
+    """
+    for shell in shells.SHELLS:
+        if shell.reserves_top:
+            continue
+        # It asks for nothing. The one of the three the gate CAN see, and only
+        # while the other two also hold — which is why it is pinned here rather
+        # than left to the run.
+        assert not window_declares_a_zone(shell), (shell.attr, window_zone(shell))
+        # It is not mapped unless it has something to say, so a zone it grew
+        # would be published at a moment the compositor was not listening.
+        assert not window_always_mapped(shell), (shell.attr, window_visibility(shell))
+        # And it is anchored to a bare corner, which sway drops a zone for.
+        assert frozenset(window_anchors(shell)) not in ZONED_ANCHORS, sorted(
+            window_anchors(shell)
+        )
+        assert len(window_anchors(shell)) == 2, sorted(window_anchors(shell))
+        # And its corner is one the compositor was WATCHED discarding a zone
+        # for, rather than one merely absent from the list above — both of
+        # these two have been through the real gate with a live 100 px zone on
+        # them (D54, D59 run A), which is the only reason this loop is allowed
+        # to treat an anchor shape as a reason for the zero it reads.
+        assert frozenset(window_anchors(shell)) in DISCARDED_ANCHORS, sorted(
+            window_anchors(shell)
+        )
+    # Both of them, or the loop above is a rule about an empty list.
+    assert [s.attr for s in shells.SHELLS if not s.reserves_top] == [
+        "jv-hud",
+        "jv-notify",
+    ]
+    # The corners they are anchored to are the two §06 assigns them, and they
+    # are different corners: two surfaces in one corner is the one arrangement
+    # neither of them can detect (shell/jv-notify/shell.qml says so).
+    assert window_anchors(shells.hud_shell()) == {"top", "right"}
+    notify = next(s for s in shells.SHELLS if s.attr == "jv-notify")
+    assert window_anchors(notify) == {"bottom", "right"}
 
 
 def test_the_compositor_is_asked_over_its_own_socket():
@@ -556,7 +893,7 @@ def test_a_shell_is_read_before_during_and_after_it_runs():
 
 
 def test_the_monitors_the_compositor_really_has_are_checked_before_any_shell():
-    """The floor under everything else. `WLR_HEADLESS_OUTPUTS=3` and the
+    """The floor under everything else. `WLR_HEADLESS_OUTPUTS` and the
     `output` lines in the config are both REQUESTS; until D44 nothing read the
     answer, and a run that got one output would have loaded one delegate per
     shell, scanned one surface's worth of log and reported that all three
@@ -585,6 +922,46 @@ ENGINE_CEILING_S = 100.0
 RUN_CEILING_S = 300.0
 
 
+def engine_load_bounds() -> dict[str, float]:
+    """The worst READY wait of each engine, in the order `main` starts them.
+
+    Its own function because D53's whole claim is about this one wait: the cold
+    bound belongs to whichever engine touches Qt first and to none of the rest,
+    and a reader who could only see the totals below could not tell a run with
+    one cold engine from a run with four.
+    """
+    names = [shell.attr for shell in shells.SHELLS] + [shells.HUD_BLIND_LOG]
+    return {
+        name: (
+            shells.READY_TIMEOUT_COLD_S if i == 0 else shells.READY_WARM_CEILING_S
+        )
+        for i, name in enumerate(names)
+    }
+
+
+def engine_zone_readings() -> dict[str, int]:
+    """How many times each engine asks the compositor what it reserved.
+
+    COUNTED OFF THE DRIVER rather than written down here, because the count is
+    multiplied by `MAPPED_TIMEOUT_S` below: a reading added to the run and not to
+    the arithmetic is 8 s of pathological wait outside the ceiling, which is
+    exactly the hole D50 found in the load wait. A number in this file would go
+    stale the same way.
+
+    Two slices, because the engines do not share code the way they share a
+    compositor. `load()` runs once per entry in `shells.SHELLS`, so its readings
+    are each of those engines'. The blind engine's are everything from
+    `load_blind` down, which is its own three and — since D54 was measured and
+    closed rather than built — no fourth.
+    """
+    text = DRIVER.read_text("utf-8")
+    per_shell = text[text.index("def load(") : text.index("def load_blind(")]
+    blind = text[text.index("def load_blind(") : text.index("def main(")]
+    out = {shell.attr: per_shell.count("check_zone(shell,") for shell in shells.SHELLS}
+    out[shells.HUD_BLIND_LOG] = blind.count("check_zone(shell,")
+    return out
+
+
 def engine_ceilings() -> dict[str, float]:
     """The worst case of every wait ONE engine of this gate can spend.
 
@@ -593,32 +970,46 @@ def engine_ceilings() -> dict[str, float]:
     honest addition rather than on a cost problem — D47 took it from 136 to 148
     against a limit of 150, so the D49 relink would have read as expensive when
     it is nine seconds of waiting on a corner. And what it summed was not the
-    worst case: `READY_TIMEOUT_S` was left out entirely, which is 30 s per
-    engine of pathological wait — a quickshell that maps nothing and says
-    nothing is exactly the run a ceiling exists for, and it was the one run the
-    ceiling did not cover.
+    worst case: the load wait was left out entirely, which is 30 s per engine
+    of pathological wait — a quickshell that maps nothing and says nothing is
+    exactly the run a ceiling exists for, and it was the one run the ceiling
+    did not cover.
 
     Stated as an argument about ONE ENGINE because that is the claim that stays
     true as runs are added: this gate starts a fresh quickshell per reading, and
     no one of them may hang for minutes.
+
+    And the load wait is not the same number for all four since D53. The cold
+    one is paid by whichever engine the run starts first — `shells.SHELLS[0]`,
+    because `main` walks that list and then runs the blind HUD — and every
+    engine after it is bounded by what the run measured, whose worst case is
+    `READY_WARM_CEILING_S`. That is where the blind engine's headroom came
+    from: 98 s of ceiling to 80.
     """
-    # Every engine pays for these: the load, and the three compositor readings
-    # around it (before / while / after, PLAN D44).
-    base = shells.READY_TIMEOUT_S + shells.MAPPED_TIMEOUT_S * 3
-    out = {shell.attr: base for shell in shells.SHELLS}
+    # Every engine pays for these: the load, and the compositor readings around
+    # it (before / while / after, PLAN D44), counted off the driver so the
+    # arithmetic cannot drift from the run.
+    reads = engine_zone_readings()
+    out = {
+        name: load + shells.MAPPED_TIMEOUT_S * reads[name]
+        for name, load in engine_load_bounds().items()
+    }
+    base = out[shells.HUD_BLIND_LOG]
     # The frames run waits for the publisher's first round and then for the
     # corner to name ten plates. Two different waits on two different numbers
     # since D52 — the publisher's is about a process starting, the corner's
     # about a cold Qt, and they were one number only because there was one
     # publisher.
     out[shells.hud_shell().attr] = (
-        base + shells.HUD_PUBLISH_TIMEOUT_S + shells.HUD_LIT_TIMEOUT_S
+        out[shells.hud_shell().attr]
+        + shells.HUD_PUBLISH_TIMEOUT_S
+        + shells.HUD_LIT_TIMEOUT_S
     )
     # And the blind run is three acts: it waits out the grace, then the socket
     # and the corner going dark again (PLAN D49), then a second publisher and
     # the corner lighting back up (PLAN D52). It is this gate's most expensive
-    # engine by some way, and the next act added to it does not fit — see
-    # PLAN D53, which is where the headroom is.
+    # engine by some way, at 80 s of 100: the headroom D53 bought is still
+    # unspent, because the act D54 would have put here does not exist.
     out[shells.HUD_BLIND_LOG] = (
         base
         + shells.HUD_BLIND_TIMEOUT_S
@@ -646,9 +1037,113 @@ def test_no_single_engine_can_hang_this_gate_for_minutes():
     assert sum(ceilings.values()) <= RUN_CEILING_S, ceilings
     assert RUN_CEILING_S <= ENGINE_CEILING_S * len(ceilings)
     assert 0 < shells.MAPPED_POLL_S <= 0.25
+    # And the compositor readings the arithmetic paid for are the ones the run
+    # really makes. This is the half of a ceiling that drifts silently: a reading
+    # is one line, it is 8 s of worst case, and D50's bug was exactly a wait the
+    # driver spent and the arithmetic did not know about.
+    reads = engine_zone_readings()
+    assert set(reads) == set(ceilings)
+    # Three per engine — before / while / after, PLAN D44 — for all four of them.
+    assert list(reads.values()) == [3] * len(reads), reads
     # And the frames go out faster than the plate that needs them goes stale,
     # or the ceiling above is spent waiting for a corner that keeps dimming.
     assert 0 < shells.HUD_ROUND_S <= 1.0
+
+
+def budget_text() -> str:
+    """`ReadyBudget` alone, the way `relink_text()` is one function alone: the
+    rules about a derived bound are that class's, and a slice that ran on into
+    `load()` would answer them with the caller."""
+    text = DRIVER.read_text("utf-8")
+    return text[text.index("class ReadyBudget") : text.index("def swaymsg(")]
+
+
+def test_only_one_engine_of_a_run_is_given_the_cold_bound():
+    """D53, and it is the arithmetic above rather than a saving.
+
+    `READY_TIMEOUT_COLD_S` is written against a cold Qt and a cold font cache.
+    That cost is paid by whichever engine touches this machine first and by
+    none of the three after it — so four engines holding it put 120 s of
+    un-payable wait into the run's worst case, which is a ceiling that had
+    stopped describing the run. Exactly one engine may hold it now."""
+    bounds = engine_load_bounds()
+    cold = [
+        name
+        for name, worst in bounds.items()
+        if worst == shells.READY_TIMEOUT_COLD_S
+    ]
+    assert cold == [shells.SHELLS[0].attr], cold
+    # And it is the FIRST engine `main` starts, which is the only way the
+    # driver could have spent it — a cold bound on engine three would be a
+    # ceiling nobody could reach from a run nobody runs.
+    assert list(bounds) == [s.attr for s in shells.SHELLS] + [shells.HUD_BLIND_LOG]
+    # And the warm bound really is the smaller one, or the split is a rename.
+    assert shells.READY_WARM_CEILING_S < shells.READY_TIMEOUT_COLD_S
+
+
+def test_the_warm_bound_is_derived_from_what_this_run_measured():
+    """The reason it is a function and not a fifth constant. A second static
+    number would be a second guess at a cost nobody has measured; this one is
+    the run's own slowest load with room on it, so a machine three times slower
+    than ares gets three times the bound without anybody editing a file."""
+    warm = shells.warm_ready_timeout
+    # Monotone: a bound that has learned the machine is slow must not un-learn
+    # it, which is also why `ReadyBudget` keeps the SLOWEST rather than the last.
+    seen = [warm(x / 10) for x in range(0, 300)]
+    assert seen == sorted(seen)
+    # Floored, so a fast first engine cannot make the bound brittle...
+    assert warm(0.0) == shells.READY_WARM_FLOOR_S
+    # ...and capped, so `engine_ceilings()` has a static number to add up.
+    assert warm(1e6) == shells.READY_WARM_CEILING_S
+    assert shells.READY_WARM_FLOOR_S < shells.READY_WARM_CEILING_S
+    # In between it is the measurement, multiplied.
+    assert warm(2.0) == 2.0 * shells.READY_WARM_FACTOR
+    assert shells.READY_WARM_FACTOR >= 2
+
+
+def test_the_warm_bound_covers_the_load_this_gate_actually_measures():
+    """The failure direction that matters: a bound that fires on a healthy run
+    is a gate that gets switched off, which is the sentence the cold number was
+    written under and it applies to this one too.
+
+    Measured on ares, every engine of the run — including the first, because
+    the caches are warm across runs — says `Configuration Loaded` in 0.40 s.
+    The floor alone is twelve times that before the derivation adds anything."""
+    measured = 0.40
+    assert shells.warm_ready_timeout(measured) >= measured * 10
+    # And the engine that sets the bound is covered by the bound it sets, which
+    # is what makes the derivation safe: a warm load cannot exceed the cold one
+    # it followed, so any first load the cap does not bind on is covered too.
+    for first in [0.1, 0.4, 1.0, shells.READY_WARM_CEILING_S / shells.READY_WARM_FACTOR]:
+        assert shells.warm_ready_timeout(first) > first
+
+
+def test_the_ready_budget_is_one_object_for_the_whole_run():
+    """"The first engine" is the whole of the distinction, so a budget built
+    per shell would hand the cold number to all four again — which is the bug
+    D53 is about, reintroduced by a constructor in the wrong place."""
+    text = DRIVER.read_text("utf-8")
+    assert text.count("ReadyBudget()") == 1
+    built = text[text.index("ReadyBudget()") :]
+    assert built.index("for shell in shells.SHELLS") < built.index("load_blind(stage, ready)")
+    # Both runs are handed it rather than making their own.
+    assert "def load(shell: shells.Shell, stage: Path, ready: ReadyBudget)" in text
+    assert "def load_blind(stage: Path, ready: ReadyBudget)" in text
+
+
+def test_a_warm_engine_that_runs_out_says_where_its_bound_came_from():
+    """A derived bound is a worse report than a constant one unless it says so.
+    `jv-bar never said 'Configuration Loaded' in 5s` over a 30 s constant sends
+    a reader to the shell; over a number this run computed it has to send them
+    to the measurement and to the constant that capped it, because on a slow
+    enough machine the repair really is the constant."""
+    budget = budget_text()
+    assert "READY_WARM_CEILING_S" in budget
+    assert "PLAN D53" in budget
+    # And the cold engine's failure is NOT dressed up with a derivation it did
+    # not have: there was nothing measured to derive it from.
+    assert "if warm is None:" in budget
+    assert budget.index("if warm is None:") < budget.index("raise Fail(")
 
 
 # ------------------------------------------------------------- the wiring
@@ -806,16 +1301,16 @@ def test_the_corner_is_read_on_every_monitor_and_not_just_somewhere():
     name and this holds the parser to answering per monitor."""
     said = "\n".join(
         shells.hud_corner_line(out["name"], shells.HUD_PLATES_LIT)
-        for out in shells.OUTPUTS[:-1]
+        for out in shells.ALL_OUTPUTS[:-1]
     )
-    for out in shells.OUTPUTS[:-1]:
+    for out in shells.ALL_OUTPUTS[:-1]:
         assert shells.hud_corner_plates(said, out["name"]) == list(
             shells.HUD_PLATES_LIT
         ), out["name"]
-    missed = shells.OUTPUTS[-1]["name"]
+    missed = shells.ALL_OUTPUTS[-1]["name"]
     assert shells.hud_corner_plates(said, missed) is None, missed
     driver = code_lines(DRIVER)
-    assert "for out in shells.OUTPUTS" in driver
+    assert "for out in shells.ALL_OUTPUTS" in driver
 
 
 def test_a_corner_that_never_spoke_is_told_apart_from_one_that_went_dark():
@@ -856,6 +1351,137 @@ def test_the_corner_names_the_plates_and_never_what_they_say():
     # Nothing in the logged expression may reach into a plate's own content.
     for reach in ("text", "summary", "body", "transcript", "verdict", "file"):
         assert reach not in logged, reach
+
+
+# ------------------- the screen the corner does not fit on (PLAN D75)
+#
+# The fourth output, which is not a monitor. `shell/jv-hud/shell.qml` declares
+# the shortest screen its corner is for and D74 settled that as a DECLARED
+# FLOOR rather than as a clamp: on a shorter screen the compositor crops the
+# bottom of the stack, every plate is still drawn, and the shell says so in its
+# log. `tools/tests/test_gen_theme_qml.py` grades the declaration by reading
+# shell.qml, which is all a suite with no compositor can do with a file no
+# engine in this repo loads. These are the gates that make the gate itself ask
+# the question as a behaviour — the ones that do not need a compositor.
+
+
+def test_the_short_output_is_under_the_floor_the_hud_declares():
+    """The whole point of the fourth output, and the number is not this file's
+    to choose: 768 has to be under `shell/jv-hud/shell.qml`'s own floor or the
+    compositor crops nothing, the HUD says nothing, and the reading in
+    `load.py` waits three seconds to assert that a shell was quiet about a
+    screen it had no business mentioning.
+
+    The floor is read out of the shell rather than restated here, which makes
+    this the third file holding the two together: a plate that made the corner
+    taller raises the floor, and an output between the old floor and the new
+    one would make this gate green and vacuous at the same time."""
+    floor = hud_min_screen_height()
+    assert shells.SHORT["height"] < floor, (
+        f"{shells.SHORT['name']} is {shells.SHORT['height']}px and shell.qml's "
+        f"corner is {floor}px, so it is not a short screen at all and nothing "
+        "this gate reads about it can fail"
+    )
+    # And it is not one of ares', which is the care `sheet.py` takes over its
+    # own fourth output: `OUTPUTS` is the machine that exists, and three things
+    # in this file count it.
+    assert shells.SHORT not in shells.OUTPUTS
+    assert all(out["height"] >= floor for out in shells.OUTPUTS), (
+        "one of ares' monitors is now under the floor shell.qml declares — "
+        "which is a decision to reopen (D74), not a harness to adjust"
+    )
+
+
+def test_each_harness_fourth_output_asks_one_question_and_not_the_others():
+    """Two harnesses, two compositors, two fourth outputs, and they are not the
+    same experiment. `sheet.py`'s is 280 px WIDE and 1080 tall: the width
+    question (D66's clamp, which is real code), photographed. This one is 1024
+    px wide and 768 TALL: the height question (D74's floor, which is a
+    declaration and a warn), read out of a log. Each has to be clear of the
+    other's question, or a failure on one axis is reported as the other —
+    and both bounds come from the shell they are both about."""
+    corner_w, _ = hud_surface_box()
+    floor = hud_min_screen_height()
+    assert shells.SHORT["width"] >= corner_w, (
+        f"{shells.SHORT['name']} is {shells.SHORT['width']}px wide against a "
+        f"{corner_w}px corner, so it is also asking D68's width question and "
+        "a clipped sentence there would be read as a cropped stack"
+    )
+    assert sheet.NARROW["height"] >= floor, (
+        f"the screen sheet's narrow output is {sheet.NARROW['height']}px tall "
+        f"against a {floor}px corner, so it is also a short screen — and the "
+        "pictures taken of it would be pictures of a cropped corner"
+    )
+    assert sheet.NARROW["width"] < corner_w
+    # The names collide on purpose and it is the backend's doing: the fourth
+    # output of a headless wlroots is HEADLESS-4 whatever it was made for.
+    assert shells.SHORT["name"] == sheet.NARROW["name"]
+
+
+def test_the_short_screen_line_this_gate_reads_is_the_one_the_hud_writes():
+    """The copy, and the third file that holds both ends equal — the shape
+    `hud_corner_line()` already uses, because the string only exists inside a
+    running QML engine. Assembled here out of the QML's own literals, so a
+    reworded warn fails this rather than turning the reading in `load.py` into
+    a three-second wait with no explanation."""
+    body = hud_shell_text()
+    warns = re.findall(r"console\.warn\((.*?)\);", body, re.S)
+    assert len(warns) == 1, warns
+    literals = re.findall(r'"([^"]*)"', warns[0])
+    # The template, in the order the QML concatenates it: the prefix, the
+    # joiner before the screen's height, the one before the corner's, and
+    # whatever is left of the sentence. The three numbers are sentinels — this
+    # is a claim about the wording and not about the floor, which is read out of
+    # the shell by the gate above.
+    assembled = (
+        literals[0] + "HEADLESS-9" + literals[1] + "111"
+        + literals[2] + "222" + "".join(literals[3:])
+    )
+    assert shells.hud_short_screen_line("HEADLESS-9", 111, 222) == assembled, (
+        "the template in shells.py is not the one shell.qml writes: "
+        f"{shells.hud_short_screen_line('HEADLESS-9', 111, 222)!r} against "
+        f"{assembled!r}"
+    )
+
+
+def test_the_short_screen_report_is_per_output_and_reads_the_newest():
+    """A screen that changed mode under a running HUD is entitled to a second
+    verdict, and the report is per output because the news is WHICH screen. A
+    parser that answered from any line would let a warn about the short output
+    stand in for silence about a monitor — which is the absence half of the
+    reading in `load.py`, and the half no regex over shell.qml can ask."""
+    said = "\n".join(
+        [
+            "  WARN qml: " + shells.hud_short_screen_line("HEADLESS-4", 600, 826),
+            "  WARN qml: " + shells.hud_short_screen_line("HEADLESS-4", 768, 826),
+        ]
+    )
+    assert shells.hud_short_screen_report(said, "HEADLESS-4") == (768, 826)
+    assert shells.hud_short_screen_report(said, "HEADLESS-1") is None
+    assert shells.hud_short_screen_report("", "HEADLESS-4") is None
+    # Prefixed by whatever quickshell's logger puts in front of it, which is why
+    # the line is searched for rather than matched from the start.
+    bare = shells.hud_short_screen_line("HEADLESS-4", 768, 826)
+    assert shells.hud_short_screen_report(bare, "HEADLESS-4") == (768, 826)
+
+
+def test_the_short_screen_warn_is_invisible_to_the_scan_that_reads_the_log():
+    """Which is why the driver has to ASSERT it. `tools/qmlerrors.py` requires
+    a source location and one of ECMAScript's error names, so a `console.warn`
+    carrying plain prose reads clean through it — measured here rather than
+    assumed, because the whole D75 reading rests on it: if the scan DID fail on
+    this line, every run of this gate would now be red and the assertion below
+    would be the thing nobody could find."""
+    line = "  WARN qml: " + shells.hud_short_screen_line("HEADLESS-4", 768, 826)
+    assert qmlerrors.scan(line, prefix=shells.hud_shell().root) == []
+    driver = code_lines(DRIVER)
+    assert "hud_short_screen_report" in driver, (
+        "the driver no longer reads the line at all, and nothing else in this "
+        "repo can see it"
+    )
+    # Both directions: the short output has to have said it and the monitors
+    # have to have been left out of it.
+    assert "shells.SHORT" in driver and "for out in shells.OUTPUTS" in driver
 
 
 def test_the_frames_this_gate_publishes_are_the_screen_sheets_own():
@@ -1166,7 +1792,7 @@ def test_the_blind_corner_must_name_the_dark_plate_and_nothing_else():
 
 def test_every_reading_of_the_corner_is_the_same_reading():
     """One census, three callers. The way a corner is READ — newest line per
-    monitor, every monitor, exact order — is the same question whether there are
+    screen, every screen, exact order — is the same question whether there are
     ten plates on it, one, or none, and two copies of it would be two answers.
     The third caller is D49's: the same blind HUD once the bus arrives."""
     text = DRIVER.read_text("utf-8")
@@ -1275,7 +1901,7 @@ def test_the_corner_that_comes_back_is_empty_and_that_is_an_expectation():
 def test_the_empty_corner_is_only_read_after_the_hud_said_it_was_blind():
     """What makes that reading mean anything. An empty corner is also what a HUD
     that never lit a plate looks like — so this only counts because the blind
-    census has already required the NEWEST line on every monitor to be `link`,
+    census has already required the NEWEST line on every screen to be `link`,
     and `hud_corner_plates` reads the newest. Order, therefore, is load-bearing:
     the relink is inside `load_blind`, after its census."""
     text = DRIVER.read_text("utf-8")
@@ -1406,7 +2032,7 @@ def test_the_hud_that_survived_the_outage_has_to_light_a_plate_again():
 def test_the_recovered_corner_is_only_read_after_the_corner_went_dark():
     """What makes the reading mean anything, and it is D49's own argument one
     act further on. `hud_corner_plates` reads the NEWEST line, and the relink
-    census has already required that line to be `nothing` on every monitor — so
+    census has already required that line to be `nothing` on every screen — so
     ten plates here can only be a line the HUD wrote after the bus came back.
     Order is load-bearing, which is why `recover` is called from inside
     `relink` rather than being a run of its own: the broker has to still be
@@ -1491,7 +2117,7 @@ def test_the_blind_run_is_counted_in_the_verdict_and_not_only_logged():
     did not load — a run that reported its failure and returned 0 is the shape
     of a gate that quietly stopped asking half its question."""
     text = DRIVER.read_text("utf-8")
-    after = text[text.index("load_blind(stage)", text.index("def main(")):]
+    after = text[text.index("load_blind(stage, ready)", text.index("def main(")):]
     assert "bad += 1" in after[: after.index("if bad:")]
 
 

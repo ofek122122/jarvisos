@@ -73,7 +73,16 @@ Rectangle {
   // — so two things in one corner is the one arrangement nothing on this
   // machine can report. This number is the whole of the bar's side of that
   // promise.
-  readonly property int hudOverflowPx: Math.max(0, Math.ceil(row.x + row.width - (root.width - root.hudReservePx)))
+  //
+  // A row with no labels in it has no reach (PLAN D35). The row is anchored
+  // one inset from the left edge whether or not it draws anything, so on an
+  // output narrower than the reserve its ORIGIN is already inside the corner
+  // — and an empty Row is as wide as its children, which is 0 px, so the
+  // right edge this measures is that origin. Reporting 12 px there would be
+  // reporting the inset rather than a label, and the overflow that matters
+  // is painted: this number is about glyphs in another process's corner, and
+  // a row with no glyphs cannot have put one there.
+  readonly property int hudOverflowPx: row.width <= 0 ? 0 : Math.max(0, Math.ceil(row.x + row.width - (root.width - root.hudReservePx)))
 
   // …and how far it reaches past the left edge of the clock, which is centred
   // on the SCREEN and therefore cannot move out of the way. Zero when the
@@ -117,7 +126,16 @@ Rectangle {
     // limit is the corner the HUD draws its plates over. One gap is left
     // between the row and whichever of the two it stops at — a label
     // touching the clock reads as one longer word.
-    roomPx: (face.visible ? face.x : root.width - root.hudReservePx) - Theme.insetPx - Theme.gapPx
+    //
+    // CLAMPED AT ZERO, and that is not tidiness (PLAN D35). A negative
+    // budget is how `RowFit` spells "nobody has said how wide this
+    // surface is", which draws every label — so on a monitor narrower
+    // than the reserve above, the subtraction turned "there is no room"
+    // into "there is no limit" and put the row inside the HUD's corner.
+    // Zero is the other fact, and this is the only place that knows it:
+    // the row cannot tell a budget that was never set from one that came
+    // out below nothing.
+    roomPx: Math.max(0, (face.visible ? face.x : root.width - root.hudReservePx) - Theme.insetPx - Theme.gapPx)
   }
 
   Clock {

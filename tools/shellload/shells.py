@@ -65,10 +65,54 @@ READY = "Configuration Loaded"
 # `hudscreens.sh` is that it costs seconds instead of minutes.
 HOLD_S = 2.0
 
-# How long a shell may take to say READY before this gives up. Generous: the
-# first quickshell of a run pays for a cold Qt and a cold font cache, and a
-# timeout that fires on a slow machine is a gate that gets switched off.
-READY_TIMEOUT_S = 30.0
+# How long a shell may take to say READY before this gives up, and it is not
+# one number, because the cost it is written against is paid ONCE per machine
+# rather than once per engine (PLAN D53).
+#
+# THE COLD ONE, for the first engine a run starts. A quickshell that is the
+# first on this machine to scan Qt's plugins and build a font cache pays for
+# both, and a timeout that fires on a slow machine is a gate that gets switched
+# off — so it is generous, and it is a guess, and it has to be: this gate
+# cannot make itself pay that cost. Measured here, the first engine of a run
+# loads in the same 0.40 s the other three do, because the caches have been
+# warm on ares for as many runs as there have been runs.
+READY_TIMEOUT_COLD_S = 30.0
+
+# AND THE WARM ONE IS DERIVED, from what this run has already measured, which
+# is the only honest thing available: whatever the first engine warmed is warm
+# for every engine after it, so a later one cannot be waiting on the cold cost
+# and handing it the cold number gives a HUNG engine thirty seconds of a reason
+# it cannot have. Four times the slowest load this run has seen — floored, so a
+# fast first engine cannot make the bound brittle, and capped, so the worst
+# case stays a static number `engine_ceilings()` can add up.
+#
+# The floor is fifteen times the 0.40 s this gate measures, and it is there so
+# that one fast reading cannot make the bound brittle: a first engine clocked at
+# a twentieth of a second would otherwise bound the next one at a fifth of one.
+# The cap is thirty times it, and it only starts answering once the first engine
+# took more than three seconds — a machine already seven times slower than this.
+#
+# THE CAP IS THE LIMIT AND IT IS WORTH STATING. A machine uniformly slow enough
+# that a WARM engine needs more than twelve seconds, after another quickshell in
+# the same run has already done it, fails this gate. `ReadyBudget` makes that
+# failure say so and name this constant, because the repair for it is a number
+# rather than a shell.
+READY_WARM_FACTOR = 4.0
+READY_WARM_FLOOR_S = 6.0
+READY_WARM_CEILING_S = 12.0
+
+
+def warm_ready_timeout(slowest_so_far: float) -> float:
+    """How long the NEXT engine may take, given the slowest one so far.
+
+    The slowest rather than the previous: a bound that has learned the machine
+    is slower than it thought must not un-learn it on the next fast engine.
+    Monotone in its argument for the same reason.
+    """
+    return min(
+        READY_WARM_CEILING_S,
+        max(READY_WARM_FLOOR_S, slowest_so_far * READY_WARM_FACTOR),
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -153,6 +197,56 @@ OUTPUTS = [
     {"name": "HEADLESS-3", "width": 1920, "height": 1080, "x": 4480},
 ]
 
+# ------------------------------------- the output that is not a monitor (D75)
+#
+# ares' shortest screen is 1080 px. This one is 768, and it exists to ask the
+# one thing the three above cannot: what the HUD does on an output SHORTER THAN
+# ITS OWN SURFACE.
+#
+# `shell/jv-hud/shell.qml` declares an 826 px corner, and D74 settled the
+# height question as a DECLARED FLOOR rather than as a clamp — on a screen
+# under the floor the compositor crops the bottom of the stack, every plate is
+# still drawn (a dropped plate is indistinguishable from a machine with nothing
+# to report; a cropped one is visibly cropped), and the shell SAYS SO in its
+# log. Until this output, the saying-so was graded by a regex over shell.qml in
+# `tools/tests/test_gen_theme_qml.py` — which is all a suite with no compositor
+# can do with a file no engine in this repo loads. Here it is a BEHAVIOUR: the
+# warn either arrives naming this output or it does not, and it has to be
+# absent from the three above it, which is the half no regex can ask.
+#
+# 768 rather than something dramatic, and it is the panel shell.qml's own
+# comment names: it has to be under the floor (or it asks nothing at all) and
+# tall enough that the corner is really CROPPED rather than mostly absent. A
+# 200 px output would make a better anecdote and a worse reading.
+#
+# 1024 WIDE, and that is the whole care taken over the size: it clears the
+# HUD's 300 px surface by enough that this output asks the HEIGHT question and
+# only that one. `tools/hudscreens/sheet.py`'s fourth output is the other way
+# round — 280 px wide and 1080 px tall, the width question and only that one —
+# and `test_each_harness_fourth_output_asks_one_question_and_not_the_others`
+# holds the two apart by reading the shell they are both about. Same name in
+# both, because the name is the headless backend's and the fourth output of a
+# compositor is HEADLESS-4 whatever it was made for.
+#
+# It is NOT in `OUTPUTS`, for the reason sheet.py's is not in its own: every
+# claim this file makes about a MONITOR — three surfaces from `Variants`, the
+# strip the bar reserves on each of them — is about the machine that exists,
+# and a fourth entry there would quietly make the count of ares' screens four.
+SHORT = {
+    "name": "HEADLESS-4",
+    "width": 1024,
+    "height": 768,
+    "x": sum(o["width"] for o in OUTPUTS),
+}
+
+# Every output the compositor is given, which is not every monitor. The
+# difference is load-bearing in both directions, exactly as it is in
+# `sheet.py`: `OUTPUTS` is ares, and everything that is a claim about a
+# SURFACE rather than about ares — the compositor's config, the exclusive
+# zone the bar takes, the corner the HUD docks to and what it says about the
+# screen under it — is about all four.
+ALL_OUTPUTS = OUTPUTS + [SHORT]
+
 
 def sway_config() -> str:
     """The compositor the shells are loaded on, as a config file.
@@ -167,7 +261,12 @@ def sway_config() -> str:
         # No keybindings and no decorations. There is no user in this session.
         "default_border none",
     ]
-    for out in OUTPUTS:
+    # ALL of them, monitors and not: a config naming three against a backend
+    # making four leaves the fourth at whatever size wlroots defaults to —
+    # which is a real screen, drawn on, and not the one it was added to ask
+    # about. The count the backend is given comes from `len(ALL_OUTPUTS)` in
+    # the script for the same reason.
+    for out in ALL_OUTPUTS:
         lines.append(
             f"output {out['name']} mode {out['width']}x{out['height']} "
             f"pos {out['x']} 0"
@@ -219,23 +318,123 @@ def sway_config() -> str:
 #
 # AND THE LIMIT, WHICH IS THE SHARPEST THING MEASURED HERE AND IS NOT THE ONE
 # ANYBODY WOULD GUESS. That second injection only bit once the surface was
-# ALSO made `visible: true`. With the notifier's own `visible:
-# Notifications.anyLit` — false when the window is created, true a moment
-# later when the gate's notification arrives — the identical 100 px zone is
-# silently never published, and the compositor reports every monitor whole.
-# A conditionally-visible `PanelWindow` gets its exclusive zone at creation
-# and a zone declared while it was invisible does not reach the compositor.
-# Both of these shells are conditionally visible (`Notifications.anyLit`,
-# `selfTest || stack.anyLit`), and the HUD with no jarvisd is never lit at
-# all, so no surface of its is ever created in this gate.
+# ALSO made `visible: true`, AND once its anchors had been widened from the
+# corner to the bottom triplet — two conditions, not one, which is D59 below and
+# is the correction to what this paragraph said for two iterations. With the
+# notifier's own `visible: Notifications.anyLit` — false when the window is
+# created, true a moment later when the gate's notification arrives — the
+# identical 100 px zone is silently never published on ANY anchors, and the
+# compositor reports every monitor whole. A conditionally-visible `PanelWindow`
+# gets its exclusive zone at creation and a zone declared while it was invisible
+# does not reach the compositor. Both of these shells are conditionally visible
+# (`Notifications.anyLit`, `selfTest || stack.anyLit`), and the HUD with no
+# jarvisd is never lit at all, so no surface of its is ever created in this gate.
 #
-# So, plainly: the bar's reading is a proof. The notifier's refutes a zone on
-# a surface that was mapped when it was born. The HUD's refutes nothing about
-# today's HUD — it is the line that notices the day the corner becomes
-# always-mapped and takes space, which is the future the bar already is. It is
-# kept for the same reason `tools/hudscreens/shoot.py` keeps its own version
-# of this check, and for one more: it is the CONTROL that makes the bar's
-# 31 px the bar's.
+# AND LIGHTING THE CORNER DOES NOT REPAIR THAT, which is D54 and is why that
+# item is closed by measurement rather than built. D43 put real frames into this
+# run and D47 lights `LinkPlate` with no bus at all, so the HUD's surface really
+# is mapped at both of its `up=True` readings now — and the comment in `load()`
+# was amended to claim those readings had therefore become the HUD's own. They
+# have not. Three injections, each a full run of the real gate:
+#   · `exclusiveZone: 100` + `ExclusionMode.Normal`, unconditional, from birth —
+#     all four engines GREEN, every monitor whole, on the lit frames run and the
+#     lit blind run both.
+#   · the same zone made to appear only on the surface D52 REBUILDS (a latch on
+#     `onVisibleChanged`, so surface #1 is born with 0 and surface #2 with 100) —
+#     green again, with the HUD's own log showing the latch fire: `lit,
+#     darkenings 1 zone 100` on all three monitors, while sway went on reporting
+#     2560x1440 and 1920x1080.
+#   · and the same zone with `visible: true`, which is the one that says WHY —
+#     green again. Mapping was never the missing ingredient.
+#
+# THE CAUSE IS THE ANCHOR, and `tools/hudscreens/shoot.py` had already found it
+# from the other side: `check_no_space_reserved` there says so in as many words,
+# and reports the opposite direction measured — the HUD anchored left+right+top
+# with `ExclusionMode.Auto` took HEADLESS-1's usable area to 2560x880. sway
+# honours an exclusive zone only for a surface anchored to ONE edge or to an edge
+# plus both perpendicular ones; this corner is top+right, which is neither, so
+# its zone is discarded whatever the value and whoever is looking.
+#
+# AND THAT LEFT TWO HARNESSES GIVING TWO REASONS FOR ONE ZERO, which is what
+# D59 settled and it turns out BOTH were right about their own half. `jv-notify`
+# is anchored bottom+right, a bare corner like the HUD's, and the injection above
+# reported its 100 px zone coming off every monitor — which under the anchor rule
+# should have been discarded too. Three more runs of the real gate, all on the
+# notifier, all `ExclusionMode.Normal` + `exclusiveZone: 100`, complete the 2x2:
+#
+#   anchors            visible:               reserved
+#   bottom+right       true                   nothing           (run A, GREEN)
+#   bottom+left+right  true                   100 px, bottom    (run B, RED)
+#   bottom+left+right  Notifications.anyLit   nothing           (run C, GREEN)
+#   bottom+right       Notifications.anyLit   nothing      (what ships, GREEN)
+#
+# Run B reproduced the D44 numbers to the pixel — 2560x1340 and 1920x980 on all
+# three monitors — and the workspace rects came back `y: 0`, so the 100 px really
+# did come off the BOTTOM edge, not the top. Run A is the answer to D59's
+# question: the old notifier injection had widened the anchors and did not record
+# it. Run C is why the earlier paragraph is still true: conditional visibility
+# suppresses a zone the anchors WOULD have honoured.
+#
+# So a surface takes space off a monitor only when three things hold at once — it
+# declares a zone, it is mapped when it declares it, and its anchors are a shape
+# sway zones — and each of the three alone is enough to make the zero above.
+# Which is exactly why the reading is a control and not a proof for these two:
+# runs A and C are `exclusiveZone: 100` in a shipped shell with this whole gate
+# GREEN. `test_a_shell_whose_zero_is_only_a_control_asks_for_nothing` is what
+# covers the two conjuncts the compositor cannot show us, in the cheap gate, on
+# the commit that moves one.
+#
+# AND THE ANCHOR RULE ITSELF IS NOW MEASURED, EVERY SHAPE OF IT (D60), which
+# it was not while two tests rested on it. `ZONED_ANCHORS` in
+# `tools/tests/test_shellload.py` is sway's `apply_exclusive` written out by
+# hand — one edge, or an edge plus both perpendiculars, eight sets — and until
+# now six of those eight had never been through a compositor here at all: what
+# had been watched was the bar's `{top,left,right}` and run B's
+# `{bottom,left,right}`. A wrong entry in that list is a discarded zone this
+# gate calls a proof, so each remaining shape is one run of `shellload.sh` with
+# `jv-notify` anchored that way, `ExclusionMode.Normal`, `exclusiveZone: 100`,
+# `visible: true`, and nothing else moved:
+#
+#   anchors             reserved
+#   {top}               2560x1340 and 1920x980 — 100 off the height, RED
+#   {bottom}            2560x1340 and 1920x980 — 100 off the height, RED
+#   {left}              2460x1440 and 1820x1080 — 100 off the WIDTH, RED
+#   {right}             2460x1440 and 1820x1080 — 100 off the WIDTH, RED
+#   {left,top,bottom}   2460x1440 and 1820x1080, RED
+#   {right,top,bottom}  2460x1440 and 1820x1080, RED
+#
+# Six for six: every shape the rule accepts really is honoured, on both axes,
+# and the list the two cheap tests read is now evidence rather than recall. The
+# left/right shapes are also the first thing in this harness to take space off
+# a WIDTH — `usable_areas()` above models a strip off the top, and it reads
+# these correctly only because it compares whole rects.
+#
+# AND ONE SHAPE THE RULE REJECTS WAS MEASURED TOO, because it is the one a
+# person would expect to be honoured: anchored to ALL FOUR EDGES — the shape a
+# full-screen overlay takes — with the same live zone, the compositor reserved
+# NOTHING and this gate stayed green. `apply_exclusive` compares the anchor mask
+# for EQUALITY against one edge or one triplet, and four edges is neither. So an
+# overlay stretched across the screen can ask for a strip and silently not get
+# one, which is the failure direction nobody watches for; it is in
+# `DISCARDED_ANCHORS` beside the two corners for exactly that reason.
+#
+# THE CONSEQUENCE, PLAINLY. The bar's reading is a proof, and it is the only one
+# here: its window declares a zone, is always mapped AND is anchored to an edge
+# plus both perpendiculars, which is the one configuration in this repo whose
+# zone has been watched reaching the compositor. The notifier's reading and both
+# of the HUD's are the CONTROL that makes the bar's 31 px the bar's, and nothing
+# more — `test_the_only_shell_whose_zone_is_proven_is_configured_for_it` is what
+# keeps `reserves_top` and that configuration from drifting apart.
+#
+# AND INVARIANT 10 IS STILL HELD, by the configuration rather than by this gate:
+# every arrangement in which this corner would really take space off a monitor is
+# one where sway honours the zone, and a zone sway honours is one this reading
+# SEES. The HUD that starts reserving a strip is the HUD that re-anchored to the
+# top edge — `shoot.py` measured that exact change taking 560 px — and both this
+# gate and that one go red on it. What cannot be caught HERE is any of the three
+# conjuncts moving on its own, because the compositor's answer does not change
+# until the last of them does; that is the cheap gate's job (D59), and it is why
+# the two tests are worth having separately.
 
 
 def bar_strip_px(theme_toml: str) -> int:
@@ -279,10 +478,16 @@ def usable_areas(reserved_top_px: int) -> dict[str, tuple[int, int]]:
     Keyed by output name and in the shape `swaymsg -t get_workspaces` reports,
     so the comparison in `load.py` is one `==` between two dicts and a failure
     can print both.
+
+    Every output the compositor has, not every monitor (D75). A strip is a
+    property of the BAR's surface and `Variants` builds one per screen, so the
+    short output is owed one exactly as the three monitors are — and this is
+    arithmetic rather than a decision: it is 31 px shorter than itself like
+    everything else.
     """
     return {
         out["name"]: (out["width"], out["height"] - reserved_top_px)
-        for out in OUTPUTS
+        for out in ALL_OUTPUTS
     }
 
 
@@ -795,6 +1000,74 @@ def hud_corner_plates(said: str, monitor: str) -> list[str] | None:
     return [] if names == "nothing" else names.split(" ")
 
 
+# ------------------------------ what the HUD says about a short screen (D75)
+#
+# The other thing `shell/jv-hud/shell.qml` writes to its log, and the only
+# reading anywhere of D74's decision as a behaviour. A COPY of the QML's
+# template, like `hud_corner_line()` above and for the same reason — the string
+# exists only inside a running engine — and
+# `test_the_short_screen_line_this_gate_reads_is_the_one_the_hud_writes` holds
+# the two equal by assembling this one out of the QML's own literals.
+#
+# It is a `console.warn` and not an error, which is why this gate has to ASSERT
+# it: `tools/qmlerrors.py` requires a source location and one of ECMAScript's
+# error names, so a HUD that warned on every frame reads clean through that
+# scan whatever it said. A line nobody asserts is a line nobody has checked.
+HUD_SHORT_SCREEN = (
+    "jv-hud: {monitor} is {height}px tall and this corner is {floor}px, so "
+    "the compositor is cropping the bottom of it — every plate is still "
+    "drawn, and the bottom one is the health plate"
+)
+
+
+def hud_short_screen_line(monitor: str, height_px: int, floor_px: int) -> str:
+    """The line the HUD logs about `monitor` being under its corner's floor."""
+    return HUD_SHORT_SCREEN.format(monitor=monitor, height=height_px, floor=floor_px)
+
+
+def hud_short_screen_report(said: str, monitor: str) -> tuple[int, int] | None:
+    """(the screen's height, the corner's floor) as the NEWEST such line for
+    `monitor` reported them, or None if it never said anything about it.
+
+    The two numbers are read back rather than matched against expected ones,
+    because the floor is the one number this harness must not know: it is
+    `surface.implicitHeight` in shell.qml, a literal there on purpose (D74),
+    and a copy here would be the drift `test_gen_theme_qml.py` refuses. What
+    the driver does with the pair is assert that the height is the one the
+    COMPOSITOR was given for this output and that the floor is above it — so
+    the reading grades the shell's arithmetic without restating either.
+
+    The newest for the same reason `hud_corner_plates` reads the newest: this
+    is a per-screen binding and a monitor that changed mode under a running HUD
+    is entitled to a second verdict.
+
+    None is the failure D74 leaves room for and no regex can see — a
+    declaration whose binding is never evaluated, or a change handler nothing
+    ever calls, both of which read out of the file exactly like a working one.
+    """
+    head, rest = HUD_SHORT_SCREEN.split("{height}")
+    mid, tail = rest.split("{floor}")
+    pattern = re.compile(
+        re.escape(head.format(monitor=monitor))
+        + r"(\d+)"
+        + re.escape(mid)
+        + r"(\d+)"
+        + re.escape(tail)
+    )
+    found = [m for m in (pattern.search(line) for line in said.splitlines()) if m]
+    if not found:
+        return None
+    return int(found[-1].group(1)), int(found[-1].group(2))
+
+
+# How long the HUD is given to have said it. Short, and it is insurance rather
+# than a wait: the census above has already required every one of the four
+# surfaces to name its plates, so all four `Variants` delegates exist and their
+# bindings have run by the time this is read. Not 5.0 — see
+# `test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate`.
+HUD_SHORT_SCREEN_TIMEOUT_S = 3.0
+
+
 # ------------------------------------------- the blind HUD (PLAN D47)
 #
 # THE ELEVENTH PLATE, and the only run that can light it. Everything above is
@@ -953,6 +1226,17 @@ HUD_RELINK_TIMEOUT_S = 16.0
 # already started. The expectation is `HUD_PLATES_LIT` itself, unchanged and
 # not a copy: the recovered corner has to be the SAME corner, and a third
 # reading of one tuple is the whole point of it being a tuple.
+#
+# AND THE SURFACE IT REBUILDS IS NOT MEASURED, which was D54's whole proposal
+# and is the one thing this act deliberately does not do. The reasoning was
+# sound: this is the only place in the repo where a wl_surface of the HUD's is
+# destroyed and another created, so the rebuilt surface looked like the one
+# object that could be carrying a zone nothing here had ever read. The
+# measurement refutes it — this corner's zone is discarded by the compositor for
+# being anchored to a corner, on any surface it ever has (three injections, in
+# the D44 section above). A fourth `check_zone` here would have been 8 s of this
+# gate's ceiling spent on a reading that cannot come back false, which is worse
+# than no reading: it reads, in the log and in the plan, as coverage.
 
 # Where the late publisher's output goes, as a basename under the stage. Its
 # own file, and — like the late broker's and for the same reason — deliberately

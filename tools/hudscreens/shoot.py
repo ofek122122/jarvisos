@@ -1,7 +1,8 @@
 """Photograph the REAL HUD on a real compositor, and measure what it drew.
 
 Driven by `ops/ralph/hudscreens.sh`, which is what puts a wlroots
-compositor with ares' three monitors underneath it (PLAN A30). This half
+compositor with ares' three monitors — and, since D68, one output narrower
+than the HUD's own surface — underneath it (PLAN A30). This half
 does the rest: for each shot in `sheet.py` it starts a real jarvisd, runs
 the real `jv-hud` — quickshell, layer-shell, its own read-only bridge —
 publishes the shot's frames onto the bus, photographs every monitor with
@@ -24,7 +25,9 @@ asked things no QML engine knows:
     completely fine in a photograph nobody measured.
   · earned emptiness is REAL emptiness. The quiet shot must come back
     pixel-identical to the bare desktop — not "looks dark", but every
-    monitor untouched, which is what an unmapped surface means.
+    OUTPUT untouched, which is what an unmapped surface means. Every
+    output and not every monitor: the narrow one is outside the desk
+    capture, so it is looked at through a second exposure (D70).
   · a click over the HUD reaches the window UNDERNEATH it (A32). The
     empty input mask was the one invariant-10 claim left resting on a
     reading of shell.qml, because it cannot be measured without a second
@@ -69,6 +72,18 @@ sys.path.insert(0, str(ROOT / "harness"))
 # plate rather than inside a fade or after an expiry.
 SETTLE_S = 1.6
 READY_TIMEOUT_S = 30.0
+
+# How long a process gets to go away politely before it is killed, and then
+# to be reaped. Named rather than inlined because it is spent TWICE per
+# process, once per shot and once per idle window, and the ceiling in
+# tools/tests/test_hudscreens.py adds it up: every bound in this file is a
+# constant up here so that arithmetic reads the run rather than a guess at it
+# (PLAN D58).
+STOP_TIMEOUT_S = 8.0
+
+# The drain after a publish. The broker fans out from its own task, so the
+# socket is held open this long per frame — see `publish_shot`.
+PUBLISH_DRAIN_S = 0.1
 
 
 def log(msg: str) -> None:
@@ -134,12 +149,18 @@ def usable_rects():
     return {w["output"]: w["rect"] for w in swaymsg("-t", "get_workspaces")}
 
 
-def check_outputs_are_ares_monitors() -> None:
+def check_the_outputs_are_the_ones_the_sheet_declares() -> None:
+    """Every output, which since D68 is not every monitor: ares' three plus
+    the 280 px one that exists to ask what the HUD does on a screen narrower
+    than its own surface. Exact equality in both directions — a fourth output
+    the compositor invented, or a narrow one it never made, would leave the
+    checks below measuring a machine the sheet does not describe.
+    """
     got = {
         o["name"]: (o["current_mode"]["width"], o["current_mode"]["height"], o["rect"]["x"])
         for o in swaymsg("-t", "get_outputs")
     }
-    want = {o["name"]: (o["width"], o["height"], o["x"]) for o in sheet.OUTPUTS}
+    want = {o["name"]: (o["width"], o["height"], o["x"]) for o in sheet.ALL_OUTPUTS}
     if got != want:
         raise Fail(f"compositor has outputs {got}, sheet declares {want}")
 
@@ -163,7 +184,11 @@ def check_no_space_reserved() -> None:
     with ExclusionMode.Auto took HEADLESS-1's usable area to 2560x880.
     """
     rects = usable_rects()
-    for out in sheet.OUTPUTS:
+    # Every output, not every monitor (D68). The narrow one is where an
+    # exclusive zone would do the most damage — 300 px of reserved corner on
+    # a 280 px screen is the whole screen — so it is the last output this
+    # check should skip.
+    for out in sheet.ALL_OUTPUTS:
         r = rects.get(out["name"])
         if r is None:
             raise Fail(f"{out['name']} has no workspace at all")
@@ -189,10 +214,10 @@ class Proc:
         if self.p.poll() is None:
             self.p.terminate()
             try:
-                self.p.wait(timeout=8)
+                self.p.wait(timeout=STOP_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 self.p.kill()
-                self.p.wait(timeout=8)
+                self.p.wait(timeout=STOP_TIMEOUT_S)
         self._fh.close()
 
     def mark(self) -> int:
@@ -263,7 +288,7 @@ def publish_shot(shot: dict, bus_addr: str) -> None:
             )
             # The broker fans out from its own task; closing the socket the
             # instant after a write can drop the frame before it is read.
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(PUBLISH_DRAIN_S)
             await bus.close()
             log(f"  published {spec['topic']} as {spec['src']}")
 
@@ -411,18 +436,46 @@ def drawn_bands(region: np.ndarray, background: np.ndarray):
     return bands
 
 
+def check_grim_size(label: str, img: np.ndarray, want: dict) -> None:
+    """Refuse a capture that is not the screen it was asked for. The rule is
+    `sheet.capture_size_complaint`, which says at length why a wrongly-sized
+    image is worse here than a missing one."""
+    complaint = sheet.capture_size_complaint(label, (img.shape[1], img.shape[0]), want)
+    if complaint is not None:
+        raise Fail(complaint)
+
+
 def check_desk_is_bare(ppm: Path, background: np.ndarray, why: str) -> None:
-    """Photograph all three monitors and insist every one of them is the
-    flat backdrop and nothing else. Used for two different claims — the
-    desktop before the HUD exists, and the desktop a running HUD has
-    decided to leave alone — so the caller says which it is asking."""
+    """Photograph EVERY output the compositor has and insist every one of
+    them is the flat backdrop and nothing else. Used for two different
+    claims — the desktop before the HUD exists, and the desktop a running
+    HUD has decided to leave alone — so the caller says which it is asking.
+
+    Two exposures, because the desk is not every output (D70). `OUTPUTS` is
+    ares and comes back in one wide `grim -g`; the narrow output sits to the
+    right of the desk on purpose, so the desk capture cannot see it, and
+    until this took its own picture a surface that mapped on that screen with
+    nothing to say was caught by NOTHING: the quiet shot photographs the desk
+    alone, and the lit shots' corner check only bounds the box that was drawn.
+    The second exposure is 0.3 Mpx against the desk's 33.
+    """
     capture("desk", ppm)
     img = read_ppm(ppm)
+    check_grim_size(f"the desk shot for {ppm.name}", img, sheet.DESK)
     for out in sheet.OUTPUTS:
         region = img[0 : out["height"], out["x"] : out["x"] + out["width"]]
         box = drawn_box(region, background)
         if box is not None:
             raise Fail(f"{out['name']}: something is drawn at {box} — {why}")
+
+    narrow = sheet.output_by_role("narrow")
+    narrow_ppm = ppm.with_name(f"{ppm.stem}-narrow.ppm")
+    capture("narrow", narrow_ppm)
+    narrow_img = read_ppm(narrow_ppm)
+    check_grim_size(f"the narrow shot for {ppm.name}", narrow_img, narrow)
+    box = drawn_box(narrow_img, background)
+    if box is not None:
+        raise Fail(f"{narrow['name']}: something is drawn at {box} — {why}")
 
 
 def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: bool) -> None:
@@ -447,7 +500,33 @@ def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: boo
     x0, y0, x1, y1 = box
     left = w - sheet.SURFACE_W - sheet.INSET
     bottom = sheet.SURFACE_H + sheet.INSET
-    if x0 < left or x1 >= w or y0 < 0 or y1 > bottom:
+    # TWO BOUNDS, AND IT USED TO BE FOUR (PLAN D73).
+    #
+    # This condition read `x0 < left or x1 >= w or y0 < 0 or y1 > bottom`, and
+    # half of it could never be true. `drawn_box` is `np.nonzero` over an array
+    # the shape of the region it was handed, so every number it returns is an
+    # INDEX into that region: `x1 >= w` and `y0 < 0` are bounds of the IMAGE,
+    # not of the surface. Dead in both callers, and in the desk branch dead
+    # twice over — `region` is a slice one monitor wide, so a box out of it is
+    # bounded by that monitor, and a layer surface hanging off its output's
+    # right edge cannot land in the neighbour's pixels anyway. The compositor
+    # clips it to the output it is on; grim photographs each output's own
+    # buffer.
+    #
+    # Which is the real reason they went rather than merely being tautologies:
+    # they read as "the HUD did not draw off the right edge" and "not above the
+    # top edge", and NO photograph can make either claim. What is off the
+    # screen is not in the picture. The observable form of drawing past an edge
+    # is content FLUSH to that edge, and the three edge gaps below — right,
+    # left, top — are the checks that say so.
+    #
+    # What is left are the two bounds a photograph really does make, and both
+    # are about where the compositor PLACED a surface it did not clip: the
+    # stack begins within `SURFACE_W + INSET` of the right edge, and ends
+    # within `SURFACE_H + INSET` of the top. A layer-shell `top`/`right` anchor
+    # that silently stopped working puts the surface somewhere else on a screen
+    # this much bigger than it, and that is what these two catch.
+    if x0 < left or y1 > bottom:
         raise Fail(
             f"{name}: drew at x{x0}..{x1} y{y0}..{y1}, outside the "
             f"{sheet.SURFACE_W}x{sheet.SURFACE_H} box shell.qml anchors to the "
@@ -464,6 +543,50 @@ def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: boo
             f"{name}: right-hand gap is {gap}px, not the {sheet.INSET}px inset "
             "personality/theme.toml declares"
         )
+    # AND THE OTHER EDGE, on a screen narrower than the corner (PLAN D68).
+    #
+    # The box check above is vacuous there and silently so: `left` comes out
+    # NEGATIVE on a 280 px output (280 - 300 - 16 = -36), because the surface
+    # really does hang off the left of the world and the check is written
+    # about the surface. What has to hold on such a screen is not a fact
+    # about the surface at all — it is D66's clamp: `plateRoomPx` is
+    # `min(surface.width, screen.width) - 2 x insetPx`, so a plate may reach
+    # to the inset and no further, and a plate that reached past it would be
+    # laying a sentence out in the part of the surface that is not on any
+    # screen. Same two pixels of anti-aliasing slack the right-hand gap gets.
+    #
+    # It is asserted on EVERY output rather than only the narrow one, because
+    # on a monitor wider than the corner it is a weaker restatement of the box
+    # check and costs nothing; the day it bites is the day a surface stops
+    # being granted what it asks for.
+    if x0 < sheet.INSET - 2:
+        raise Fail(
+            f"{name}: drew from x{x0}, inside the {sheet.INSET}px left inset of "
+            f"a {w}px screen. On an output narrower than the "
+            f"{sheet.SURFACE_W}px surface the plates are capped by "
+            "`plateRoomPx` and not by the surface, so this is that clamp "
+            "failing on a real compositor — the HUD is drawing where the "
+            "screen is not"
+        )
+
+    # AND THE TOP EDGE (PLAN D73), which is the claim `y0 < 0` was standing in
+    # for and could not make. A surface placed above the top of its output is
+    # clipped, so what a photograph of one looks like is a stack that starts at
+    # row 0 — and the top inset is what that violates. Every plate in the stack
+    # hangs off `anchors.topMargin: Theme.insetPx` inside a surface anchored to
+    # the top of the screen with no margin of its own, so the first drawn row is
+    # the inset, measured at exactly 16 on all ten pictures in
+    # docs/hud/screens. Same two pixels of anti-aliasing slack as the other two
+    # gaps, and the same reason to hold it on every output: §06 gives the top
+    # edge the same gap as the right, and a HUD flush to the top of the screen
+    # reads as a crop whether or not it is one.
+    if y0 < sheet.INSET - 2:
+        raise Fail(
+            f"{name}: drew from y{y0}, inside the {sheet.INSET}px top inset "
+            f"personality/theme.toml declares. Either the stack lost its top "
+            "margin, or the surface itself was placed above the top of the "
+            "output and the compositor clipped what a photograph cannot see"
+        )
 
 
 # ----------------------------------------------------------- the click probe
@@ -474,6 +597,14 @@ def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: boo
 # with room to spare; the second is a compositor round trip.
 BLIND_TIMEOUT_S = 25.0
 CLICK_TIMEOUT_S = 3.0
+
+# How long a second Wayland client gets to map its window onto the monitor it
+# was told to open on, and how long the backdrop gets to be flat again once
+# those windows are gone. Both were bare literals until PLAN D58 asked what a
+# pathological run of this harness can cost and found two numbers nothing
+# could add up.
+CLIENT_WINDOW_TIMEOUT_S = 15.0
+CLIENTS_GONE_S = 0.5
 
 
 def click_at(x: int, y: int) -> None:
@@ -1557,7 +1688,7 @@ def probe_click_through(stage: Path, background: np.ndarray) -> None:
         for client in clients:
             client.stop()
         clients = []
-        time.sleep(0.5)
+        time.sleep(CLIENTS_GONE_S)
         capture("primary", lit)
         after = drawn_box(read_ppm(lit), background)
         if after != box:
@@ -1585,7 +1716,7 @@ def start_client(role: str, out: dict, stage: Path, clients: list) -> dict:
     clients.append(
         Proc(f"wev-{role}", [os.environ["WEV_BIN"]], stage / f"click-{role}.log", dict(os.environ))
     )
-    deadline = time.monotonic() + 15.0
+    deadline = time.monotonic() + CLIENT_WINDOW_TIMEOUT_S
     while time.monotonic() < deadline:
         fresh = [w for w in toplevels() if w["id"] not in before]
         if fresh:
@@ -1603,6 +1734,140 @@ def start_client(role: str, out: dict, stage: Path, clients: list) -> dict:
     raise Fail(f"the {role} window never appeared on {out['name']}")
 
 
+# ------------------------------------------- the granted-width probe (D68)
+
+
+def probe_surface_granted(stage: Path, background: np.ndarray) -> None:
+    """What size the compositor GAVE a surface that asked for 300 px on a
+    280 px screen (PLAN D68).
+
+    `shell.qml` declares a 300 px corner on every monitor it can see, and
+    since D66 it clamps its plates with
+    `min(surface.width, screen.width) - 2 x insetPx` — a line whose whole
+    reason for existing is that a layer-shell surface anchored to one edge is
+    granted the width it asks for whether or not the output is that wide, so
+    on a narrow screen the surface overhangs the left edge and the plates
+    have to know. That sentence is in three comments in this repo and had
+    never been observed. D66 measured the clamp in a QML engine, against a
+    plain `Item` whose `width` a test assigns, and a test assigning a width
+    is not a compositor configuring a surface.
+
+    PIXELS CANNOT ANSWER IT, which is why this is a probe and not another
+    photograph. A surface clamped by wlroots to 280 and a surface granted 300
+    over a 280 px screen leave the stack in exactly the same place: anchored
+    16 px off the right edge, 248 px of room, the same plate, the same
+    picture. The two readings differ in one place only — the `configure`
+    event the compositor sends — and the HUD's own WAYLAND_DEBUG log carries
+    it, the same log the idle probe counts commits in.
+
+    So: one shell, on all four outputs, lit by one real heartbeat, and every
+    layer surface it was given read back out of the socket log. The census is
+    the instrument's control — a regex that stopped matching, or a shell that
+    mapped nothing, both come back as an empty dict, and "no surface was
+    configured wrongly" is true of both. One surface per output, or this
+    probe says nothing.
+    """
+    log("granted probe: what the compositor gave a 300px surface on a 280px screen")
+
+    bus_addr = str(stage / "granted.sock")
+    broker = Proc(
+        "jarvisd",
+        [os.environ["JARVISD_BIN"]],
+        stage / "granted-jarvisd.log",
+        dict(os.environ, JARVIS_BUS=bus_addr),
+    )
+    hud = None
+    try:
+        broker.wait_for("jarvisd listening on")
+        hud = Proc(
+            "jv-hud",
+            [os.environ["JV_HUD_BIN"]],
+            stage / "granted-hud.log",
+            dict(os.environ, JARVIS_BUS=bus_addr, WAYLAND_DEBUG="1"),
+        )
+        hud.wait_for("Configuration Loaded")
+
+        # One open microphone. The narrowest thing this HUD can say — 164 px
+        # of `MIC` against 248 px of room — on purpose: the plate must not be
+        # the thing under test. What is under test is whether the SURFACE it
+        # sits on was given 300 px, and a plate that fitted with room to
+        # spare cannot be mistaken for evidence about the clamp.
+        publish_shot({"frames": [sheet.MIC_OPEN]}, bus_addr)
+
+        ppm = stage / "granted-narrow.ppm"
+        deadline = time.monotonic() + BLIND_TIMEOUT_S
+        box = None
+        while time.monotonic() < deadline:
+            capture("narrow", ppm)
+            img = read_ppm(ppm)
+            box = drawn_box(img, background)
+            if box is not None:
+                break
+            # The heartbeat again while we look, for `wait_for_drawing`'s
+            # reason: jv-ears declares `period_s: 5` and MicState believes a
+            # beat for two of them, which a slow capture loop can outlast.
+            feed_snapshots(1.0, [sheet.MIC_OPEN], bus_addr)
+        if box is None:
+            raise Fail(
+                f"the HUD drew nothing on the {sheet.NARROW_W}px output in "
+                f"{BLIND_TIMEOUT_S:.0f}s with the microphone open. Either the "
+                "surface never mapped there — which is its own news, since "
+                "`Variants` is supposed to give every screen one — or the "
+                "clamp left the plate with no room at all"
+            )
+        narrow = sheet.output_by_role("narrow")
+        check_corner(f"granted {narrow['name']}", img, background, True)
+        log(f"  the corner on {narrow['name']} ({narrow['width']}px): {box}")
+
+        sizes = sheet.layer_surface_sizes(hud.since(0))
+        if len(sizes) != len(sheet.ALL_OUTPUTS):
+            raise Fail(
+                f"{len(sizes)} layer surfaces were configured in the HUD's "
+                f"Wayland log and this compositor has {len(sheet.ALL_OUTPUTS)} "
+                f"outputs ({sizes}) — so this probe is not reading the traffic "
+                "it thinks it is, and whatever it says about the width below "
+                "is about a surface nobody can name"
+            )
+        asked = (sheet.SURFACE_W, sheet.SURFACE_H)
+        wrong = {oid: got for oid, got in sizes.items() if got != asked}
+        if wrong:
+            raise Fail(
+                f"the HUD asked for {asked[0]}x{asked[1]} on every output and "
+                f"the compositor configured {wrong} — so a layer surface is "
+                f"NOT granted the size it asks for, and the three comments "
+                "that say it is (shell.qml's `plateRoomPx`, sheet.py's "
+                "narrow output, this probe) are wrong. The clamp in "
+                "`plateRoomPx` is then doing nothing, because `surface.width` "
+                "is already the screen's"
+            )
+        # The line itself, once, because everything above is a count. A
+        # census that came back right for the wrong reason — a regex matching
+        # something else that happens to be four per run — is exactly the
+        # failure this probe is built against, and one verbatim line in the
+        # run's output is what lets a reader check the instrument rather than
+        # trust it. It is also where `tools/tests/test_hudscreens.py` gets
+        # the real text its reader is graded on.
+        sample = next(
+            (
+                line.strip()
+                for line in hud.since(0).splitlines()
+                if sheet.LAYER_CONFIGURE_RE.search(line)
+            ),
+            "",
+        )
+        log(f"  the line that says so: {sample}")
+        log(
+            f"  all {len(sizes)} surfaces configured {asked[0]}x{asked[1]} — "
+            f"granted as asked, including on the {narrow['width']}px output, "
+            f"so the surface overhangs its left edge by "
+            f"{sheet.SURFACE_W - narrow['width'] + sheet.INSET}px"
+        )
+    finally:
+        if hud is not None:
+            hud.stop()
+        broker.stop()
+
+
 # ---------------------------------------------------------------------- main
 
 
@@ -1617,21 +1882,73 @@ def capture(target: str, ppm: Path) -> None:
     subprocess.run(argv, check=True, capture_output=True)
 
 
-def check_capture(shot: dict, target: str, img: np.ndarray, background: np.ndarray) -> None:
+def check_capture(
+    shot: dict, target: str, ppm: Path, img: np.ndarray, background: np.ndarray
+) -> None:
     if target == "desk":
         # One monitor at a time: the desk shot's job is to answer whether
         # the same plate really is on all three, so it is checked as three
         # monitors rather than as one wide picture.
+        check_grim_size(f"{shot['file']} desk", img, sheet.DESK)
         for out in sheet.OUTPUTS:
             region = img[0 : out["height"], out["x"] : out["x"] + out["width"]]
             check_corner(f"{shot['file']} {out['name']}", region, background, shot["lit"])
+
+        # AND THE FOURTH SCREEN, which is not in the picture (PLAN D72).
+        #
+        # A desk capture is `sheet.OUTPUTS` in one wide `grim`, and the narrow
+        # output sits to the right of the desk on purpose, so every verdict
+        # taken off a desk shot was a verdict about three of the four screens
+        # the compositor has. D70 closed that for the desktop with no HUD on
+        # it (`check_desk_is_bare` takes its own second exposure for exactly
+        # this reason); this closes it for the shots.
+        #
+        # `01-quiet` is why it matters. Its `captures` is `["desk"]` and its
+        # `lit` is false, so the one DARK shot on the sheet — frames ARRIVE,
+        # and every plate decides it has nothing true to show — was never
+        # asked about the one screen where a plate drawing a zero-height
+        # sliver or an empty rectangle of glass is most likely and least
+        # visible. `check_corner(lit=False)` is the other place in this file
+        # where "nothing drawn" is the pass, and until this it never ran on
+        # that output at all.
+        #
+        # One 0.3 Mpx exposure against the desk's 33, and NO PNG: the sheet
+        # stays at ten pictures and gains an assertion. An eleventh photograph
+        # of an empty 280 px screen was declined on its own grounds (D70) —
+        # it is a picture of nothing, and the assertion is worth more.
+        #
+        # Said out loud rather than discovered: this runs for every desk shot
+        # including the LIT ones, and on a 280 px output `check_corner` loses
+        # the LEFT bound of its box — `w - SURFACE_W - INSET` is -36, so
+        # `x0 < left` is true of nothing. Exactly that one bound, and the item
+        # that raised this said "the box half" when it meant it: `y1 > bottom`
+        # still holds the stack to 842 px, the right-hand gap still holds it
+        # to the inset, and D66's clamp (the `x0 < INSET - 2` below) is what
+        # replaces the bound that went. So on `02-heard` and `03-confirm` this
+        # is a cheap restatement of claims `03-confirm-narrow.png` already
+        # makes; on `01-quiet` it is the only place any of them is made.
+        narrow = sheet.output_by_role("narrow")
+        narrow_ppm = ppm.with_name(f"{ppm.stem}-narrow.ppm")
+        capture("narrow", narrow_ppm)
+        narrow_img = read_ppm(narrow_ppm)
+        check_grim_size(f"{shot['file']} {narrow['name']}", narrow_img, narrow)
+        check_corner(
+            f"{shot['file']} {narrow['name']}", narrow_img, background, shot["lit"]
+        )
+        # Said out loud, because a check nobody can see run is not evidence.
+        # Every other probe in this file logs its measurement; this one has no
+        # PNG to point at, so the line is the only trace that the fourth screen
+        # was looked at — and it names the size the image came back as, which
+        # is the half that stops a vacuous read from reading as a pass.
+        log(
+            f"  and the screen outside the picture: {narrow['name']} came back "
+            f"{narrow_img.shape[1]}x{narrow_img.shape[0]} and "
+            f"{'is bare' if not shot['lit'] else 'draws in its corner'}, "
+            "no picture kept"
+        )
     else:
         out = sheet.output_by_role(target)
-        if img.shape[:2] != (out["height"], out["width"]):
-            raise Fail(
-                f"{shot['file']} {target}: grim returned "
-                f"{img.shape[1]}x{img.shape[0]}, not {out['width']}x{out['height']}"
-            )
+        check_grim_size(f"{shot['file']} {target}", img, out)
         check_corner(f"{shot['file']} {out['name']}", img, background, shot["lit"])
 
 
@@ -1653,9 +1970,12 @@ def main() -> int:
     )
 
     with cost.phase("checks"):
-        check_outputs_are_ares_monitors()
+        check_the_outputs_are_the_ones_the_sheet_declares()
         bare_focus = seat_focus()
-        log(f"three monitors up; the seat's keyboard is on {bare_focus}")
+        log(
+            f"three monitors and the narrow output up; the seat's keyboard is "
+            f"on {bare_focus}"
+        )
 
         # The desktop with no HUD on it at all. The quiet shot is compared
         # against THIS, not against an idea of what dark looks like.
@@ -1771,7 +2091,7 @@ def main() -> int:
                     capture(target, ppm)
                     img = read_ppm(ppm)
                 with cost.phase("checks"):
-                    check_capture(shot, target, img, background)
+                    check_capture(shot, target, ppm, img, background)
                     if target == "primary" and shot.get("grows_from"):
                         # BEFORE the PNG is written, not after: a failed run
                         # that had already saved the picture would leave the
@@ -1872,6 +2192,8 @@ def main() -> int:
         probe_idle_frames(stage, background)
     with cost.phase("click"):
         probe_click_through(stage, background)
+    with cost.phase("granted"):
+        probe_surface_granted(stage, background)
 
     expected = sheet.all_files()
     if written != expected:

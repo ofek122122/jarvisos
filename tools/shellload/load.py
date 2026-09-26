@@ -46,14 +46,18 @@ came back LINKED and never accepted another frame passes the act above exactly:
 the corner goes dark because the SOCKET came back, and nothing watched traffic.
 
 THE COMPOSITOR IS ASKED TWO THINGS, and both are here because a log line
-cannot answer either (PLAN D44). First, ONCE, that sway really has the three
-monitors `shells.OUTPUTS` declares — every shell builds one surface per
+cannot answer either (PLAN D44). First, ONCE, that sway really has the four
+outputs `shells.ALL_OUTPUTS` declares — ares' three monitors plus the 768 px
+screen that is not one (D75) — because every shell builds one surface per
 `Quickshell.screens` entry, so a run that got one output would load one
 delegate and call it a shell, and nothing checked. Second, PER SHELL, what it
 took off the top of each of them: `Configuration Loaded` is the root component
 built, and a `PanelWindow` whose layer-shell properties failed to attach gets
-that line too. See the D44 section in `shells.py` for which direction each
-shell's answer is a proof and which is only a refutation.
+that line too. Exactly one of the three answers is a PROOF — the bar's, whose
+window is always mapped and anchored to an edge plus both perpendicular ones,
+which is the only configuration sway zones. The other two are the control that
+makes the bar's 31 px the bar's; see the D44 section in `shells.py` for the
+injections that say so and for what still protects invariant 10.
 
 THE WAIT IS THE CENSUS. `qmlerrors.py` over an empty file reports "nothing
 threw", so a harness that started no engine would grade itself clean forever;
@@ -154,6 +158,82 @@ class Proc:
         )
 
 
+class ReadyBudget:
+    """How long each engine of THIS run may take to say READY (PLAN D53).
+
+    One number was wrong in a way that only showed up in the arithmetic.
+    `READY_TIMEOUT_COLD_S` is written against a cold Qt and a cold font cache,
+    which is a cost paid once and then not again — so giving it to all four
+    engines put 120 s of un-payable wait into the run's pathological ceiling,
+    and 30 of the blind engine's 98 s (D50/D52). That mattered because the
+    ceiling is a BOUND rather than a budget: a bound nobody could reach is a
+    bound that stopped describing the run.
+
+    So the first engine gets the cold number and every engine after it gets one
+    derived from what the run has already measured. Shared across `load` and
+    `load_blind` rather than kept per call, because "the first engine of the
+    run" is the whole of the distinction and a per-shell budget would hand the
+    cold number to all four again.
+
+    It is deliberately NOT a stopwatch on the gate. Nothing here is expected to
+    spend any of it; what this bounds is the engine that comes up and then holds
+    still forever.
+    """
+
+    def __init__(self) -> None:
+        # None until one engine of this run has loaded, which is exactly the
+        # condition "nothing on this machine has been measured yet".
+        self.slowest: float | None = None
+        # And what the engine that just ran was GIVEN, which is not the same
+        # question a moment later: `wait` records the load before anything is
+        # printed, so asking `timeout()` after it answers about the NEXT engine.
+        self.spent: float | None = None
+        self.spent_cold = False
+
+    def timeout(self) -> float:
+        if self.slowest is None:
+            return shells.READY_TIMEOUT_COLD_S
+        return shells.warm_ready_timeout(self.slowest)
+
+    def wait(self, proc: Proc) -> float:
+        """Wait for READY on this engine's own bound, and remember the cost."""
+        warm = self.slowest
+        self.spent, self.spent_cold = self.timeout(), warm is None
+        try:
+            took = proc.wait_for(shells.READY, self.spent)
+        except Fail as exc:
+            if warm is None:
+                raise
+            # A derived bound has to say what it was derived FROM, or a run
+            # that failed on a slow machine reads as a shell that did not load.
+            # The repair for this failure is a constant, and it is named.
+            raise Fail(
+                f"{exc}\nthat bound is derived (PLAN D53): the slowest engine "
+                f"this run had already loaded took {warm:.2f} s, and nothing "
+                f"after the first pays for a cold Qt again. If a WARM engine "
+                f"really needs longer on this machine, the number to raise is "
+                f"shells.READY_WARM_CEILING_S "
+                f"(now {shells.READY_WARM_CEILING_S:.0f}s)."
+            ) from None
+        self.slowest = took if warm is None else max(warm, took)
+        return took
+
+    def spell(self, took: float) -> str:
+        """`loaded in 0.40 s of a derived 6s` — the cost AND the bound on it.
+
+        Printed on every run because this is the only place a reader can watch
+        the rule decide: the numbers in `shells.py` say what the rule IS, and
+        every line here says what it did to one engine. It is also how the D53
+        measurement gets made again on every machine this ever runs on — a
+        first engine that really is slower than the rest says so in the log
+        rather than in an argument.
+        """
+        return (
+            f"loaded in {took:.2f} s of "
+            f"{'a cold' if self.spent_cold else 'a derived'} {self.spent:.0f}s"
+        )
+
+
 # ---------------------------------------------------------- the compositor
 #
 # Two questions, both of them things no log line can answer. See the D44
@@ -182,15 +262,21 @@ def swaymsg(*args: str):
 
 
 def check_outputs() -> None:
-    """The compositor really has the monitors `shells.OUTPUTS` declares.
+    """The compositor really has the outputs `shells.ALL_OUTPUTS` declares.
 
     Asked ONCE, before any shell starts, and it is the floor under everything
-    else here. `WLR_HEADLESS_OUTPUTS=3` and the `output` lines in the config
-    are both requests; nothing until now read the answer. All three shells
-    build one surface per `Quickshell.screens` entry, so a run that got one
-    output would load one delegate, scan one surface's worth of log and report
-    that every shell loads — which is the shape of a gate that quietly stopped
+    else here. `WLR_HEADLESS_OUTPUTS` and the `output` lines in the config are
+    both requests; nothing until now read the answer. All three shells build
+    one surface per `Quickshell.screens` entry, so a run that got one output
+    would load one delegate, scan one surface's worth of log and report that
+    every shell loads — which is the shape of a gate that quietly stopped
     asking most of its question.
+
+    All four, and the fourth is the sharpest of them (D75): it is 768 px tall,
+    under the floor shell.qml declares its corner is for, and the HUD's verdict
+    about it is a line in a log. An output that came up at wlroots' default
+    size would be a screen this gate then asks nothing about while every other
+    check stays green.
     """
     got = {
         out["name"]: (
@@ -202,15 +288,19 @@ def check_outputs() -> None:
     }
     want = {
         out["name"]: (out["width"], out["height"], out["x"])
-        for out in shells.OUTPUTS
+        for out in shells.ALL_OUTPUTS
     }
     if got != want:
         raise Fail(
             f"the compositor has outputs {got}, and tools/shellload/shells.py "
-            f"declares {want} — every shell builds one surface per monitor, so "
+            f"declares {want} — every shell builds one surface per output, so "
             "a run on the wrong ones is a run about a different shell"
         )
-    log(f"  compositor: {len(got)} monitors, as declared")
+    log(
+        f"  compositor: {len(got)} outputs, as declared "
+        f"({len(shells.OUTPUTS)} monitors and {shells.SHORT['name']}, which is "
+        f"{shells.SHORT['height']}px tall and is not one)"
+    )
 
 
 def usable_areas() -> dict[str, tuple[int, int]]:
@@ -250,7 +340,7 @@ def check_reserved(px: int, when: str) -> None:
 
 
 def check_zone(shell: shells.Shell, when: str, *, up: bool) -> None:
-    """What this shell has taken off every monitor, right now.
+    """What this shell has taken off every screen, right now.
 
     `up` is whether the shell is supposed to be on screen. Down, the answer is
     always zero: the strip must come back, which is the control that makes the
@@ -335,13 +425,21 @@ def wake_hud(stage: Path) -> Proc:
     the HUD reserves no space, takes no focus and — with `ExclusionMode.Ignore`
     and no zone — changes nothing a compositor reports when it maps. So
     `shell/jv-hud/shell.qml` logs one line per surface naming the plates on it,
-    and this waits for the line every monitor has to write. A publisher that
+    and this waits for the line every screen has to write. A publisher that
     graded itself on what it had just sent would be grading the bus.
 
     Per monitor, and that is the part worth having: `Variants` builds one
     surface per screen and each one's plates decide for themselves, so a shell
     that quietly stopped building the third surface fails here rather than
     reporting that the HUD lit.
+
+    Per OUTPUT since D75, which is four of them, and on the short one the
+    census is the other half of D74's decision rather than a repetition: the
+    corner there is cropped by the compositor and the claim is that every plate
+    is STILL DRAWN. A HUD that had quietly grown a height clamp — dropping the
+    health plate off the bottom of a screen too short for it — names nine
+    plates there and ten everywhere else, and this is the only reading in the
+    repo that would see it.
     """
     pub = Proc("publish", [sys.executable, str(PUBLISH)], stage / "hud-frames.log")
     try:
@@ -363,10 +461,104 @@ def wake_hud(stage: Path) -> Proc:
             ),
             alive=pub,
         )
+        # And what this HUD made of the screen it cannot fit on, which is a
+        # reading of the same log and is here rather than beside the census
+        # because the census is what earns it: a corner that named its plates
+        # on all four outputs is four `Variants` delegates that exist and whose
+        # bindings have run.
+        check_short_screen(stage / "jv-hud.log")
         return pub
     except Exception:
         pub.stop()
         raise
+
+
+def check_short_screen(hudlog: Path) -> None:
+    """The HUD noticed the one output under its corner's floor, and only it.
+
+    D75, and it is D74's decision read as a BEHAVIOUR for the first time.
+    `shell/jv-hud/shell.qml` declares the shortest screen its corner is for
+    (`minScreenHeightPx`, which is the surface's own height so the two cannot
+    drift) and settled the height question as a declared floor rather than as a
+    clamp: on a shorter screen the compositor crops the bottom of the stack,
+    every plate is still drawn, and the shell says so in its log. Until this
+    output existed, "says so" was a regex over shell.qml in
+    `tools/tests/test_gen_theme_qml.py` — the best a suite with no compositor
+    can do with a file no engine in this repo loads. Here the warn either
+    arrives naming `shells.SHORT` or it does not.
+
+    THREE readings, and the second two are the ones a regex cannot make:
+
+      · it SAID it, at all. A binding that is never evaluated and a change
+        handler nothing ever calls read out of the file exactly like a working
+        one.
+      · about the right screen, and with the right numbers: the height it
+        reports has to be the one the compositor was given for that output —
+        not this surface's own, which is the mistake the declaration is written
+        to avoid, and which would make every screen either short or none of
+        them — and the floor has to be above it. The floor itself is
+        deliberately not restated here (see `hud_short_screen_report`).
+      · and NOT about the three monitors. A shell that warned on every screen
+        would pass the first two readings, teach whoever reads that log to
+        ignore it, and is exactly what a flipped comparison produces.
+
+    It is a warning rather than an error, so `tools/qmlerrors.py` is blind to
+    it by design — a source location and one of ECMAScript's error names are
+    what that scan requires. This is the assertion instead.
+    """
+    short = shells.SHORT
+    deadline = time.monotonic() + shells.HUD_SHORT_SCREEN_TIMEOUT_S
+    said = ""
+    report = None
+    while time.monotonic() < deadline:
+        said = hudlog.read_text("utf-8", "replace")
+        report = shells.hud_short_screen_report(said, short["name"])
+        if report is not None:
+            break
+        time.sleep(shells.MAPPED_POLL_S)
+    if report is None:
+        raise Fail(
+            f"{short['name']} is {short['height']}px tall and this HUD's corner "
+            f"declares a floor above that, and after "
+            f"{shells.HUD_SHORT_SCREEN_TIMEOUT_S:.0f}s the shell has said "
+            "nothing about it. D74 settled the height question as a declared "
+            "floor AND a report — the plates are all still drawn and the "
+            "compositor is what crops them, so the log is the only place that "
+            "can be said, and a declaration nothing ever evaluates is a "
+            "comment"
+        )
+    height, floor = report
+    if height != short["height"]:
+        raise Fail(
+            f"the HUD says {short['name']} is {height}px tall and the "
+            f"compositor was told to make it {short['height']}px — the report "
+            "has to be about the OUTPUT's height, because this surface is "
+            "granted the height it asks for whatever the screen is, exactly as "
+            "it is granted its width"
+        )
+    if floor <= height:
+        raise Fail(
+            f"the HUD reports a corner {floor}px tall on a {height}px screen "
+            "and calls that cropped, which is not short at all — the floor it "
+            "names has to be the height of the surface being cropped"
+        )
+    spoke = [
+        out["name"]
+        for out in shells.OUTPUTS
+        if shells.hud_short_screen_report(said, out["name"]) is not None
+    ]
+    if spoke:
+        raise Fail(
+            f"the HUD also calls {spoke} too short for its corner, and every "
+            f"one of them is at least {min(o['height'] for o in shells.OUTPUTS)}"
+            f"px tall against a corner of {floor}px. A shell that reports every "
+            "screen is a shell whose log nobody can use to find the one that "
+            "is really cropped"
+        )
+    log(
+        f"  hud: {short['name']} is {height}px under a {floor}px corner, and "
+        f"the shell says so about it and about no other screen"
+    )
 
 
 def spell(plates: list[str]) -> str:
@@ -390,7 +582,7 @@ def corner_census(
     because: str,
     alive: Proc | None = None,
 ) -> None:
-    """Wait until every monitor's corner names exactly `want`.
+    """Wait until every screen's corner names exactly `want`.
 
     Shared by every reading of a corner here, which is the only reason it is
     a function: one run has a broker and ten lit plates, the blind one has
@@ -412,10 +604,10 @@ def corner_census(
         said = hudlog.read_text("utf-8", "replace")
         got = {
             out["name"]: shells.hud_corner_plates(said, out["name"])
-            for out in shells.OUTPUTS
+            for out in shells.ALL_OUTPUTS
         }
         if all(plates == want for plates in got.values()):
-            log(f"  {name}: the corner names {spell(want)} on every monitor")
+            log(f"  {name}: the corner names {spell(want)} on every screen")
             return
         time.sleep(shells.MAPPED_POLL_S)
     # Named per monitor and per plate, because the two ways this fails are
@@ -442,7 +634,7 @@ def corner_census(
         )
     raise Fail(
         f"{name}: after {timeout:.0f}s of {because}, the corner should have been "
-        f"showing [{' '.join(want) or 'nothing'}] on every monitor. "
+        f"showing [{' '.join(want) or 'nothing'}] on every screen. "
         + "; ".join(report)
     )
 
@@ -450,7 +642,7 @@ def corner_census(
 # ----------------------------------------------------------------- the run
 
 
-def load(shell: shells.Shell, stage: Path) -> None:
+def load(shell: shells.Shell, stage: Path, ready: ReadyBudget) -> None:
     binary = need(shell.env)
     logpath = stage / f"{shell.attr}.log"
     # The control, and the first of the three readings: whatever this shell
@@ -461,8 +653,8 @@ def load(shell: shells.Shell, stage: Path) -> None:
     proc = Proc(shell.attr, [binary], logpath)
     woken: Proc | None = None
     try:
-        took = proc.wait_for(shells.READY, shells.READY_TIMEOUT_S)
-        log(f"  {shell.attr}: loaded in {took:.2f} s")
+        took = ready.wait(proc)
+        log(f"  {shell.attr}: {ready.spell(took)}")
         # Whatever can reach this shell, reaches it. Dispatched on the name in
         # `shells.py` rather than on `attr`, so the list of shells stays the
         # only place that decides which of them is given something to do.
@@ -476,20 +668,24 @@ def load(shell: shells.Shell, stage: Path) -> None:
         time.sleep(shells.HOLD_S)
         check_zone(shell, "while", up=True)
         # Said as what was measured rather than as what it implies. "Took
-        # nothing" is also true of a surface that was never created, which is
-        # what the notifier's reading still is — its `PanelWindow` is
-        # conditionally visible and a zone declared while it was invisible
-        # never reaches the compositor (the D44 section in `shells.py`). The
-        # HUD's used to be the same sentence about the same nothing and is
-        # not any more: with the frames above in it, the corner is lit on
-        # every monitor before this is asked, so a surface really is there
-        # and really does leave every screen whole (PLAN D43).
+        # nothing" is also true of a surface that was never created, and of one
+        # that exists and whose zone the compositor DISCARDED — and both of
+        # these readings are the second of those. sway honours an exclusive
+        # zone only for a surface anchored to one edge or to an edge plus both
+        # perpendicular ones; this corner is top+right, so a HUD carrying
+        # `exclusiveZone: 100` leaves all three monitors whole here — lit, on
+        # both runs, and `visible: true` as well (three injections, in the D44
+        # section in `shells.py`). So this is the control that makes the bar's
+        # 31 px the bar's and not evidence about what the corner takes. D43
+        # amended this comment to claim it had become the second, on the
+        # strength of the corner now being lit; mapping was never what was
+        # missing, and that claim was wrong.
         log(
             f"  {shell.attr}: "
             + (
-                "its strip is reserved on every monitor"
+                "its strip is reserved on every screen"
                 if shell.reserves_top
-                else "took no space off any monitor"
+                else "took no space off any screen"
             )
         )
     finally:
@@ -502,7 +698,7 @@ def load(shell: shells.Shell, stage: Path) -> None:
     check_zone(shell, "after", up=False)
 
 
-def load_blind(stage: Path) -> None:
+def load_blind(stage: Path, ready: ReadyBudget) -> None:
     """The same HUD again, with no bus at all, until it says so (PLAN D47).
 
     `LinkPlate` is the one plate the run above cannot light: it is on screen
@@ -536,8 +732,8 @@ def load_blind(stage: Path) -> None:
         env=env,
     )
     try:
-        took = proc.wait_for(shells.READY, shells.READY_TIMEOUT_S)
-        log(f"  {shells.HUD_BLIND_LOG}: loaded in {took:.2f} s, with no bus")
+        took = ready.wait(proc)
+        log(f"  {shells.HUD_BLIND_LOG}: {ready.spell(took)}, with no bus")
         corner_census(
             shells.HUD_BLIND_LOG,
             proc.logpath,
@@ -551,11 +747,12 @@ def load_blind(stage: Path) -> None:
         )
         # And this surface really is mapped while it says it — the plate lit,
         # so `visible: selfTest || stack.anyLit` is true and a wl_surface
-        # exists — which makes "took no space" the HUD's own reading here
-        # rather than a sentence about a window that was never created (the
-        # D44 section in `shells.py`).
+        # exists. It is still the CONTROL and not a reading about the corner's
+        # footprint, for the reason `load()` above states: a zone on a surface
+        # anchored to a bare corner is discarded by the compositor, mapped or
+        # not (measured in D54; the D44 section in `shells.py`).
         check_zone(shell, "while", up=True)
-        log(f"  {shells.HUD_BLIND_LOG}: took no space off any monitor")
+        log(f"  {shells.HUD_BLIND_LOG}: took no space off any screen")
         # And then the bus arrives. Same quickshell, same surface, same log.
         relink(stage, proc)
     finally:
@@ -582,7 +779,7 @@ def relink(stage: Path, hud: Proc) -> None:
     AND THAT READING IS NOT VACUOUS, which is the whole reason this is called
     from inside `load_blind` rather than being a run of its own. An empty corner
     is what a HUD that never lit anything looks like too — but the blind census
-    has already required the NEWEST corner line on every monitor to be `link`,
+    has already required the NEWEST corner line on every screen to be `link`,
     and `hud_corner_plates` reads the newest. So the only way this passes is a
     line the HUD wrote after the broker arrived.
 
@@ -724,10 +921,14 @@ def main() -> int:
         log(f"  FAILED: {exc}")
         return 1
     bad = 0
+    # One budget for the whole run: the cold Qt the generous bound is written
+    # against is paid by whichever engine starts first, and by none of the rest
+    # (PLAN D53).
+    ready = ReadyBudget()
     for shell in shells.SHELLS:
         log(f"shellload: {shell.attr}")
         try:
-            load(shell, stage)
+            load(shell, stage, ready)
         except Fail as exc:
             log(f"  FAILED: {exc}")
             bad += 1
@@ -737,7 +938,7 @@ def main() -> int:
     log(f"shellload: {shells.HUD_BLIND_LOG}")
     runs = len(shells.SHELLS) + 1
     try:
-        load_blind(stage)
+        load_blind(stage, ready)
     except Fail as exc:
         log(f"  FAILED: {exc}")
         bad += 1

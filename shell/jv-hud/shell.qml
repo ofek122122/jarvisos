@@ -196,6 +196,112 @@ ShellRoot {
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
+      // HOW MUCH ROOM THE PLATES HAVE, which is not how much the surface
+      // asked for (PLAN D66). `implicitWidth` above is a DECLARED choice —
+      // 300 px of corner — and a layer-shell surface anchored to one edge is
+      // granted the size it asks for whether or not the output is that wide.
+      // On a monitor narrower than the corner this surface therefore extends
+      // off the left of the screen, which costs nothing at all — it is
+      // transparent, its input region is empty and it reserves no space —
+      // right up until a plate lays a sentence out in the part that is not
+      // there. Measured, before this line existed: at every surface width from
+      // 300 px down to 32, the crowded corner drew its confirmation plate 260
+      // px wide, so 228 px of a question jv-act was waiting on an answer to sat
+      // past the edge of a 32 px screen. Nothing errored, because nothing in
+      // the HUD had ever been told what it was on.
+      //
+      // So the room is the narrower of the two facts — what this surface got
+      // and what the output has — less the inset the stack is anchored by, at
+      // each edge. §06 gives the corner that gap at the top and the right; the
+      // left earns it here for the same reason the bottom has it in the height
+      // above, and `core/PlateFit.qml` is what the capped plates do with it.
+      //
+      // AND IT CLAMPS, which is the half a subtraction gets wrong. There are
+      // THREE facts here and only two of them are a room: a surface nobody has
+      // configured yet — before the first configure `width` is 0 — where each
+      // plate keeps its own cap, because a plate that elided in the first frame
+      // of every session would be hiding the news to protect a margin; a
+      // surface that HAS measured itself and has no room to give, where the
+      // text goes and the label stays; and a width. `Math.min(…) - insetPx * 2`
+      // spells the first two the same, and it was measured doing it: the 1 px
+      // case came out at -31 px, which `PlateFit` reads as "nobody has said"
+      // and answers with the full 260 px cap, so the narrowest surface in the
+      // sweep was the one that drew the most. That is D35's bug on the bar's
+      // row, one process over, and `core/RowFit.qml` says in as many words
+      // that the answer belongs to the surface. This is that clamp.
+      readonly property int plateRoomPx: surface.width > 0
+        ? Math.max(0, Math.min(surface.width, surface.modelData.width) - Theme.insetPx * 2)
+        : -1
+
+      // AND THE OTHER AXIS, WHICH HAS NO CLAMP AND IS NOT GETTING ONE
+      // (PLAN D74). The room above is measured on ONE axis: the plates are
+      // bounded by the narrower of this surface and the screen, and nothing
+      // at all bounds the stack's HEIGHT by the screen's. On an output
+      // shorter than this surface the compositor therefore crops the bottom
+      // of it — and the bottom plate is `HealthPlate`, the thing that says
+      // what is wrong, cropped exactly when everything is. That is A63's
+      // failure arriving from OUTSIDE the surface instead of from inside it,
+      // and it is a real hole rather than a broken test: ares' shortest
+      // output is 1080 px, so nothing on this machine is in it today.
+      //
+      // THE DECISION IS TO DECLARE THE FLOOR RATHER THAN TO CLAMP, and the
+      // reason is which failure each of them leaves behind. Width elision
+      // shortens a SENTENCE — `PlateFit` drops words off a line that is still
+      // there, under a label that still says what the line is about. There is
+      // no vertical version of that: a stack with less room than plates has
+      // to drop a whole PLATE, and a plate that is not on screen is
+      // indistinguishable from a machine with nothing to report, while a
+      // cropped one is visibly cropped. So the compositor's crop is the
+      // better of the two failures, and a clamp would trade a visible crop
+      // for an invisible absence — on the one plate this HUD exists in order
+      // not to lose. This corner is for screens at least as tall as itself;
+      // on a shorter one it goes on drawing every plate, and SAYS SO.
+      //
+      // The floor is not a number. It is this surface's own height, because a
+      // literal would stay put the next time a plate makes the corner taller
+      // and the two are one fact said twice. If a screen under it ever does
+      // arrive — a 768 px panel, a projector — what that needs is this
+      // decision reopened: a height clamp beside the width one, an ordering
+      // that DROPS a plate rather than cutting it, and an answer to which
+      // plate may go, which is not this one.
+      //
+      // Graded in two places, because it is a claim about two files.
+      // `tools/tests/test_gen_theme_qml.py` reads the declaration (the floor
+      // is the height, the comparison is against the OUTPUT's height, and
+      // this says so in the log); `tools/tests/test_hudscreens.py` holds every
+      // output its compositor has above the floor — including the part that is
+      // easy to miss, that `check_corner`'s bottom bound is a bound on the
+      // SURFACE and goes vacuous on a screen barely taller than it (D73), so
+      // the one check that would notice a crop in a photograph goes quiet
+      // before the crop does.
+      readonly property int minScreenHeightPx: surface.implicitHeight
+
+      // Unmeasured is not short, which is the distinction the room above
+      // draws for the other axis: a screen whose height has not reached this
+      // process yet is 0, and 0 is no reason to report anything.
+      readonly property bool screenTooShort: surface.modelData.height > 0
+        && surface.modelData.height < surface.minScreenHeightPx
+
+      // Said once per screen that is under the floor, and per screen because
+      // `Variants` builds one surface per monitor: the laptop panel and the
+      // desk display are two different verdicts and a shell that reported the
+      // first would be silent about the second. A binding rather than a
+      // one-shot at startup, so a monitor that changes mode under a running
+      // HUD is reported too.
+      //
+      // A line in the log and not a plate: the news is that the bottom of
+      // this corner is off the screen, and a plate saying so would be drawn
+      // in the corner — where the condition it reports is what crops it.
+      onScreenTooShortChanged: {
+        if (surface.screenTooShort) {
+          console.warn("jv-hud: " + surface.modelData.name + " is "
+            + surface.modelData.height + "px tall and this corner is "
+            + surface.minScreenHeightPx + "px, so the compositor is cropping "
+            + "the bottom of it — every plate is still drawn, and the bottom "
+            + "one is the health plate");
+        }
+      }
+
       // Mapped only while something is genuinely on screen — including
       // while a plate is fading out, or the exit would be a surface
       // vanishing out from under it rather than an element evaporating.
@@ -228,6 +334,7 @@ ShellRoot {
         // themselves — a refusal and a calm machine draw the same nothing.
         LinkPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // The question Jarvis is waiting on, from jv-act's own
@@ -239,6 +346,7 @@ ShellRoot {
         // all — so answering stays with your voice and `jv confirm`.
         ConfirmPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // What Jarvis is doing, from speech.state + audio.wake + audio.vad.
@@ -265,6 +373,7 @@ ShellRoot {
         // better report on whether you were heard correctly.
         HeardPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // How the last answer ENDED, from jv-brain's own brain.response —
@@ -288,6 +397,7 @@ ShellRoot {
         // machine whose actions all worked it is never here at all.
         ActionPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // The Windows binary this machine refused to run, from jv-guard's
@@ -298,6 +408,7 @@ ShellRoot {
         // all. On a machine nobody hands .exe files to it is never here.
         GuardPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // The Windows app jv-compat could not finish installing, from its
@@ -309,6 +420,7 @@ ShellRoot {
         // or one that worked, draws nothing at all.
         InstallPlate {
           anchors.right: parent.right
+          roomPx: surface.plateRoomPx
         }
 
         // Whether the microphone is open, from jv-ears' own capture

@@ -31,8 +31,9 @@ repository, and both are properties of a laid-out surface at a real width:
 
 Each PNG is **one whole bar, at the width of a real monitor**: 2560 px for
 ares' primary (HP 27xq at 2560x1440), 1920 px for either side monitor (DP-1 and
-DP-2 at 1920x1080), and one deliberately narrow 640 px output that ares does
-not have. The height is not a number anyone chose — it is
+DP-2 at 1920x1080), and two deliberately narrow outputs ares does not have:
+640 px, where the clock no longer fits, and 320 px, which is narrower than the
+corner the bar keeps clear for the HUD and so has room for nothing at all. The height is not a number anyone chose — it is
 `Theme.labelPx + Theme.padPx * 2`, derived here exactly as `shell.qml` derives
 it, which is 31 px at the current type scale.
 
@@ -40,14 +41,17 @@ The paper is the bar's own ground (`ground_deep`), unlike the other two sheets,
 whose neutral grey is the harness's: this surface is opaque, reserves its own
 strip, and has nothing behind it. What you see is what the compositor maps.
 
-**Recorded and composed.** Six of the eleven shots are ares' own desk —
+**Recorded and composed.** Seven of the twelve shots are ares' own desk —
 `harness/fixtures/niri/ares-desk.jsonl` line 1, the real opening snapshot of
 `niri msg --json event-stream`, byte for byte, fed through the real
 `core/NiriModel.qml`. Four are **composed**: `07-named.png`, `08-crowded.png`,
 `10-collapsed.png` and `11-collapsed-focus-last.png` need a desk this machine
 does not have (workspaces with names, and more of them than fit), and they are
 built in the recording's own shape, every field checked against it by
-`tools/tests/test_barshots.py`. The two deltas in `03` and `04`
+`tools/tests/test_barshots.py`. `09-narrow.png` and `12-no-room.png` are the
+recorded desk on a **monitor** ares does not have: there the width is the
+composed thing, and it is composed because the strip's arithmetic decides what
+happens at widths nobody chose. The two deltas in `03` and `04`
 are composed too, for the reason `harness/fixtures/niri/README.md` gives: niri
 sends them only when a desk someone is sitting at is rearranged.
 
@@ -220,6 +224,39 @@ the marker exists to prevent. The count is always exact; its *position* says
 "the row was cut here" rather than "they were all here" — with more workspaces
 beyond the one you are on, some of the counted ones are to the right of the
 label the marker is drawn to the left of.
+
+### 12-no-room.png — narrower than the corner the HUD reserves
+
+![12-no-room.png](12-no-room.png)
+
+320 px, **composed**: an output narrower than the 316 px this strip keeps
+clear for the HUD. There is nothing on it. That is the shot — and it is the
+only empty strip on this sheet that is empty because there is no *room*,
+rather than because there is nothing to say (05 and 06 are the other two, and
+both are on a 2560 px monitor with a desk nobody has described).
+
+Put beside the 640 px shot above it is the same desk, on the same output,
+with one thing changed: the width. At 640 px the clock goes and the label stays; at
+320 px the row's whole budget — `width - the HUD's corner - the inset - the
+gap` — comes to **-20 px**, and there is no honest label left to draw. The
+strip keeps its ground and its hairline, because the bar is still there.
+
+This is **PLAN D35**, and what it was is worth writing down: a negative budget
+used to be spelled exactly the way `core/RowFit.qml` spells *"nobody has said
+how wide this surface is"* — which draws every label, deliberately, so that a
+row does not hide things in the first frame of a session before it has been
+measured. So the one width at which the row had no right to draw was the width
+at which it drew everything, one label deep into the corner another process
+puts its plates in. Neither surface can see the other; this sheet is the only
+thing that could ever have reported it. The surfaces now clamp their own
+arithmetic at zero, and zero is a fact `RowFit` answers separately: **a row
+that cannot legally paint a pixel paints nothing**, and the `+N` goes with the
+names, since a count is a label too.
+
+ares has no such output and probably nothing does — 320 px is a capture device
+or a virtual sink. It is photographed because the arithmetic decides what
+happens at widths nobody chose, and a rule with no picture of its edge is a
+rule nobody has looked at.
 
 ## What this sheet is NOT
 

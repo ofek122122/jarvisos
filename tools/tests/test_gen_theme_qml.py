@@ -10,6 +10,8 @@ is in sync with the toml, they check the toml still agrees with the blueprint's
 
 from __future__ import annotations
 
+import ast
+import collections
 import dataclasses
 import html
 import json
@@ -49,6 +51,33 @@ hud_corner_px = 300
 
 def gen_from(text: str) -> str:
     return gen.render_theme_qml(gen.load_tokens(text))
+
+
+# The comment stripper every gate in this file reads a QML file through,
+# and the one thing in this module four OTHER suites import by name
+# (test_barshots, test_hudshots, test_notifyshots, test_shellload). It sits
+# up here with the other module-level helper for that reason: it was
+# defined twice for a while — once naively, 120 lines above this careful
+# one — and a reader of either version could not tell which one the gates
+# below were actually calling (PLAN D76).
+def strip_qml_comments(text: str) -> str:
+    """Drop `//` comments, leaving braces and code intact.
+
+    A `//` inside a string literal is not a comment, so only one with an even
+    number of quotes before it on its line counts. (`/* */` is not handled
+    because the HUD does not use it; a file that grows one will show up as a
+    parse the gates disagree about, not as a silent pass.)
+    """
+    out = []
+    for line in text.splitlines():
+        i = line.find("//")
+        while i != -1:
+            if line.count('"', 0, i) % 2 == 0:
+                line = line[:i]
+                break
+            i = line.find("//", i + 2)
+        out.append(line)
+    return "\n".join(out)
 
 
 # --- generator shape -------------------------------------------------------
@@ -673,10 +702,6 @@ def names_word(text: str, word: str) -> bool:
     return f"`{word}`" in text or f'"{word}"' in text
 
 
-def strip_qml_comments(text: str) -> str:
-    return re.sub(r"//[^\n]*", "", text)
-
-
 def state_words(element: str) -> set[str]:
     """Every word `readonly property string state` can hand a plate."""
     found = STATE_BLOCK.search(element)
@@ -792,26 +817,6 @@ SAFE_SURFACE = {
     # plate has something to say.
     "color": '"transparent"',
 }
-
-
-def strip_qml_comments(text: str) -> str:
-    """Drop `//` comments, leaving braces and code intact.
-
-    A `//` inside a string literal is not a comment, so only one with an even
-    number of quotes before it on its line counts. (`/* */` is not handled
-    because the HUD does not use it; a file that grows one will show up as a
-    parse the gates disagree about, not as a silent pass.)
-    """
-    out = []
-    for line in text.splitlines():
-        i = line.find("//")
-        while i != -1:
-            if line.count('"', 0, i) % 2 == 0:
-                line = line[:i]
-                break
-            i = line.find("//", i + 2)
-        out.append(line)
-    return "\n".join(out)
 
 
 def window_bodies(text: str) -> list[tuple[str, str]]:
@@ -1225,6 +1230,172 @@ def hud_surface_box() -> tuple[int, int]:
         f"`Theme.hudCornerPx`; shell.qml says {width.group(1).strip()!r}"
     )
     return int(theme_tokens()["geometry"]["hud_corner_px"]), int(height.group(1))
+
+
+def test_the_hud_surface_measures_the_room_its_plates_have():
+    """D66. Six plates cap their own text at a number chosen for the 300 px
+    corner, and `core/PlateFit.qml` narrows that cap to the room the surface
+    really has. The surface is what MEASURES the room, and this is the only
+    gate that can look at it: `shell.qml` is the Quickshell half, so no QML
+    engine in this repo loads it and no mutation of it can be graded. Measured
+    — a mutation removing the clamp below survived every suite.
+
+    Three things have to be true of that expression, and each of them was a
+    real bug in the two hours this item took:
+
+      · it asks the SCREEN, not only itself. A layer-shell surface anchored to
+        one edge is granted the width it asks for whether or not the output is
+        that wide, so `surface.width` alone is 300 px on a 256 px monitor and
+        the room would come out 44 px too generous — with the difference off
+        the left of the screen.
+      · it CLAMPS at zero. `Math.min(...) - insetPx * 2` goes negative on a
+        narrow output, PlateFit reads a negative room as "nobody has measured
+        this surface", and the narrowest screen then draws the widest plate.
+        That is D35's bug on the bar's row, one process over.
+      · and zero still differs from unmeasured. Before the first configure
+        `width` is 0, and a plate that elided in the first frame of every
+        session would be hiding the news to protect a margin.
+
+    What proves the BEHAVIOUR is `tools/hudshots/scene/Corner.qml`, which
+    computes the same room for the harnesses and is driven through nine
+    surface widths by `tst_fit.qml`. This gate is what keeps the two from
+    drifting on the half that has no engine.
+    """
+    hud = strip_qml_comments((ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8"))
+    room = re.search(r"property\s+int\s+plateRoomPx:(.*?)(?=\n\n)", hud, re.S)
+    assert room, "shell/jv-hud/shell.qml no longer measures the room its plates have"
+    expr = " ".join(room.group(1).split())
+
+    assert "modelData.width" in expr, (
+        "the room has to be bounded by the OUTPUT's width as well as by the "
+        f"surface's own, or a narrow monitor is measured as a wide one: {expr}"
+    )
+    assert "Math.max(0," in expr, (
+        "the room has to be clamped at zero, or a surface narrower than two "
+        f"insets hands PlateFit a negative and every cap comes back: {expr}"
+    )
+    assert "-1" in expr and "surface.width > 0" in expr, (
+        "a surface nobody has configured yet has to stay distinguishable from "
+        f"one with no room to give: {expr}"
+    )
+    # The same inset, twice, and named rather than typed — §06 gives this
+    # corner that gap at the top and the right, and the plates earn it on the
+    # left for the reason the box's height already gives it to the bottom.
+    assert "Theme.insetPx * 2" in expr, (
+        f"the room should spend two `Theme.insetPx`, not a number: {expr}"
+    )
+
+
+def hud_min_screen_height() -> int:
+    """The shortest output shell.qml says its corner is for, in px (PLAN D74).
+
+    Resolved, because the declaration is deliberately NOT a number: it is
+    `surface.implicitHeight`, so the floor and the box are one fact and the
+    next plate that makes the corner taller raises the floor with it. The gate
+    below is what holds it to that expression; this is what hands the number to
+    the gates that need it, which are in `tools/tests/test_hudscreens.py` —
+    every output the screen harness photographs has to be one the declaration
+    covers, and that is a claim about two files neither of them can make alone.
+    """
+    hud = strip_qml_comments((ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8"))
+    floor = re.search(
+        r"^\s*readonly property int minScreenHeightPx:\s*(.+?)\s*$", hud, re.M
+    )
+    assert floor, (
+        "shell/jv-hud/shell.qml no longer declares the shortest screen its "
+        "corner is for — D74 settled the height question as a DECLARED floor "
+        "rather than as a clamp, and a declaration no gate can read is a "
+        "comment"
+    )
+    assert floor.group(1) == "surface.implicitHeight", (
+        "the floor has to BE this surface's own height rather than a copy of "
+        f"today's number, or it stays put the next time a plate makes the "
+        f"corner taller; shell.qml says {floor.group(1)!r}"
+    )
+    return hud_surface_box()[1]
+
+
+def test_the_hud_says_when_a_screen_is_shorter_than_the_corner_it_declares():
+    """D74 — `plateRoomPx`'s other axis, and the decision not to clamp it.
+
+    The clamp above bounds the plates by the narrower of the surface and the
+    SCREEN. Nothing bounds the stack's height by the screen's, so on an output
+    shorter than this surface the compositor crops the bottom of it, and the
+    bottom plate is `HealthPlate`: the thing that says what is wrong, cropped
+    exactly when everything is. That is A63's failure arriving from outside the
+    surface rather than from inside it.
+
+    D74 settled it as a declared floor rather than as a clamp, and the reason
+    is which failure each one leaves behind. Width elision shortens a SENTENCE
+    — `PlateFit` drops words off a line that is still there, under a label that
+    still says what the line is about. There is no vertical version of that: a
+    stack with less room than plates has to drop a whole PLATE, and a plate
+    that is not on screen is indistinguishable from a machine with nothing to
+    report, while a cropped one is visibly cropped. A clamp would trade a
+    visible crop for an invisible absence, on the one plate this HUD exists in
+    order not to lose.
+
+    So there is no clamp to measure and what there is to grade is the
+    declaration — and this is the only suite that can grade it, for the reason
+    the gate above gives: shell.qml is the Quickshell half, no QML engine in
+    this repo loads it, and no mutation of it is caught by anything else.
+
+    Three things, each of them the decision rather than a style:
+      · the floor is the surface's own height (the helper above);
+      · what it is compared against is the OUTPUT's height, because a
+        layer-shell surface is granted the height it asks for whatever the
+        screen is, exactly as it is granted its width (D66);
+      · and the shell SAYS SO, because a corner that goes on drawing past the
+        bottom of a screen without a word in the log is the same run as one
+        that never noticed.
+    """
+    floor = hud_min_screen_height()
+    hud = strip_qml_comments((ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8"))
+
+    short = re.search(r"property\s+bool\s+screenTooShort:(.*?)(?=\n\n)", hud, re.S)
+    assert short, (
+        "shell/jv-hud/shell.qml no longer notices a screen shorter than its "
+        "corner, so the floor it declares is a number nothing compares "
+        "anything with"
+    )
+    expr = " ".join(short.group(1).split())
+    assert "surface.modelData.height < surface.minScreenHeightPx" in expr, (
+        "the comparison has to be the OUTPUT's height against the floor: this "
+        "surface is granted the 826 px it asks for on a 700 px screen exactly "
+        f"as it is granted 300 px on a 256 px one, so its own is not the "
+        f"question: {expr}"
+    )
+    assert "surface.modelData.height > 0" in expr, (
+        "a screen whose height has not arrived yet is 0 and is not a short "
+        f"one — the same distinction `plateRoomPx` draws above: {expr}"
+    )
+    assert str(floor) not in expr, (
+        f"the condition types {floor} rather than reading the floor, so the "
+        f"two can drift: {expr}"
+    )
+
+    said = re.search(r"onScreenTooShortChanged:(.*?)(?=\n\n)", hud, re.S)
+    assert said and "console.warn" in said.group(1), (
+        "nothing says so. D74's decision is to declare the floor AND report a "
+        "screen under it: the plates are still all drawn, the compositor is "
+        "the thing doing the cropping, and the log is the only place that can "
+        "be said"
+    )
+    body = " ".join(said.group(1).split())
+    for named in (
+        "surface.modelData.name",
+        "surface.modelData.height",
+        "surface.minScreenHeightPx",
+    ):
+        assert named in body, (
+            f"the line has to name {named}: which screen, how tall it is and "
+            "how tall the corner needs it to be are the three things a reader "
+            f"of that log has no other way to get: {body}"
+        )
+    assert str(floor) not in body, (
+        f"the line types {floor} rather than reading the floor it reports: "
+        f"{body}"
+    )
 
 
 def test_the_bar_leaves_the_corner_the_hud_draws_in():
@@ -2156,3 +2327,102 @@ def test_every_face_a_nix_surface_asks_for_is_a_role_theme_toml_names():
             f"{path} sets type; it must ask theme.toml for the family through "
             f'`face "<role>"` rather than spelling one'
         )
+
+
+# --- D76: the helper's own contract, since no file in the tree exercises it ---
+#
+# `strip_qml_comments` was defined twice in this module for several iterations:
+# the careful version above, and a naive `re.sub(r"//[^\n]*", "", text)`. Python
+# binds at call time, so every caller in every suite got the careful one and
+# nothing was ever wrong — the naive one was dead the moment it was written,
+# which is exactly why it survived long enough to become a trap. What it cost
+# was reading: a gate in the first 800 lines of this file was reasoning about a
+# function that was not the one it called, and the two differ on precisely the
+# case the survivor's docstring is about.
+#
+# Deleting it is therefore a change with no verdict of its own, and that was
+# measured, not assumed. Run over all 101 QML files in this tree the two
+# functions agree on every single line — there is no `//` inside a string
+# literal anywhere in the shells today — and with the naive one installed as
+# the real definition, 774 of this suite's 776 tests still pass: the only two
+# that notice are the two below. Had the careful one been the one deleted, the
+# gate would have gone on being green for as long as no QML string held a URL.
+# So the contract needs a test that names its case outright rather than hoping
+# a shell file happens to contain it, and this is that test: the first QML
+# string to hold a URL (or a regex with `//` in it) must not lose half its
+# line.
+
+
+def test_a_slash_slash_inside_a_qml_string_is_not_a_comment():
+    stripped = strip_qml_comments(
+        'property string docs: "https://example/x" // the real comment\n'
+        'property string re: "a//b"\n'
+    )
+    assert stripped.splitlines() == [
+        'property string docs: "https://example/x" ',
+        'property string re: "a//b"',
+    ]
+    # The naive definition this replaced would have cut both lines at the first
+    # `//`, leaving `property string docs: ` and an unterminated quote — every
+    # gate that matches a quoted value would then read the file as not having
+    # said the thing it says.
+    assert '"https://example/x"' in stripped and '"a//b"' in stripped
+
+
+def test_stripping_comments_never_moves_a_line_or_drops_a_brace():
+    """Two properties the gates above depend on without ever saying so:
+    `window_bodies` counts `{` and `}` to track depth, and several gates report
+    a line number or use `re.M` against a line-anchored pattern. A stripper
+    that joined lines, or that ate a brace inside a commented-out block, would
+    make those read the wrong element and say so convincingly."""
+    text = (
+        "Item {\n"
+        "    // a whole-line comment\n"
+        '    color: "#000" // and a trailing one { with a brace in it }\n'
+        "\n"
+        "}\n"
+    )
+    stripped = strip_qml_comments(text)
+    assert len(stripped.splitlines()) == len(text.splitlines())
+    assert stripped.count("{") == 1 and stripped.count("}") == 1
+    assert stripped.splitlines()[1].strip() == ""
+
+
+def test_no_module_under_tools_defines_the_same_name_twice():
+    """The shape of the D76 trap, wherever it appears next.
+
+    A second module-level `def` or `class` of a name silently replaces the
+    first, and nothing — not pytest, not a linter this repo runs — says a word.
+    In a helper module (this one is imported by four other suites) the cost is
+    a reader believing the wrong definition; in a `test_*` name the cost is
+    worse, because the shadowed test still LOOKS collected and covered in the
+    file and never runs at all.
+
+    Module level only, on purpose, and that narrowness was measured rather
+    than assumed: widening the walk to every node in the tree (`ast.walk`)
+    reports four modules here, and every one of them is legitimate — `__init__`
+    on two classes of the same file, and a helper nested inside two different
+    tests. A `def` under `try`/`except ImportError` or `if TYPE_CHECKING` is a
+    deliberate fallback for the same reason, and none of them are siblings in
+    the module body.
+    """
+    duplicates: dict[str, list[str]] = {}
+    scanned = []
+    for path in sorted((ROOT / "tools").rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        scanned.append(str(path.relative_to(ROOT)))
+        defined: collections.Counter[str] = collections.Counter()
+        for node in ast.parse(path.read_text("utf-8")).body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined[node.name] += 1
+        again = sorted(name for name, count in defined.items() if count > 1)
+        if again:
+            duplicates[str(path.relative_to(ROOT))] = again
+    # A scan that reads nothing passes, so say what it read: this very file has
+    # to be in it, and a tools/ that suddenly holds three modules means the walk
+    # broke rather than that the trap is gone.
+    assert "tools/tests/test_gen_theme_qml.py" in scanned and len(scanned) >= 20, scanned
+    assert not duplicates, "each of these names is defined twice; the first is dead:\n" + "\n".join(
+        f"{path}: {', '.join(names)}" for path, names in sorted(duplicates.items())
+    )

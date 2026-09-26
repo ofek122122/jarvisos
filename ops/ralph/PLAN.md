@@ -461,7 +461,7 @@ human-reviewed step.
       `{ token; face; num; }` from one `fromTOML` would be read by all three;
       the gate that discovers painters (`_bearing_files`) already works by
       finding `token "x"` calls, so it would keep working unchanged.
-- [ ] D27. **The bar's and the notifier's `core/` have never had a mutation
+- [x] D27. **The bar's and the notifier's `core/` have never had a mutation
       sweep, and now they can.** D11 graded four lines of `NiriModel.qml` and
       one of `NotifyModel.qml` — five of perhaps forty — and one of the five
       found a real hole on the first try. Everything either model does
@@ -470,6 +470,31 @@ human-reviewed step.
       nobody so far. ~15 mutations over the two is ~20 suite runs at ~14 s, so
       under five minutes — the cheapest evidence in the repo, and the only
       kind that says what these two suites are worth.
+      (DONE, iteration 126, commit 507f7c9. **34 mutations over six files**
+      — `NiriModel` 10, `NotifyModel` 12, `RowFit` 6, `KeyedRows` 4+2,
+      `WallClock` 2 — **29 caught first pass, and all 5 survivors were real
+      holes.** The estimate was right about the price and low about the
+      yield: the two suites are 4.5 s and 3.5 s, so the whole sweep plus
+      every re-grade was ~40 suite runs in a few minutes. What the five were:
+      · **a duplicate workspace id.** `find` answers `null` for one on
+        purpose and `hit.length >= 1` survived. `applyActivated` and
+        `applyUrgency` then walk the list by `w.id === id` and patch BOTH —
+        one delta lighting an active pip on two monitors at once.
+      · **a workspace whose `output` is the empty string.** The refusal was
+        written and asked for by nobody. It is not a monitor called "": the
+        strip asks `workspacesOn(<screen>)`, so that pip is on no strip while
+        still counting towards the desk the model reports.
+      · **the order inside `NotifyModel.sweep`.** `entries` is replaced
+        BEFORE any handle is told. The re-entrant `drop()` the comment names
+        is NOT the case that discriminates — both orders end in the same
+        list — and the one that does is a sender POSTING while being closed:
+        its new plate was computed away by a sweep that had already decided.
+      · **the 1 ms floor in `arm`.** A deadline already past computes a
+        negative interval, which is not one a Timer can honour.
+      · **`KeyedRows`' search window.** The scan starts at `i`, not 0; from
+        0, two rows with one key swap delegates and draw the same word twice.
+      All five closed with a test and re-graded caught. One survivor was NOT
+      a hole and cost 5m05s to prove so — see **D69**.)
 - [x] D29. **`tools/hudshots/stub/Motion.qml` is now a hand copy of a
       GENERATED file.** The stub exists for one real reason — the shots
       harness cannot import Quickshell, so `Quickshell.env` has to go — and
@@ -1051,35 +1076,275 @@ human-reviewed step.
       · Cost: **34.8 s**, unchanged — the third act is sub-second. Ceilings:
         the blind engine is now **98 s of 100** (D53 is where the headroom is).
 
-- [ ] D53. **The first quickshell pays for a cold Qt and the other three do
-      not, and all four are given 30 s for it.** `READY_TIMEOUT_S` is written
-      against the cold-font-cache argument, which is true of engine one and
-      false of engines two, three and four — they load 0.40 s after their
-      predecessor on a warm cache, measured on every run in the journal. That
-      one number is 120 s of the run's 289 s pathological ceiling (D50), and
-      it is the cheapest place to shrink it: a first-engine timeout and a
-      warm-engine timeout, or a ceiling derived from the previous engine's
-      MEASURED load time. Worth doing only with the D50 arithmetic in front of
-      you — this is a bound on a hung engine, not a budget, so the value of
-      shrinking it is that the bound stays honest rather than that the gate
-      gets faster. Raised by D50. **Now load-bearing:** D52 took the blind
-      engine to 98 of its 100 s ceiling, so this is the item that has to happen
-      before that run grows a fourth act. 30 s of its 98 is a cold-font-cache
-      argument that is false of every engine but the first.
+- [x] D53. **The first quickshell pays for a cold Qt and the other three do
+      not, and all four were given 30 s for it.** (Done: `ReadyBudget` in
+      `tools/shellload/load.py`, one object for the whole run, handed to both
+      `load()` and `load_blind()`.) The first engine keeps
+      `READY_TIMEOUT_COLD_S = 30`; every engine after it is bounded by
+      `shells.warm_ready_timeout(slowest_so_far)` — four times the slowest load
+      the run has measured, floored at 6 s and capped at 12.
+      · **The premise was half wrong, and the measurement is why the derived
+        form was taken rather than a second constant.** ALL FOUR engines load
+        in 0.40 s on ares, the first included: the font cache is warm across
+        runs, so this gate has never once paid the cost its generous number is
+        written against and cannot make itself pay it. What survives is the
+        ORDERING claim — whatever engine one warmed is warm for the rest — so
+        the honest bound for a later engine is the run's own measurement, not
+        a second guess at a cold cost nobody here has seen.
+      · **The slowest so far, not the previous one:** a bound that has learned
+        the machine is slow must not un-learn it on the next fast engine.
+      · **The cap is the limit.** It only starts answering once the first
+        engine took more than 3 s — a machine seven times slower than this —
+        and a machine uniformly slow enough that a WARM engine needs more than
+        12 s fails this gate. So the failure NAMES its derivation and the
+        constant to raise, because there the repair really is a number.
+      · Every run now prints which bound each engine got and what it spent of
+        it (`loaded in 0.40 s of a cold 30s` / `of a derived 6s`), so the D53
+        measurement is re-made on every machine this ever runs on.
+      · The ceiling arithmetic (`engine_load_bounds()`, split out of
+        `engine_ceilings()` so the claim is about the one wait D53 is about):
+        78 s for the frames run (unchanged — it is the cold engine), 36 s for
+        the bar and the notifier, **80 s for the blind run against 98 before**.
+        D54 would have fit; it turned out not to be worth building (see
+        D54), so the headroom is still there — D58 is where to spend it.
+      · Cost: unchanged at 34.8 s. Nothing here was ever spending the 30 s.
 
-- [ ] D54. **The compositor is never asked about the surface that came
-      BACK.** `load_blind` reads the screens three times — before, while, after
-      (D44) — and the `while` is taken when the corner is showing `link`. Then
-      D52's cycle destroys that surface (`visible: selfTest || stack.anyLit`,
-      and the dark census requires `nothing` on every monitor) and builds a new
-      one for the ten plates, and nobody asks sway anything about it. The HUD
-      reserves no space, so that reading is a refutation rather than a proof —
-      but it is the one this gate has, and a HUD whose rebuilt surface came
-      back with an exclusive zone on it would take a strip off all three
-      monitors and pass. One more `check_zone(shell, "while", up=True)` inside
-      `recover()`, after the census, is the whole of it; the arithmetic is the
-      catch (`engine_ceilings()` has 2 s of room and `MAPPED_TIMEOUT_S` is 8),
-      so this is D53's dependent rather than a free addition. Raised by D52.
+- [ ] D58. **The other real-quickshell gate has the same 30 s, six times over,
+      and it spends it on a broker too.** `tools/hudscreens/shoot.py` holds its
+      own `READY_TIMEOUT_S = 30.0` as the DEFAULT of `Proc.wait_for`, and that
+      harness starts at least five quickshells and four `jarvisd` in one run —
+      so every engine after the first gets the cold-Qt bound D53 just showed
+      nothing pays, and so does every broker, which is a Rust process binding a
+      unix socket and has no Qt in it at all. Two different repairs and only
+      one of them is D53's: the engines want `ReadyBudget` (which is D42's
+      question, since `Proc` already exists twice and this would be the third
+      caller), and the broker's wait wants a number of its own, the way
+      `shells.HUD_RELINK_BUS_TIMEOUT_S` is 4 s for exactly that reading. The
+      catch is that `hudscreens.sh` has NO ceiling test at all — 3m15s is its
+      measured cost and nothing anywhere bounds its pathological one — so the
+      honest first half is `engine_ceilings()`' equivalent over that harness,
+      and the shrink is second. Raised by D53.
+      · **The first half is BUILT and the number is 26.6 minutes.**
+        `stretch_ceilings()` in `tools/tests/test_hudscreens.py` walks
+        `shoot.py`'s AST and charges every wait it finds: 94 wait sites, 76 of
+        them charged (the other 18 are polls inside a bound already named, or
+        a helper's insides charged at its call sites instead). Twelve engines
+        — six shots, five idle windows, the click probe — worst one 238 s
+        (heard-and-confirm: four `wait_for_drawing`s and two engine starts)
+        against `STRETCH_CEILING_S = 300`, and 1593 s over the run against
+        `RUN_CEILING_S = 1800`. The measured pass is 199.6 s, so the ceiling
+        is 8x the run it bounds, which is what a ceiling is for.
+      · **Where the 1593 s goes, which is the answer the shrink needs:**
+        `READY_TIMEOUT_S` 688 s (43%, twenty-two waits of 30 s for a process
+        to say one line), `STOP_TIMEOUT_S` 416 s (26%, spent TWICE per
+        process — terminate, wait, kill, wait — over 26 stops),
+        `wait_for_drawing` 210 s (13%), everything else 278 s. The shrink is
+        the first two and nothing else is worth touching.
+      · Derived rather than written down, because at ninety sites a hand
+        list is stale within an iteration: a way of waiting nobody taught the
+        arithmetic is refused BY NAME (`test_every_way_this_harness_waits_is_
+        one_the_ceiling_knows_about` closes over the call graph, so a helper
+        three calls deep from a `time.sleep` is still one whose call sites
+        cost seconds), a loop around a wait that the ceiling cannot count is
+        refused, and a wait outside every stretch is refused. 10 mutations,
+        10 caught — including the two that motivated the shape: a sixth idle
+        window written without its `# ---` marker, and a wait in `main` just
+        after the shot loop, which an earlier text-sliced version charged six
+        times and called a ceiling.
+      · Three bounds in `shoot.py` were bare literals and are constants now,
+        because a number nobody named is a number nothing can add up:
+        `STOP_TIMEOUT_S` (8 s, spent twice), `CLIENT_WINDOW_TIMEOUT_S` (15 s,
+        the second Wayland client's window), `CLIENTS_GONE_S` (0.5 s) and
+        `PUBLISH_DRAIN_S` (0.1 s, the broker's fan-out). `test_every_bound_in_
+        this_harness_is_a_named_number` keeps them that way.
+      · **What this does NOT bound, stated where a reader meets it:** work.
+        `grim`, the PNG encode, the numpy compare and both binaries' own exec
+        are `subprocess.run` with no timeout. The claim is about every wait
+        this file CHOOSES to spend; a subprocess that never returns is
+        outside it. Raised as D64 rather than fixed here.
+
+- [ ] D63. **The shrink D58 measured: 69% of that ceiling is two constants.**
+      `READY_TIMEOUT_S` is 688 s of it and `STOP_TIMEOUT_S` 416 s. The first
+      is D53's repair in a second harness — a cold bound for whichever engine
+      touches Qt first and a DERIVED warm bound for the eleven after it — and
+      it needs `ReadyBudget`, which is D42's question of where a third copy
+      of `Proc`-and-its-bound should live rather than a fourth. The second is
+      cheaper and nobody has looked at it: eight seconds for a jarvisd or a
+      quickshell to answer SIGTERM, then eight more after SIGKILL, over 26
+      stops. A process that is going to exit on a TERM does it in
+      milliseconds; what the 8 s is really insuring against is a hung engine,
+      which is the run this ceiling already bounds. Measure one stop before
+      touching it — `Proc.stop` is the last thing that runs in a `finally`,
+      so a number that is too small there LEAKS a quickshell into the next
+      engine's compositor, and that failure looks like anything but a
+      timeout. Raised by D58.
+
+- [ ] D64. **The ceiling D58 built bounds waits and not work, and the biggest
+      thing it cannot see is `grim`.** Every `subprocess.run` in
+      `tools/hudscreens/shoot.py` — the compositor queries, the captures, the
+      two binaries' exec — has no `timeout=`, so a compositor that stops
+      answering hangs the gate forever with the ceiling still green. It is
+      honest in the docstring and that is not the same as bounded. The cheap
+      version is one `timeout=` on the `swaymsg`/`grim` helper with a
+      constant beside the others, and it would need a reading of what a
+      capture of 2560x1440 really costs on this machine (the B75 table says
+      the whole capture phase is 0.4 s over the sheet, so the bound is
+      generous by two orders of magnitude and still a bound). Raised by D58.
+
+- [x] D54. **The compositor is never asked about the surface that came
+      BACK** — asked now, three ways, and the answer is that asking is worth
+      nothing, so this is CLOSED BY MEASUREMENT rather than built. The proposal
+      was one more `check_zone(shell, "while", up=True)` inside `recover()`: D52
+      destroys the surface the D47 reading was taken on (`visible: selfTest ||
+      stack.anyLit` goes false while the corner says `nothing`) and builds
+      another for the ten plates, so the rebuilt surface looked like the one
+      object in this gate that could be carrying a zone nobody had ever read. It
+      was built, it ran green, and then it was injected against — three full runs
+      of the real gate, each on top of D43's frames:
+      · `exclusiveZone: 100` + `ExclusionMode.Normal`, unconditional, from birth:
+        all four engines GREEN, every monitor reported whole, on the lit frames
+        run and the lit blind run both.
+      · the same zone made to appear only on the REBUILT surface (a latch on
+        `onVisibleChanged`, so surface #1 is born with 0 and surface #2 with
+        100): green again, and the HUD's own log shows the latch fire —
+        `INJECT: lit, darkenings 1 zone 100` on all three monitors — while sway
+        went on reporting 2560x1440 and 1920x1080.
+      · and the same zone with `visible: true`, which is the run that says WHY:
+        green again. **Mapping was never the missing ingredient.**
+      **THE CAUSE IS THE ANCHOR**, and `tools/hudscreens/shoot.py` had already
+      found it from the other side — `check_no_space_reserved` says so in as many
+      words and reports the opposite direction measured: the HUD re-anchored
+      left+right+top with `ExclusionMode.Auto` took HEADLESS-1's usable area to
+      2560x880. sway honours an exclusive zone only for a surface anchored to ONE
+      edge or to an edge plus both perpendicular ones; this corner is top+right,
+      which is neither, so its zone is discarded whatever the value and whoever
+      is looking. The fourth reading was removed: 8 s of this gate's ceiling on a
+      check that cannot come back false is worse than no check, because it reads
+      as coverage in the log and in this file.
+      · What shipped instead, out of the same measurement: **the rule is a
+        test.** `test_the_only_shell_whose_zone_is_proven_is_configured_for_it`
+        pairs `reserves_top` with the window's own configuration — always mapped
+        (no `visible:` binding, or the literal `true`) AND anchors in a shape sway
+        zones — so the bar is the only shell here that PROVES anything, and a
+        `reserves_top` that drifted from the QML can no longer turn three whole
+        monitors into a proof that the corner takes nothing. Live in three
+        directions: HUD with `reserves_top=True` → red; the bar's anchors cut to
+        a corner → red; the bar gated on a condition → red.
+      · And the overstated claims are corrected where a reader meets them. D43's
+        amendment to `load()`'s comment — "the corner is lit, so a surface really
+        is there and really does leave every screen whole" — was wrong in its
+        second half; the D44 section in `shells.py` now carries all three
+        injections, names the anchor rule, and states the thing that actually
+        holds invariant 10 here: **every configuration in which this corner would
+        really take space is one where sway honours the zone, and a zone sway
+        honours is one this reading SEES.** What cannot be caught is a zone the
+        compositor itself discards, which is a HUD that takes nothing.
+      · And the ceiling arithmetic no longer hardcodes how many readings each
+        engine takes: `engine_zone_readings()` counts them off the driver, per
+        engine, so a reading added to the run and not to the arithmetic can no
+        longer be 8 s of pathological wait outside the bound — the exact shape of
+        the hole D50 found in the load wait. The blind engine stays at 80 s of
+        100; **D53's headroom is still unspent, and D58 is where to spend it.**
+
+- [x] D59. **Two harnesses gave two reasons for one zero and BOTH were right.**
+      (Done — three runs of the real gate, and the answer is that neither
+      attribution was wrong, each had found one of two causes.) D44 recorded the
+      notifier's 100 px zone coming off every monitor once its window was
+      `visible: true` and blamed the conditional visibility; D54 measured the
+      HUD's identical zone discarded WITH `visible: true` and blamed the bare
+      corner anchor. The 2x2, all on the notifier, all `ExclusionMode.Normal` +
+      `exclusiveZone: 100`:
+      · bottom+right, `visible: true` → **nothing reserved** (run A, gate GREEN)
+      · bottom+left+right, `visible: true` → **100 px off the bottom** (run B,
+        RED; 2560x1340 and 1920x980, D44's numbers to the pixel, and the
+        workspace rects came back `y: 0` so the edge is settled too)
+      · bottom+left+right, `Notifications.anyLit` → nothing (run C, GREEN)
+      · bottom+right, `Notifications.anyLit` → nothing (what ships)
+      Run A answers the question as asked: the D44 notifier run had widened the
+      anchors and did not record it. Run C says its mechanism is real anyway — a
+      `PanelWindow` publishes its zone at creation, so a zone declared while the
+      window was invisible never reaches the compositor whatever the anchors say.
+      **So both conjuncts are load-bearing and neither is belt**: each alone is
+      enough to make the zero, and a surface reserves space only when a THIRD
+      thing holds as well — it declares a nonzero `exclusiveZone` at all.
+      What shipped is the third conjunct, which nothing had ever pinned:
+      `test_a_shell_whose_zero_is_only_a_control_asks_for_nothing` requires the
+      HUD and the notifier to miss the rule on all three counts, because runs A
+      and C are the measurement that the expensive gate stays GREEN over
+      `exclusiveZone: 100` in a shipped shell. Without it, a zone declared on a
+      corner today becomes a strip off every monitor the day somebody widens the
+      anchors for a full-width toast or drops the `visible:` gate — two ordinary
+      commits, neither caught. 10 mutations, 10 caught; an explicit
+      `exclusiveZone: 0`, the same zero spelled out, correctly stays green.
+      The D44 section in `tools/shellload/shells.py` now carries the 2x2, and
+      `tools/hudscreens/shoot.py` needed no correction — its
+      `check_no_space_reserved` had the anchor rule right from the start.
+
+- [x] D60. **Six of the eight entries in `ZONED_ANCHORS` were believed and two
+      were measured; all eight are measured now, and so is a shape the rule
+      rejects.** (Done.) The list in `tools/tests/test_shellload.py` is sway's
+      `apply_exclusive` written out by hand — one edge, or an edge plus both
+      perpendiculars — and it is the load-bearing conjunct of two tests, so a
+      wrong entry is a gate calling a discarded zone a PROOF. Six runs of the
+      real gate, each `jv-notify` anchored that way with `ExclusionMode.Normal`,
+      `exclusiveZone: 100`, `visible: true` and nothing else moved:
+      · `{top}` and `{bottom}` → 2560x1340 and 1920x980, RED — off the height
+      · `{left}` and `{right}` → 2460x1440 and 1820x1080, RED — off the WIDTH,
+        the first thing in this harness ever to take space off one
+      · `{left,top,bottom}` and `{right,top,bottom}` → same widths, RED
+      Six for six: every shape the rule accepts really is honoured, on both
+      axes, and the two already watched (`{top,left,right}` every run of the
+      bar, `{bottom,left,right}` D59 run B) complete the eight.
+      **And a seventh run measured a shape the rule REJECTS, the one nobody
+      would expect it to**: anchored to ALL FOUR EDGES — what a full-screen
+      overlay takes — the same live zone reserved NOTHING and the gate stayed
+      green, because `apply_exclusive` compares the mask for EQUALITY against
+      one edge or one triplet and four edges is neither. So an overlay stretched
+      across the screen can ask for a strip and silently not get one.
+      What shipped is the ledger and the rule as a test: `ZONED_ANCHORS` is now
+      a shape → measurement map, `DISCARDED_ANCHORS` holds the three refuted
+      shapes (the HUD's corner D54, the notifier's D59 run A, four edges D60),
+      and `test_the_shapes_sway_zones_are_the_rule_they_claim_to_be` GENERATES
+      the eight from the four edges instead of proof-reading them and refuses
+      an entry with no measurement against it. `test_a_shell_whose_zero_is_only_
+      a_control_asks_for_nothing` now requires each control shell's corner to be
+      one that was WATCHED having its zone discarded, not merely one absent from
+      the accepted list. 4 mutations, 4 caught (a dropped triplet, a spurious
+      corner, an entry with an empty measurement, a corner dropped from the
+      refutation ledger). The alternative — deriving the list from sway's source
+      — is still not available: the flake pins a binary, not a checkout.
+
+- [ ] D61. **Two `visible:` bindings are now invariant-10 machinery and neither
+      file says so.** `shell/jv-hud/shell.qml` and `shell/jv-notify/shell.qml`
+      both explain their conditional visibility as earned emptiness and 0 fps
+      while idle (§06), which is why it was written. After D59 it is also one of
+      the three things keeping each surface from reserving screen space — run C
+      is the measurement — and `test_a_shell_whose_zero_is_only_a_control_asks_
+      for_nothing` will now go red if either is dropped. Somebody with a good
+      reason to make a surface unconditionally visible (D52's rebuild is exactly
+      such a reason) will meet that red without the QML ever having told them
+      what they were holding. One sentence in each file, pointing at the D44
+      section. NOT free: a comment in either file wakes `qmltest.sh`,
+      `notifytest.sh` and `hudscreens.sh` (3 m, and the shots want looking at),
+      so it belongs in an iteration that is touching a shell anyway. Raised by
+      D59.
+
+- [ ] D62. **This gate can only express a strip taken off the TOP, and D60
+      measured two taken off the width.** `shells.usable_areas(px)` is
+      `(out["width"], out["height"] - px)`, `check_reserved`'s failure says "px
+      off the top of every one", `bar_strip_px` is a height and `Shell.
+      reserves_top` is a bool. That is exactly right for the three shells that
+      ship — the bar's strip is the only zone on this desktop — and it is why
+      the six D60 runs read as a rect mismatch rather than as a number: the
+      harness could see they were wrong but not say what they were. The day a
+      shell reserves a side strip (a dock is the obvious one, and §06 does not
+      forbid it) this model cannot describe it, and the failure it gives is a
+      dict-vs-dict diff a reader has to subtract by hand. The change is small
+      and it is not free: `reserves_top` is read by `load.py`, by both zone
+      tests and by `tools/hudscreens/shoot.py`'s sibling check, so it is an
+      edge + a width, everywhere, in one commit. Worth doing when something
+      actually needs a second zone — writing it now is a generality with one
+      user. Raised by D60.
 
 - [ ] D55. **A plate that came back LIT and EMPTY passes the new census.**
       `test_the_corner_names_the_plates_and_never_what_they_say` states the
@@ -1161,16 +1426,17 @@ human-reviewed step.
       true as runs are added: this gate starts a fresh quickshell per reading
       and no one of them may hang for minutes.
       · **AND THE OLD SUM WAS NOT THE WORST CASE.** It left out
-        `READY_TIMEOUT_S` entirely — 30 s per engine, 120 s of the run — and a
+        the READY wait entirely — 30 s per engine, 120 s of the run — and a
         quickshell that comes up and then says nothing is exactly the run a
         ceiling is for. It was the one run the ceiling did not cover.
       · The per-engine numbers today (moved by D52, which split the
-        publisher's wait off the corner's and added a third act): 54 s for the
+        publisher's wait off the corner's and added a third act, and then by
+        D53, which stopped giving every engine the cold-Qt bound): 36 s for the
         bar and the notifier (`READY` + three mapped readings), 78 s for the
-        frames run, 98 s for the blind run — the grace, the socket, the corner
+        frames run, 80 s for the blind run — the grace, the socket, the corner
         going dark, then a publisher and the corner lighting again. That last
-        is 2 s from the limit: **the next act added to the blind engine does
-        not fit, and D53 is where the room is.** `RUN_CEILING_S` is
+        was 98 s and 2 s from the limit until D53 took the un-payable 30 s out
+        of three of the four engines. `RUN_CEILING_S` is
         asserted too, and only to keep it exactly four times the per-engine
         bound: the engines are sequential, so a per-engine ceiling is not a
         ceiling on the run, and a reader who saw only the small number would be
@@ -1241,6 +1507,14 @@ human-reviewed step.
       guardrail is the one somebody edits away. Three comment-only edits, plus
       one failure message, plus a rebuild of all three shells; worth its own
       commit rather than riding on the gate that found it. Raised by D44.
+      **D59 adds the other direction**, so the property is now cornered from
+      both sides: runs A and C put `ExclusionMode.Normal` with a live
+      `exclusiveZone: 100` on the notifier and reserved NOTHING. So
+      `exclusionMode` is neither necessary (Ignore + a zone reserved 31 px) nor
+      sufficient (Normal + a zone reserved 0), and the tests that replaced those
+      comments' claim read `exclusiveZone`, the anchors and `visible:` instead —
+      `window_declares_a_zone` in `tools/tests/test_shellload.py` says why in as
+      many words. This item is now purely the three comments and the message.
 
 - [ ] D42. **`Proc` exists twice now.** `tools/hudscreens/shoot.py` and
       `tools/shellload/load.py` both hold a small class that starts a process,
@@ -1255,7 +1529,7 @@ human-reviewed step.
       "a process that EXITED is reported as itself rather than waited out"
       right for the same reason. Raised by D41.
 
-- [ ] D35. **A monitor narrower than the corner the HUD reserves gets an
+- [x] D35. **A monitor narrower than the corner the HUD reserves gets an
       unbounded row.** `roomPx` negative means "nobody has said" — the right
       default, since a row that hid labels before its surface had a width would
       hide them in the first frame of every session — but the surfaces compute
@@ -1266,6 +1540,614 @@ human-reviewed step.
       surface, which is where the arithmetic is), and the reason it is not done
       is that both answers want the one shot nobody can take: a picture of a
       bar on a monitor that does not exist to photograph. Raised by D32.
+      DONE — and the shot WAS takeable, which is the part this item had
+      wrong: `tools/barshots` renders one surface into a box the driver
+      chooses, so a 320 px output is a `"screen": 320` on the sheet and
+      nothing else. `docs/bar/12-no-room.png` is that picture — two colours
+      in the whole PNG, the ground and the hairline — and it is the same
+      desk on the same output as `09-narrow.png`, so the only thing that
+      differs between the two is the width.
+      · **The clamp is in both surfaces**, which is where the arithmetic is:
+        `Math.max(0, …)` in `shell/jv-bar/shell.qml` and in the staged
+        `tools/barshots/scene/Strip.qml` that `test_barshots.py` pins to it.
+        Only a surface knows how wide its monitor is, so only a surface can
+        tell "no room" from "not yet measured".
+      · **A clamp alone was not the fix**, and that is the half this item did
+        not see. `RowFit` at exactly 0 took the last branch — the one that
+        holds back the workspace you are ON and elides it to the room there
+        is — and `elidePx` is only set when the label is wider than the room,
+        so a room of 0 came out as "not elided", which the delegate reads as
+        "draw it whole". The one case that could not afford a pixel was the
+        one case that took its full width. Zero is answered first now: a row
+        that cannot legally paint paints nothing, and the `+N` goes with the
+        names, because a count is a label too. The pre-existing zero test
+        passed `keepIndex: -1` and so never met it.
+      · **`hudOverflowPx` ignores an empty row.** The row is anchored one
+        inset from the left edge whether or not it draws anything, so on an
+        output narrower than the reserve its ORIGIN is inside the corner:
+        12 px of "overflow" for a row with no glyphs is reporting the inset.
+      · All 11 existing shots came out byte-identical, which is the evidence
+        that nothing moved at any width a real monitor has. 6 mutations, 6
+        caught (3 graded by `mutate.sh --runner qml bar`, 3 by hand against
+        `barshots.sh` and the tools suite, each restored and diffed). Raised:
+        **D65**, **D66**. — 895e6e5
+
+- [ ] D65. **The bar on that monitor is an empty strip, and it still takes
+      31 px of it.** D35 makes the row honest — no room, so nothing drawn —
+      but the surface underneath it is unchanged: `exclusionMode` is Normal
+      and `exclusiveZone: implicitHeight`, so an output narrower than the
+      HUD's corner loses a strip of its height to a bar that can never put
+      anything in it. On a 320 px capture sink that is 31 of 1080 px spent on
+      ground and a hairline. The argument for leaving it is real and is why
+      this is an item rather than a fix: the strip is the bar's identity, a
+      surface that vanished when it went quiet would resize every window on
+      the monitor to do it (shell.qml says exactly that), and "narrow" is not
+      a state the bar is in and out of. The argument against is that this
+      particular emptiness is not earned, it is structural — nothing will
+      ever be drawn there, at any time, on that output. Wants a human: it is
+      a question about what a bar IS, and the answer changes how windows tile
+      on a monitor nobody has yet. Raised by D35.
+
+- [x] D66. **Nothing has asked what the HUD does on that monitor.** The
+      cheap half, as scoped: the fit driver gained the narrow surface and the
+      HUD gained the room to measure against. What was found, and the two
+      places the item's own premise was off:
+      · **the premise was off by an inset, and the real answer is worse.**
+        D66 read the corner as 300 px + `insetPx` of anchor margin, i.e. 316
+        px against a 320 px screen. The inset is INSIDE the surface
+        (shell.qml says so: "the edge inset is baked into the surface rather
+        than into `margins`"), so at 320 px the HUD fits with 20 px spare and
+        there is nothing to find. The 316 belongs to the BAR's reserve, which
+        is the number D35 was working with. But the plates turned out not to
+        care about the surface AT ALL: measured at thirteen widths from 300
+        down to 32, the crowd drew its confirmation plate 260 px wide at
+        every one of them. There was no width at which the corner noticed.
+      · **the fix is not a clamp on the scene, it is a room the surface
+        measures.** `core/PlateFit.qml` + `tests/tst_platefit.qml` (12
+        checks), a `roomPx` on each of the six capped plates, and the two
+        files that compose the stack handing it down — `shell.qml` from
+        `Math.min(surface.width, modelData.width)`, because a layer-shell
+        surface anchored to one edge is granted what it asks for whether or
+        not the output is that wide, and `Corner.qml` from its parent box.
+      · **the bar's zero bug, again, one process over.** With a bare
+        subtraction the 1 px surface reported -31 px of room, which PlateFit
+        reads as "nobody has measured this" and answers with the full cap —
+        so the narrowest screen drew the widest plate. Both surfaces clamp
+        now, and `test_an_unmeasured_surface_and_an_empty_one_are_not_the_
+        same` holds the two spellings apart. `core/RowFit.qml` already said
+        the fix belongs to the surface; nothing had made the HUD read it.
+      · **nothing is hidden, ever.** RowFit may DROP a workspace name because
+        the row ranks them; a plate has no ranking and the one that would go
+        is as likely to be the failed action as the recording light, which is
+        the exact bug `PlateStack` exists to kill. The text elides, the label
+        stays.
+      · **the floor is 237 px, measured.** Below it the binding constraint
+        stops being a capped plate and becomes `HealthPlate` — no `maxTextPx`
+        at all, its width exactly its longest row, every row a real service
+        name beside a word out of an enum, so there is nothing to elide.
+        Pinned by `test_the_floor_is_the_widest_row_no_plate_can_narrow`, so
+        a row added to that plate moves a number a check is watching.
+      Three third-party gates, because the half that matters has no engine:
+      `test_every_capped_plate_is_handed_the_room_it_has` (equality, both
+      composition files), `test_no_capped_plate_measures_its_text_against_
+      the_cap_alone` (a plate that went back to the declared cap would pass
+      every 300 px check), and `test_the_hud_surface_measures_the_room_its_
+      plates_have` — a TEXT pin, because `shell.qml` is the Quickshell half
+      and a mutation removing its clamp survived every suite in the repo.
+      All 16 contact-sheet shots and all 9 compositor screens byte-identical.
+      8 mutations, 8 caught. **The expensive half is NOT done and is D68.**
+      Raised: **D67**, **D68**. — 0e066df
+
+- [ ] D67. **A surface below the floor has run out of things to elide, and
+      nothing says what it should do.** D66 makes every capped plate narrow
+      to its room, and it measured where that stops working: at 237 px the
+      widest thing on the crowded corner is `HealthPlate` at 204.5 px, and
+      that plate has no `maxTextPx` because every row on it is a service name
+      this machine really has beside a word out of a frozen enum. There is
+      nothing there to shorten. Below 237 px the plate is laid out past the
+      edge of the screen exactly the way all six capped ones used to be, and
+      `tst_fit.qml`'s sweep stops at the floor rather than asserting through
+      it, on purpose — because the two ways out are a design question and not
+      arithmetic:
+      · **clip it.** Half a service name at the screen edge is a surface that
+        looks broken, which is the argument `RowFit` makes for never eliding
+        a workspace label. But it is also the only option that never hides a
+        fault, and this is the plate that says what is wrong.
+      · **take the plate off an output that cannot hold it.** Honest about
+        the room, and it is the one thing `PlateStack` was written to prevent:
+        "the plate that was trying to warn you never appeared". It would also
+        need somewhere else to appear, and a HUD with only narrow monitors has
+        nowhere.
+      · **or shorten the rows.** `jv-hud-bridge` is 13 characters and the
+        longest name on this machine; a plate that abbreviated service names
+        under pressure would fit a much narrower screen and would be saying
+        something slightly different from what `jv health` says.
+      Wants a human, like D65 next door, and for the same reason: it is a
+      question about what the HUD owes a reader, and the answer is a rule
+      about the one plate that reports faults. No monitor on this machine is
+      within 1600 px of the floor. Raised by D66.
+
+- [x] D68. **The HUD on a narrow output has still never been photographed.**
+      D66's expensive half, left undone deliberately: everything D66 asserts
+      about a 237-to-300 px surface was measured in a QML engine, against
+      `Corner.qml` and a plain `Item` whose `width` a test assigns. The real
+      surface is a layer-shell panel whose width a COMPOSITOR configures, and
+      the two are not the same claim — `surface.width` on an output narrower
+      than `implicitWidth` is a wlroots behaviour this repo has assumed
+      (granted-as-asked, so the surface overhangs the left edge) and never
+      once observed. `tools/hudscreens/shoot.py` already drives sway with
+      two headless outputs and reads the HUD's painted box back out of a
+      real framebuffer; a third output of 280 px would answer it. Cost is the
+      3 m the gate already takes plus a tenth screen on the sheet, and the
+      awkward half is `sheet.py`: `SURFACE_W = 300` is what the committed
+      PNGs were photographed against, read OUT OF GIT on purpose (D33), so a
+      shot of a different box needs its own entry rather than a second
+      meaning for that constant. Raised by D66.
+      **Done (44788f8).** Granted as asked, and now observed: all four layer
+      surfaces of a run configure `300x826`, the 280 px one included, so the
+      surface really does hang 36 px off the left of that screen. Read out of
+      the HUD's own WAYLAND_DEBUG log by `probe_surface_granted`, because
+      pixels cannot answer it — a surface wlroots clamped to 280 and one
+      granted 300 over a 280 px screen leave the stack in the same place and
+      make the same picture; the configure event is the only witness. The
+      census is the control (one configured surface per output, or the probe
+      says nothing), and the run prints the line it matched.
+      The awkward half went the other way from the way D68 guessed: rather
+      than giving `SURFACE_W` a second meaning, the narrow output was kept OUT
+      of `OUTPUTS` entirely. It is `sheet.NARROW`, to the right of the desk,
+      so `DESK_WIDTH` never moved and the nine committed screens were not
+      re-photographed to answer a question about a tenth. `ALL_OUTPUTS` is
+      what the compositor config, the exclusive-zone check and the output
+      census read; `OUTPUTS` stays ares.
+      The picture is `03-confirm-narrow.png`: the confirmation 248 px wide
+      between two 16 px insets, against 260 px (its own cap) on the primary.
+      `check_corner` now asserts on every output that nothing starts inside
+      the left inset — which was silently vacuous on the narrow one, since
+      `w - SURFACE_W - INSET` is -36 there.
+      Cost 1.8 s of a 196.6 s run and one engine on D58's ceiling (1593 ->
+      1714 s of 1800). Raised **D70** and **D71**.
+
+- [ ] D69. **The notifier's suite cannot tell a kept row from a rebuilt
+      one, and the notifier is the shell that blinks.** Measured at D27: a
+      mutation making `shell/jv-notify/core/KeyedRows.qml` `remove`+`insert`
+      a row it should have `move`+`set` — the exact D37 bug, every plate in
+      the corner announcing itself as new whenever any of them changes —
+      SURVIVES `notifytest.sh`. That suite reads `onScreen` as values
+      (`get(i).summary`), and destroy-and-rebuild produces the same values;
+      only a `Repeater` under it can tell, which is what the bar's
+      `tst_keyedrows.qml` has and the notifier has nothing of. It is not a
+      hole today, and that took a 5-minute measurement rather than an
+      argument: the body is generated into both shells from one renderer, so
+      the mutation IS caught by `runtests.sh tools` (via
+      `test_the_shells_that_share_a_core_type_share_it_byte_for_byte` and
+      `--check`), and the harness says so in B55's words — "the suite reads
+      it, it never runs it". So the coverage is real and it is THIRD-PARTY:
+      the bar grades the body, the generator holds the copies equal, and the
+      notifier's own suite is a bystander to the one property its corner was
+      rebuilt around. Two readings, and the item is which one is right.
+      (a) That is exactly invariant 1's shape and nothing is missing — write
+      it down in `tst_notifymodel.qml` so the next author does not re-derive
+      it. (b) The notifier should have its own `tst_keyedrows.qml` with a
+      real `Repeater` and a fading `Toast`-shaped delegate, because what the
+      corner does with a kept delegate is not what the strip does with one
+      (a fade from zero, not a colour easing) and the generator's equality
+      says nothing about the CALLER. Note `tools/notifyshots/scene/
+      tst_settle.qml` already samples the real toast mid-fade, so (b) may be
+      buying a second copy of a claim that has a picture — which is worth
+      checking before building it, and is the same question **D31** asks
+      about pointing `--runner shots` at that harness. Raised by D27.
+
+- [x] D70. **Earned emptiness has never been measured on the narrow
+      output.** D68 put a 280 px screen under the HUD and photographed it
+      LIT. The other half of invariant 10 — that a HUD with nothing to say
+      leaves the screen pixel-identical to the bare desktop — is checked by
+      `check_desk_is_bare`, which walks `sheet.OUTPUTS` over a `grim` of the
+      DESK, and the narrow output is deliberately outside both. So a surface
+      that mapped on that screen when it had nothing to say would be caught by
+      nothing: `01-quiet` captures the desk alone, and the lit shots' corner
+      check only bounds the box that was drawn. Small and real. The cheap
+      shape is a second grim in `check_desk_is_bare` — `capture("narrow", …)`
+      and the same `drawn_box` over it — which is one exposure of a 280x1080
+      screen (the desk one is 33 Mpx; this is 0.3) and makes the quiet claim
+      cover every output the compositor has. The expensive shape is a tenth
+      PNG of an empty 280 px screen, which is a picture of nothing and would
+      be the second one on this sheet. Raised by D68.
+      **Done (bbaf170).** Two exposures where there was one: the desk in the
+      same wide `grim`, then a 280x1080 one of its own — 0.3 Mpx against the
+      desk's 33 — read by the same `drawn_box` against the same backdrop, so
+      the quiet claim now covers every output the compositor has. Six call
+      sites, five of them in the idle probe, and the narrow screen came back
+      bare in every one.
+      The coverage is DERIVED, not counted. The gate walks the AST of
+      `check_desk_is_bare`, expands its `"desk"` exposure back into
+      `sheet.OUTPUTS`, and insists the union is every role in `ALL_OUTPUTS` —
+      so an output declared and photographed by nobody goes red there instead
+      of passing quietly forever, which is exactly what D70 was.
+      The other half was not in the item, and it is the reason one more grim
+      would not have been enough. The sentence being proven is `drawn_box`
+      returning None; numpy slicing past the end of an array returns a
+      SMALLER array rather than raising; and no capture in this harness had
+      its size checked — so a grim that came back as the wrong screen, or
+      1x1, reads as "the HUD drew nothing here". The rule is
+      `sheet.capture_size_complaint`, in the sheet so a suite with no
+      compositor and no numpy can run the rule itself; `check_grim_size`
+      raises it; and it guards exactly the two verdicts where None is the
+      PASS — `check_desk_is_bare` and `check_corner(lit=False)` through
+      `check_capture`. The other nineteen captures are bounded waits where
+      None means keep waiting, so a vacuous read there fails loudly and they
+      are deliberately left alone. `check_capture`'s hand-rolled
+      `img.shape[:2] !=` is gone, and a gate refuses it by name.
+      The expensive shape in the item — an eleventh PNG of an empty 280 px
+      screen — was declined on the item's own grounds: it is a picture of
+      nothing, and the assertion is worth more than the photograph. Raised
+      **D72**.
+
+- [x] D73. **Two of `check_corner`'s four box bounds are bounds of the
+      IMAGE, and so are vacuous on every output.** Counting them honestly for
+      D72 turned up something the narrow output has nothing to do with. The
+      box check is
+      `if x0 < left or x1 >= w or y0 < 0 or y1 > bottom`, and `drawn_box`
+      returns indices into an array `w` wide and `h` tall — so `x1 >= w` and
+      `y0 < 0` cannot be true of anything it ever returns, on any screen.
+      They read as "the HUD did not draw off the right edge" and "not above
+      the top edge", which are claims a photograph cannot make at all: a
+      plate drawn past an output's edge is CLIPPED by the compositor, and what
+      arrives in the ppm is the part that landed. So the four-term condition
+      that looks like it fences a box on all four sides really has two live
+      terms — `x0 < left` (which 280 px then takes away, leaving one) and
+      `y1 > bottom`.
+      Not a bug, and the fix is probably not to delete them: a reader who has
+      to work out that two terms are tautologies is the cost, and `x1 >= w`
+      is genuinely the right assertion the day someone passes `check_corner` a
+      REGION cut out of a wider image — which is exactly what the desk branch
+      does, where `region` is a slice and an overflow would land in the
+      neighbouring monitor's pixels rather than off the image. That may make
+      `x1 >= w` live for the three desk monitors and dead only for the
+      single-output captures, which is worth settling rather than guessing.
+      So: work out which of the four terms is live in which caller, say it in
+      the code, and if a term is dead everywhere then either delete it or
+      replace it with the claim it was standing in for — the clip. Raised by
+      D72.
+      **Done (b9681a0).** Settled, and the item's guess was wrong in the
+      useful direction: `x1 >= w` is dead in the desk branch TOO, twice over.
+      `drawn_box` is handed the region, not the image, so its numbers are
+      indices into that one monitor — and a layer surface hanging off its
+      output's right edge cannot reach the neighbour's pixels anyway, because
+      the compositor clips it to the output it is on and grim photographs each
+      output's own buffer. So both terms went, and `y0 < 0` was replaced with
+      the claim it was standing in for: `y0 < INSET - 2`, the TOP inset. That
+      is the observable form of "drew above the top edge" — a clipped surface
+      looks, from inside a ppm, like content flush to row 0 — and it is the
+      §06 edge gap the top was the only side not to have. Measured at exactly
+      16 on all ten committed pictures and on every box the real compositor
+      drew in this iteration's run, including the 280 px output's.
+      Three gates, all graded by mutation (8 mutants, 8 reds): no bound in
+      `check_corner` may be vacuous over the boxes `drawn_box` can return on
+      any output (polarity carried, chains split, `left`/`bottom`/`gap`
+      derived from the function's own source); the drawn box is fenced on all
+      FOUR edges, checked by pushing a box the sheet really measured onto each
+      edge in turn; and `drawn_box` still returns region indices, which is the
+      premise the first gate's domain rests on and the one change that would
+      make `x1 >= w` live. Plus D72's correction turned into a gate: the
+      bounds vacuous at 280 px are exactly `{x0 < left}`, by name.
+
+- [x] D74. **D66's clamp is width-only, and the bottom bound is the one
+      that would notice.** Counting `check_corner`'s terms for D73 turned this
+      up from the other side. `y1 > bottom` bounds the drawn box by
+      `SURFACE_H + INSET` = 842, which is a bound on the SURFACE — so it goes
+      vacuous on any output shorter than 842 px, exactly as `x0 < left` goes
+      vacuous below 316 px wide (D72). This compositor's shortest screen is
+      1080, so it says something on all four today, and that is not the worry.
+      The worry is what it would be saying if it went quiet: `plateRoomPx` is
+      `min(surface.width, screen.width) - 2 x insetPx` — WIDTH only. Nothing
+      caps the stack's height by the screen's. On a 768 px panel the 826 px
+      surface hangs 58 px off the bottom, the compositor clips it, and the
+      plate that goes is `HealthPlate` — the thing that says what is wrong,
+      cropped exactly when everything is, which is the failure A63 measured
+      and fixed INSIDE the surface arriving from outside it. ares has no such
+      output and the harness has no such probe, so this is a real hole rather
+      than a broken test: the honest shape is either a height clamp beside
+      D66's width one (and a plate ordering that drops the bottom plate rather
+      than cutting it), or a written-down decision that this shell is for
+      screens at least 842 px tall, said in `shell.qml` next to the height and
+      graded by a fifth output in `sheet.ALL_OUTPUTS` that a `check_corner`
+      call actually reaches. Settle which before building either. Raised by
+      D73.
+      **Done (this commit): DECLARE the floor, and the reason is which
+      failure each shape leaves behind.** Width elision shortens a SENTENCE —
+      `PlateFit` drops words off a line that is still there, under a label
+      that still says what it is about. There is no vertical version of that:
+      a stack with less room than plates has to drop a whole PLATE, and a
+      plate that is not on screen is indistinguishable from a machine with
+      nothing to report, while a cropped one is visibly cropped. So the
+      compositor's crop is the BETTER of the two failures, and a clamp would
+      trade a visible crop for an invisible absence — on `HealthPlate`, the
+      plate this HUD exists in order not to lose. A clamp also has to answer
+      "which plate may go", and the honest answer for the bottom of this
+      stack is "none of them".
+      So `shell.qml` declares `minScreenHeightPx`, which is not a number: it
+      is `surface.implicitHeight`, so the floor and the box are one fact and
+      the next plate that makes the corner taller raises the floor with it.
+      `screenTooShort` compares the OUTPUT's height against it (the surface's
+      own is 826 on a 700 px screen exactly as its width is 300 on a 256 px
+      one), keeps D66's unmeasured-is-not-short distinction, and a
+      `console.warn` names the screen, its height and the floor — every plate
+      still drawn, the compositor still the thing doing the cropping, and the
+      log the only place that can be said. Not a plate: a plate saying the
+      bottom of the corner is off the screen would be drawn in the corner,
+      where the condition it reports is what crops it.
+      The item's fifth output was DECLINED on its own grounds, which is the
+      other half of the answer: the narrow output (D68) exists because
+      `plateRoomPx` is real code only a compositor can confirm, and the
+      content of this decision is that there is no such code for the other
+      axis. A short output would photograph a screen the shell declares it is
+      not for, PASS (every probe shot lights two or three plates; only the
+      crowd overflows), and take `y1 > bottom` away while doing it — the bound
+      is `SURFACE_H + INSET` and `drawn_box` returns indices, so on a screen
+      no taller than 842 px it is a bound on the IMAGE (D73). So the grading
+      of a declaration is a gate that holds the outputs to it, in the two
+      suites that can each see one half:
+      `test_the_hud_says_when_a_screen_is_shorter_than_the_corner_it_declares`
+      reads the declaration (shell.qml is the Quickshell half, so no engine
+      loads it and source-reading is the only grading there is — the same
+      reason D66's clamp is graded there), and
+      `test_every_screen_this_harness_has_clears_the_floor_the_shell_declares`
+      holds every output in `sheet.ALL_OUTPUTS` above the floor AND insists
+      the bottom bound still speaks on each of them. That second half is the
+      one worth keeping: the bound goes quiet at 843 px, which is 17 px ABOVE
+      the 826 px floor, so an output between the two clears the shell's own
+      declaration and silences the only check that would see a crop — the gate
+      goes red before anything is cropped.
+      Graded by mutation, seven mutants and seven reds, each in the gate that
+      owns the claim: the floor as a literal (both, via the shared helper),
+      the comparison against the surface's own height, the unmeasured guard
+      deleted, the warn deleted, the warn stripped of its numbers, a 768 px
+      output (the floor half), and an 840 px one (the bound half, alone).
+
+- [x] D75. **The too-short line is graded by a regex, and `shellload.sh`
+      could grade it by running it.** D74's declaration is read out of
+      `shell.qml` by a source gate, because that file has no engine — but
+      `ops/ralph/shellload.sh` DOES load the real quickshell HUD on a real
+      headless sway (`tools/shellload/shells.py: OUTPUTS`, three of them, all
+      1080 or taller) and already reads the HUD's own log for what the corner
+      says (D43). A FOURTH output there, short on purpose, is the one place in
+      this repo where "the shell notices a screen under its floor and says so"
+      is a behaviour rather than a pattern in a file: the warn either arrives
+      naming that output, or it does not. Cheap in seconds (this gate is
+      49.7 s and takes no pictures), and it is the probe D74 declined for the
+      3-minute picture harness, where a photograph of a short screen would
+      have said nothing. The ripple is the whole cost and should be counted
+      before starting: `sway_config()` grows an output, `check_outputs`' census
+      and `expected_usable_areas` are per-output, the bar's strip verdict is
+      asserted on EVERY output (a short one is still 31 px shorter, so that
+      part is arithmetic rather than a decision), and
+      `test_the_monitors_are_the_ones_the_screen_sheet_uses` currently holds
+      `shells.OUTPUTS == sheet.OUTPUTS` — a deliberate invariant-1 relation
+      that would have to become "ares' three, plus each harness's own extra
+      outputs" (`sheet.py` already has `NARROW` outside `OUTPUTS` for exactly
+      this reason, which is the shape to copy). One more thing to check rather
+      than assume: `tools/qmlerrors.py` scans for JS error names, not for
+      warnings, so a HUD that warns does not fail that scan — the new gate has
+      to ASSERT the line, and assert its absence on the three tall outputs.
+      Raised by D74.
+      **Done (d82e70f).** The fourth output is 1024x768 and OUTSIDE `OUTPUTS`,
+      which is what kept `shells.OUTPUTS == sheet.OUTPUTS` intact — the item
+      expected that relation to have to change and it did not; putting the new
+      screen outside the monitor list is the whole of it, and it is the shape
+      `sheet.NARROW` already had. 1024 WIDE on purpose: wide enough to clear
+      the HUD's 300 px surface, so this output asks the HEIGHT question and
+      only that one, and
+      `test_each_harness_fourth_output_asks_one_question_and_not_the_others`
+      holds both harnesses' fourth outputs to one question each by reading the
+      shell they are both about.
+      Three readings, and the second two are the ones the regex cannot make:
+      the warn arrived at all; it names the OUTPUT's height (not the surface's,
+      which is granted whatever it asks for) under a floor above it, with the
+      floor read back out of the line so shell.qml keeps the only copy of 826;
+      and the three monitors are left out of it. The corner census went to
+      `ALL_OUTPUTS` as well, which is not a repetition: the claim on the short
+      screen is that every plate is STILL DRAWN, so a HUD that had grown the
+      height clamp D74 refused names nine plates there and ten elsewhere.
+      The item's note about `qmlerrors` was right and is now measured rather
+      than assumed —
+      `test_the_short_screen_warn_is_invisible_to_the_scan_that_reads_the_log`
+      runs the real scanner over the real line.
+      Nine mutants, nine reds, the load-bearing one being the floor doubled
+      INSIDE the comparison: every substring the D74 regex demands is still
+      there, that gate stays green on all 773, and this one goes red naming all
+      three monitors. 35.0 s, up from 32, and no pictures. Raised **D77**.
+
+- [x] D76. **`tools/tests/test_gen_theme_qml.py` defines
+      `strip_qml_comments` twice.** Lines 676 and 797, in one file: the first
+      is `re.sub(r"//[^\n]*", "", text)`, the second is the line-preserving,
+      string-literal-aware one with the docstring explaining why a `//` inside
+      a quoted string is not a comment. Python binds at call time, so EVERY
+      caller — including the ones written above line 797 against the naive
+      version — gets the careful one, which means there is no bug today and
+      the naive definition is dead code. That is exactly what makes it a trap:
+      a reader anywhere in the first 800 lines reasons about the gates with
+      the wrong function, and the two differ on the case the second one was
+      written for. Delete the first, keep the second where it is (or move it
+      up), and the verdict is the suite staying green. Small, and worth doing
+      alone rather than smuggled into a change about something else. Raised by
+      D74, which read both of them looking for the one it was calling.
+      **Done (3b9a014).** Naive one deleted; the survivor moved UP to the
+      module's helpers, beside `gen_from`, because the one name four other
+      suites import is not a detail of the A10 section it was hiding in (67
+      call sites across five suites). The item said the verdict is the suite
+      staying green — it is, and that is exactly the problem, so it was
+      MEASURED instead of accepted: the two functions agree on every line of
+      all 101 QML files in this tree, and with the naive one installed as the
+      real definition 774 of the suite's 776 tests still pass. So the contract
+      got two tests that do notice (a `//` inside a QML string survives;
+      stripping never moves a line or eats a brace) and one that catches the
+      SHAPE of the trap wherever it appears next: no module under `tools/`
+      defines a name twice — worst for a `test_*` name, where the shadowed copy
+      still looks collected and never runs. Eight mutants, eight reds,
+      including the walk pointed at a directory that does not exist (a scan
+      that reads nothing passes, so it says what it read) and the walk widened
+      to `ast.walk`, which is why it is `tree.body`: all four modules that
+      widening names are a legitimate `__init__` or a helper nested in two
+      tests. Raised **D78**.
+
+- [ ] D79. **The bar is the third shell and the only one nothing has ever
+      measured against a screen.** D74 gave the HUD a declared floor and a
+      warn; D77 measured the notifier's maximum and found the cap already is
+      its floor. `jv-bar` has neither, and the D77 item said why: its surface
+      is a 31 px strip anchored top+left+right, so it has no HEIGHT question at
+      all. What it has is a WIDTH question — the workspaces row and the clock
+      are laid out against the monitor's width, and the right end is left empty
+      by exactly `hudCornerPx` for the HUD to draw over. That is D65, which is
+      open and predates all of this. What D77 adds is the SHAPE of the answer,
+      and it is the notifier's rather than the HUD's: before writing a warn or
+      a clamp, ask whether the thing is bounded already. The workspaces row is
+      not — niri can hold any number of desks and each one is a delegate — so
+      unlike `maxVisible` there is no cap to be the floor, and the honest
+      outcome is probably a real measurement of the widest strip a plausible
+      desk count produces against `sheet.py`'s 280 px narrow output. Note the
+      two harnesses' fourth outputs are already the right pair for this: the
+      shellload one asks height (1024x768), the hudscreens one asks width
+      (280x1080), and `test_each_harness_fourth_output_asks_one_question_and_not_the_others`
+      holds them apart. Do D65 with that framing rather than as bar polish.
+      Raised by D77.
+
+- [ ] D78. **The duplicate-definition scan D76 wrote stops at `tools/`, and
+      the trap is not a property of `tools/`.** There are 93 more Python
+      modules in this repo — `services/**`, `harness/`, `pkgs/` — and a second
+      module-level `def` of the same name is silently the last one in every one
+      of them, with the same worst case: a shadowed `test_*` that still looks
+      collected in the file and never runs. Measured before raising: today all
+      93 are clean, so this widening is green on arrival and its whole value is
+      the next one. The interesting half is NOT the scan, it is **which suite
+      may own it**. Put it where it is now and `tools` claims
+      `services/**`-wide, so `dependents.py` runs the 63-second tools suite on
+      every Python change anywhere in the repo — which may well be right (it
+      already reads jv-compat's installer, jv-guard's heuristics and jv-act's
+      tool table as source text) but is a cost to decide deliberately rather
+      than discover. The alternatives are a tiny suite of its own that names
+      every tree, or each service suite scanning only itself, which is the one
+      shape that cannot see a service nobody wrote a suite for. Decide, write
+      the reason down, then widen. Raised by D76.
+
+- [x] D77. **The HUD is the only one of the three shells that declares a
+      floor, and the notifier is the only other one for which that is a
+      question.** D74 gave `shell/jv-hud/shell.qml` a `minScreenHeightPx` and a
+      warn, and D75 put a 768 px output under the load gate to read it. Neither
+      of the other two says anything about the size of the screen it is on, and
+      the two cases are not alike — which is the first thing to write down,
+      because "do the same for the other shells" is the wrong shape:
+      · **jv-bar has no height question at all.** Its surface is a 31 px strip
+        anchored top+left+right, and 31 px fits on anything. What it has is a
+        WIDTH question — the workspaces row and the clock are laid out against
+        the monitor's width — and that is D65, already open, with the empty
+        strip on a narrow monitor as its own half.
+      · **jv-notify's is real but is not the HUD's.** Its surface is anchored
+        BOTTOM+right and `implicitHeight` is derived from the stack, so the
+        column grows UPWARD out of the corner: an overflowing stack is cropped
+        at the TOP, and the topmost element is the `+N EARLIER` line, which
+        exists precisely to say that something is being hidden. The thing that
+        reports the hiding is the first thing hidden, which is a sharper
+        version of the HealthPlate argument rather than a copy of it.
+        It is also already BOUNDED in a way the HUD's corner is not:
+        `NotifyModel.maxVisible` is 3, so the stack is three toasts plus that
+        line and not an unbounded column. So the question is arithmetic before
+        it is a decision — can three toasts and the counter exceed 768 px at
+        all? A `Toast` wraps its body, and if the answer is no under every
+        `maxVisible`-worth of text the fit suite already generates, then the
+        honest outcome is a sentence next to `maxVisible` saying the cap IS the
+        floor, and this item closes with no new code in any shell.
+      The cheap half is already paid either way: the output exists, all three
+      shells already load on it, and the gate already reads each shell's log.
+      Do not add a warn to either shell before deciding which failure is the
+      better one — D74's whole argument is that the question is WHICH crop, not
+      whether to report one. Raised by D75.
+      **Done (67b9c92).** The item called the outcome and the arithmetic came
+      out where it guessed: no new code in any shell, one comment beside
+      `maxVisible`, and the notifier keeps no floor and no warn. What it did
+      NOT predict is where the measurement belongs. A sentence saying "the cap
+      is the floor" is a claim nothing checks, and the corner's height is a
+      font question, so the honest home for it is the SHEET:
+      `docs/notify/11-tallest.png` is the corner at its own maximum — three
+      plates, both rows elided on every one of them, under the `+N EARLIER`
+      line — and its PNG's HEIGHT is the reading. 470 px against the 768 px
+      output D75 added, so the corner at its worst leaves 298 px of that screen
+      empty. Three gates in `tools/tests/test_notifyshots.py`: the sheet must
+      photograph the worst case (or the number is the maximum of nothing), the
+      tallest PNG must fit the shortest output `shells.py` declares, and the
+      note's two numbers are read back from the picture and from that harness.
+      Eight mutants, eight reds. Two worth keeping: `png_size` pointed at the
+      wrong IHDR offset is caught by the NOTE gate and not by the fit gate,
+      which would have compared a width against a height and passed — the pair
+      is load-bearing, not the fit gate alone; and `maxVisible` raised to six
+      with every other gate satisfied gives 893 px, exactly the 47 + 141·6 the
+      rhythm predicts, with the fit gate the thing that says so. Measured on
+      the way past: the cap could go to FIVE and still fit, and a raised cap
+      that did not re-render the sheet goes red three shots earlier, in the
+      driver's own captions. Raised **D79**.
+
+- [ ] D71. **The crowded corner has never met the narrow screen.** D68's
+      picture is `03-confirm`: two plates, one of them capped. What D66's
+      sweep was actually about is the CROWD — every plate at once, which
+      `tools/hudshots/scene/tst_fit.qml` measures at 713+ px tall and 300 px
+      wide in a QML engine, and which is the case where 248 px of room has
+      the most to take away. Nothing has ever put that stack on a real
+      compositor at any width, narrow or not: the screens sheet's tallest
+      shot is three plates. It is not obviously worth a tenth PNG — the fit
+      suite already owns the question and owns it at every width — so the
+      item is really "is there a claim about the crowd that only a compositor
+      can make", and the honest answer may be no, in which case write that
+      down next to `tst_fit.qml` and close it. Raised by D68.
+
+- [x] D72. **The only DARK shot on the sheet is checked on three outputs of
+      four.** D70 closed the quiet claim for the idle probe — no frames at
+      all, surface unmapped, and now the narrow output photographed for it.
+      `01-quiet` is a different dark: frames ARRIVE and every plate decides
+      it has nothing to show, which is the case where a plate drawing a
+      zero-height sliver or an empty glass rectangle would be a bug. Its
+      `captures` is `["desk"]`, the narrow output is outside the desk, and
+      `check_corner(lit=False)` — the other place where "nothing drawn" is
+      the pass — therefore never runs on it. The cheap shape is the one D70
+      used: in `check_capture`'s desk branch, a second grim of the narrow
+      output and `check_corner` over it, with no PNG written, so the sheet
+      still has ten pictures and one more assertion. The awkward part is that
+      the branch would then check an output for every desk shot including the
+      LIT ones (`02-heard`, `03-confirm`), where the box half of
+      `check_corner` is vacuous at that width (`w - SURFACE_W - INSET` is
+      -36) and only the left-inset half says anything — which is fine but
+      should be said out loud rather than discovered. Raised by D70.
+      **Done (953b5a9).** The cheap shape, exactly as the item drew it: one
+      more 0.3 Mpx exposure in `check_capture`'s desk branch against the
+      desk's 33, sized, and the same `check_corner` over it with the shot's
+      own `lit`. No PNG — the sheet is still ten pictures — and the awkward
+      part is written into the code rather than left to be found.
+      With one correction to the item, which had it slightly wrong: at 280 px
+      `check_corner` loses the LEFT bound of its box and only that one.
+      `w - SURFACE_W - INSET` is -36 so `x0 < left` is true of nothing, but
+      `y1 > bottom` still holds the stack to 842 px, the right-hand gap still
+      holds it to the inset, and D66's clamp is what replaces the bound that
+      went. "The box half is vacuous" would have been a bigger hole than the
+      one that was there. Raised **D73** off the rest of that reading.
+      It is also now VISIBLE, which was not in the item. Every other probe in
+      that file logs its measurement and this one had no picture to point at,
+      so a green run said nothing about whether the fourth screen had been
+      looked at. It prints per shot, with the size the image came back as:
+      `HEADLESS-4 came back 280x1080 and is bare` under `01-quiet`, and
+      `draws in its corner` under `02-heard` and `03-confirm` — the two
+      verdicts are the whole claim, and a run where both said the same thing
+      would be one worth reading.
+      Three gates, graded by mutation before being trusted. The coverage one
+      is derived off `ALL_OUTPUTS` like D70's, so a fifth output photographed
+      by nobody goes red there. The second insists every image `check_capture`
+      turns into a verdict is one size check AND one corner verdict, asked
+      with `shot['lit']` rather than a literal — an exposure nobody reads is
+      a grim paid for to prove a sentence nobody said, and a hard-wired
+      `lit=True` would pass `01-quiet` with a plate on it. The third is a
+      REPLACEMENT: `test_the_two_whole_image_verdicts_size_check_before_they_
+      read` compared the first size check against the first read, and both
+      functions now take a second exposure of their own — under min-against-
+      min the second image's size check is optional, which is D70's vacuous
+      read arriving by a new door. It is now one size check per read in
+      source order. Four mutants, four reds, each in the gate that owns it.
 
 - [ ] D33. **Two copies of the HUD's box survive D16, and both are outside a
       shell.** The corner's width is one token now and both shells read it —
@@ -4954,24 +5836,50 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `svc-a` on sorted bases even with the passes merged, and the depth of
       the Python-under-it rule had no test at all. Raised: B87, B88.)
 
-- [ ] B87. **The file test was written down and it was wrong (B86); the BASE
-      LIST is written down too.** `_package_bases` returns `["", "tools",
-      "harness"] + services/*`, which is right today only because all eight
-      `pyproject.toml` files in this repo live under `services/`. A ninth
-      Python package anywhere else — `shell/jv-hud/tools/`, a `bench/`, a
-      second library beside `pylib` — is a directory no base names, so every
-      `import` of it resolves to nothing and the closure walk stops at the
-      first edge again. That is B86's failure by a different mechanism: B86
-      was the FILE test being a written-down rule, this is the SEARCH PATH
-      being one, and both fail the same silent way, because a suite that is
-      never named cannot report being skipped. The derivation is sitting
-      there: a base is a directory with a `pyproject.toml` in it, plus the
-      repo root and the two package directories that have none (`tools`,
-      `harness` — and `harness/` has no `__init__.py` either, so it is this
-      repo's SECOND namespace package; nothing imports it by that name today,
-      which is the only reason B86 had one instance and not two). Wants a
-      `tools` test pinning that every pyproject directory is a base.
-      Discovered while fixing B86.
+- [x] B87. **The file test was written down and it was wrong (B86); the BASE
+      LIST was written down too.** `_package_bases` returned `["", "tools",
+      "harness"] + services/*`, right only because all eight
+      `pyproject.toml` in this repo happen to live under `services/` — a
+      ninth Python package anywhere else (`shell/jv-hud/tools/`, a `bench/`,
+      a second library beside `pylib`) was a directory no base named, so
+      every `import` of it resolved to nothing and the closure walk stopped
+      at the first edge. B86's failure by a second mechanism, silent the
+      same way. Derived now, from the two things that actually put a
+      directory of this repo on `sys.path`: a `pyproject.toml` beside a
+      package (that is what installs it), and a suite's own parent
+      (`runtests.sh` does `cd "$testdir"` and `-m` puts the cwd first) —
+      which is what puts `tools` and `harness` on the list without either
+      being named, and `harness` has no `__init__.py` either. Plus the root,
+      on the generous side. `_suite_dirs` is shared with `suites()` so the
+      discovery cannot drift from the search path it implies. The real
+      repo's answer is UNCHANGED: all ten suites' read sets are identical,
+      and the only difference is that `services/jarvisd` and
+      `services/jv-act` stop being bases — the one narrowing, with its own
+      test, since they hold no `*.py` at all and a rule picks either up if
+      it grows some. The assertion B87 asked for is
+      `test_every_installable_package_resolves_to_its_own_source`: it walks
+      for the pyprojects itself rather than asking where they are, and
+      demands each package resolve to its own directory (not to nothing, a
+      missed reader, and not to a namesake elsewhere, a wrong one).
+      4 mutations, 4 caught. — d51f58d
+
+- [ ] B95. **The search path is one list for ten suites, and no interpreter
+      on this machine agrees with it.** `_package_bases` is computed once and
+      handed to every suite, so `services/jv-brain`'s tests are resolved
+      against `services/jv-guard` as well — a base that suite never has.
+      What `runtests.sh` really gives a suite is its OWN directory (the
+      `cd`), `services/pylib` (the exported PYTHONPATH) and whatever the nix
+      env installed; invariant 1 forbids one service importing another, so
+      the difference is invisible today. It errs generously (one suite too
+      many, the cheap direction) but it models a cross-service import as
+      WORKING when the interpreter would raise, and the first thing that
+      relies on that reading will be wrong in the confident direction. The
+      fix is small — bases per suite: `{"", suite dir, every pyproject dir}`
+      is already the right set, minus the other services — and the reason it
+      is not done here is that `names()` takes `bases` as one argument
+      shared through the whole closure cache, so per-suite bases means a
+      cache key per suite and a measurement that the walk is still 4 ms.
+      Discovered while fixing B87.
 
 - [ ] B88. **Every Python file in this repo is read by at least one suite —
       measured, 0 unread — and nothing asserts it.** What B86 landed is the

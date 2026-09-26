@@ -171,10 +171,20 @@ def test_both_surfaces_tell_the_row_how_much_room_it_has():
     draws over. So it is written twice, once per surface, and compared here
     with the id normalised away: a staged strip that gave its row a different
     budget would photograph a collapse that happens at a width the real bar
-    does not collapse at."""
+    does not collapse at.
+
+    The `Math.max(0, …)` is part of the expression and not a detail of it
+    (PLAN D35): below it the subtraction goes negative, and negative is how
+    `core/RowFit.qml` spells "nobody has said how wide this surface is" —
+    which draws every label, into the corner the HUD's plates land in. A
+    strip that clamped and a bar that did not would photograph an empty row
+    on the monitor where the real one overflows."""
     shell = strip_qml_comments((SHELL / "shell.qml").read_text("utf-8"))
     strip = strip_qml_comments(STRIP.read_text("utf-8"))
-    wanted = "roomPx: (face.visible ? face.x : @.width - @.hudReservePx) - Theme.insetPx - Theme.gapPx"
+    wanted = (
+        "roomPx: Math.max(0, (face.visible ? face.x : @.width - @.hudReservePx)"
+        " - Theme.insetPx - Theme.gapPx)"
+    )
     assert wanted.replace("@", "surface") in shell, (
         "shell.qml no longer tells the workspaces row how much room it has"
     )

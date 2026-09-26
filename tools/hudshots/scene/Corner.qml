@@ -26,14 +26,32 @@ import ".."
 import "../core"
 
 PlateStack {
+  id: corner
+
   spacing: Theme.gapPx
+
+  // The room the plates have, worked out the way shell.qml works it out (PLAN
+  // D66). It is here rather than in the three drivers for the same reason the
+  // plate list is: one claim about what the harnesses stack, not one per
+  // driver. Each driver anchors this stack into an Item the size of the real
+  // surface and sets those margins itself, so the box is simply the parent's
+  // width, less the inset it is anchored by at each edge — clamped at zero,
+  // and zero kept distinct from "no parent at all", for the reason shell.qml
+  // spells out beside its own copy of this: a bare subtraction turns a surface
+  // with no room into a surface nobody has measured, and `core/PlateFit.qml`
+  // answers those two with opposite widths.
+  readonly property int plateRoomPx: corner.parent !== null && corner.parent.width > 0
+    ? Math.max(0, corner.parent.width - Theme.insetPx * 2)
+    : -1
 
   LinkPlate {
     anchors.right: parent.right
+    roomPx: corner.plateRoomPx
   }
 
   ConfirmPlate {
     anchors.right: parent.right
+    roomPx: corner.plateRoomPx
   }
 
   StatePlate {
@@ -46,6 +64,7 @@ PlateStack {
 
   HeardPlate {
     anchors.right: parent.right
+    roomPx: corner.plateRoomPx
   }
 
   ReplyPlate {
@@ -54,14 +73,17 @@ PlateStack {
 
   ActionPlate {
     anchors.right: parent.right
+    roomPx: corner.plateRoomPx
   }
 
   GuardPlate {
     anchors.right: parent.right
+    roomPx: corner.plateRoomPx
   }
 
   InstallPlate {
     anchors.right: parent.right
+    roomPx: corner.plateRoomPx
   }
 
   MicPlate {

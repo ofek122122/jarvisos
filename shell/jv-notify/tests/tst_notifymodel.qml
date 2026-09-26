@@ -245,6 +245,65 @@ TestCase {
     compare(model.expiry.running, false, "nothing to wake up for");
   }
 
+  function test_what_a_sender_does_on_being_closed_is_not_erased_by_the_sweep() {
+    const model = makeModel();
+    // A sender that answers its own expiry — the re-entrant case the order
+    // inside `sweep` exists for. `expire()` is what makes the server emit
+    // `closed`, and the server is free to do anything on the way back: call
+    // `drop` for this key, or — as here, and as a sync client really does —
+    // post the next chapter of the same story. Whatever it does lands in
+    // `entries`, so the sweep must already have put its OWN answer there. A
+    // sweep that told the senders first would then overwrite the corner with
+    // a list computed before any of them spoke, and the new notification
+    // would be gone without ever having been drawn.
+    const handle = {
+      "expired": 0
+    };
+    handle.expire = () => {
+      handle.expired++;
+      model.push(sent("sync-2", {
+        "summary": "Retrying",
+        "timeoutMs": 5000
+      }));
+    };
+    model.push(sent("sync-1", {
+      "summary": "Sync failed",
+      "timeoutMs": 2000,
+      "handle": handle
+    }));
+    model.push(sent("mail", {
+      "timeoutMs": 10000
+    }));
+
+    suite.fakeNow = 2;
+    model.sweep();
+
+    compare(handle.expired, 1);
+    compare(model.toasts.map(e => e.key).join(" "), "mail sync-2", "the plate its sender posted while being closed is still in the corner");
+    compare(model.expiry.interval, 5000, "and the one timer woke up for it");
+  }
+
+  function test_a_deadline_already_in_the_past_still_goes_round_the_timer() {
+    const model = makeModel();
+    model.push(sent("1", {
+      "timeoutMs": 2000
+    }));
+    compare(model.expiry.interval, 2000);
+    // The clock can be well past a deadline by the time anything re-arms:
+    // the machine slept, or what moved it was a push rather than the sweep
+    // that was waiting for it. The interval `arm` computes here is negative,
+    // which is not an interval a Timer can honour, and zero would be asking
+    // the event loop to come straight back. One millisecond is the floor,
+    // and the point of it is that `sweep` is reached through the timer and
+    // never from inside itself.
+    suite.fakeNow = 100;
+    model.push(sent("2", {
+      "urgency": 2
+    }));
+    compare(model.expiry.running, true);
+    compare(model.expiry.interval, 1, "a deadline in the past is one millisecond away, not minus ninety-eight seconds");
+  }
+
   function test_with_no_clock_nothing_expires_on_its_own() {
     const model = makeModel({
       "clock": false

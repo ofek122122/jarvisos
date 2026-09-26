@@ -19,6 +19,7 @@ the sheet is made. What IS here is everything that would make those checks
 run against the wrong machine, or not run at all.
 """
 
+import ast
 import json
 import re
 import subprocess
@@ -28,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from test_gen_theme_qml import ROOT, hud_surface_box
+from test_gen_theme_qml import ROOT, hud_min_screen_height, hud_surface_box
 
 sys.path.insert(0, str(ROOT / "tools" / "hudscreens"))
 import sheet  # noqa: E402
@@ -380,10 +381,17 @@ def test_the_idle_probe_actually_runs():
     )
 
 
-def test_the_idle_probe_reads_the_huds_own_wayland_log():
+def test_only_the_probes_that_read_the_socket_log_ask_for_one():
     """WAYLAND_DEBUG is how the HUD is made to say what it committed. With
     it unset the log is empty, every window reads zero, and the probe
     passes for a HUD animating on all three monitors.
+
+    Two probes read that log now — the idle windows count commits in it
+    (A34), and D68's asks it what size the compositor configured each
+    surface at — and nothing else in this harness may ask for one. The rule
+    is about the PICTURES: a shot taken of a HUD writing a protocol log for
+    every frame is a photograph of a machine nobody runs, and the shot loop
+    is where that would go unnoticed.
     """
     shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
     probe = shoot.split("\ndef probe_idle_frames(")[-1].split("\ndef ")[0]
@@ -391,9 +399,24 @@ def test_the_idle_probe_reads_the_huds_own_wayland_log():
         "every jv-hud the idle probe starts must be started with "
         "WAYLAND_DEBUG=1, or the frames it is counting are not being logged"
     )
-    assert "WAYLAND_DEBUG" not in shoot.replace(probe, ""), (
-        "WAYLAND_DEBUG is set outside the idle probe — the photographs "
-        "should be of a HUD doing its job, not one writing a protocol log"
+    granted = shoot.split("\ndef probe_surface_granted(")[-1].split("\ndef ")[0]
+    assert granted.count('WAYLAND_DEBUG="1"') == 1, (
+        "the granted-width probe (D68) reads the configure event out of the "
+        "HUD's own Wayland log, so its one shell must be started with "
+        "WAYLAND_DEBUG=1 — without it the log is empty and the probe's census "
+        "fails rather than lying, which is the right way round and still not a "
+        "measurement"
+    )
+    assert shoot.count('WAYLAND_DEBUG="1"') == 6, (
+        "a jv-hud is started with WAYLAND_DEBUG=1 outside the two probes that "
+        "read that log — the photographs should be of a HUD doing its job, not "
+        "one writing a protocol log"
+    )
+    body = shoot.split("\ndef main(")[-1]
+    assert "WAYLAND_DEBUG" not in body, (
+        "the shot loop mentions WAYLAND_DEBUG: every PNG in docs/hud/screens "
+        "is taken of a HUD that is not being traced, and that is the half of "
+        "this rule the sheet depends on"
     )
 
 
@@ -2367,7 +2390,7 @@ def declared_boxes() -> dict[tuple[int, int], str]:
         (sheet.DESK_WIDTH, sheet.DESK_HEIGHT): "the whole desk",
         shot_box(): "the surface the committed PNGs were photographed against",
     }
-    for out in sheet.OUTPUTS:
+    for out in sheet.ALL_OUTPUTS:
         boxes.setdefault((out["width"], out["height"]), f"the {out['role']} monitor")
     return boxes
 
@@ -2899,3 +2922,1372 @@ def test_every_shell_this_starts_is_one_this_heard_from():
         f"{shells} jv-hud processes are started and {heard} are waited for — a "
         "shell nobody heard from writes a log the D39 scan cannot speak for"
     )
+
+
+# ------------------- the ceiling on a pathological run (D58)
+#
+# `shellload.sh` has had a per-engine ceiling since D50, and D53 then found
+# 90 s of un-payable cold-Qt wait inside it. This harness — the other gate
+# that runs real quickshells — had NO ceiling at all. 3m00s is its measured
+# cost (B75 books the phases); nothing anywhere bounded the run where a
+# quickshell comes up and then holds still forever, and that run has to end,
+# be reported, and not take the afternoon with it.
+#
+# What is bounded here is every stretch of `shoot.py` that WAITS: a timeout,
+# a settle, a poll loop with a deadline. What is NOT is work — `grim`, a PNG
+# encode, a numpy compare, and the two binaries' own exec. A subprocess that
+# never returns is outside this claim and stays outside it; the claim is that
+# no wait this file chooses to spend is unbounded or unaccounted.
+#
+# The arithmetic is D50's lesson applied to a bigger file: the waits are
+# COUNTED OFF THE SOURCE rather than written down, because a wait added to
+# the run and not to the ceiling is exactly the hole D50 found — and at this
+# size (about ninety wait sites) a hand-written list would be stale within an
+# iteration. So `wait_sites()` walks the AST, every site must land in a
+# stretch or in a helper whose call sites are charged, and a way of waiting
+# nobody taught this file is refused by name rather than ignored.
+
+SHOOT = ROOT / "tools" / "hudscreens" / "shoot.py"
+
+# A poll inside a bounded loop is free — it is spent INSIDE the deadline, not
+# on top of it. What it does cost is one last pass through the body, begun an
+# instant before the deadline and finished after it, and the widest body here
+# is `wait_for_drawing`'s one-second feed with a publish in it. That overrun
+# is charged to every bounded wait, and this is the cap a poll may have.
+POLL_CEILING_S = 1.0
+
+# What ONE engine of this harness may cost: a quickshell, its broker, and
+# every wait the run spends around them. Per engine rather than per run for
+# D50's reason — it is the claim that survives the next window somebody adds,
+# and a run ceiling alone breaks on an honest addition instead of on a cost
+# problem. The worst today is the heard-and-confirm window at 238 s, which is
+# four `wait_for_drawing`s and two engine starts; the room above it is for
+# about one more reading, and a window that wants two is a conversation.
+STRETCH_CEILING_S = 300.0
+
+# And what the whole pass can cost if every one of them goes pathological:
+# thirteen engines, six of them the shot loop, 1714 s — 28.6 minutes against a
+# measured 3m20s. (Twelve and 1593 s before D68's granted-width probe, which
+# is one more engine and 121 s of it: two process starts, a bounded wait for
+# the narrow output to draw, and two stops.) So this is a bound on the run that never happens and not a
+# budget for the one that does. Where it goes is the answer D58 was opened
+# for: 43% is `READY_TIMEOUT_S`, twenty-two waits of 30 s for a process to
+# say one line, and D53 measured that a warm engine here says it in 0.40 s.
+# Another 26% is `STOP_TIMEOUT_S`, spent twice per process over 26 stops.
+# Those two are the shrink, and this is the number it will be measured
+# against.
+RUN_CEILING_S = 1800.0
+
+# Every way this file waits, and what one occurrence of it costs the ceiling.
+# The helpers are charged at their CALL SITES and their insides skipped, so
+# `wait_for_blind_plate`'s own deadline is counted once per call rather than
+# once per definition.
+CHARGED_HELPERS = {
+    "Proc.wait_for",
+    "Proc.stop",
+    "publish_shot",
+    "feed_snapshots",
+    "settle",
+    "start_client",
+    "wait_for_blind_plate",
+    "wait_for_drawing",
+}
+
+# The three functions of `shoot.py` that spend waits of their own rather than
+# lending them to a caller. Every wait site in them has to fall inside one of
+# the stretches below.
+WAITING_CALLERS = {
+    "main",
+    "probe_idle_frames",
+    "probe_click_through",
+    "probe_surface_granted",
+}
+
+
+def shoot_text() -> str:
+    return SHOOT.read_text("utf-8")
+
+
+def shoot_tree() -> ast.Module:
+    return ast.parse(shoot_text())
+
+
+def shoot_constants() -> dict[str, float]:
+    """Every module-level number in `shoot.py`, read without importing it.
+
+    Without importing because this suite has no numpy and `shoot.py` does —
+    the same reason every other gate in this file reads the harness as text.
+    """
+    out: dict[str, float] = {}
+    for node in shoot_tree().body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        try:
+            value = ast.literal_eval(node.value)
+        except ValueError:
+            continue
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[target.id] = float(value)
+    return out
+
+
+def _units(tree: ast.Module):
+    """Every node of `shoot.py`, with its parent and the definition it is
+    charged to. A nested function is charged to the one it lives in, so
+    `publish_shot`'s async body belongs to `publish_shot` and a method to
+    `Proc.<name>`."""
+    parent: dict[ast.AST, ast.AST] = {}
+    unit: dict[ast.AST, str] = {}
+
+    def walk(node: ast.AST, own: str, cls: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            parent[child] = node
+            here, klass = own, cls
+            if isinstance(child, ast.ClassDef):
+                klass, here = child.name, ""
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and not own:
+                here = f"{cls}.{child.name}" if cls else child.name
+            unit[child] = here
+            walk(child, here, klass)
+
+    walk(tree, "", "")
+    return parent, unit
+
+
+def wait_sites() -> list[dict]:
+    """Every place `shoot.py` waits, with what it waits on.
+
+    A site is a sleep, a `time.monotonic()` deadline, or a call to one of the
+    helpers above. `poll` marks the ones spent inside a bounded loop, which
+    the ceiling gets for free; `unit` is the definition the site is charged
+    to, which is how a helper's insides are kept from being counted twice.
+    """
+    tree = shoot_tree()
+    parent, unit = _units(tree)
+
+    def ancestors(node: ast.AST):
+        out = []
+        while node in parent:
+            node = parent[node]
+            out.append(node)
+        return out
+
+    sites: list[dict] = []
+    for node in ast.walk(tree):
+        kind = None
+        if isinstance(node, ast.Call):
+            called = ast.unparse(node.func)
+            if called in ("time.sleep", "asyncio.sleep"):
+                kind = "sleep"
+            elif called.endswith(".wait_for"):
+                kind = "wait_for"
+            elif called.endswith(".stop"):
+                kind = "stop"
+            elif called == "self.p.wait":
+                kind = "procwait"
+            elif called in CHARGED_HELPERS:
+                kind = called
+        elif (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Add)
+            and isinstance(node.left, ast.Call)
+            and ast.unparse(node.left) == "time.monotonic()"
+        ):
+            kind = "deadline"
+        if kind is None:
+            continue
+        sites.append(
+            {
+                "kind": kind,
+                "node": node,
+                "line": node.lineno,
+                "unit": unit.get(node, ""),
+                "poll": any(
+                    isinstance(a, ast.While) and "time.monotonic" in ast.unparse(a.test)
+                    for a in ancestors(node)
+                ),
+                "loops": [a for a in ancestors(node) if isinstance(a, ast.For)],
+            }
+        )
+    return sites
+
+
+def stretches() -> dict[str, tuple[int, int, str]]:
+    """The engines, as line ranges of `shoot.py`: the body of the shot loop
+    (entered once per shot in the sheet), the five idle windows, and the click
+    probe. Sliced out of the source rather than listed, so a window renamed
+    is a window still covered and a window ADDED is one the census below
+    refuses to leave uncounted."""
+    text = shoot_text()
+
+    def line(idx: int) -> int:
+        return text.count("\n", 0, idx) + 1
+
+    idle = text.index("def probe_idle_frames"), text.index("def probe_click_through")
+    marks = [
+        idle[0] + m.start()
+        for m in re.finditer(r"^    # --- ", text[idle[0] : idle[1]], re.M)
+    ]
+    out: dict[str, tuple[int, int, str]] = {}
+    for i, start in enumerate(marks):
+        end = marks[i + 1] if i + 1 < len(marks) else idle[1]
+        title = re.match(r"    # --- ([A-Z][A-Z ]+)", text[start:]).group(1).strip()
+        out[title.lower()] = (line(start), line(end), text[start:end])
+    # These two off the AST rather than off the text, because their ends
+    # matter: a wait written just after the shot loop and just before the
+    # next phase is a wait spent ONCE, and a stretch that ran to the next
+    # landmark would charge it to all six shots and call that a ceiling.
+    tree = shoot_tree()
+    lines = text.splitlines(keepends=True)
+
+    def span(node) -> tuple[int, int, str]:
+        return node.lineno, node.end_lineno + 1, "".join(
+            lines[node.lineno - 1 : node.end_lineno]
+        )
+
+    out["shot"] = span(
+        next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.For) and ast.unparse(n.iter) == "sheet.SHOTS"
+        )
+    )
+    for fn, engine in (
+        ("probe_click_through", "click"),
+        ("probe_surface_granted", "granted"),
+    ):
+        out[engine] = span(
+            next(
+                n
+                for n in tree.body
+                if isinstance(n, ast.FunctionDef) and n.name == fn
+            )
+        )
+    return out
+
+
+def publish_charge() -> float:
+    """What one `publish_shot` can hold the run for: the broker's drain, once
+    per frame, for the widest thing this harness publishes at once."""
+    consts = shoot_constants()
+    widest = max(len(s["frames"]) + len(s.get("hold", [])) for s in sheet.SHOTS)
+    return consts["PUBLISH_DRAIN_S"] * widest
+
+
+def site_charge(site: dict) -> float:
+    """What one occurrence of a site costs the ceiling.
+
+    Every bounded wait carries the overrun above: the loop tests its deadline
+    at the top, so the last pass through the body begins inside the bound and
+    ends outside it.
+    """
+    consts = shoot_constants()
+    publish = publish_charge()
+    overrun = POLL_CEILING_S + publish
+    node = site["node"]
+
+    def named(expr: ast.AST) -> float:
+        """The bound, which must be a constant `shoot.py` declares by name."""
+        assert isinstance(expr, ast.Name) and expr.id in consts, (
+            f"{SHOOT.name}:{site['line']} waits on {ast.unparse(expr)}, which "
+            "is not a module constant of that file — a bound nobody named is "
+            "a bound this ceiling cannot add up (PLAN D58)"
+        )
+        return consts[expr.id]
+
+    kind = site["kind"]
+    if kind == "sleep":
+        return named(node.args[0])
+    if kind == "deadline":
+        return named(node.right) + overrun
+    if kind == "wait_for":
+        explicit = [kw.value for kw in node.keywords if kw.arg == "timeout"]
+        bound = named(explicit[0]) if explicit else consts["READY_TIMEOUT_S"]
+        return bound + overrun
+    if kind in ("wait_for_blind_plate", "wait_for_drawing"):
+        return consts["BLIND_TIMEOUT_S"] + overrun
+    if kind == "start_client":
+        return consts["CLIENT_WINDOW_TIMEOUT_S"] + overrun
+    if kind == "stop":
+        # Terminate, wait, kill, wait: the timeout is spent twice.
+        return 2 * consts["STOP_TIMEOUT_S"]
+    if kind == "settle":
+        # It either sleeps its seconds or feeds them; the feed publishes.
+        return named(node.args[0]) + publish
+    if kind == "feed_snapshots":
+        return named(node.args[0]) + overrun
+    if kind == "publish_shot":
+        return publish
+    raise AssertionError(f"no charge for a {kind} site")
+
+
+def loop_factor(site: dict, source: str) -> int:
+    """How many times a stretch enters a site. Every loop around a wait has to
+    be one this file knows how to count — an unknown one is refused rather
+    than treated as one pass, because a wait inside a loop nobody counted is
+    the same hole as a wait nobody counted at all."""
+    times = 1
+    for loop in site["loops"]:
+        over = ast.unparse(loop.iter)
+        if isinstance(loop.iter, (ast.Tuple, ast.List)):
+            times *= len(loop.iter.elts)
+        elif over == "sheet.SHOTS":
+            times *= 1  # the stretch IS one shot; the run multiplies below
+        elif over == "shot['captures']":
+            times *= max(len(s["captures"]) for s in sheet.SHOTS)
+        elif over == "clients":
+            times *= source.count("start_client(")
+        else:
+            raise AssertionError(
+                f"{SHOOT.name}:{site['line']} waits inside `for … in {over}`, "
+                "which the ceiling does not know how to count (PLAN D58)"
+            )
+    return times
+
+
+def stretch_ceilings() -> dict[str, float]:
+    """The worst case of every wait each engine of this harness can spend."""
+    spans = stretches()
+    out = {name: 0.0 for name in spans}
+    for site in wait_sites():
+        if site["poll"] or site["unit"] in CHARGED_HELPERS:
+            continue
+        where = [n for n, (lo, hi, _) in spans.items() if lo <= site["line"] < hi]
+        assert len(where) == 1, (
+            f"{SHOOT.name}:{site['line']} is a {site['kind']} in "
+            f"{site['unit']!r} that belongs to {len(where)} engines — a wait "
+            "outside every stretch is a wait outside this ceiling (PLAN D58)"
+        )
+        name = where[0]
+        out[name] += site_charge(site) * loop_factor(site, spans[name][2])
+    return out
+
+
+def run_ceiling() -> float:
+    """And the whole pass: the shot stretch once per shot in the sheet, every
+    other engine once."""
+    ceilings = stretch_ceilings()
+    shots = len(sheet.SHOTS)
+    return ceilings["shot"] * shots + sum(
+        v for name, v in ceilings.items() if name != "shot"
+    )
+
+
+def test_no_engine_of_this_harness_can_hang_for_an_afternoon():
+    """The claim D58 opened for, and it is about the run that never happens:
+    a quickshell that comes up and holds still, a broker that binds nothing, a
+    plate that never arrives. Every one of those is a poll with a generous
+    timeout, and this is the arithmetic that says what they add up to."""
+    ceilings = stretch_ceilings()
+    for engine, worst in sorted(ceilings.items()):
+        assert worst <= STRETCH_CEILING_S, (engine, worst)
+    assert run_ceiling() <= RUN_CEILING_S, ceilings
+    # Thirteen engines — six shots and seven probes — so the run bound is not
+    # the sum of thirteen stretch bounds. It is asserted below the product for
+    # the reason `shellload.sh`'s is: a reader who saw only the per-engine
+    # number would be reading a thirteenth of the true worst case.
+    engines = len(sheet.SHOTS) + len(ceilings) - 1
+    assert RUN_CEILING_S <= STRETCH_CEILING_S * engines
+    # And the ceiling is a ceiling rather than a budget: the measured pass is
+    # three minutes, and a bound that had drifted down to it would fail the
+    # first slow machine this ever runs on.
+    assert run_ceiling() >= 4 * 180.0
+
+
+def test_every_way_this_harness_waits_is_one_the_ceiling_knows_about():
+    """The half of a ceiling that drifts silently, and the only reason this
+    one is derived instead of written down.
+
+    A wait is one line. `hudscreens.sh` has about ninety of them across twelve
+    engines, and D50's bug in the smaller gate was exactly a wait the driver
+    spent and the arithmetic did not know about. So the question is not
+    whether the sum is right today: it is whether a function that waits can
+    exist in that file without this test naming it."""
+    tree = shoot_tree()
+    _, unit = _units(tree)
+    primitive = {s["unit"] for s in wait_sites()}
+    # A definition that waits because it calls something that waits, to a
+    # fixed point: a helper three calls deep from a sleep is still a helper
+    # whose call sites cost seconds.
+    methods = {
+        f"{cls.name}.{fn.name}"
+        for cls in tree.body
+        if isinstance(cls, ast.ClassDef)
+        for fn in cls.body
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    calls: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = ast.unparse(node.func)
+        if "." in called:
+            tail = called.rsplit(".", 1)[1]
+            named = {m for m in methods if m.endswith(f".{tail}")}
+        else:
+            named = {called}
+        calls.setdefault(unit.get(node, ""), set()).update(named)
+    waiting = set(primitive)
+    while True:
+        grown = {
+            who
+            for who, called in calls.items()
+            if who and (called & waiting)
+        } | waiting
+        if grown == waiting:
+            break
+        waiting = grown
+    waiting.discard("")
+    assert waiting == CHARGED_HELPERS | WAITING_CALLERS, (
+        "these functions of shoot.py wait and the ceiling does not charge "
+        f"them: {sorted(waiting - (CHARGED_HELPERS | WAITING_CALLERS))}; and "
+        "these are charged and no longer wait: "
+        f"{sorted((CHARGED_HELPERS | WAITING_CALLERS) - waiting)}"
+    )
+
+
+def arguments_of_each_definition() -> dict[str, set[str]]:
+    """The parameter names of every definition in `shoot.py`, by the unit it
+    is charged to. A wait on an argument is a wait whose bound the CALLER
+    named, which is the shape every charged helper here has."""
+    tree = shoot_tree()
+    _, unit = _units(tree)
+    out: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = node.args
+            names = {
+                a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]
+            }
+            out.setdefault(unit.get(node, ""), set()).update(names)
+    return out
+
+
+def test_every_bound_in_this_harness_is_a_named_number():
+    """`start_client` waited 15 s on a bare literal and `Proc.stop` spent 8 s
+    twice on another, which is how a harness ends up with no ceiling: there
+    was nothing to add up. Every deadline and every settle is a constant at
+    the top of the file now, and `site_charge` refuses one that is not.
+
+    A POLL is the exception, and it is the only one: it is spent inside a
+    bound that was already named, so the literal is a cadence rather than a
+    ceiling — capped here so it stays one."""
+    consts = shoot_constants()
+    params = arguments_of_each_definition()
+    for site in wait_sites():
+        node = site["node"]
+        if site["poll"]:
+            numbers = [
+                n.value
+                for n in ast.walk(node)
+                if isinstance(n, ast.Constant) and isinstance(n.value, (int, float))
+            ]
+            assert all(n <= POLL_CEILING_S for n in numbers), (site["line"], numbers)
+            continue
+        if site["kind"] == "deadline":
+            bound = node.right
+        elif site["kind"] == "sleep":
+            bound = node.args[0]
+        elif site["kind"] == "procwait":
+            assert [kw.arg for kw in node.keywords] == ["timeout"], ast.unparse(node)
+            bound = node.keywords[0].value
+        else:
+            continue  # a call site: its bound is the helper's, checked below
+        # A name, and one of two kinds of name: a constant at the top of the
+        # file, or an argument — which is a bound the CALLER named, and every
+        # caller is charged for it above.
+        assert isinstance(bound, ast.Name), (
+            f"{SHOOT.name}:{site['line']} waits {ast.unparse(bound)}, which is "
+            "a number nobody named — the ceiling cannot add up a literal "
+            "(PLAN D58)"
+        )
+        assert bound.id in consts or bound.id in params[site["unit"]], (
+            f"{SHOOT.name}:{site['line']} waits on {bound.id}, which is "
+            f"neither a constant of {SHOOT.name} nor an argument of "
+            f"{site['unit']}"
+        )
+
+
+def test_the_helpers_wait_on_the_bound_the_ceiling_charges_for_them():
+    """The table above says `wait_for_blind_plate` costs `BLIND_TIMEOUT_S`.
+    Nothing but this test says it is true — the helper could be changed to
+    wait on something else entirely and every sum here would go on reading
+    the old number, which is the failure mode of every arithmetic written
+    beside the thing it measures rather than off it."""
+    tree = shoot_tree()
+    _, unit = _units(tree)
+    deadlines: dict[str, list[str]] = {}
+    for site in wait_sites():
+        if site["kind"] == "deadline":
+            deadlines.setdefault(site["unit"], []).append(
+                ast.unparse(site["node"].right)
+            )
+    assert deadlines["wait_for_blind_plate"] == ["BLIND_TIMEOUT_S"]
+    assert deadlines["wait_for_drawing"] == ["BLIND_TIMEOUT_S"]
+    assert deadlines["start_client"] == ["CLIENT_WINDOW_TIMEOUT_S"]
+    # `Proc.wait_for` waits on its argument, so what the ceiling charges is
+    # the DEFAULT — and every call site in this harness takes it.
+    assert deadlines["Proc.wait_for"] == ["timeout"]
+    waiter = next(
+        fn
+        for cls in tree.body
+        if isinstance(cls, ast.ClassDef)
+        for fn in cls.body
+        if isinstance(fn, ast.FunctionDef) and fn.name == "wait_for"
+    )
+    assert ast.unparse(waiter.args.defaults[-1]) == "READY_TIMEOUT_S"
+    assert not [
+        s for s in wait_sites() if s["kind"] == "wait_for" and s["node"].keywords
+    ], "a call site passes its own timeout; the ceiling charges the default"
+    # `settle` and `feed_snapshots` are charged their first argument, which
+    # only holds while that argument is the number of seconds they wait.
+    for name in ("settle", "feed_snapshots"):
+        fn = next(
+            f
+            for f in tree.body
+            if isinstance(f, ast.FunctionDef) and f.name == name
+        )
+        assert fn.args.args[0].arg == "seconds", name
+
+
+def test_the_ceiling_has_one_engine_for_every_shell_this_harness_starts():
+    """The stretches are sliced out of the source, and the one way that can
+    go quietly wrong is a SIXTH idle window written without the `# ---`
+    marker: its waits would land inside the window above it and be counted
+    once against a bound they no longer describe. So the count is pinned to
+    the thing a window cannot be written without — its own quickshell."""
+    spans = stretches()
+    for name, (_, _, source) in spans.items():
+        shells = source.count('"jv-hud",')
+        assert shells == 1, (
+            f"the {name} engine starts {shells} quickshells — an engine is "
+            "one shell, and a stretch holding two is a window whose waits "
+            "are charged to its neighbour (PLAN D58)"
+        )
+    started = shoot_text().count('"jv-hud",')
+    assert started == len(spans), (
+        f"{started} quickshells are started and the ceiling has {len(spans)} "
+        f"engines: {sorted(spans)}"
+    )
+
+
+# ------------------- the output that is not a monitor, and what it is for (D68)
+#
+# D66 taught the HUD that a 300 px corner does not fit on every screen —
+# `plateRoomPx` is `min(surface.width, screen.width) - 2 x insetPx`, and the
+# plates are capped by it. Every word of that was measured in a QML engine,
+# against a plain `Item` whose `width` a test assigns, and the sentence it
+# rests on is about a COMPOSITOR: a layer-shell surface anchored to one edge
+# is granted the width it asks for whether or not the output is that wide.
+# This harness is the only place in the repo that can ask a compositor
+# anything, and until D68 it had three outputs, all of them wider than the
+# surface, so the question was never put.
+#
+# These gates hold the two halves of putting it: that the narrow output is
+# still narrow (and still outside the desk, so the nine older pictures are
+# untouched by it), and that the instrument which reads the answer is reading
+# the compositor's event rather than the client's request.
+
+
+def test_the_narrow_output_is_narrower_than_the_surface_it_asks_about():
+    """It has exactly one job. An output that grew past 300 px would leave
+    every check in `shoot.py` green with nothing anywhere asking what the HUD
+    does when the screen is smaller than the corner — and the picture would
+    still be committed, under a caption saying it was."""
+    assert sheet.NARROW["width"] == sheet.NARROW_W
+    assert sheet.NARROW_W < sheet.SURFACE_W, (
+        f"the narrow output is {sheet.NARROW_W}px and the surface asks for "
+        f"{sheet.SURFACE_W}px — it is not narrow, so it asks nothing"
+    )
+    # And wide enough to still be a corner: the plates are capped at the room
+    # the output leaves after both insets, and a photograph of nothing at all
+    # answers the question no better than a wide screen does.
+    assert sheet.NARROW_W - 2 * sheet.INSET > 0, (
+        "the narrow output leaves no room between the insets, so the HUD has "
+        "nowhere to draw and the shot is of an empty screen"
+    )
+
+
+def test_the_narrow_output_is_not_one_of_ares_monitors():
+    """The desk is `OUTPUTS` and ares is the desk. The narrow output is an
+    instrument, and the moment it joins that list `DESK_WIDTH` moves — which
+    re-photographs nine committed screens to answer a question about a tenth,
+    and makes `check_desk_is_bare` a claim about a machine nobody owns.
+    """
+    assert sheet.NARROW not in sheet.OUTPUTS
+    assert sheet.ALL_OUTPUTS == [*sheet.OUTPUTS, sheet.NARROW]
+    assert sheet.NARROW["x"] >= sheet.DESK_WIDTH, (
+        f"the narrow output starts at x={sheet.NARROW['x']} and the desk is "
+        f"{sheet.DESK_WIDTH}px wide — it is inside the desk capture, so every "
+        "desk shot in this sheet is now a picture of four screens"
+    )
+    roles = [o["role"] for o in sheet.ALL_OUTPUTS]
+    assert len(roles) == len(set(roles)), f"two outputs share a role: {roles}"
+
+
+def test_the_compositor_is_given_the_narrow_output_too():
+    """The config and the backend have to agree with each other, and neither
+    is written where the other can see it: `sway_config()` names the outputs
+    and `WLR_HEADLESS_OUTPUTS` says how many the backend makes. A config
+    naming four against a backend making three leaves the fourth unconfigured
+    at whatever size wlroots defaults to — which is a real screen, drawn on,
+    and not the one this asks about."""
+    line = (
+        f"output {sheet.NARROW['name']} mode "
+        f"{sheet.NARROW['width']}x{sheet.NARROW['height']} "
+        f"pos {sheet.NARROW['x']} 0"
+    )
+    assert line in sheet.sway_config(), f"the compositor is never told about {line!r}"
+    assert "len(sheet.ALL_OUTPUTS)" in driver_text(), (
+        "ops/ralph/hudscreens.sh writes its own WLR_HEADLESS_OUTPUTS instead "
+        "of asking the sheet how many outputs there are"
+    )
+    assert not re.search(r"^export WLR_HEADLESS_OUTPUTS=\d", driver_text(), re.M), (
+        "ops/ralph/hudscreens.sh still has a literal output count in it"
+    )
+
+
+# ---------------------- the quiet half of the narrow output (D70)
+#
+# D68 photographed the 280 px screen LIT. The other half of invariant 10 is
+# that a HUD with nothing to say leaves the screen pixel-identical to the bare
+# desktop, and that claim is made by `check_desk_is_bare` — which walked
+# `sheet.OUTPUTS` over one wide `grim` of the DESK, and the narrow output is
+# deliberately outside the desk. So a surface that mapped on that screen while
+# it had nothing to say was caught by nothing at all: the quiet shot
+# photographs the desk alone, and the lit shots' corner check only bounds the
+# box that WAS drawn.
+#
+# These two gates are the shape of closing it. The first is the coverage
+# arithmetic — which outputs that function's exposures actually reach — and it
+# is written as a derivation off the sheet rather than as "there are two
+# captures", so an output added to `ALL_OUTPUTS` and to nothing else goes red
+# here. The second is the reason the fix is not just one more grim: the
+# sentence it proves is "nothing is drawn", and numpy hands that same sentence
+# to a caller whose capture came back too small.
+
+
+def units_of(name: str) -> list[ast.AST]:
+    """Every node of `shoot.py` charged to one definition."""
+    _, unit = _units(shoot_tree())
+    return [node for node, own in unit.items() if own == name]
+
+
+def calls_in(name: str, called: str) -> list[ast.Call]:
+    return [
+        node
+        for node in units_of(name)
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == called
+    ]
+
+
+def test_earned_emptiness_is_measured_on_every_output_the_compositor_has():
+    """The claim is invariant 10's, and it is about the SCREEN — every screen
+    there is, not every screen ares has. `check_desk_is_bare` is the only
+    place in this repo that makes it, so which outputs its exposures reach is
+    the whole scope of the claim, and it is derived here off `ALL_OUTPUTS`:
+    a fifth output declared and photographed by nobody goes red on this line
+    rather than passing quietly forever."""
+    targets = [ast.literal_eval(c.args[0]) for c in calls_in("check_desk_is_bare", "capture")]
+    assert targets, "check_desk_is_bare photographs nothing"
+    covered = set()
+    for target in targets:
+        if target == "desk":
+            covered |= {o["role"] for o in sheet.OUTPUTS}
+        else:
+            covered.add(target)
+    missing = {o["role"] for o in sheet.ALL_OUTPUTS} - covered
+    assert not missing, (
+        f"check_desk_is_bare captures {targets} and so never looks at "
+        f"{sorted(missing)} — a surface that mapped on that output with "
+        "nothing to say would be caught by nothing: the quiet shot is of the "
+        "desk, and a lit shot's corner check only bounds what was drawn"
+    )
+    # And every exposure it pays for is READ. A grim whose image nothing
+    # passes to `drawn_box` is a picture taken to prove a sentence nobody
+    # said.
+    reads = calls_in("check_desk_is_bare", "drawn_box")
+    assert len(reads) == len(targets), (
+        f"check_desk_is_bare takes {len(targets)} exposures and reads "
+        f"{len(reads)} of them"
+    )
+
+
+def test_a_capture_that_is_not_the_screen_is_refused():
+    """`sheet.capture_size_complaint`, exercised on the sizes that would make
+    the gate above vacuous. It lives in the sheet so that a test with no
+    compositor — and no numpy — can run the rule itself rather than assert
+    that some source line mentions it.
+
+    The failure it exists for: every check downstream reads pixels with
+    `img[0:h, x:x+w]` or reads the whole array, numpy slicing past the end of
+    an array returns a SMALLER array rather than raising, `drawn_box` of an
+    empty region is None, and None is spelt "the HUD drew nothing here".
+    """
+    narrow = sheet.output_by_role("narrow")
+    assert sheet.capture_size_complaint("x", (narrow["width"], narrow["height"]), narrow) is None
+    assert sheet.capture_size_complaint("x", (sheet.DESK_WIDTH, sheet.DESK_HEIGHT), sheet.DESK) is None
+
+    # A grim that came back with the desk when the narrow output was asked
+    # for, and one that came back with a monitor missing off the right of the
+    # desk. Both are the wrong screen and both would read as bare.
+    wrong = sheet.capture_size_complaint("narrow", (sheet.DESK_WIDTH, sheet.DESK_HEIGHT), narrow)
+    assert wrong and narrow["name"] in wrong and f"{narrow['width']}x{narrow['height']}" in wrong
+    short = sheet.capture_size_complaint(
+        "desk", (sheet.DESK_WIDTH - sheet.OUTPUTS[-1]["width"], sheet.DESK_HEIGHT), sheet.DESK
+    )
+    assert short, "the desk minus a monitor is accepted as the desk"
+
+    # Transposed and one-pixel: the two shapes a broken capture path actually
+    # produces. Transposed matters on its own — the narrow output is the one
+    # screen here whose two dimensions could be swapped without the numbers
+    # looking wrong.
+    assert sheet.capture_size_complaint("x", (narrow["height"], narrow["width"]), narrow)
+    assert sheet.capture_size_complaint("x", (1, 1), narrow)
+
+    assert sheet.DESK not in sheet.ALL_OUTPUTS, (
+        "the desk has joined the outputs — it is an IMAGE, not a screen, and "
+        "the compositor config and the output census both walk that list"
+    )
+
+
+# ------------ the dark verdict on the screen outside the picture (D72)
+#
+# The gate above is about the desktop with NO HUD on it. This one is about the
+# SHOTS, and the hole is the same shape: a desk capture is `sheet.OUTPUTS` in
+# one wide grim, the narrow output sits to the right of the desk on purpose,
+# and `01-quiet` captures the desk and nothing else.
+#
+# `01-quiet` is a different dark from D70's. There, no frames arrive at all
+# and the surfaces are never mapped. Here frames DO arrive and every plate
+# decides it has nothing true to show — which is the case where a plate
+# drawing a zero-height sliver or an empty rectangle of glass is a bug, and
+# the 280 px output is where such a thing is most likely (its 248 px of room
+# is under `ConfirmPlate`'s own cap) and least visible. `check_corner(lit=
+# False)` is the other place in shoot.py where "nothing drawn" is the pass,
+# and it had never run on that screen.
+#
+# Both halves below are derived off the sheet rather than asserted as shapes,
+# so a fifth output declared and photographed by nobody goes red here.
+
+
+def test_a_desk_capture_is_a_verdict_about_every_output_there_is():
+    """Which screens one desk exposure's verdict reaches — all of them, not
+    just the desk's. A shot's `captures` is the list of PICTURES it writes,
+    and the sheet has a shot that writes one, so the pictures cannot also be
+    the census of screens the shot is a claim about."""
+    covered = set()
+    for node in units_of("check_capture"):
+        # The desk image, sliced one monitor at a time.
+        if isinstance(node, ast.For) and ast.unparse(node.iter) == "sheet.OUTPUTS":
+            covered |= {o["role"] for o in sheet.OUTPUTS}
+    # And every screen it takes an exposure of its own for.
+    for call in calls_in("check_capture", "capture"):
+        covered.add(ast.literal_eval(call.args[0]))
+    missing = {o["role"] for o in sheet.ALL_OUTPUTS} - covered
+    assert not missing, (
+        f"a desk capture is checked on {sorted(covered)} and so says nothing "
+        f"about {sorted(missing)} — `01-quiet` captures the desk alone, so on "
+        "that screen a plate that lit up with nothing to say would be caught "
+        "by nothing at all"
+    )
+
+    # Every image it turns into a verdict is one size check and one corner
+    # verdict. The odd one out is either an exposure nobody read — a grim paid
+    # for to prove a sentence nobody said — or a read nobody sized, which is
+    # the vacuous pass D70 refuses.
+    sized = calls_in("check_capture", "check_grim_size")
+    verdicts = calls_in("check_capture", "check_corner")
+    assert len(sized) == len(verdicts), (
+        f"check_capture checks {len(sized)} image size(s) and takes "
+        f"{len(verdicts)} corner verdict(s)"
+    )
+    # And every one of them is asked the SHOT's question. A narrow exposure
+    # hard-wired to `lit=True` would pass `01-quiet` with a plate on it, and
+    # one hard-wired to False would fail `02-heard` — the dark half is the
+    # whole reason this exposure exists.
+    for call in verdicts:
+        lit = ast.unparse(call.args[-1])
+        assert lit == "shot['lit']", (
+            f"check_capture line {call.lineno} decides for itself whether the "
+            f"HUD should be drawn ({lit}) rather than asking the shot"
+        )
+
+
+def test_the_two_whole_image_verdicts_size_check_before_they_read():
+    """`check_capture` and `check_desk_is_bare` are the two places that turn a
+    whole image into a verdict, and a size check that runs AFTER the pixels
+    are read is not a check. The ordering is the assertion; the rule itself is
+    graded above."""
+    for name in ("check_capture", "check_desk_is_bare"):
+        sized = calls_in(name, "check_grim_size")
+        assert sized, f"{name} reads an image it never checked the size of"
+        readers = [
+            c
+            for c in units_of(name)
+            if isinstance(c, ast.Call) and ast.unparse(c.func) in ("drawn_box", "check_corner")
+        ]
+        assert readers, f"{name} checks a size and then reads nothing"
+        # One size check per read, in that order — not `the first check comes
+        # before the first read` (PLAN D72). Both of these functions now take
+        # a SECOND exposure of their own: `check_desk_is_bare` photographs the
+        # narrow output after walking the desk, and `check_capture`'s desk
+        # branch does the same. Under a min-against-min rule the second
+        # image's size check is optional, because the first one already sits
+        # above every read in the function — which is precisely the vacuous
+        # read D70 exists to refuse, arriving by a new door.
+        #
+        # So: walk the two kinds of site in source order and insist a read is
+        # never reached with fewer size checks behind it than reads. A second
+        # grim whose size nobody asked about goes red here, and so does one
+        # checked a line too late.
+        seen_sized = seen_read = 0
+        for lineno, is_read in sorted(
+            [(c.lineno, False) for c in sized] + [(c.lineno, True) for c in readers]
+        ):
+            if is_read:
+                assert seen_sized > seen_read, (
+                    f"{name} reads pixels at line {lineno} behind "
+                    f"{seen_sized} size check(s) and {seen_read} earlier "
+                    "read(s) — one of the images it turns into a verdict was "
+                    "never checked to be the screen it was asked for, and a "
+                    "capture that came back too small reads as 'the HUD drew "
+                    "nothing here'"
+                )
+                seen_read += 1
+            else:
+                seen_sized += 1
+    assert "img.shape[:2] !=" not in shoot_text(), (
+        "shoot.py has a hand-rolled capture-size comparison again — the rule "
+        "is sheet.capture_size_complaint, which is the copy a test can run"
+    )
+
+
+# Verbatim from a real run of this harness: the four layer surfaces of one
+# jv-hud being configured, on a compositor with ares' three monitors and the
+# 280 px output. Kept as text for the reason the frame counter's sample is —
+# it is the thing the reader has to survive, and a hand-idealised line would
+# not be.
+GRANTED_LOG = """\
+[3395049.239] {Default Queue} zwlr_layer_surface_v1#22.configure(1, 300, 826)
+[3395049.301] {Default Queue} zwlr_layer_surface_v1#31.configure(2, 300, 826)
+[3395049.354] {Default Queue} zwlr_layer_surface_v1#38.configure(3, 300, 826)
+[3395049.402] {Default Queue} zwlr_layer_surface_v1#45.configure(4, 300, 826)
+"""
+
+
+def test_the_configure_reader_reads_a_real_wayland_log():
+    """The instrument D68 rests on. It is a regex over a debug log, which is
+    not a stable interface — and the way it fails is silent: a pattern that
+    stopped matching returns an empty dict, and "no surface was configured
+    wrongly" is true of one of those."""
+    sizes = sheet.layer_surface_sizes(GRANTED_LOG)
+    assert sizes == {22: (300, 826), 31: (300, 826), 38: (300, 826), 45: (300, 826)}
+    # Both separators, for COMMIT_RE's reason: libwayland has printed the
+    # object id as `@` and the build under this harness prints `#`.
+    assert sheet.layer_surface_sizes(
+        "[1.0] zwlr_layer_surface_v1@7.configure(1, 300, 826)"
+    ) == {7: (300, 826)}
+    # The LAST configure per surface, because a surface is reconfigured
+    # whenever anything about it changes and what the probe asks about is the
+    # size it settled at.
+    assert sheet.layer_surface_sizes(
+        "[1.0] zwlr_layer_surface_v1@7.configure(1, 300, 826)\n"
+        "[2.0] zwlr_layer_surface_v1@7.configure(2, 280, 826)\n"
+    ) == {7: (280, 826)}
+
+
+def test_the_configure_reader_reads_the_answer_and_not_the_question():
+    """The whole point is the difference between what the client asked for
+    and what the compositor gave it. A reader that counted `set_size` would
+    report `300x826` on every output forever — the HUD's own request, read
+    back as if it were the compositor agreeing to it, which is exactly the
+    assumption D68 exists to stop making."""
+    asked = (
+        "[1.0]  -> zwlr_layer_surface_v1@7.set_size(300, 826)\n"
+        "[1.1]  -> zwlr_layer_surface_v1@7.ack_configure(1)\n"
+        "[1.2]  -> zwlr_layer_shell_v1@6.get_layer_surface("
+        "new id zwlr_layer_surface_v1@7, wl_surface@5, wl_output@4, 2, \"jv-hud\")\n"
+    )
+    assert sheet.layer_surface_sizes(asked) == {}
+    # And nothing else on the socket. The idle probe's traffic is the busiest
+    # thing in these logs and none of it is a layer-surface configure.
+    assert sheet.layer_surface_sizes(REAL_WAYLAND_LOG) == {}
+
+
+def test_the_granted_probe_actually_runs():
+    """A probe nobody calls measures nothing, and this one has no picture to
+    be missing: the sheet would be complete and the question unasked."""
+    body = shoot_text().split("\ndef main(")[-1]
+    assert "probe_surface_granted(stage, background)" in body, (
+        "tools/hudscreens/shoot.py never calls probe_surface_granted, so "
+        "nothing in a run of this harness reads what width the compositor "
+        "granted (PLAN D68)"
+    )
+
+
+def test_the_granted_probe_counts_one_surface_per_output():
+    """The control. Every way of breaking this probe — a regex that stopped
+    matching, a shell that mapped nothing, a log nobody wrote — comes back as
+    an empty dict, and an empty dict has no surface configured at the wrong
+    size in it. So the census is the measurement: one layer surface per
+    output, or the probe says so and stops."""
+    probe = shoot_text().split("\ndef probe_surface_granted(")[-1].split("\ndef ")[0]
+    assert "len(sizes) != len(sheet.ALL_OUTPUTS)" in probe, (
+        "the granted-width probe no longer insists on one configured surface "
+        "per output, so it passes on a log it never read"
+    )
+    assert "sheet.layer_surface_sizes(" in probe
+
+
+def test_the_narrow_output_is_photographed():
+    """D68 is two claims and the probe above is one of them. The other is a
+    picture: what the corner LOOKS like when the screen is narrower than it
+    is, which no measurement substitutes for and which this sheet exists to
+    provide."""
+    shots = [s for s in sheet.SHOTS if "narrow" in s["captures"]]
+    assert shots, (
+        "no shot photographs the narrow output — the HUD on a screen smaller "
+        "than its own surface is measured and still never seen (PLAN D68)"
+    )
+    for shot in shots:
+        assert shot["lit"], (
+            f"{shot['file']} photographs the narrow output dark, which is a "
+            "picture of a bare desktop and says nothing about the corner"
+        )
+
+
+# --------- every bound the corner check draws is one a photograph can cross (D73)
+#
+# `check_corner` is the only thing in this repo that measures WHERE the HUD
+# landed on a real compositor, and its box condition read
+# `x0 < left or x1 >= w or y0 < 0 or y1 > bottom` — four terms, fencing a box
+# on all four sides. Two of them can never be true. `drawn_box` is
+# `np.nonzero` over an array the shape of the region it was handed, so every
+# number it returns is an INDEX into that region: `x1 >= w` and `y0 < 0` are
+# bounds of the IMAGE, not of the surface, and no photograph of any screen can
+# cross them.
+#
+# The claims they read as — "the HUD did not draw off the right edge", "not
+# above the top edge" — are ones a photograph cannot make at all, because a
+# surface placed past an output's edge is CLIPPED by the compositor and what
+# arrives in the ppm is the part that landed. Their observable form is the
+# INSET: content flush to an edge is what a clip looks like from inside the
+# picture, and the three edge gaps (right, left, top) are what say so.
+#
+# So this gate, which is about the shape of the condition rather than about
+# any one term of it: every bound `check_corner` draws must be crossable by a
+# box `drawn_box` can actually return, and must also hold for one it can. A
+# term that is never true is a sentence in a failure message that no failure
+# will ever print; a term that is always true would fail every green run.
+#
+# The domain is the whole argument, so it is derived rather than assumed:
+# `_drawn_box_is_indices_into_its_region` below pins it to the function, and
+# the day `drawn_box` starts returning LAYOUT coordinates — which is the one
+# change that would make `x1 >= w` live — that gate goes red instead of this
+# one going quietly vacuous.
+
+# The names `check_corner` measures a photograph with, and which of them this
+# gate samples rather than derives. `left`, `bottom` and `gap` are computed by
+# the function itself out of these, so they are taken from its own source: a
+# gate that sampled `gap` as a free variable would be asking about boxes no
+# photograph can produce (`gap` is `w - 1 - x1`, and the two cannot drift).
+CORNER_FREE = ("x0", "y0", "x1", "y1", "w", "h")
+
+
+def corner_bounds() -> list[str]:
+    """Every comparison `check_corner` fails a photograph on, as a condition
+    that is TRUE when the function raises.
+
+    Split out of chained and `or`-ed conditions so each is graded on its own: a
+    chain whose two halves are graded together hides a dead half, and `or` is a
+    list of sufficient causes. Polarity matters and is carried — the right-hand
+    gap is written `if not (INSET - 2 <= gap <= INSET + 2)`, so the two
+    comparisons in it are bounds only once negated, and a gate that read them
+    as written would have the sense of half its terms backwards.
+
+    The `lit` and `box is None` guards are not bounds — they are about whether
+    anything was drawn at all — and they drop out by their free names.
+    """
+    fn = next(
+        n
+        for n in shoot_tree().body
+        if isinstance(n, ast.FunctionDef) and n.name == "check_corner"
+    )
+    known = set(CORNER_FREE) | {"sheet"} | {name for name, _ in corner_derivations()}
+    out = []
+
+    def walk(node, negated):
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            walk(node.operand, not negated)
+            return
+        if isinstance(node, ast.BoolOp):
+            for value in node.values:
+                walk(value, negated)
+            return
+        if not isinstance(node, ast.Compare):
+            return
+        names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+        if not names or not names <= known:
+            return
+        operands = [node.left] + list(node.comparators)
+        for i, op in enumerate(node.ops):
+            term = ast.unparse(
+                ast.Compare(left=operands[i], ops=[op], comparators=[operands[i + 1]])
+            )
+            out.append(f"not ({term})" if negated else term)
+
+    for node in ast.walk(fn):
+        if isinstance(node, ast.If):
+            walk(node.test, False)
+    return out
+
+
+def corner_derivations() -> list[tuple[str, str]]:
+    """The names `check_corner` computes OUT OF a photograph's box, in source
+    order, as (name, expression).
+
+    Only those: `box = drawn_box(...)` is where the box comes from rather than
+    something computed from it, and it drops out by the same free-name rule the
+    bounds use — nothing but the sampled coordinates and the sheet's own
+    geometry can appear on the right-hand side.
+    """
+    fn = next(
+        n
+        for n in shoot_tree().body
+        if isinstance(n, ast.FunctionDef) and n.name == "check_corner"
+    )
+    known = set(CORNER_FREE) | {"sheet"}
+    out = []
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            names = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
+            if names <= known:
+                out.append((target.id, ast.unparse(node.value)))
+                known.add(target.id)
+    return out
+
+
+def photographable_boxes(w: int, h: int):
+    """Every box `drawn_box` can hand `check_corner` on a `w` x `h` region,
+    sampled at the values that decide something.
+
+    The domain — `0 <= x0 <= x1 < w` and `0 <= y0 <= y1 < h` — is not a
+    choice: `drawn_box` returns `np.nonzero` extremes over an array of that
+    shape. The sample points are every bound in the function plus two pixels
+    of anti-aliasing slack either side, plus the edges of the region, so a
+    term that only discriminates within a pixel or two of its own threshold
+    still gets a witness.
+    """
+    def marks(size, *vals):
+        return sorted({v for v in vals if 0 <= v <= size - 1})
+
+    inset, sw, sh = sheet.INSET, sheet.SURFACE_W, sheet.SURFACE_H
+    xs = marks(w, 0, 1, inset - 3, inset - 2, inset, w - sw - inset - 1,
+               w - sw - inset, w - sw - inset + 1, w - 1 - inset - 3,
+               w - 1 - inset, w - 1 - inset + 3, w - 2, w - 1)
+    ys = marks(h, 0, 1, inset - 3, inset - 2, inset, sh + inset - 1,
+               sh + inset, sh + inset + 1, h - 2, h - 1)
+    for x0 in xs:
+        for x1 in xs:
+            if x1 < x0:
+                continue
+            for y0 in ys:
+                for y1 in ys:
+                    if y1 >= y0:
+                        yield x0, y0, x1, y1
+
+
+def corner_program(bounds):
+    """`check_corner`'s arithmetic, compiled, plus the check that this gate can
+    run all of it.
+
+    Every name a bound reads has to be one the gate either samples or derives
+    the way the function does. A bound over something else — a new helper, a
+    value read off the region — would otherwise come back as a NameError from
+    inside an `eval`, which reads as a broken test rather than as the honest
+    news that this gate has stopped covering the function.
+    """
+    derivations = corner_derivations()
+    env_names = set(CORNER_FREE) | {"sheet"} | {name for name, _ in derivations}
+    for b in bounds:
+        unknown = {
+            n.id for n in ast.walk(ast.parse(b, mode="eval")) if isinstance(n, ast.Name)
+        } - env_names
+        assert not unknown, (
+            f"check_corner bounds the photograph with {sorted(unknown)}, which "
+            f"this gate can neither sample nor derive — `{b}` is therefore "
+            "graded by nobody, and a vacuous bound is exactly what it is "
+            "looking for"
+        )
+    return (
+        {b: compile(b, "<check_corner>", "eval") for b in bounds},
+        [(name, compile(expr, "<check_corner>", "eval")) for name, expr in derivations],
+    )
+
+
+def corner_fires(program, box, w, h):
+    """The bounds `check_corner` would raise on, given a box and the screen it
+    was measured on. Empty is the pass."""
+    code, derived = program
+    x0, y0, x1, y1 = box
+    env = {"sheet": sheet, "x0": x0, "y0": y0, "x1": x1, "y1": y1, "w": w, "h": h}
+    for name, expr in derived:
+        env[name] = eval(expr, {}, env)
+    return [b for b, c in code.items() if bool(eval(c, {}, env))]
+
+
+def corner_verdicts(bounds, w, h):
+    """For each bound, the set of verdicts it takes over every box a
+    photograph of a `w` x `h` screen can produce."""
+    program = corner_program(bounds)
+    seen = {b: set() for b in bounds}
+    for box in photographable_boxes(w, h):
+        fired = set(corner_fires(program, box, w, h))
+        for b in bounds:
+            seen[b].add(b in fired)
+    return seen
+
+
+def test_no_bound_the_corner_check_draws_is_vacuous():
+    """Every term of every condition `check_corner` fails a photograph on has
+    to be one a photograph can cross — on at least one of this compositor's
+    screens — and one it can also satisfy.
+
+    What it caught: `x1 >= w` and `y0 < 0`, two of the four terms in a
+    condition that looked like it fenced the drawn box on all four sides, dead
+    on every output there is and dead in both callers (PLAN D73).
+    """
+    bounds = corner_bounds()
+    assert len(bounds) >= 4, (
+        f"only {len(bounds)} bound(s) found in check_corner ({bounds}) — the "
+        "function measures where the HUD landed and this gate has lost track "
+        "of how it does it, which is a vacuous pass either way"
+    )
+    live, always = set(), set(bounds)
+    for out in sheet.ALL_OUTPUTS:
+        seen = corner_verdicts(bounds, out["width"], out["height"])
+        live |= {b for b in bounds if True in seen[b]}
+        always -= {b for b in bounds if True in seen[b]}
+    dead = [b for b in bounds if b not in live]
+    assert not dead, (
+        f"check_corner cannot fail on {dead} for any box `drawn_box` can "
+        "return, on any screen this compositor has — every number it returns "
+        "is an index into the region it was handed, so a bound outside that "
+        "region is a sentence in a failure message no failure will print. If "
+        "the claim was about the HUD drawing past an edge: a surface placed "
+        "past an output's edge is CLIPPED, and what a photograph sees is "
+        "content flush to that edge, which is the INSET's business"
+    )
+    assert not always, (
+        f"check_corner fails on {sorted(always)} for every box a photograph "
+        "can produce, so a green run of this harness is impossible"
+    )
+
+
+def test_the_only_bound_the_narrow_screen_takes_away_is_the_left_one():
+    """The correction D72 needed, kept as a gate rather than as a paragraph.
+
+    On the 280 px output `w - SURFACE_W - INSET` is negative, so `x0 < left`
+    is true of nothing: the surface really does hang off the left of the world
+    and that half of the box check is about the surface. Exactly that one
+    bound goes — `y1 > bottom` still holds the stack, the right-hand gap still
+    holds the inset, and D66's clamp replaces the bound that went. A bound
+    added later that is ALSO vacuous at 280 px would be a check that reads as
+    covering the narrow screen and does not, so it goes red here by name.
+    """
+    bounds = corner_bounds()
+    narrow = sheet.output_by_role("narrow")
+    seen = corner_verdicts(bounds, narrow["width"], narrow["height"])
+    dead = {b for b in bounds if True not in seen[b]}
+    assert dead == {"x0 < left"}, (
+        f"on the {narrow['width']}px output the bounds that can never fail are "
+        f"{sorted(dead)}, not the left one alone — every desk shot takes this "
+        "function to that screen (PLAN D72), and a bound vacuous there is one "
+        "the only narrow verdict on the sheet does not make"
+    )
+
+
+def test_drawn_box_returns_indices_into_the_region_it_was_given():
+    """The premise under both gates above, pinned to the function.
+
+    `photographable_boxes` is only the domain because `drawn_box` returns
+    `np.nonzero` extremes over the region it was handed and adds nothing to
+    them. The one change that would make `x1 >= w` a live bound is a
+    `drawn_box` that returned LAYOUT coordinates — an offset for the monitor
+    the region was cut from — and then the desk branch's regions would be
+    slices of a wider image with room to the right of them. That is a real
+    possibility and this is where it must be noticed, so the gate is on the
+    RETURN rather than on a comment: no offsets, no arguments but the region
+    and the backdrop.
+    """
+    fn = next(
+        n
+        for n in shoot_tree().body
+        if isinstance(n, ast.FunctionDef) and n.name == "drawn_box"
+    )
+    assert [a.arg for a in fn.args.args] == ["region", "background"], (
+        "drawn_box takes an argument other than the region and the backdrop — "
+        "if it is an origin, every bound check_corner draws is now about a "
+        "different coordinate system than the gates above sample"
+    )
+    returns = [n for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]
+    tuples = [ast.unparse(n.value) for n in returns if isinstance(n.value, ast.Tuple)]
+    assert tuples == ["(int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))"], (
+        f"drawn_box returns {tuples} — the gates above sample the boxes it can "
+        "produce as indices into its own region, and anything added to those "
+        "extremes silently widens that domain"
+    )
+
+
+# Where the HUD really is, in the ten pictures this repo ships. Read off
+# docs/hud/screens with `drawn_box`'s own rule — every pixel that is not
+# `sheet.BACKDROP` — one per shape the corner takes: the widest plate pair, the
+# same pair on a smaller monitor, the 280 px screen, and the narrowest thing
+# the HUD ever says (`05-preempted` is one plate, 108 px wide).
+#
+# They are here because the arithmetic above is only worth what its domain is.
+# A bound is graded by boxes a photograph COULD produce; these are boxes a
+# photograph DID produce, and every one of them has to pass. The numbers were
+# measured, not derived, so they are also the evidence for the top inset: all
+# four begin at y16, which is `Theme.insetPx` exactly.
+MEASURED_CORNERS = [
+    ("02-heard-primary.png", "primary", (2307, 16, 2543, 176)),
+    ("02-heard-side.png", "side", (1667, 16, 1903, 176)),
+    ("03-confirm-narrow.png", "narrow", (16, 16, 263, 152)),
+    ("05-preempted-primary.png", "primary", (2436, 16, 2543, 50)),
+]
+
+
+def test_the_corner_check_passes_the_pictures_this_repo_ships():
+    """The sanity half, and the one that would catch a bound tightened past
+    the HUD it is measuring. A gate that fenced the drawn box on all four
+    sides and rejected the real corner would be red on every run of the
+    harness — which nobody would mistake for a pass, but would also tell a
+    reader nothing about which bound was wrong."""
+    program = corner_program(corner_bounds())
+    for file, role, box in MEASURED_CORNERS:
+        out = sheet.output_by_role(role)
+        fired = corner_fires(program, box, out["width"], out["height"])
+        assert not fired, (
+            f"{file} measures {box} on {out['name']} and check_corner would "
+            f"fail it on {fired} — the bound is tighter than the HUD this "
+            "repo actually draws"
+        )
+        assert Path(ROOT / "docs" / "hud" / "screens" / file).exists(), (
+            f"{file} is not on the sheet any more, so the box above is a "
+            "measurement of a picture nobody has"
+        )
+
+
+def test_the_corner_check_fences_the_drawn_box_on_all_four_edges():
+    """The claim the two dead bounds were reaching for, made in the form a
+    photograph can make it (PLAN D73).
+
+    `x1 >= w` and `y0 < 0` read as "did not draw off the right edge" and "not
+    above the top edge". What is off the screen is not in the picture, so the
+    observable version of both is content FLUSH to an edge: that is what a
+    clipped surface looks like from inside a ppm. Take a box the sheet really
+    measured, push it to each of the four edges in turn, and insist something
+    in `check_corner` refuses it.
+
+    This is what grades the three inset gaps and the bottom bound. Delete the
+    top-inset check and the top row here passes.
+    """
+    program = corner_program(corner_bounds())
+    for file, role, box in MEASURED_CORNERS:
+        out = sheet.output_by_role(role)
+        w, h = out["width"], out["height"]
+        x0, y0, x1, y1 = box
+        # Each is the measured corner with ONE edge of it moved onto the edge
+        # of the screen, so whatever fires is firing about that edge alone.
+        pathologies = {
+            "top": (x0, 0, x1, y1),
+            "right": (x0, y0, w - 1, y1),
+            "left": (0, y0, x1, y1),
+            "bottom": (x0, y0, x1, h - 1),
+        }
+        for edge, bad in pathologies.items():
+            fired = corner_fires(program, bad, w, h)
+            assert fired, (
+                f"nothing in check_corner refuses {bad} on {out['name']} — the "
+                f"corner {file} measures, reaching the {edge} edge of the "
+                "screen. A surface the compositor placed past that edge is "
+                "CLIPPED, and this is what the photograph of one looks like, "
+                f"so the {edge} edge of the HUD is bounded by nobody"
+            )
+
+
+# --------- the axis with no clamp, and the floor that stands in for one (D74)
+#
+# `plateRoomPx` in shell.qml bounds the plates by the narrower of the surface
+# and the SCREEN (D66). Nothing bounds the stack's HEIGHT by the screen's, and
+# D74 settled that as a declared floor rather than as a clamp: a clamp would
+# have to drop a whole plate, the bottom plate is `HealthPlate`, and a plate
+# that is not on screen is indistinguishable from a machine with nothing to
+# report — where the compositor's crop at least leaves the cut plate visibly
+# cut. `tools/tests/test_gen_theme_qml.py` grades the declaration itself (the
+# floor is the surface's own height, the comparison is against the OUTPUT's,
+# and the shell says so in its log). What is left is the claim neither file can
+# make alone: every screen this harness puts the HUD on is one the declaration
+# covers.
+#
+# Two halves, and the second is the one that is easy to miss. `check_corner`'s
+# bottom bound is `y1 > SURFACE_H + INSET`, a bound on the SURFACE — and
+# `drawn_box` returns indices into the region it was handed (D73), so on a
+# screen no taller than that bound it is a bound on the IMAGE and can never
+# fail. The one check that would notice a cropped corner in a photograph goes
+# quiet INSET px ABOVE the floor the shell declares, which is the better news
+# than it sounds: an output between the two passes the shell's own declaration
+# and still takes the photograph's only bottom bound away, so this gate is what
+# goes red first, before anything is cropped.
+
+
+def test_every_screen_this_harness_has_clears_the_floor_the_shell_declares():
+    """No output the compositor is given may be shorter than the corner, and
+    none may be short enough to silence the bound that would notice.
+
+    The fifth output D74 asked about is deliberately NOT here, and that is the
+    other half of the decision: the narrow output (D68) exists because
+    `plateRoomPx` is real code whose behaviour only a compositor can confirm,
+    and the answer to the height question is that there is no such code. A
+    short output would photograph a screen the shell declares it is not for,
+    pass (every probe shot lights two or three plates, and only the crowd
+    overflows), and take the bottom bound away while doing it. So the grading
+    of a declaration is a gate that holds the outputs to it.
+    """
+    floor = hud_min_screen_height()
+    bounds = corner_bounds()
+    bottom = [b for b in bounds if "bottom" in b]
+    assert len(bottom) == 1, (
+        f"check_corner bounds the drawn box with {bottom} in terms of "
+        "`bottom` — this gate is about the one that holds the stack to the "
+        "surface's height, and it can no longer tell which that is"
+    )
+    for out in sheet.ALL_OUTPUTS:
+        assert out["height"] >= floor, (
+            f"{out['name']} is {out['height']}px tall and shell.qml's corner "
+            f"is {floor}px, so the compositor crops the bottom of it — and the "
+            "bottom plate is the health plate, cropped exactly when everything "
+            "is wrong. There is no height clamp and D74 settled that there "
+            "should not be one: a screen this short needs that decision "
+            "reopened (a clamp, and an ordering that drops a plate rather than "
+            "cutting it), not a harness that photographs it anyway"
+        )
+        seen = corner_verdicts(bounds, out["width"], out["height"])
+        assert True in seen[bottom[0]], (
+            f"on {out['name']} ({out['width']}x{out['height']}) "
+            f"`{bottom[0]}` can never fail: every number `drawn_box` returns "
+            "is an index into the region it was handed, so on a screen no "
+            f"taller than {sheet.SURFACE_H + sheet.INSET}px that bound is a "
+            "bound on the IMAGE. It is the only thing in this harness that "
+            "would see a cropped corner, and a screen can silence it while "
+            f"still clearing the {floor}px floor the shell declares — which is "
+            "what this half is here to catch"
+        )

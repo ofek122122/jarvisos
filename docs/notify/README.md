@@ -207,6 +207,39 @@ fallback chain that makes a stranger's string pick the typeface.
 What matters here is what does NOT happen: the line height does not blow up, the
 plate does not grow, and nothing paints outside it.
 
+### 11 — the tallest this corner can ever be
+
+![11-tallest.png](11-tallest.png)
+
+**On screen:** `+2 EARLIER`, then three `normal` plates, every row elided
+
+**This shot is a measurement, not a picture** (PLAN D77). It is the corner at
+its own maximum: the cap-many plates, each one with both rows full and elided,
+under the `+N EARLIER` line — and nothing a sender can do makes this surface
+taller. The reading is the PNG's own **height, 470 px**.
+
+That number is the reason this shell declares no minimum screen height and
+warns about no screen, where `jv-hud` does both. The HUD asks the compositor
+for a *fixed* 300x826 box, so a screen shorter than 826 crops it, and
+`shell/jv-hud/shell.qml` says so in its log. This surface is *derived* —
+`stack.implicitHeight + inset·2` — so the question is not whether it fits a
+screen but how tall the stack can get, and that is bounded twice: by
+`NotifyModel.maxVisible`, and by `Toast` giving the summary two lines and the
+body three before it elides. The shortest screen any shell in this repo is ever
+loaded on is the 768 px output in `tools/shellload/shells.py`, so the corner at
+its worst leaves 298 px of it empty. At today's rhythm the cap could go to five
+and still fit; six is where it stops.
+
+`tools/tests/test_notifyshots.py` holds those two numbers together — the
+tallest PNG on this sheet against the shortest output that harness declares —
+so a theme with a bigger body size, a fourth line of body, or a raised cap goes
+red here rather than cropping a corner on somebody's screen.
+
+If it ever does go red, the fix is not a clamp. This column grows *upward* out
+of the bottom corner, so the first thing a crop takes is the topmost element:
+the `+N EARLIER` line, whose entire job is to say that something is being
+hidden.
+
 ## How it is checked
 
 Then the sheet is **read back**: every PNG compared against the one committed
@@ -218,5 +251,6 @@ changed — look at the new PNGs and commit them.
 `tools/tests/test_notifyshots.py` is the gate on everything this directory
 claims: that the staged strip stacks what `shell.qml` stacks, that the two
 stand-ins offer every member the real singletons do, that every shot the driver
-takes is committed here and every PNG here is one the driver takes, and that
-each one is described above.
+takes is committed here and every PNG here is one the driver takes, that each
+one is described above, and that the tallest of them still fits the shortest
+screen any shell in this repo is loaded on.

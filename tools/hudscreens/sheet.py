@@ -42,6 +42,92 @@ OUTPUTS = [
 DESK_WIDTH = sum(o["width"] for o in OUTPUTS)
 DESK_HEIGHT = max(o["height"] for o in OUTPUTS)
 
+# ------------------------------------- the output that is not a monitor (D68)
+#
+# ares has no screen this narrow and never will. This one exists to ask what
+# the three above cannot: what the HUD does on an output NARROWER THAN ITS
+# OWN SURFACE.
+#
+# `shell.qml` declares a 300 px corner, and a layer surface anchored to one
+# edge is granted the width it asks for whatever the output is — so on a
+# 280 px screen the surface hangs 36 px off the left of the world and
+# `plateRoomPx` (D66) is the only thing keeping a sentence from being laid
+# out in the part that is not there. Every word of that was an ARGUMENT
+# until this output existed: D66 measured the clamp in a QML engine,
+# against a plain `Item` whose `width` a test assigns, and a test assigning
+# a width is not a compositor configuring a surface. `probe_surface_granted`
+# in shoot.py reads the configure event itself, and `03-confirm-narrow.png`
+# is the picture of what the clamp does with the answer.
+#
+# It is NOT in OUTPUTS, and that is the whole care taken here. `OUTPUTS` is
+# ares, and three things hang off it that must not move to answer a question
+# about a fourth screen: `DESK_WIDTH`, which is the grim geometry the nine
+# committed PNGs were photographed at; `check_desk_is_bare`, whose subject is
+# the desktop this machine actually has; and the sentence this sheet's README
+# opens with. The narrow output sits to the RIGHT of all of them, so the desk
+# capture cannot see it and no existing picture changed to make room for it.
+#
+# 280 rather than something dramatic: it has to be narrower than the surface
+# (or it asks nothing at all) and wide enough that the corner still has a
+# corner to draw in — 280 - 2 x INSET is 248 px of room, which is under
+# `ConfirmPlate`'s own 260 px cap by enough to see in a photograph. A 32 px
+# output would make a better anecdote and a worse picture.
+NARROW_W = 280
+
+NARROW = {
+    "name": "HEADLESS-4",
+    "role": "narrow",
+    "width": NARROW_W,
+    "height": 1080,
+    "x": DESK_WIDTH,
+}
+
+# Every output the compositor is given, which is not every monitor. The
+# difference is load-bearing in both directions: the DESK is `OUTPUTS`, and
+# everything that is a claim about a SURFACE rather than about ares — the
+# compositor's config, the exclusive zone, the corner the HUD docks to — is
+# about all four.
+ALL_OUTPUTS = OUTPUTS + [NARROW]
+
+# The desk, as one thing that can be photographed: `OUTPUTS` side by side in
+# a single `grim -g`. It is not an output and is deliberately in no list of
+# them — it exists so that "the image I am about to read pixels out of" has
+# a declared width and height for the desk exactly as it does for a monitor.
+DESK = {
+    "name": "the desk (" + "+".join(o["name"] for o in OUTPUTS) + ")",
+    "width": DESK_WIDTH,
+    "height": DESK_HEIGHT,
+}
+
+
+def capture_size_complaint(label, got, want):
+    """What is wrong with the size of a capture, or None if nothing is.
+
+    `got` is (width, height) as the image came back; `want` is an output of
+    this sheet, or `DESK`.
+
+    This exists because of how the checks downstream FAIL. Every one of them
+    reads pixels out of a numpy array — `img[0:h, x:x+w]` for a monitor inside
+    the desk shot, the whole array for a single-output one — and numpy slicing
+    past the end of an array is not an error, it is a smaller array. So a grim
+    that returned the wrong screen, or a 1x1 placeholder, or the desk with one
+    monitor missing off the right, hands `drawn_box` a region that is empty or
+    is not the one the caller named. `drawn_box` of an empty region is None,
+    None is "the HUD drew nothing here", and "nothing is drawn" is the exact
+    sentence earned emptiness is proven with (D70). A check over an image that
+    is not the screen is vacuous, not green, and this is the only place in the
+    harness that can tell the two apart.
+    """
+    if tuple(got) == (want["width"], want["height"]):
+        return None
+    return (
+        f"{label}: grim returned {got[0]}x{got[1]}, not the "
+        f"{want['width']}x{want['height']} of {want['name']} — every check "
+        "that follows reads pixels out of that image, and one taken over an "
+        "image that is not the screen is vacuous rather than green"
+    )
+
+
 # The desktop behind the HUD. The real surface is `color: "transparent"`
 # and floats over whatever Niri has on screen, so a photograph has to put
 # SOMETHING behind it or `plate_opacity = 0.86` is invisible and the shot
@@ -230,6 +316,47 @@ def surface_traffic(text):
     return len(COMMIT_RE.findall(text)), len(FRAME_RE.findall(text))
 
 
+# ------------------------- what size the compositor granted the surface (D68)
+#
+# The HUD asks for a 300 px corner on every monitor it can see, and on the
+# narrow output (`NARROW`) one of those monitors is 280 px wide. What wlroots
+# does with that request is a behaviour this repo has ASSUMED since D66 —
+# granted as asked, so the surface overhangs the left edge and `plateRoomPx`
+# has to clamp the plates itself — and had never once observed.
+#
+# Pixels cannot answer it. A surface clamped to 280 and a surface granted 300
+# over a 280 px screen both leave the stack anchored 16 px off the right edge
+# with 248 px of room, so the photograph is IDENTICAL under both readings.
+# The compositor's own configure event is the only witness, and the HUD's
+# WAYLAND_DEBUG log already carries it — the same log the frame counter above
+# reads, for free.
+#
+# Keyed by the surface's object id and keeping the LAST configure, because a
+# surface is configured again whenever anything about it changes and what the
+# probe asks about is the size it settled at. Both separators, for the reason
+# COMMIT_RE has both: a debug log is not a stable interface, and a pattern
+# that silently stopped matching would hand this probe an empty dict — which
+# is why the probe insists on finding one surface per output rather than on
+# finding no bad ones.
+LAYER_CONFIGURE_RE = re.compile(
+    r"zwlr_layer_surface_v1[@#](\d+)\.configure\(\s*\d+\s*,\s*(\d+)\s*,\s*(\d+)\s*\)"
+)
+
+
+def layer_surface_sizes(text):
+    """{object id: (width, height)} the compositor last configured each
+    layer surface at, from a stretch of WAYLAND_DEBUG.
+
+    The EVENT, not the request. `set_size(300, 826)` is the client asking
+    and is not matched here; `configure(serial, w, h)` is the compositor
+    answering, and the answer is the whole question.
+    """
+    sizes = {}
+    for oid, w, h in LAYER_CONFIGURE_RE.findall(text):
+        sizes[int(oid)] = (int(w), int(h))
+    return sizes
+
+
 def grew_downwards(before, after):
     """Did a plate ARRIVE UNDER another one, in this stack's geometry?
 
@@ -372,7 +499,9 @@ def sway_config():
         # routed somewhere — which is the entire measurement.
         "focus_follows_mouse no",
     ]
-    for out in OUTPUTS:
+    # Every output, not every monitor: the narrow one (D68) is a real
+    # output on this compositor and the HUD gets a surface on it.
+    for out in ALL_OUTPUTS:
         lines.append(
             f"output {out['name']} mode {out['width']}x{out['height']} "
             f"pos {out['x']} 0"
@@ -834,9 +963,22 @@ SHOTS = [
         "captures": ["desk"],
         # Nothing at all. jarvisd is up, the bridge is subscribed, every
         # plate has looked at the bus and decided it has nothing true to
-        # say — so the shell leaves all three surfaces unmapped and the
+        # say — so the shell leaves all four surfaces unmapped and the
         # screens are the desktop. This is the HUD's ordinary state and
         # the one picture that has to be boring.
+        #
+        # FOUR surfaces and one picture, which is the care in this shot
+        # (D72). `captures` is the list of PNGs, `desk` is `OUTPUTS`, and
+        # the narrow output is outside the desk — so for thirty iterations
+        # the sheet's only DARK shot was a verdict about three of the four
+        # screens the compositor has. It is dark in a way D70's idle probe
+        # is not: there, no frames arrive and nothing ever maps; here the
+        # frames ARRIVE and every plate refuses them, which is the case
+        # where a plate drawing an empty rectangle of glass is a bug.
+        # `shoot.check_capture` now takes a second 0.3 Mpx exposure of the
+        # narrow output for every desk shot and runs `check_corner` over it
+        # without writing a PNG — so this stays one picture, and the claim
+        # under it covers every screen there is.
         "source": "recorded from a live bus with nothing published on it",
         "frames": [],
     },
@@ -872,7 +1014,16 @@ SHOTS = [
     {
         "file": "03-confirm",
         "lit": True,
-        "captures": ["desk", "primary"],
+        # And the one screen on this sheet that is not ares (D68). The
+        # narrow output is 280 px wide against a 300 px surface, and this
+        # is the shot whose plate has something to lose by it:
+        # `ConfirmPlate` caps its own question at 260 px, the room on that
+        # output is 248, so this picture is the first evidence in the repo
+        # of what the HUD does when the screen is smaller than the corner
+        # it asked for. Photographed on the primary FIRST, deliberately —
+        # the two pictures are the same frames at two widths, and the pair
+        # is the measurement.
+        "captures": ["desk", "primary", "narrow"],
         # COMPOSED. jv-act stopping in front of a destructive tool, in its
         # own words, with the window running. The one thing this HUD ever
         # shows that is waiting on YOU — and the reason its size on a real
@@ -1016,7 +1167,7 @@ def all_files():
 
 
 def output_by_role(role):
-    for o in OUTPUTS:
+    for o in ALL_OUTPUTS:
         if o["role"] == role:
             return o
     raise KeyError(role)
@@ -1060,6 +1211,7 @@ PHASES = {
     "checks": (PROBE, "the monitors, the corner, the zone, the focus, the growth"),
     "idle": (PROBE, "five idle windows and the control for each"),
     "click": (PROBE, "one click over a plate, onto the window underneath"),
+    "granted": (PROBE, "the size the compositor configured each surface at"),
     "qmlerrors": (PROBE, "every shell's own log, read for a throw"),
     "encode": (SHEET, "the PNGs, written"),
     "compare": (SHEET, "them read back against the sheet committed at HEAD"),

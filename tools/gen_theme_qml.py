@@ -172,6 +172,7 @@ CORE = (
     ("InstallState", "InstallState.qml"),  # did an install fail, and which? (A52)
     ("ReplyState", "ReplyState.qml"),  # was the last reply cut off? (A71)
     ("PlateStack", "PlateStack.qml"),  # is ANYTHING on screen? (A15)
+    ("PlateFit", "PlateFit.qml"),  # how wide may a plate's text be drawn? (D66)
     ("EarsBudgets", "EarsBudgets.qml"),  # how is jv-ears tuned? (A14)
 )
 
