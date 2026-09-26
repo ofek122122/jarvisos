@@ -500,7 +500,33 @@ def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: boo
     x0, y0, x1, y1 = box
     left = w - sheet.SURFACE_W - sheet.INSET
     bottom = sheet.SURFACE_H + sheet.INSET
-    if x0 < left or x1 >= w or y0 < 0 or y1 > bottom:
+    # TWO BOUNDS, AND IT USED TO BE FOUR (PLAN D73).
+    #
+    # This condition read `x0 < left or x1 >= w or y0 < 0 or y1 > bottom`, and
+    # half of it could never be true. `drawn_box` is `np.nonzero` over an array
+    # the shape of the region it was handed, so every number it returns is an
+    # INDEX into that region: `x1 >= w` and `y0 < 0` are bounds of the IMAGE,
+    # not of the surface. Dead in both callers, and in the desk branch dead
+    # twice over — `region` is a slice one monitor wide, so a box out of it is
+    # bounded by that monitor, and a layer surface hanging off its output's
+    # right edge cannot land in the neighbour's pixels anyway. The compositor
+    # clips it to the output it is on; grim photographs each output's own
+    # buffer.
+    #
+    # Which is the real reason they went rather than merely being tautologies:
+    # they read as "the HUD did not draw off the right edge" and "not above the
+    # top edge", and NO photograph can make either claim. What is off the
+    # screen is not in the picture. The observable form of drawing past an edge
+    # is content FLUSH to that edge, and the three edge gaps below — right,
+    # left, top — are the checks that say so.
+    #
+    # What is left are the two bounds a photograph really does make, and both
+    # are about where the compositor PLACED a surface it did not clip: the
+    # stack begins within `SURFACE_W + INSET` of the right edge, and ends
+    # within `SURFACE_H + INSET` of the top. A layer-shell `top`/`right` anchor
+    # that silently stopped working puts the surface somewhere else on a screen
+    # this much bigger than it, and that is what these two catch.
+    if x0 < left or y1 > bottom:
         raise Fail(
             f"{name}: drew at x{x0}..{x1} y{y0}..{y1}, outside the "
             f"{sheet.SURFACE_W}x{sheet.SURFACE_H} box shell.qml anchors to the "
@@ -541,6 +567,25 @@ def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: boo
             "`plateRoomPx` and not by the surface, so this is that clamp "
             "failing on a real compositor — the HUD is drawing where the "
             "screen is not"
+        )
+
+    # AND THE TOP EDGE (PLAN D73), which is the claim `y0 < 0` was standing in
+    # for and could not make. A surface placed above the top of its output is
+    # clipped, so what a photograph of one looks like is a stack that starts at
+    # row 0 — and the top inset is what that violates. Every plate in the stack
+    # hangs off `anchors.topMargin: Theme.insetPx` inside a surface anchored to
+    # the top of the screen with no margin of its own, so the first drawn row is
+    # the inset, measured at exactly 16 on all ten pictures in
+    # docs/hud/screens. Same two pixels of anti-aliasing slack as the other two
+    # gaps, and the same reason to hold it on every output: §06 gives the top
+    # edge the same gap as the right, and a HUD flush to the top of the screen
+    # reads as a crop whether or not it is one.
+    if y0 < sheet.INSET - 2:
+        raise Fail(
+            f"{name}: drew from y{y0}, inside the {sheet.INSET}px top inset "
+            f"personality/theme.toml declares. Either the stack lost its top "
+            "margin, or the surface itself was placed above the top of the "
+            "output and the compositor clipped what a photograph cannot see"
         )
 
 

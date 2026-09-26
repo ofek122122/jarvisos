@@ -3858,3 +3858,367 @@ def test_the_narrow_output_is_photographed():
             f"{shot['file']} photographs the narrow output dark, which is a "
             "picture of a bare desktop and says nothing about the corner"
         )
+
+
+# --------- every bound the corner check draws is one a photograph can cross (D73)
+#
+# `check_corner` is the only thing in this repo that measures WHERE the HUD
+# landed on a real compositor, and its box condition read
+# `x0 < left or x1 >= w or y0 < 0 or y1 > bottom` — four terms, fencing a box
+# on all four sides. Two of them can never be true. `drawn_box` is
+# `np.nonzero` over an array the shape of the region it was handed, so every
+# number it returns is an INDEX into that region: `x1 >= w` and `y0 < 0` are
+# bounds of the IMAGE, not of the surface, and no photograph of any screen can
+# cross them.
+#
+# The claims they read as — "the HUD did not draw off the right edge", "not
+# above the top edge" — are ones a photograph cannot make at all, because a
+# surface placed past an output's edge is CLIPPED by the compositor and what
+# arrives in the ppm is the part that landed. Their observable form is the
+# INSET: content flush to an edge is what a clip looks like from inside the
+# picture, and the three edge gaps (right, left, top) are what say so.
+#
+# So this gate, which is about the shape of the condition rather than about
+# any one term of it: every bound `check_corner` draws must be crossable by a
+# box `drawn_box` can actually return, and must also hold for one it can. A
+# term that is never true is a sentence in a failure message that no failure
+# will ever print; a term that is always true would fail every green run.
+#
+# The domain is the whole argument, so it is derived rather than assumed:
+# `_drawn_box_is_indices_into_its_region` below pins it to the function, and
+# the day `drawn_box` starts returning LAYOUT coordinates — which is the one
+# change that would make `x1 >= w` live — that gate goes red instead of this
+# one going quietly vacuous.
+
+# The names `check_corner` measures a photograph with, and which of them this
+# gate samples rather than derives. `left`, `bottom` and `gap` are computed by
+# the function itself out of these, so they are taken from its own source: a
+# gate that sampled `gap` as a free variable would be asking about boxes no
+# photograph can produce (`gap` is `w - 1 - x1`, and the two cannot drift).
+CORNER_FREE = ("x0", "y0", "x1", "y1", "w", "h")
+
+
+def corner_bounds() -> list[str]:
+    """Every comparison `check_corner` fails a photograph on, as a condition
+    that is TRUE when the function raises.
+
+    Split out of chained and `or`-ed conditions so each is graded on its own: a
+    chain whose two halves are graded together hides a dead half, and `or` is a
+    list of sufficient causes. Polarity matters and is carried — the right-hand
+    gap is written `if not (INSET - 2 <= gap <= INSET + 2)`, so the two
+    comparisons in it are bounds only once negated, and a gate that read them
+    as written would have the sense of half its terms backwards.
+
+    The `lit` and `box is None` guards are not bounds — they are about whether
+    anything was drawn at all — and they drop out by their free names.
+    """
+    fn = next(
+        n
+        for n in shoot_tree().body
+        if isinstance(n, ast.FunctionDef) and n.name == "check_corner"
+    )
+    known = set(CORNER_FREE) | {"sheet"} | {name for name, _ in corner_derivations()}
+    out = []
+
+    def walk(node, negated):
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            walk(node.operand, not negated)
+            return
+        if isinstance(node, ast.BoolOp):
+            for value in node.values:
+                walk(value, negated)
+            return
+        if not isinstance(node, ast.Compare):
+            return
+        names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+        if not names or not names <= known:
+            return
+        operands = [node.left] + list(node.comparators)
+        for i, op in enumerate(node.ops):
+            term = ast.unparse(
+                ast.Compare(left=operands[i], ops=[op], comparators=[operands[i + 1]])
+            )
+            out.append(f"not ({term})" if negated else term)
+
+    for node in ast.walk(fn):
+        if isinstance(node, ast.If):
+            walk(node.test, False)
+    return out
+
+
+def corner_derivations() -> list[tuple[str, str]]:
+    """The names `check_corner` computes OUT OF a photograph's box, in source
+    order, as (name, expression).
+
+    Only those: `box = drawn_box(...)` is where the box comes from rather than
+    something computed from it, and it drops out by the same free-name rule the
+    bounds use — nothing but the sampled coordinates and the sheet's own
+    geometry can appear on the right-hand side.
+    """
+    fn = next(
+        n
+        for n in shoot_tree().body
+        if isinstance(n, ast.FunctionDef) and n.name == "check_corner"
+    )
+    known = set(CORNER_FREE) | {"sheet"}
+    out = []
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            names = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
+            if names <= known:
+                out.append((target.id, ast.unparse(node.value)))
+                known.add(target.id)
+    return out
+
+
+def photographable_boxes(w: int, h: int):
+    """Every box `drawn_box` can hand `check_corner` on a `w` x `h` region,
+    sampled at the values that decide something.
+
+    The domain — `0 <= x0 <= x1 < w` and `0 <= y0 <= y1 < h` — is not a
+    choice: `drawn_box` returns `np.nonzero` extremes over an array of that
+    shape. The sample points are every bound in the function plus two pixels
+    of anti-aliasing slack either side, plus the edges of the region, so a
+    term that only discriminates within a pixel or two of its own threshold
+    still gets a witness.
+    """
+    def marks(size, *vals):
+        return sorted({v for v in vals if 0 <= v <= size - 1})
+
+    inset, sw, sh = sheet.INSET, sheet.SURFACE_W, sheet.SURFACE_H
+    xs = marks(w, 0, 1, inset - 3, inset - 2, inset, w - sw - inset - 1,
+               w - sw - inset, w - sw - inset + 1, w - 1 - inset - 3,
+               w - 1 - inset, w - 1 - inset + 3, w - 2, w - 1)
+    ys = marks(h, 0, 1, inset - 3, inset - 2, inset, sh + inset - 1,
+               sh + inset, sh + inset + 1, h - 2, h - 1)
+    for x0 in xs:
+        for x1 in xs:
+            if x1 < x0:
+                continue
+            for y0 in ys:
+                for y1 in ys:
+                    if y1 >= y0:
+                        yield x0, y0, x1, y1
+
+
+def corner_program(bounds):
+    """`check_corner`'s arithmetic, compiled, plus the check that this gate can
+    run all of it.
+
+    Every name a bound reads has to be one the gate either samples or derives
+    the way the function does. A bound over something else — a new helper, a
+    value read off the region — would otherwise come back as a NameError from
+    inside an `eval`, which reads as a broken test rather than as the honest
+    news that this gate has stopped covering the function.
+    """
+    derivations = corner_derivations()
+    env_names = set(CORNER_FREE) | {"sheet"} | {name for name, _ in derivations}
+    for b in bounds:
+        unknown = {
+            n.id for n in ast.walk(ast.parse(b, mode="eval")) if isinstance(n, ast.Name)
+        } - env_names
+        assert not unknown, (
+            f"check_corner bounds the photograph with {sorted(unknown)}, which "
+            f"this gate can neither sample nor derive — `{b}` is therefore "
+            "graded by nobody, and a vacuous bound is exactly what it is "
+            "looking for"
+        )
+    return (
+        {b: compile(b, "<check_corner>", "eval") for b in bounds},
+        [(name, compile(expr, "<check_corner>", "eval")) for name, expr in derivations],
+    )
+
+
+def corner_fires(program, box, w, h):
+    """The bounds `check_corner` would raise on, given a box and the screen it
+    was measured on. Empty is the pass."""
+    code, derived = program
+    x0, y0, x1, y1 = box
+    env = {"sheet": sheet, "x0": x0, "y0": y0, "x1": x1, "y1": y1, "w": w, "h": h}
+    for name, expr in derived:
+        env[name] = eval(expr, {}, env)
+    return [b for b, c in code.items() if bool(eval(c, {}, env))]
+
+
+def corner_verdicts(bounds, w, h):
+    """For each bound, the set of verdicts it takes over every box a
+    photograph of a `w` x `h` screen can produce."""
+    program = corner_program(bounds)
+    seen = {b: set() for b in bounds}
+    for box in photographable_boxes(w, h):
+        fired = set(corner_fires(program, box, w, h))
+        for b in bounds:
+            seen[b].add(b in fired)
+    return seen
+
+
+def test_no_bound_the_corner_check_draws_is_vacuous():
+    """Every term of every condition `check_corner` fails a photograph on has
+    to be one a photograph can cross — on at least one of this compositor's
+    screens — and one it can also satisfy.
+
+    What it caught: `x1 >= w` and `y0 < 0`, two of the four terms in a
+    condition that looked like it fenced the drawn box on all four sides, dead
+    on every output there is and dead in both callers (PLAN D73).
+    """
+    bounds = corner_bounds()
+    assert len(bounds) >= 4, (
+        f"only {len(bounds)} bound(s) found in check_corner ({bounds}) — the "
+        "function measures where the HUD landed and this gate has lost track "
+        "of how it does it, which is a vacuous pass either way"
+    )
+    live, always = set(), set(bounds)
+    for out in sheet.ALL_OUTPUTS:
+        seen = corner_verdicts(bounds, out["width"], out["height"])
+        live |= {b for b in bounds if True in seen[b]}
+        always -= {b for b in bounds if True in seen[b]}
+    dead = [b for b in bounds if b not in live]
+    assert not dead, (
+        f"check_corner cannot fail on {dead} for any box `drawn_box` can "
+        "return, on any screen this compositor has — every number it returns "
+        "is an index into the region it was handed, so a bound outside that "
+        "region is a sentence in a failure message no failure will print. If "
+        "the claim was about the HUD drawing past an edge: a surface placed "
+        "past an output's edge is CLIPPED, and what a photograph sees is "
+        "content flush to that edge, which is the INSET's business"
+    )
+    assert not always, (
+        f"check_corner fails on {sorted(always)} for every box a photograph "
+        "can produce, so a green run of this harness is impossible"
+    )
+
+
+def test_the_only_bound_the_narrow_screen_takes_away_is_the_left_one():
+    """The correction D72 needed, kept as a gate rather than as a paragraph.
+
+    On the 280 px output `w - SURFACE_W - INSET` is negative, so `x0 < left`
+    is true of nothing: the surface really does hang off the left of the world
+    and that half of the box check is about the surface. Exactly that one
+    bound goes — `y1 > bottom` still holds the stack, the right-hand gap still
+    holds the inset, and D66's clamp replaces the bound that went. A bound
+    added later that is ALSO vacuous at 280 px would be a check that reads as
+    covering the narrow screen and does not, so it goes red here by name.
+    """
+    bounds = corner_bounds()
+    narrow = sheet.output_by_role("narrow")
+    seen = corner_verdicts(bounds, narrow["width"], narrow["height"])
+    dead = {b for b in bounds if True not in seen[b]}
+    assert dead == {"x0 < left"}, (
+        f"on the {narrow['width']}px output the bounds that can never fail are "
+        f"{sorted(dead)}, not the left one alone — every desk shot takes this "
+        "function to that screen (PLAN D72), and a bound vacuous there is one "
+        "the only narrow verdict on the sheet does not make"
+    )
+
+
+def test_drawn_box_returns_indices_into_the_region_it_was_given():
+    """The premise under both gates above, pinned to the function.
+
+    `photographable_boxes` is only the domain because `drawn_box` returns
+    `np.nonzero` extremes over the region it was handed and adds nothing to
+    them. The one change that would make `x1 >= w` a live bound is a
+    `drawn_box` that returned LAYOUT coordinates — an offset for the monitor
+    the region was cut from — and then the desk branch's regions would be
+    slices of a wider image with room to the right of them. That is a real
+    possibility and this is where it must be noticed, so the gate is on the
+    RETURN rather than on a comment: no offsets, no arguments but the region
+    and the backdrop.
+    """
+    fn = next(
+        n
+        for n in shoot_tree().body
+        if isinstance(n, ast.FunctionDef) and n.name == "drawn_box"
+    )
+    assert [a.arg for a in fn.args.args] == ["region", "background"], (
+        "drawn_box takes an argument other than the region and the backdrop — "
+        "if it is an origin, every bound check_corner draws is now about a "
+        "different coordinate system than the gates above sample"
+    )
+    returns = [n for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]
+    tuples = [ast.unparse(n.value) for n in returns if isinstance(n.value, ast.Tuple)]
+    assert tuples == ["(int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))"], (
+        f"drawn_box returns {tuples} — the gates above sample the boxes it can "
+        "produce as indices into its own region, and anything added to those "
+        "extremes silently widens that domain"
+    )
+
+
+# Where the HUD really is, in the ten pictures this repo ships. Read off
+# docs/hud/screens with `drawn_box`'s own rule — every pixel that is not
+# `sheet.BACKDROP` — one per shape the corner takes: the widest plate pair, the
+# same pair on a smaller monitor, the 280 px screen, and the narrowest thing
+# the HUD ever says (`05-preempted` is one plate, 108 px wide).
+#
+# They are here because the arithmetic above is only worth what its domain is.
+# A bound is graded by boxes a photograph COULD produce; these are boxes a
+# photograph DID produce, and every one of them has to pass. The numbers were
+# measured, not derived, so they are also the evidence for the top inset: all
+# four begin at y16, which is `Theme.insetPx` exactly.
+MEASURED_CORNERS = [
+    ("02-heard-primary.png", "primary", (2307, 16, 2543, 176)),
+    ("02-heard-side.png", "side", (1667, 16, 1903, 176)),
+    ("03-confirm-narrow.png", "narrow", (16, 16, 263, 152)),
+    ("05-preempted-primary.png", "primary", (2436, 16, 2543, 50)),
+]
+
+
+def test_the_corner_check_passes_the_pictures_this_repo_ships():
+    """The sanity half, and the one that would catch a bound tightened past
+    the HUD it is measuring. A gate that fenced the drawn box on all four
+    sides and rejected the real corner would be red on every run of the
+    harness — which nobody would mistake for a pass, but would also tell a
+    reader nothing about which bound was wrong."""
+    program = corner_program(corner_bounds())
+    for file, role, box in MEASURED_CORNERS:
+        out = sheet.output_by_role(role)
+        fired = corner_fires(program, box, out["width"], out["height"])
+        assert not fired, (
+            f"{file} measures {box} on {out['name']} and check_corner would "
+            f"fail it on {fired} — the bound is tighter than the HUD this "
+            "repo actually draws"
+        )
+        assert Path(ROOT / "docs" / "hud" / "screens" / file).exists(), (
+            f"{file} is not on the sheet any more, so the box above is a "
+            "measurement of a picture nobody has"
+        )
+
+
+def test_the_corner_check_fences_the_drawn_box_on_all_four_edges():
+    """The claim the two dead bounds were reaching for, made in the form a
+    photograph can make it (PLAN D73).
+
+    `x1 >= w` and `y0 < 0` read as "did not draw off the right edge" and "not
+    above the top edge". What is off the screen is not in the picture, so the
+    observable version of both is content FLUSH to an edge: that is what a
+    clipped surface looks like from inside a ppm. Take a box the sheet really
+    measured, push it to each of the four edges in turn, and insist something
+    in `check_corner` refuses it.
+
+    This is what grades the three inset gaps and the bottom bound. Delete the
+    top-inset check and the top row here passes.
+    """
+    program = corner_program(corner_bounds())
+    for file, role, box in MEASURED_CORNERS:
+        out = sheet.output_by_role(role)
+        w, h = out["width"], out["height"]
+        x0, y0, x1, y1 = box
+        # Each is the measured corner with ONE edge of it moved onto the edge
+        # of the screen, so whatever fires is firing about that edge alone.
+        pathologies = {
+            "top": (x0, 0, x1, y1),
+            "right": (x0, y0, w - 1, y1),
+            "left": (0, y0, x1, y1),
+            "bottom": (x0, y0, x1, h - 1),
+        }
+        for edge, bad in pathologies.items():
+            fired = corner_fires(program, bad, w, h)
+            assert fired, (
+                f"nothing in check_corner refuses {bad} on {out['name']} — the "
+                f"corner {file} measures, reaching the {edge} edge of the "
+                "screen. A surface the compositor placed past that edge is "
+                "CLIPPED, and this is what the photograph of one looks like, "
+                f"so the {edge} edge of the HUD is bounded by nobody"
+            )
