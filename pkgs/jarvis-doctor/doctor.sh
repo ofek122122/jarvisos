@@ -6,7 +6,7 @@
 #   3. Lenovo 510 FHD enumerates RGB *and* IR nodes; a frame captures from each
 #   4. PipeWire sees the microphone and records audio
 #   5. Every monitor hosts/ares/outputs.nix declares is live at exactly the
-#      mode and left edge it declares, and no other output is connected
+#      mode and position it declares, and no other output is connected
 #   6. Windows NVMe is NOT mounted and NOT in the bootloader
 #   7. The 2 TB data disk is not mounted (permanently off-limits)
 #
@@ -103,7 +103,7 @@ section "Monitors (Wayland, via niri)"
 # expectation is GENERATED from hosts/ares/outputs.nix and interpolated into
 # the package as $JARVIS_OUTPUTS, one tab-separated row per declared output —
 #
-#     name <TAB> width <TAB> height <TAB> refresh <TAB> x
+#     name <TAB> width <TAB> height <TAB> refresh <TAB> x <TAB> y
 #
 # and a monitor added there is checked here on the next rebuild with nobody
 # remembering to edit this file.
@@ -114,9 +114,11 @@ section "Monitors (Wayland, via niri)"
 # flake has ever heard of — no bespoke wallpaper, no niri rule, and no other
 # check that would ever mention it.
 #
-# What it deliberately does not claim: the VERTICAL position. The declaration
-# carries `x` and no `y`, and a check must not assert more than the thing it
-# reads.
+# THE WHOLE POSITION, not just the left edge (PLAN E14). `Logical position:
+# X, Y` used to be read for its X alone, because the declaration had no `y` to
+# compare the other half against — so a side panel sitting a screen-height too
+# low was three passes and no finding: right modes, right names, a desktop
+# whose bar and wallpaper are placed for a row of three that is not a row.
 decl_file="${JARVIS_OUTPUTS:-}"
 declared=""
 if [ -n "$decl_file" ] && [ -r "$decl_file" ]; then
@@ -135,8 +137,8 @@ elif [ -z "$declared" ]; then
 elif [ -z "$outputs" ]; then
   fail "niri msg outputs failed — run inside the niri session"
 else
-  # One `connector <TAB> WxH <TAB> refresh <TAB> x` row per live output, from
-  # niri's blocks:
+  # One `connector <TAB> WxH <TAB> refresh <TAB> x <TAB> y` row per live
+  # output, from niri's blocks:
   #
   #     Output "HP Inc. HP 27xq CNK038121B" (HDMI-A-1)
   #       Current mode: 2560x1440 @ 144.006 Hz
@@ -145,24 +147,24 @@ else
   # A DISABLED output has a block and no `Current mode:`, so its fields keep
   # the `?` the header set — which is a mismatch below, and not a skip.
   live=$(awk '
-    function flush() { if (conn != "") printf "%s\t%s\t%s\t%s\n", conn, mode, hz, x }
+    function flush() { if (conn != "") printf "%s\t%s\t%s\t%s\t%s\n", conn, mode, hz, x, y }
     /^Output /                       { flush(); conn = $NF; gsub(/[()]/, "", conn)
-                                       mode = "?"; hz = "?"; x = "?" }
+                                       mode = "?"; hz = "?"; x = "?"; y = "?" }
     /^[[:space:]]+Current mode:/     { mode = $3; hz = $5 }
-    /^[[:space:]]+Logical position:/ { x = $3; sub(/,$/, "", x) }
+    /^[[:space:]]+Logical position:/ { x = $3; sub(/,$/, "", x); y = $4 }
     END { flush() }
   ' <<<"$outputs")
 
   # `while read` over a here-string runs in THIS shell, not a subshell, so the
   # failures these arms count survive the loop.
-  while IFS=$'\t' read -r name w h hz x; do
+  while IFS=$'\t' read -r name w h hz x y; do
     [ -n "$name" ] || continue
-    want=$(printf '%s\t%sx%s\t%s\t%s' "$name" "$w" "$h" "$hz" "$x")
+    want=$(printf '%s\t%sx%s\t%s\t%s\t%s' "$name" "$w" "$h" "$hz" "$x" "$y")
     got=$(awk -F'\t' -v n="$name" '$1 == n { print; exit }' <<<"$live")
     if [ -z "$got" ]; then
-      fail "$name is declared (${w}x${h} @ ${hz} Hz at x=${x}) and the session has no such output"
+      fail "$name is declared (${w}x${h} @ ${hz} Hz at ${x},${y}) and the session has no such output"
     elif [ "$got" = "$want" ]; then
-      pass "$name at ${w}x${h} @ ${hz} Hz, ${x} px from the left"
+      pass "$name at ${w}x${h} @ ${hz} Hz, at ${x},${y} in the layout"
     else
       fail "$name is declared as '$(tr '\t' ' ' <<<"$want")' and is live as '$(tr '\t' ' ' <<<"$got")'"
     fi

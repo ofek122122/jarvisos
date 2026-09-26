@@ -20,6 +20,7 @@ run against the wrong machine, or not run at all.
 """
 
 import ast
+import itertools
 import json
 import re
 import subprocess
@@ -119,23 +120,37 @@ def test_the_monitors_are_ares_monitors():
     backend is headless, it has no scanout, and sheet.py calls its outputs
     HEADLESS-1..3 on purpose. The claim is about size and layout, which is what
     the sheet is evidence about.
+
+    `y` joined the tuple with PLAN E14. It was a row of three at y=0 in both
+    places, so the sheet agreeing with ares about the vertical was true by
+    accident and would have stayed green through a declaration that stacked
+    one panel above another.
     """
-    ares = sorted(declared_outputs(ARES_OUTPUTS), key=lambda o: o["x"])
-    assert [(o["width"], o["height"], o["x"]) for o in sheet.OUTPUTS] == [
-        (o["width"], o["height"], o["x"]) for o in ares
-    ], (
-        f"tools/hudscreens/sheet.py lays out "
-        f"{[(o['width'], o['height'], o['x']) for o in sheet.OUTPUTS]} and ares "
-        f"declares {[(o['width'], o['height'], o['x']) for o in ares]}"
+    def box(o):
+        return (o["width"], o["height"], o["x"], o["y"])
+
+    ares = sorted(declared_outputs(ARES_OUTPUTS), key=lambda o: (o["x"], o["y"]))
+    assert [box(o) for o in sheet.OUTPUTS] == [box(o) for o in ares], (
+        f"tools/hudscreens/sheet.py lays out {[box(o) for o in sheet.OUTPUTS]} and "
+        f"ares declares {[box(o) for o in ares]}"
     )
-    # Side by side, no overlap and no gap: the desk shot is one grim
-    # capture across the whole layout, and an overlap would photograph one
-    # monitor twice.
-    x = 0
-    for out in sheet.OUTPUTS:
-        assert out["x"] == x, f"{out['name']} starts at {out['x']}, expected {x}"
-        x += out["width"]
-    assert sheet.DESK_WIDTH == x
+    # No two monitors overlap. The desk shot is one grim capture across the
+    # whole layout and every verdict on it is read per monitor, so an overlap is
+    # one screen photographed twice and one measurement made about the wrong
+    # panel. Stated as geometry rather than as "x += width" (which was the old
+    # rule) because a row is one legal layout and E14 made the others
+    # describable.
+    #
+    # NOT "and no gap": ares' desk has 1.4 Mpx of no screen at all in it — the
+    # bottom 360 px under each 1080p panel, beside a 1440p primary. That is the
+    # reason every check reads `sheet.desk_slice(out)` out of the desk capture
+    # rather than the image: a verdict taken off the whole picture would be
+    # partly about a rectangle no monitor is showing.
+    for a, b in itertools.combinations(sheet.OUTPUTS, 2):
+        overlap = max(0, min(a["x"] + a["width"], b["x"] + b["width"]) - max(a["x"], b["x"])) * max(
+            0, min(a["y"] + a["height"], b["y"] + b["height"]) - max(a["y"], b["y"])
+        )
+        assert overlap == 0, f"{a['name']} and {b['name']} overlap by {overlap} px²"
 
 
 def test_at_least_one_shot_is_dark_and_at_least_one_is_lit():
@@ -260,7 +275,7 @@ def test_the_compositor_never_follows_the_mouse():
     )
 
 
-def test_the_compositor_is_given_the_monitors_the_sheet_declares():
+def test_the_compositor_is_given_the_monitors_the_sheet_declares(monkeypatch):
     """One source for ares' monitors. A config that drifted from
     `sheet.OUTPUTS` would leave every geometric check measuring a screen
     the compositor does not have.
@@ -269,9 +284,23 @@ def test_the_compositor_is_given_the_monitors_the_sheet_declares():
     for out in sheet.OUTPUTS:
         line = (
             f"output {out['name']} mode {out['width']}x{out['height']} "
-            f"pos {out['x']} 0"
+            f"pos {out['x']} {out['y']}"
         )
         assert line in config, f"the compositor is never told about {line!r}"
+
+    # And the position it writes is the DECLARED one, both coordinates — which
+    # this cannot show on ares, because every `y` here is 0 and `pos {x} 0`
+    # would satisfy every line above (PLAN E14: that literal was there, and this
+    # test passed on it). So the generator is run against a desk nobody owns.
+    monkeypatch.setattr(
+        sheet,
+        "ALL_OUTPUTS",
+        [{"name": "HEADLESS-9", "role": "primary", "width": 1280, "height": 720, "x": 40, "y": -720}],
+    )
+    assert "output HEADLESS-9 mode 1280x720 pos 40 -720" in sheet.sway_config(), (
+        "sway_config() does not place an output at the vertical position it is "
+        f"declared at:\n{sheet.sway_config()}"
+    )
 
 
 def test_the_driver_takes_its_compositor_config_from_the_sheet():
@@ -3536,10 +3565,10 @@ def test_the_narrow_output_is_not_one_of_ares_monitors():
     """
     assert sheet.NARROW not in sheet.OUTPUTS
     assert sheet.ALL_OUTPUTS == [*sheet.OUTPUTS, sheet.NARROW]
-    assert sheet.NARROW["x"] >= sheet.DESK_WIDTH, (
-        f"the narrow output starts at x={sheet.NARROW['x']} and the desk is "
-        f"{sheet.DESK_WIDTH}px wide — it is inside the desk capture, so every "
-        "desk shot in this sheet is now a picture of four screens"
+    assert sheet.NARROW["x"] >= sheet.DESK_X + sheet.DESK_WIDTH, (
+        f"the narrow output starts at x={sheet.NARROW['x']} and the desk runs to "
+        f"x={sheet.DESK_X + sheet.DESK_WIDTH} — it is inside the desk capture, so "
+        "every desk shot in this sheet is now a picture of four screens"
     )
     roles = [o["role"] for o in sheet.ALL_OUTPUTS]
     assert len(roles) == len(set(roles)), f"two outputs share a role: {roles}"
@@ -3555,7 +3584,7 @@ def test_the_compositor_is_given_the_narrow_output_too():
     line = (
         f"output {sheet.NARROW['name']} mode "
         f"{sheet.NARROW['width']}x{sheet.NARROW['height']} "
-        f"pos {sheet.NARROW['x']} 0"
+        f"pos {sheet.NARROW['x']} {sheet.NARROW['y']}"
     )
     assert line in sheet.sway_config(), f"the compositor is never told about {line!r}"
     assert "len(sheet.ALL_OUTPUTS)" in driver_text(), (
@@ -3630,6 +3659,77 @@ def test_earned_emptiness_is_measured_on_every_output_the_compositor_has():
     assert len(reads) == len(targets), (
         f"check_desk_is_bare takes {len(targets)} exposures and reads "
         f"{len(reads)} of them"
+    )
+
+
+def test_the_desk_capture_is_the_bounding_box_of_the_layout():
+    """`DESK` is an IMAGE and not a screen, and until PLAN E14 the image began
+    at 0,0 because every monitor did. The origin is the layout's now: `grim -g`
+    is handed a corner, and a corner written as a literal zero is a capture that
+    silently slides off any desk whose top-left monitor is not at the origin —
+    the same size, so `check_grim_size` passes, of pixels that are mostly not
+    the screens the checks below are about.
+    """
+    assert (sheet.DESK_X, sheet.DESK_Y) == (
+        min(o["x"] for o in sheet.OUTPUTS),
+        min(o["y"] for o in sheet.OUTPUTS),
+    ), f"the desk starts at {sheet.DESK_X},{sheet.DESK_Y}, which is no monitor's corner"
+    assert sheet.DESK_WIDTH == max(o["x"] + o["width"] for o in sheet.OUTPUTS) - sheet.DESK_X
+    assert sheet.DESK_HEIGHT == max(o["y"] + o["height"] for o in sheet.OUTPUTS) - sheet.DESK_Y
+
+    # And the harness asks the sheet for that corner rather than writing one.
+    geom = re.search(r'geom = f"(?P<g>[^"]*)"', shoot_text())
+    assert geom, "shoot.py no longer builds a `grim -g` geometry for the desk"
+    assert geom.group("g") == (
+        "{sheet.DESK_X},{sheet.DESK_Y} {sheet.DESK_WIDTH}x{sheet.DESK_HEIGHT}"
+    ), (
+        f"shoot.py photographs the desk at {geom.group('g')!r}, which is not the "
+        "rectangle the sheet says the monitors occupy"
+    )
+
+
+def test_a_monitors_pixels_are_read_where_the_layout_puts_them(monkeypatch):
+    """The other half of the same hazard, one step later: a desk capture is read
+    back per monitor, and the two readers used to slice it `img[0 : height,
+    x : x + width]` — a vertical zero, and a horizontal offset that is only the
+    output's own `x` while the image's left edge is the DESK's. Both are
+    `sheet.desk_slice` now, which is arithmetic a test with no numpy can run.
+
+    Slicing past the end of a numpy array returns a SMALLER array rather than
+    raising, `drawn_box` of an empty region is None, and None is spelt "the HUD
+    drew nothing here" — so every one of these mistakes reads as earned
+    emptiness.
+    """
+    for out in sheet.OUTPUTS:
+        rows, cols = sheet.desk_slice(out)
+        assert (rows.start, rows.stop) == (out["y"] - sheet.DESK_Y, out["y"] - sheet.DESK_Y + out["height"])
+        assert (cols.start, cols.stop) == (out["x"] - sheet.DESK_X, out["x"] - sheet.DESK_X + out["width"])
+        # Inside the picture, both axes: a region that ran off the edge would be
+        # read as a smaller one and pass.
+        assert 0 <= rows.start and rows.stop <= sheet.DESK_HEIGHT, out
+        assert 0 <= cols.start and cols.stop <= sheet.DESK_WIDTH, out
+
+    # The offsets are RELATIVE to the desk's corner, which on ares is the origin
+    # — so on ares `out["x"], out["y"]` would do, and the version of this that
+    # did was green (PLAN E14). A desk whose top-left monitor is not at 0,0 is
+    # the only thing that can tell the two apart.
+    monkeypatch.setattr(sheet, "DESK_X", -1920)
+    monkeypatch.setattr(sheet, "DESK_Y", -720)
+    rows, cols = sheet.desk_slice({"name": "x", "width": 800, "height": 600, "x": -1920, "y": -720})
+    assert (rows.start, rows.stop, cols.start, cols.stop) == (0, 600, 0, 800), (
+        "the monitor in the desk's own top-left corner is not read from the "
+        f"top-left corner of the desk capture: rows {rows}, cols {cols}"
+    )
+
+    # …and it is what the two desk readers actually use.
+    for reader in ("check_capture", "check_desk_is_bare"):
+        assert calls_in(reader, "sheet.desk_slice"), (
+            f"{reader} does not slice the desk capture with sheet.desk_slice, so "
+            "where it believes a monitor is in that image is written twice"
+        )
+    stray = re.findall(r"img\[0 ?: ?out\[", shoot_text())
+    assert stray == [], (
+        f"shoot.py still reads a desk region at a literal vertical zero {stray}"
     )
 
 

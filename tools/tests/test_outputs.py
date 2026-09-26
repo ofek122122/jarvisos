@@ -138,12 +138,19 @@ def test_every_declared_output_says_what_the_art_and_the_layout_both_need():
     """The shape of an entry, held once so the tests below can trust it. Two
     consumers, two sets of fields: the wallpaper needs integer pixels and
     exactly one primary, and the layout PLAN E5 will generate needs a name, a
-    refresh rate and a left edge. A missing `x` is the one that would be
+    refresh rate and a position. A missing `x` is the one that would be
     invisible — niri would stack two outputs on top of each other and the flake
-    would build."""
+    would build.
+
+    `y` is required for PLAN E14's reason: it used to be absent, and three
+    things read that absence as a zero — the doctor compared only the left edge
+    of `Logical position: X, Y`, the contact sheet laid its panels out in a row
+    at y=0, and the niri rules E5 will generate would have had to invent one. A
+    monitor mounted ABOVE another is a legal layout, and the failure was quiet
+    in the direction that matters: everything passed."""
     for out in declared_outputs(ARES_OUTPUTS):
         assert isinstance(out.get("name"), str) and out["name"], out
-        for px in ("width", "height", "x"):
+        for px in ("width", "height", "x", "y"):
             assert isinstance(out.get(px), int), (
                 f"{out.get('name')} declares {px}={out.get(px)!r}, and the art "
                 "de-duplicates geometries by value: \"1920\" and 1920 are two "

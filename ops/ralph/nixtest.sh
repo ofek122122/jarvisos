@@ -286,7 +286,7 @@ fi
 # declare is a FAIL on every healthy boot.
 t='the doctor checks for every output ares declares, and for none it does not'
 want=$(nix eval --raw --file hosts/ares/outputs.nix --apply \
-  'l: builtins.concatStringsSep "\n" (map (o: "${o.name}\t${toString o.width}\t${toString o.height}\t${o.refresh}\t${toString o.x}") l)' 2>&1)
+  'l: builtins.concatStringsSep "\n" (map (o: "${o.name}\t${toString o.width}\t${toString o.height}\t${o.refresh}\t${toString o.x}\t${toString o.y}") l)' 2>&1)
 # Realized rather than evaluated (PLAN E12), and cheap: cuda-smoke and the
 # doctor are two small derivations, ~2 s warm.
 doc_said=$(nix build --no-link --print-out-paths '.#jarvis-doctor' 2>&1)
@@ -294,7 +294,7 @@ doc=$(grep "^$store/" <<<"$doc_said" | tail -1)
 tsv=""
 [ -n "$doc" ] && [ -r "$doc/bin/jarvis-doctor" ] &&
   tsv=$(grep -m1 '^JARVIS_OUTPUTS=' "$doc/bin/jarvis-doctor" | cut -d= -f2- | tr -d "'")
-row_re=$(printf '^[A-Za-z0-9_-]+\t[0-9]+\t[0-9]+\t[0-9]+\\.[0-9]+\t[0-9]+$')
+row_re=$(printf '^[A-Za-z0-9_-]+\t[0-9]+\t[0-9]+\t[0-9]+\\.[0-9]+\t-?[0-9]+\t-?[0-9]+$')
 if ! grep -qE "$row_re" <<<"$want"; then
   bad "$t" "hosts/ares/outputs.nix names no output the doctor could check; nix said: $(tail -3 <<<"$want")"
 elif [ -z "$tsv" ] || [ ! -r "$tsv" ]; then

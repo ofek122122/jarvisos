@@ -31,10 +31,13 @@ let
   # against, and an interpolation that evaluated to the wrong list cannot look
   # right in this file.
   #
-  # One row per output, tab-separated:  name  width  height  refresh  x
+  # One row per output, tab-separated:  name  width  height  refresh  x  y
   # `refresh` stays the declaration's exact string (the primary is 144.006, not
-  # 144) because that is what `niri msg outputs` prints, and `x` is the left
-  # edge, which is the only part of the position the declaration commits to.
+  # 144) because that is what `niri msg outputs` prints, and `x  y` is the
+  # output's top-left corner in the layout — the whole position, since PLAN E14
+  # gave the declaration a `y`. A column added here and not read in doctor.sh
+  # shifts every field after it, which is what `test_doctor.py` holds the two
+  # halves of this hop together for.
   declared =
     if outputs == [ ] then
       throw (
@@ -45,7 +48,8 @@ let
     else
       writeText "jarvis-declared-outputs.tsv" (
         lib.concatMapStrings (
-          o: "${o.name}\t${toString o.width}\t${toString o.height}\t${o.refresh}\t${toString o.x}\n"
+          o:
+          "${o.name}\t${toString o.width}\t${toString o.height}\t${o.refresh}\t${toString o.x}\t${toString o.y}\n"
         ) outputs
       );
 in

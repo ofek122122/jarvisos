@@ -156,11 +156,13 @@ def run_check(
 # -------------------------------------------------------------- the fake world
 
 
-def tsv(*rows: tuple[str, int, int, str, int]) -> str:
-    return "".join(f"{n}\t{w}\t{h}\t{hz}\t{x}\n" for n, w, h, hz, x in rows)
+def tsv(*rows: tuple[str, int, int, str, int, int]) -> str:
+    return "".join(f"{n}\t{w}\t{h}\t{hz}\t{x}\t{y}\n" for n, w, h, hz, x, y in rows)
 
 
-def block(conn: str, mode: str | None, x: int | None, *, preferred: bool = False) -> str:
+def block(
+    conn: str, mode: str | None, x: int | None, y: int = 0, *, preferred: bool = False
+) -> str:
     """One output as `niri msg outputs` prints it. `mode=None` is a DISABLED
     output, which has a block and no `Current mode:` line."""
     out = f'Output "Some Vendor Some Model SN{conn}" ({conn})\n'
@@ -168,7 +170,7 @@ def block(conn: str, mode: str | None, x: int | None, *, preferred: bool = False
         out += f"  Current mode: {mode} Hz{' (preferred)' if preferred else ''}\n"
     out += "  Variable refresh rate: not supported\n"
     if x is not None:
-        out += f"  Logical position: {x}, 0\n"
+        out += f"  Logical position: {x}, {y}\n"
     out += "  Scale: 1\n  Transform: normal\n"
     return out
 
@@ -183,9 +185,9 @@ ARES_LIVE = (
     + block("DP-2", "1920x1080 @ 60.000", 4480, preferred=True)
 )
 ARES_TSV = tsv(
-    ("HDMI-A-1", 2560, 1440, "144.006", 0),
-    ("DP-1", 1920, 1080, "60.000", 2560),
-    ("DP-2", 1920, 1080, "60.000", 4480),
+    ("HDMI-A-1", 2560, 1440, "144.006", 0, 0),
+    ("DP-1", 1920, 1080, "60.000", 2560, 0),
+    ("DP-2", 1920, 1080, "60.000", 4480, 0),
 )
 
 
@@ -198,7 +200,7 @@ def test_the_session_ares_really_has_passes_every_arm(tmp_path):
     run = run_check(tmp_path, declared=ARES_TSV, niri_out=ARES_LIVE)
     assert run.failures == []
     assert len(run.passes) == 4, run.passes
-    assert "HDMI-A-1 at 2560x1440 @ 144.006 Hz, 0 px from the left" in run.passes
+    assert "HDMI-A-1 at 2560x1440 @ 144.006 Hz, at 0,0 in the layout" in run.passes
 
 
 def test_the_check_is_the_declaration_and_carries_no_monitor_of_its_own(tmp_path):
@@ -209,12 +211,12 @@ def test_the_check_is_the_declaration_and_carries_no_monitor_of_its_own(tmp_path
     case below."""
     run = run_check(
         tmp_path,
-        declared=tsv(("eDP-1", 3440, 1440, "99.981", 0)),
+        declared=tsv(("eDP-1", 3440, 1440, "99.981", 0, 0)),
         niri_out=block("eDP-1", "3440x1440 @ 99.981", 0),
     )
     assert run.failures == [], run.failures
     assert run.passes == [
-        "eDP-1 at 3440x1440 @ 99.981 Hz, 0 px from the left",
+        "eDP-1 at 3440x1440 @ 99.981 Hz, at 0,0 in the layout",
         "the session has no output beyond the 1 this flake declares",
     ]
 
@@ -229,7 +231,7 @@ def test_a_declared_output_that_is_not_there_is_named(tmp_path):
         niri_out=block("HDMI-A-1", "2560x1440 @ 144.006", 0) + "\n" + block("DP-1", "1920x1080 @ 60.000", 2560),
     )
     assert run.only_failure() == (
-        "DP-2 is declared (1920x1080 @ 60.000 Hz at x=4480) and the session has no such output"
+        "DP-2 is declared (1920x1080 @ 60.000 Hz at 4480,0) and the session has no such output"
     )
 
 
@@ -244,8 +246,8 @@ def test_a_rounded_refresh_rate_is_a_different_mode(tmp_path):
         niri_out=ARES_LIVE.replace("1920x1080 @ 60.000 Hz (preferred)\n  Variable refresh rate: not supported\n  Logical position: 2560", "1920x1080 @ 59.939 Hz\n  Variable refresh rate: not supported\n  Logical position: 2560"),
     )
     assert run.only_failure() == (
-        "DP-1 is declared as 'DP-1 1920x1080 60.000 2560' and is live as "
-        "'DP-1 1920x1080 59.939 2560'"
+        "DP-1 is declared as 'DP-1 1920x1080 60.000 2560 0' and is live as "
+        "'DP-1 1920x1080 59.939 2560 0'"
     )
 
 
@@ -259,8 +261,8 @@ def test_a_smaller_mode_on_the_right_connector_is_caught(tmp_path):
     # the old counts would have said "found 0" for the primary and "found 3"
     # for the secondaries — two failures about one monitor and neither naming it.
     assert run.only_failure() == (
-        "HDMI-A-1 is declared as 'HDMI-A-1 2560x1440 144.006 0' and is live as "
-        "'HDMI-A-1 1920x1080 60.000 0'"
+        "HDMI-A-1 is declared as 'HDMI-A-1 2560x1440 144.006 0 0' and is live as "
+        "'HDMI-A-1 1920x1080 60.000 0 0'"
     )
 
 
@@ -278,7 +280,60 @@ def test_three_monitors_stacked_on_top_of_each_other_is_a_failure(tmp_path):
     )
     assert len(run.failures) == 2, run.failures
     assert all("is declared as" in f and "is live as" in f for f in run.failures)
-    assert "DP-1 1920x1080 60.000 0" in run.failures[0]
+    assert "DP-1 1920x1080 60.000 0 0" in run.failures[0]
+
+
+def test_a_side_panel_that_slid_below_the_primary_is_caught(tmp_path):
+    """The other half of `Logical position` (PLAN E14). Until the declaration
+    carried a `y` this check read the line and threw half of it away, so a
+    session whose side panel sat a screen-height too low — the bar on the wrong
+    edge of the desktop, the wallpaper composed for a row of three that is not a
+    row — was three passes and no finding. The modes are right; the LAYOUT is
+    not."""
+    run = run_check(
+        tmp_path,
+        declared=ARES_TSV,
+        niri_out=ARES_LIVE.replace("Logical position: 2560, 0", "Logical position: 2560, 1080"),
+    )
+    assert run.only_failure() == (
+        "DP-1 is declared as 'DP-1 1920x1080 60.000 2560 0' and is live as "
+        "'DP-1 1920x1080 60.000 2560 1080'"
+    )
+
+
+def test_a_monitor_mounted_above_another_is_a_layout_this_repo_can_describe(tmp_path):
+    """The capability, not the failure: a monitor stacked above the primary is a
+    legal desk, and until E14 nothing in this repo could say so — the
+    declaration had no `y` to put it at. Both directions in one test, because
+    the green half alone would also pass on a check that ignores the vertical
+    entirely: the pass has to NAME the position it verified, and the same
+    session against a declaration that puts that panel at y=0 has to be red."""
+    live = block("HDMI-A-1", "2560x1440 @ 144.006", 0) + "\n" + block(
+        "DP-1", "1920x1080 @ 60.000", 320, -1080
+    )
+    stacked = run_check(
+        tmp_path,
+        declared=tsv(
+            ("HDMI-A-1", 2560, 1440, "144.006", 0, 0),
+            ("DP-1", 1920, 1080, "60.000", 320, -1080),
+        ),
+        niri_out=live,
+    )
+    assert stacked.failures == [], stacked.failures
+    assert "DP-1 at 1920x1080 @ 60.000 Hz, at 320,-1080 in the layout" in stacked.passes
+
+    beside = run_check(
+        tmp_path,
+        declared=tsv(
+            ("HDMI-A-1", 2560, 1440, "144.006", 0, 0),
+            ("DP-1", 1920, 1080, "60.000", 320, 0),
+        ),
+        niri_out=live,
+    )
+    assert beside.only_failure() == (
+        "DP-1 is declared as 'DP-1 1920x1080 60.000 320 0' and is live as "
+        "'DP-1 1920x1080 60.000 320 -1080'"
+    )
 
 
 def test_a_disabled_output_is_a_mismatch_and_not_a_skip(tmp_path):
@@ -294,7 +349,7 @@ def test_a_disabled_output_is_a_mismatch_and_not_a_skip(tmp_path):
         ),
     )
     assert run.only_failure() == (
-        "DP-2 is declared as 'DP-2 1920x1080 60.000 4480' and is live as 'DP-2 ? ? ?'"
+        "DP-2 is declared as 'DP-2 1920x1080 60.000 4480 0' and is live as 'DP-2 ? ? ? ?'"
     )
 
 
@@ -387,7 +442,11 @@ def test_the_generated_row_has_exactly_the_columns_the_check_reads():
     the other shifts every field after it — `x` would be read as a refresh rate
     and compared against one, which reads like a monitor problem."""
     src = doctor_nix()
-    row = re.search(r'writeText "jarvis-declared-outputs\.tsv"[\s\S]*?\n\s*o: "(?P<row>[^"]*)"', src)
+    # `o:` and its row may be on one line or two — nixfmt breaks the line once
+    # the row is long enough, and it got long enough when PLAN E14 added `y`.
+    row = re.search(
+        r'writeText "jarvis-declared-outputs\.tsv"[\s\S]*?\n\s*o:\s*"(?P<row>[^"]*)"', src
+    )
     assert row, "pkgs/jarvis-doctor no longer writes one interpolated row per output"
     written = row.group("row").rstrip("\\n").split(r"\t")
     read = re.search(r"while IFS=\$'\\t' read -r (?P<vars>[^\n;]*); do", DOCTOR_SH.read_text("utf-8"))
@@ -461,17 +520,30 @@ def test_the_wrapper_is_what_supplies_the_expectation():
     )
 
 
-def test_the_check_does_not_claim_a_vertical_position():
-    """Held because it is a decision and not an oversight: the declaration
-    carries `x` and no `y`, so the check compares the left edge and says so.
-    The day `hosts/ares/outputs.nix` grows a `y`, this test is the note that
-    the check should start reading the other half of the line."""
-    assert all("y" not in out for out in declared_outputs(ARES_OUTPUTS)), (
-        "hosts/ares/outputs.nix declares a vertical position now, and "
-        "jarvis-doctor still only compares the left edge of each output"
+def test_the_check_claims_the_whole_position_the_declaration_carries():
+    """PLAN E14, in the three files it takes: the declaration grows a `y`, the
+    package spends it in the row, and the parser takes BOTH halves of niri's
+    `Logical position: X, Y`. This test's ancestor was
+    `test_the_check_does_not_claim_a_vertical_position` — the note that existed
+    to go red the day the declaration grew one, which is today."""
+    for out in declared_outputs(ARES_OUTPUTS):
+        assert isinstance(out.get("y"), int), (
+            f"{out.get('name')} declares no vertical position, so the check below "
+            "is comparing a column the declaration cannot fill"
+        )
+    assert re.search(r"toString o\.y", doctor_nix()), (
+        "pkgs/jarvis-doctor does not write the declared `y` into the row, so the "
+        "column doctor.sh reads is empty on every output"
     )
-    assert re.search(r"x = \$3; sub\(/,\$/, \"\", x\)", DOCTOR_SH.read_text("utf-8")), (
-        "doctor.sh no longer takes the left edge out of niri's `Logical position`"
+    sh = DOCTOR_SH.read_text("utf-8")
+    assert re.search(r'x = \$3; sub\(/,\$/, "", x\); y = \$4', sh), (
+        "doctor.sh no longer takes both halves of niri's `Logical position` — the "
+        "vertical one is the half it used to drop"
+    )
+    assert "deliberately does not claim" not in sh, (
+        "doctor.sh still carries the paragraph explaining that it does not check "
+        "the vertical position; it checks it now, and that comment is the first "
+        "thing a human reads about what this check believes"
     )
 
 

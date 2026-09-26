@@ -463,7 +463,7 @@ def check_desk_is_bare(ppm: Path, background: np.ndarray, why: str) -> None:
     img = read_ppm(ppm)
     check_grim_size(f"the desk shot for {ppm.name}", img, sheet.DESK)
     for out in sheet.OUTPUTS:
-        region = img[0 : out["height"], out["x"] : out["x"] + out["width"]]
+        region = img[sheet.desk_slice(out)]
         box = drawn_box(region, background)
         if box is not None:
             raise Fail(f"{out['name']}: something is drawn at {box} — {why}")
@@ -1874,7 +1874,7 @@ def probe_surface_granted(stage: Path, background: np.ndarray) -> None:
 def capture(target: str, ppm: Path) -> None:
     grim = os.environ["GRIM_BIN"]
     if target == "desk":
-        geom = f"0,0 {sheet.DESK_WIDTH}x{sheet.DESK_HEIGHT}"
+        geom = f"{sheet.DESK_X},{sheet.DESK_Y} {sheet.DESK_WIDTH}x{sheet.DESK_HEIGHT}"
         argv = [grim, "-t", "ppm", "-g", geom, str(ppm)]
     else:
         out = sheet.output_by_role(target)
@@ -1891,7 +1891,7 @@ def check_capture(
         # monitors rather than as one wide picture.
         check_grim_size(f"{shot['file']} desk", img, sheet.DESK)
         for out in sheet.OUTPUTS:
-            region = img[0 : out["height"], out["x"] : out["x"] + out["width"]]
+            region = img[sheet.desk_slice(out)]
             check_corner(f"{shot['file']} {out['name']}", region, background, shot["lit"])
 
         # AND THE FOURTH SCREEN, which is not in the picture (PLAN D72).

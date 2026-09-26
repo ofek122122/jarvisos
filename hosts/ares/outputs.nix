@@ -20,10 +20,19 @@
 # The numbers are the ones CLAUDE.md states and `jarvis-doctor` measures live
 # on the machine: one 2560x1440 primary at 144 Hz (the HP 27xq, which needs
 # 144.006 to be offered it at all — see memory/ares-hardware-firstboot) and
-# two 1920x1080 at 60, to its right. `x` is the left edge of each output in
-# the layout; it is what PLAN E5 will hand to niri when the per-output rules
-# move into the flake, and it is here now so that E5 moves rules rather than
-# re-deciding a layout.
+# two 1920x1080 at 60, to its right. `x` and `y` are the TOP-LEFT CORNER of
+# each output in the layout; they are what PLAN E5 will hand to niri when the
+# per-output rules move into the flake, and they are here now so that E5 moves
+# rules rather than re-deciding a layout.
+#
+# `y` is 0 on all three of ares' monitors, and it is written anyway (PLAN E14).
+# It was absent, and three things read that absence as a zero: `jarvis-doctor`
+# compared only the left edge of niri's `Logical position: X, Y`, the screen
+# sheet laid its three headless panels out in a row at y=0, and the niri rules
+# E5 will generate would have had to invent one. A monitor mounted ABOVE
+# another is a legal desk, and the direction the silence ran is the one that
+# matters: nothing could describe that layout, and everything passed. A zero
+# somebody declared is a decision; a zero nobody wrote is a guess.
 #
 # `primary = true` belongs to exactly one entry, and the wallpaper leans on it:
 # `jarvisos.png` — the art the lock screen shows and the art every UNDECLARED
@@ -36,6 +45,7 @@
     height = 1440;
     refresh = "144.006";
     x = 0;
+    y = 0;
     primary = true;
   }
   {
@@ -44,6 +54,7 @@
     height = 1080;
     refresh = "60.000";
     x = 2560;
+    y = 0;
   }
   {
     name = "DP-2";
@@ -51,5 +62,6 @@
     height = 1080;
     refresh = "60.000";
     x = 4480;
+    y = 0;
   }
 ]

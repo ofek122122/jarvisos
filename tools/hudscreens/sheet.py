@@ -23,7 +23,7 @@ import subprocess
 import time
 from pathlib import Path
 
-# ares' monitors, at the sizes and left edges `hosts/ares/outputs.nix`
+# ares' monitors, at the sizes and positions `hosts/ares/outputs.nix`
 # declares them. This list is still written out rather than read from that
 # file: sheet.py runs in a bare checkout with no Nix, and a hand-rolled Nix
 # parser in the code that DRIVES a compositor is a worse trade than the
@@ -38,14 +38,26 @@ from pathlib import Path
 # is real, the monitors are not. What the sheet asks is a question about
 # SIZE: whether an 11 px label docked to the corner of a 1440p panel reads
 # the same as on the 1080p one beside it.
+# `y` is here for PLAN E14's reason, and it is the one field whose value is
+# uninteresting and whose presence is not: it was absent, the compositor was
+# configured `pos {x} 0`, the desk was photographed from 0,0 and every monitor's
+# pixels were read out of that image at a vertical zero. Four assumptions, one
+# of them true — and a declaration that ever mounts a panel above another turns
+# the other three into a picture of the wrong rectangle at exactly the right
+# size, which `check_grim_size` cannot see and `drawn_box` reads as bare.
 OUTPUTS = [
-    {"name": "HEADLESS-1", "role": "primary", "width": 2560, "height": 1440, "x": 0},
-    {"name": "HEADLESS-2", "role": "side", "width": 1920, "height": 1080, "x": 2560},
-    {"name": "HEADLESS-3", "role": "side2", "width": 1920, "height": 1080, "x": 4480},
+    {"name": "HEADLESS-1", "role": "primary", "width": 2560, "height": 1440, "x": 0, "y": 0},
+    {"name": "HEADLESS-2", "role": "side", "width": 1920, "height": 1080, "x": 2560, "y": 0},
+    {"name": "HEADLESS-3", "role": "side2", "width": 1920, "height": 1080, "x": 4480, "y": 0},
 ]
 
-DESK_WIDTH = sum(o["width"] for o in OUTPUTS)
-DESK_HEIGHT = max(o["height"] for o in OUTPUTS)
+# The rectangle the monitors occupy, corner included. `DESK_X`/`DESK_Y` are 0 on
+# ares and are still computed: the desk is the layout's bounding box, and the
+# only number a capture of it may be taken from is its own corner.
+DESK_X = min(o["x"] for o in OUTPUTS)
+DESK_Y = min(o["y"] for o in OUTPUTS)
+DESK_WIDTH = max(o["x"] + o["width"] for o in OUTPUTS) - DESK_X
+DESK_HEIGHT = max(o["y"] + o["height"] for o in OUTPUTS) - DESK_Y
 
 # ------------------------------------- the output that is not a monitor (D68)
 #
@@ -84,7 +96,8 @@ NARROW = {
     "role": "narrow",
     "width": NARROW_W,
     "height": 1080,
-    "x": DESK_WIDTH,
+    "x": DESK_X + DESK_WIDTH,
+    "y": DESK_Y,
 }
 
 # Every output the compositor is given, which is not every monitor. The
@@ -103,6 +116,25 @@ DESK = {
     "width": DESK_WIDTH,
     "height": DESK_HEIGHT,
 }
+
+
+def desk_slice(out):
+    """Where one monitor's pixels are inside a desk capture, as `img[...]` takes
+    it.
+
+    The desk is one wide `grim -g` of the whole layout, so a monitor's own
+    coordinates are not its offsets in that image — the image's corner is
+    `DESK_X, DESK_Y`. This was `img[0 : height, x : x + width]` written out at
+    both readers in shoot.py (PLAN E14): the vertical zero was an assumption
+    nothing declared, and the horizontal offset happened to be right only
+    because the leftmost monitor is at x=0.
+
+    Returned rather than applied so a test with no numpy can run it. numpy
+    takes a tuple of slices exactly as it takes `img[a:b, c:d]`.
+    """
+    top = out["y"] - DESK_Y
+    left = out["x"] - DESK_X
+    return (slice(top, top + out["height"]), slice(left, left + out["width"]))
 
 
 def capture_size_complaint(label, got, want):
@@ -509,7 +541,7 @@ def sway_config():
     for out in ALL_OUTPUTS:
         lines.append(
             f"output {out['name']} mode {out['width']}x{out['height']} "
-            f"pos {out['x']} 0"
+            f"pos {out['x']} {out['y']}"
         )
     return "\n".join(lines) + "\n"
 
