@@ -642,9 +642,44 @@ the top unchecked item unless it is blocked.
       a real switched session — see `ops/ralph/HUMAN-VERIFY.md`. G7 is now
       fully resolved (G7a/G7b `[H]`, G7c still `[ ]` — Syncthing); Track G
       continues there.
-- [ ] G7c. **Syncthing**, split from G7. `services.syncthing.enable` for the
-      `ofek` user, a declared `dataDir`; folder selection happens through its
-      own web GUI (127.0.0.1-only by default) same as any first run.
+- [H] G7c. **Syncthing**, split from G7. DONE (this commit): `modules/syncthing.nix`
+      (new, imported by `hosts/ares/default.nix` right after `modules/vpn.nix`).
+      `services.syncthing = { enable = true; user = "ofek"; group = "users";
+      dataDir = "/home/ofek/Sync"; }`. Setting `user` to a real login user
+      rather than nixpkgs' own dedicated `syncthing` user matters more than it
+      looks: that module's `users.users.${defaultUser}` (with `createHome =
+      true`) is behind `lib.mkIf (cfg.user == defaultUser)`, so choosing
+      `ofek` skips that path entirely — no user/home is auto-created for us,
+      and Syncthing's own binary creates `dataDir`/`configDir` itself the
+      first time it runs, the same way it already manages its config directory
+      for the default user. `group = "users"` is declared explicitly (checked
+      against the real generated unit, not assumed) so files Syncthing writes
+      land in Ofek's own primary group rather than a dedicated `syncthing`
+      group he isn't a member of. No `folders`, `devices`, `guiAddress`, or
+      `openDefaultPorts` is declared — the GUI stays at its own default,
+      `127.0.0.1:8384`, and which folders sync with which remote devices is
+      Ofek's decision to make through that GUI on first run, exactly the
+      scope the PLAN item asked for and the same shape G7a left the SSH key
+      and G7b left the VPN endpoint.
+      Gate: `ops/ralph/nixtest.sh` (+2 cases) reads the real evaluation and
+      the real generated `syncthing.service` unit text: `User=ofek`/
+      `Group=users` (not the module's own defaults), `guiAddress` is
+      `127.0.0.1:8384`, `settings.folders` evaluates to `{}` (nothing
+      pre-declared), and `dataDir` is exactly `/home/ofek/Sync`.
+      `bash ops/ralph/verify.sh`: 2 gates over 3 paths (`hosts/ares/
+      default.nix`, `modules/syncthing.nix`, `ops/ralph/nixtest.sh`), GREEN
+      in 170.0s (tools 79.4, nixtest 90.6 — 59 prior + 2 new = 61).
+      `nixos-rebuild build --flake .#ares` -> ok (16 derivations: fetched
+      `syncthing-2.1.3`, the new `unit-syncthing.service`, `system-units`/
+      `user-units`/`etc`/`activate`/toplevel and their usual neighbours).
+      Never switched. No schema, no jv-act, no boot path, no pins, no
+      disko.nix touched. `[H]` because whether the daemon actually starts
+      under `ofek` in a real session, whether it creates `/home/ofek/Sync`
+      itself with the right ownership, and whether its web GUI is reachable
+      and lets a real folder/device be added all need a human at a real
+      switched session — see `ops/ralph/HUMAN-VERIFY.md`. **G7 is now fully
+      resolved** (G7a/G7b/G7c all `[H]`); Track G continues at G8 (sound
+      theme).
 - [ ] G8. Sound theme: one quiet, on-brand notification sound.
 - [B] G9. **Narrowed automount** — removable USB only, with the Windows
       NVMe and the 2 TB disk hard-excluded by serial. gvfs force-enables

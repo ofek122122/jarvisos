@@ -838,5 +838,30 @@ if [ -f "$nm_pkg/share/dbus-1/interfaces/org.freedesktop.NetworkManager.Device.W
   ok "$t"
 else bad "$t" "no WireGuard device interface under $nm_pkg"; fi
 
+# -------------------------------------------------------------- syncthing
+# PLAN G7c, the last slice of G7. modules/syncthing.nix runs Syncthing as
+# `ofek`, not nixpkgs' own dedicated `syncthing` user — that only matters
+# because nixpkgs' module skips its own `createHome`/user-creation path
+# entirely once `user != defaultUser`, so the case below reads the generated
+# unit rather than assuming the module attrset means what modules/vpn.nix's
+# neighbours assume.
+
+t='syncthing: runs as ofek:users, GUI stays on localhost, no folders/devices declared'
+st_unit=$(sysunit 'syncthing.service')
+gui_addr=$(nix eval --raw '.#nixosConfigurations.ares.config.services.syncthing.guiAddress' 2>/dev/null)
+folders=$(nix eval --json '.#nixosConfigurations.ares.config.services.syncthing.settings.folders' 2>/dev/null)
+if is_unit "$st_unit" \
+  && grep -q '^User=ofek$' <<<"$st_unit" \
+  && grep -q '^Group=users$' <<<"$st_unit" \
+  && [ "$gui_addr" = '127.0.0.1:8384' ] \
+  && grep -qx '{}' <<<"$folders"; then
+  ok "$t"
+else bad "$t" "unit=$(tail -5 <<<"$st_unit") gui_addr=$gui_addr folders=$folders"; fi
+
+t='syncthing: dataDir lives under ofek'"'"'s own home, not the dedicated user'"'"'s'
+data_dir=$(nix eval --raw '.#nixosConfigurations.ares.config.services.syncthing.dataDir' 2>/dev/null)
+if [ "$data_dir" = '/home/ofek/Sync' ]; then ok "$t"
+else bad "$t" "dataDir=$data_dir"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

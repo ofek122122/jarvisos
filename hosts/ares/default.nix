@@ -23,6 +23,7 @@
     ../../modules/disk-space-warning.nix
     ../../modules/ssh.nix
     ../../modules/vpn.nix
+    ../../modules/syncthing.nix
     ../../modules/dictate.nix
     ../../modules/windows-compat.nix
     ../../modules/jarvis-services.nix

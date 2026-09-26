@@ -16875,3 +16875,73 @@ work was entirely in `shell/jv-hud/`.
   `services.syncthing.enable`, folder selection through its own web GUI).
   The comfort backlog is still far from resolved — H through K are entirely
   `[ ]` — so the loop keeps going per PROMPT.md STEP 5.
+
+## 2026-09-27 — Syncthing (PLAN G7c)
+- built: `modules/syncthing.nix` (new), imported by `hosts/ares/default.nix`
+  right after `modules/vpn.nix`. G7c is the last of the three slices G7 was
+  split into (SSH/VPN/Syncthing were one item). `services.syncthing = {
+  enable = true; user = "ofek"; group = "users"; dataDir = "/home/ofek/Sync";
+  }`. Read nixpkgs' own `syncthing.nix` module source before assuming the
+  attrset alone would do the right thing: its `users.users.${defaultUser}`
+  block (the one with `createHome = true`, which is what would otherwise make
+  `dataDir` exist on first boot) is gated on `lib.mkIf (cfg.user ==
+  defaultUser)` — the module's own dedicated `syncthing` user — so setting
+  `user = "ofek"` to run it as a real login user instead skips that path
+  entirely; nothing in the module creates `/home/ofek/Sync` for us. Checked
+  against the real generated unit rather than trusting that, though:
+  Syncthing's own binary already manages `dataDir`/`configDir` for whichever
+  user it runs as (its `ExecStart` is just `syncthing --config=... --data=...
+  --gui-address=... --no-browser`, no separate mkdir step even for the
+  default user — the daemon itself creates both directories on first start),
+  so no tmpfiles rule or `createHome` equivalent was needed here either.
+  `group = "users"` is declared explicitly rather than left at the module's
+  own default (a dedicated `syncthing` group, confirmed via a bare `nix eval`
+  before this was set: `Group=syncthing` shows up in the unit if `group` is
+  left unset even with `user = "ofek"`) so files Syncthing writes land in
+  Ofek's own primary group, not one he isn't a member of. No `folders`,
+  `devices`, `guiAddress` or `openDefaultPorts` declared: the GUI stays at
+  its own default, `127.0.0.1:8384` (checked against the real evaluation,
+  not the module docs), and which folders sync with which remote devices is
+  Ofek's own decision to make through that GUI on first run — the same scope
+  the PLAN item itself asked for, and the same shape G7a left the SSH key and
+  G7b left the VPN endpoint.
+- tests: `ops/ralph/nixtest.sh` (+2 cases) reads the real evaluation and the
+  real generated `syncthing.service` unit text (`sysunit`, since
+  `config.systemd.services.<name>` has no `.text` attribute — only
+  `config.systemd.units."<name>.service"` does, the same distinction the
+  file's own header already documents for `systemd.units` vs `systemd.
+  services`): `User=ofek` and `Group=users` land in the built unit (not the
+  module's own `syncthing`/`syncthing` defaults), `services.syncthing.
+  guiAddress` evaluates to `127.0.0.1:8384`, `services.syncthing.settings.
+  folders` evaluates to `{}` (an attrset, not `[]` — caught by a first run of
+  this exact check, which had assumed a list) so nothing is pre-declared, and
+  `dataDir` is exactly `/home/ofek/Sync`. The first run of both new cases
+  also hit the same untracked-file failure mode this file has already logged
+  more than once (F5b, G7a's siblings): `modules/syncthing.nix` was written
+  but not `git add`ed, so the whole flake evaluation refused with "not
+  tracked by Git" and every case in the file failed, not just the new ones —
+  fixed by staging it before re-running, not by touching the test.
+  `bash ops/ralph/runtests.sh tools`: 946 passed, unaffected (no Python
+  touched). `bash ops/ralph/nixtest.sh`: 61 passed (was 59). `bash
+  ops/ralph/verify.sh`: 2 gates over 3 paths (`hosts/ares/default.nix`,
+  `modules/syncthing.nix`, `ops/ralph/nixtest.sh`), GREEN in 170.0s (tools
+  79.4, nixtest 90.6).
+- build: `nixos-rebuild build --flake .#ares` -> ok (16 derivations: fetched
+  `syncthing-2.1.3` (11.8 MiB), the new `unit-syncthing.service`, plus the
+  usual `system-generators`/`system-path`/`system-shutdown`/`user-
+  generators`/`dbus-1`/two X-Restart-Triggers/`system-units`/`user-units`/
+  `etc`/`activate`/toplevel this size of change always rebuilds). Never
+  switched. No schema, no jv-act, no boot path, no pins, no disko.nix
+  touched.
+- files: modules/syncthing.nix (new), hosts/ares/default.nix,
+  ops/ralph/nixtest.sh, ops/ralph/PLAN.md, ops/ralph/HUMAN-VERIFY.md,
+  ops/ralph/JOURNAL.md
+- next: `[H]` because whether the daemon actually starts as `ofek` in a real
+  session, whether it creates `/home/ofek/Sync` itself with the right
+  ownership, and whether its web GUI is reachable at `127.0.0.1:8384` and
+  lets a real folder/device be added all need a human at a real switched
+  session — see HUMAN-VERIFY.md. **G7 is now fully resolved** (G7a/G7b/G7c
+  all `[H]`); Track G continues at G8 (sound theme — one quiet, on-brand
+  notification sound). The comfort backlog is still far from resolved — H
+  through K are entirely `[ ]` — so the loop keeps going per PROMPT.md
+  STEP 5.
