@@ -4,6 +4,45 @@ The loop appends here when an item requires a judgement it must not make alone
 — usually because it touches an invariant, the login path, or how the system is
 structured. Items here are marked `[B]` in PLAN.md and are NOT attempted.
 
+## G9 — Narrowed automount: re-enable udisks2, which security.nix disables on purpose?
+
+**The decision:** plugging in a USB stick and having it just appear requires
+udisks2, which `modules/security.nix` disables **deliberately** — it is the
+mechanism that would otherwise automount the Windows NVMe and the 2 TB disk,
+both of which are permanently off-limits. gvfs force-enables it, which is why
+`modules/apps.nix` ships without gvfs today.
+
+**What it needs from you:** explicit sign-off to turn udisks2 back on, narrowed
+to removable USB only with both forbidden disks hard-excluded by serial
+(`WD20EZAZ`/`WD-WXL2A90L3KAP` and the Crucial `CT500P2SSD8`). This is the one
+item in the backlog that touches the disk rule directly, so the loop will not
+attempt it on any reading of "probably fine" — it asks or it skips.
+
+**If you say no:** everything else still works; you mount USB sticks by hand.
+
+## G10 — home-manager: adopt it for declarative dotfiles?
+
+**The decision:** whether to restructure where user config lives. It would make
+things like `~/.config/niri/config.kdl` declarative in the flake rather than
+hand-edited — the exact problem F1 just solved a different way, by generating
+`/etc/niri/config.kdl` and having you move your user file aside.
+
+**What it needs from you:** a yes/no on adopting home-manager at all. It is a
+structural change to the repo's shape, not a feature, and F1's approach means
+it is no longer *needed* for the one violation that motivated it.
+
+## H14 — Graphical login greeter: when do we switch the greetd session command?
+
+**The decision:** a §06-themed regreet login screen is buildable and testable
+headless, but **switching the greetd session command is the one change that can
+lock you out of your own machine** if it is wrong. GUARDRAILS forbids the loop
+from switching it, full stop.
+
+**What it needs from you:** a human-supervised switch, with a TTY escape open
+and a known-good generation to roll back to. The loop will build it, prove it in
+a nested/headless test, and park it — it will not flip the session command even
+if every test is green.
+
 ## F4 — Game-launch VRAM handoff: who is allowed to stop `jv-llm.service`?
 
 **The decision:** the blueprint's "game launch → brain unloads" needs two things

@@ -570,11 +570,11 @@ the top unchecked item unless it is blocked.
       under systemd's real supervision — see `ops/ralph/HUMAN-VERIFY.md`.
 - [ ] G7. SSH agent + config, VPN support, Syncthing — each declared.
 - [ ] G8. Sound theme: one quiet, on-brand notification sound.
-- [ ] G9. `[B]` **Narrowed automount** — removable USB only, with the Windows
+- [B] G9. **Narrowed automount** — removable USB only, with the Windows
       NVMe and the 2 TB disk hard-excluded by serial. gvfs force-enables
       udisks2, which security.nix disables on purpose, so this needs Ofek's
       explicit sign-off before any attempt. Ask, do not implement.
-- [ ] G10. `[B]` **home-manager** for declarative dotfiles — restructures where
+- [B] G10. **home-manager** for declarative dotfiles — restructures where
       user config lives; ask before adopting.
 
 ### Track H — input, window and visual comfort
@@ -593,7 +593,7 @@ the top unchecked item unless it is blocked.
 - [ ] H11. MPRIS media controls in the bar.
 - [ ] H12. Screen magnifier, colour picker, screen-region OCR to clipboard.
 - [ ] H13. Per-workspace wallpaper tint (subtle; must stay §06-quiet).
-- [ ] H14. `[B]` Graphical login greeter (regreet, §06). **Do not switch the
+- [B] H14. Graphical login greeter (regreet, §06). **Do not switch the
       greetd session command.** Build it, prove it in a nested/headless test,
       and park it for a human-supervised switch with a TTY escape ready.
 - [ ] H15. Boot-to-desktop visual continuity check (GRUB → Plymouth → greeter →

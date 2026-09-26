@@ -110,6 +110,14 @@ those tracks in `PLAN.md`:
 
 - **Any item still `[ ]`** → keep going. Do not stop. An item that is hard is
   `[H]` or `[B]` WITH A WRITTEN REASON, never a silent skip and never a lie.
+- **THE CHECKBOX IS THE MARKER.** `- [B] G9.` is blocked; `- [ ] G9. \`[B]\``
+  is NOT — it is an open item with the word `[B]` in its prose, and this check
+  reads the checkbox. When you conclude an item is blocked, you must (a) change
+  the checkbox itself and (b) write the question into `NEEDS-DECISION.md`.
+  Leaving the checkbox `[ ]` and the reasoning in `PLAN.md` prose livelocks this
+  loop: it can never build the item and can never stop either, so every later
+  iteration re-reads it and re-derives the same block. G9/G10/H14 and F4/F5 all
+  shipped in that broken state and had to be repaired by hand.
 - **Every item `[x]`, `[H]` or `[B]`** → finish the run:
   1. Write `ops/ralph/FINAL-REPORT.md` — what was built per track, the whole
      `HUMAN-VERIFY.md` list, the whole `NEEDS-DECISION.md` list, and anything
