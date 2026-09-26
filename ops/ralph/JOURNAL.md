@@ -14964,3 +14964,95 @@ is not worth chasing.)
   human. NOTE for whoever runs next: this branch is being hand-driven in
   parallel — check `git log` against the journal before assuming the tree is
   the one the last entry describes.
+
+## 2026-09-26 — D80: the gate can now tell whose red it is
+
+- **what**: `bash ops/ralph/verify.sh --baseline`. On a red run it re-runs the
+  gates that FAILED — only those — against HEAD in a `git worktree add
+  --detach` under `$TMPDIR`, and labels each failure `INHERITED`, `NEW`,
+  `CHANGED` or `UNKNOWN`. All-INHERITED exits **3**; everything else red still
+  exits 1. PROMPT.md STEP 3 now names the flag and both statuses, and the
+  lenient one carries a duty: name the inherited failures in the journal.
+- **why**, and it is 490d1ad's own bill. That iteration opened on D78, built it,
+  and found the branch red from three gates it had never touched, because three
+  commits had landed by hand while it ran. The structural half is what made it
+  expensive: `tools` is the third suite to everything (Invariant 1) and is named
+  even by a change to `JOURNAL.md`, so somebody else's red leaves NOTHING
+  committable — **including the journal entry STEP 3 demands when a gate is red
+  and the work must be reverted.** The only exit from such an iteration was to
+  fix somebody else's failure, which is the "one finished thing" rule breaking
+  down under a shared branch.
+- **the three things it gets right on purpose**, each with a test, and two of
+  them are holes a naive version leaves wide open:
+  - **Only the RED gates are re-run.** A green gate cannot have inherited
+    anything, so asking HEAD about it buys nothing and costs its whole price.
+    D80 expected the flag to double the wall clock; it does, but only in the
+    worst case where every gate is red.
+  - **It compares WITHIN a gate**, over the failure lines it can recognise, not
+    just across gates. This is the one that matters: `tools` red at HEAD **and**
+    red here with a failing test of your own means both runs exit non-zero, so
+    exit status alone says INHERITED and hands your breakage the one label that
+    is not fatal. That case is `CHANGED`, it is fatal, and the report prints the
+    lines only your run produced. What is compared is failure lines and NOT
+    summaries — `792 passed in 66.41s` against `789 passed in 61.02s` would make
+    every run differ from every other — with store hashes and the two roots
+    normalised away, since those are the two things two runs of one failure
+    disagree about.
+  - **A gate that does not EXIST at HEAD is never INHERITED.** A gate script you
+    have only just written exits 127 there, 127 is non-zero, and a naive
+    comparison reads that as "red at HEAD too" — which would hand a brand-new
+    broken gate a free pass. It is `UNKNOWN`, it is fatal, and it is decided by
+    looking for the script rather than by running it.
+- **"could not tell" is always fatal.** `UNKNOWN` covers both a baseline
+  worktree that cannot be made and a gate missing at HEAD, so breaking the
+  baseline can never become the route past your own red — which is the one thing
+  D80 said this must never become. Any red gate the baseline did not account for
+  is counted against you too.
+- **the worktree rules this obeys**, each of them a rule from somewhere else in
+  this repo. Not a `git stash`: this branch is shared with the main checkout and
+  other sessions, and popping someone else's entry is the accident those rules
+  exist to prevent. Not under `root`: a checkout inside the repo would be an
+  untracked directory, which is a changed path, which is an input to the very
+  plan it is a baseline for. Detached, because HEAD is already checked out here.
+  Removed with `worktree remove --force` + `prune` + `rmtree` on the way out,
+  and a test asserts `git status --porcelain`, `git stash list` and `git
+  worktree list` are all exactly as they were found.
+- **the capture is opt-in, and that was deliberate.** Comparing failure text
+  needs the text, so a `--baseline` run reads each gate's output line by line
+  and writes it to the terminal *and* a temp file. That costs the child its tty.
+  The default path passes no log and is the plain inherited stdio it has always
+  been, so a flag nobody passed changes nothing about the measurements in
+  `verify.py`'s cost table.
+- **what came out of grading it that is worth writing down.** The stub gates in
+  `test_verify.py` were red via a `$RED_<name>` env var, and an env var reaches
+  BOTH runs — so it can only ever stage an inherited failure. Staging "green at
+  HEAD, red here" needs the gate to read the tree it runs in, which is what the
+  new `tree-<gate>.red` marker is: untracked, so it is not in the baseline
+  worktree. That one file is what makes NEW, CHANGED and INHERITED three
+  distinguishable outcomes instead of one.
+- **tests**: `tools/tests/test_verify.py` 51 tests (was 39); `bash
+  ops/ralph/verify.sh` GREEN — 1 gate over 4 paths, 69.2 s, 806 passed.
+  Exercised end to end against the REAL repo, not only the stubs: a deliberate
+  failing test made the tree red, `--baseline` built the throwaway worktree, ran
+  the real `tools` suite at 3c4f162 (792 passed — HEAD's count, not the tree's
+  807, which is the proof it was HEAD that ran), labelled it `NEW`, exited 1,
+  and left no worktree, no temp dir and no stash entry. The venv is shared out
+  of `$HOME/.cache`, so the baseline run cost 69.3 s and not a venv rebuild.
+  build: `nixos-rebuild build --flake .#ares` green. Never tested, never
+  switched. No schema, no jv-act, no boot path, no pins.
+- **files**: tools/verify.py, tools/tests/test_verify.py, ops/ralph/verify.sh,
+  ops/ralph/PROMPT.md, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- commit: 105e251
+- next: **E8** (the wallpaper's contact sheet, which is what closes
+  `UNPHOTOGRAPHED`), then **D82** (raised here, and measured rather than
+  suspected: `shellload.sh`'s failure text matches none of the four shapes the
+  new within-gate comparison recognises, so an inherited red there still hides a
+  new one), then **D79**, **D71**, **B88**, **B95**, **D63**, **D61**, **D57**,
+  **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. **D81** is the
+  GUARDRAILS wording that exit 3 needs and it wants a HUMAN — 105e251 changed
+  PROMPT.md and left GUARDRAILS deliberately alone, because softening its own
+  guardrail is the last thing this loop should do unattended. **D67** and
+  **D65**'s greeter half still want a human too. NOTE for whoever runs next:
+  this branch is hand-driven in parallel — check `git log` against the journal
+  before assuming the tree is the one the last entry describes, and if the gate
+  is red, `--baseline` now answers the question that costs an iteration.

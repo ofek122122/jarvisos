@@ -2043,7 +2043,7 @@ human-reviewed step.
       widening names are a legitimate `__init__` or a helper nested in two
       tests. Raised **D78**.
 
-- [ ] D80. **The verify gate cannot tell a failure it INHERITED from one the
+- [x] D80 (105e251). **The verify gate cannot tell a failure it INHERITED from one the
       working tree caused, and that cost a whole iteration's plan.** 490d1ad
       opened on D78, built it, and then found the branch red from three gates
       that had nothing to do with it — three commits had landed by hand while
@@ -2069,6 +2069,41 @@ human-reviewed step.
       chicken-and-egg that made this iteration expensive: the mechanism lives in
       `tools/verify.py`, so it can only be WRITTEN while `tools` is green.
       Raised by 490d1ad.
+
+- [ ] D81. **`--baseline` exits 3 and GUARDRAILS.md does not know about it.**
+      D80 gave the loop a third verdict — RED, but every failure predates you —
+      and PROMPT.md STEP 3 now tells it what to do with each. GUARDRAILS still
+      has two: "Verify before committing: relevant tests GREEN **and**
+      `nixos-rebuild build` succeeds" and "If the verify gate fails and you
+      can't fix it fast, revert everything you changed and end the iteration."
+      Exit 3 is neither GREEN nor a licence to revert, and GUARDRAILS is the
+      file the loop is told to obey ABSOLUTELY, so a loop that reads both is
+      being given two answers. **This one wants a human**: softening its own
+      guardrail is the last thing an autonomous builder should do unattended,
+      which is why 105e251 changed PROMPT.md and deliberately left GUARDRAILS
+      alone. The wording that is probably wanted is narrow — an inherited red
+      is not broken code you wrote, you may commit work whose own gates are
+      green, and you must name the inherited failures in the journal — but the
+      call is the user's. Raised by 105e251.
+
+- [ ] D82. **Two of the seven gates cannot be compared by failure line, and
+      it is measured rather than suspected.** D80's within-gate check is what
+      stops a new failing test riding into a suite that was already red, and it
+      works by recognising a failure LINE: `verify._FAILURE_LINE` matches
+      pytest's `FAILED tests/x.py::test_y`, qmltestrunner's `FAIL!  : tst_X`,
+      `nixtest.sh`'s `  FAIL <name>` and a nix evaluation's `error:`. Grepped
+      after the fact, `shellload.sh` matches none of them: its verdict comes
+      from `tools/qmlerrors.py` (`qmlerrors: N thrown error(s) in this run:`)
+      and `tools/brokerlog.py` (`brokerlog: <log> is not the log of a broker
+      that was well:`), and `hudshots.sh`/the contact sheets have not been
+      checked at all. For those gates a `--baseline` verdict falls back to the
+      exit status, which is the per-gate comparison D80 spent its effort
+      getting past — so an inherited `shellload.sh` red really can hide a
+      second failure of your own. The honest fix is not more regex guessing: it
+      is a census, one place, of the line every gate in this repo prints when it
+      fails, with a test that each gate's own failure output is recognised by
+      the thing that compares it. The fallback must keep saying so in the note
+      either way. Raised by 105e251.
 
 - [ ] D79. **The bar is the third shell and the only one nothing has ever
       measured against a screen.** D74 gave the HUD a declared floor and a
