@@ -191,7 +191,33 @@ the top unchecked item unless it is blocked.
       udev rules, the rebuilt `system-path`/`etc`/toplevel). Never switched.
       `[H]` because pairing a real device needs a human and a Bluetooth
       peripheral — see `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] G2. Printing (CUPS + driver set + mDNS discovery). `[H]` to print.
+- [H] G2. **Printing.** DONE (this commit): `modules/printing.nix` declares
+      `services.printing.enable` with a broad driver set
+      (`gutenprint hplip splix brlaser` — the same trio nixpkgs' own module
+      docs give as the "broad coverage" example, plus Brother's laser
+      driver) and turns `services.avahi` on (`nssmdns4`, `openFirewall`) for
+      mDNS. Discovery needed no second switch: `services.printing.browsed`
+      (the CUPS Remote Printer Discovery / cups-browsed daemon, the modern
+      DNS-SD replacement for CUPS's own deprecated browsing protocol)
+      already defaults to `config.services.avahi.enable` in nixpkgs' own
+      module, so avahi being on is the whole "find printers on the LAN"
+      story. Firewall: only 5353/udp (mDNS itself) is opened — nothing
+      inbound is needed for a machine that only discovers and prints TO
+      printers rather than sharing its own to the LAN, so no CUPS/IPP port
+      (631) was opened. Gate: `ops/ralph/nixtest.sh` (+4 cases) reads the
+      real evaluation: printing and avahi both on, mDNS resolution on AND
+      its firewall port actually open (not just declared), cups-browsed
+      auto-enabled by avahi alone (proves the "no second switch" claim
+      against the real module, not just this file's comment), and the
+      declared driver set's packages actually reach
+      `services.printing.drivers`. `bash ops/ralph/verify.sh`: 2 gates over
+      4 paths, GREEN in 139.9s (tools 917, nixtest 46 — 42 prior + 4 new).
+      `nixos-rebuild build --flake .#ares` green (CUPS, cups-browsed,
+      avahi-daemon, gutenprint/hplip/splix/brlaser and their closures, the
+      rebuilt `system-path`/`etc`/`system-units`/toplevel). Never switched.
+      `[H]` because discovering a real printer over mDNS and printing an
+      actual test page both need a physical printer and a human — see
+      `ops/ralph/HUMAN-VERIFY.md`.
 - [ ] G3. Update notifier at login: read-only `git fetch`, tell the user commits
       exist, never auto-switch. (Designed weeks ago, never built.)
 - [ ] G4. Disk-space warning before the Nix store fills the drive.

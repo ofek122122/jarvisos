@@ -16208,3 +16208,58 @@ backlog (Tracks F-K) is far from resolved — G through K are still entirely
   backlog (Tracks F-K) is still far from resolved — F4/F5 need a human
   decision before they can move, and H through K are entirely `[ ]` — so the
   loop keeps going per PROMPT.md STEP 5.
+
+## 2026-09-26 — printing declared: CUPS + driver set + mDNS discovery (PLAN G2)
+- built: G2 (printing) was next in the comfort backlog's Track G. New
+  `modules/printing.nix`, imported by `hosts/ares/default.nix`, declares
+  `services.printing.enable = true` with `drivers = [ gutenprint hplip
+  splix brlaser ]` (nixpkgs' own module docs' "broad coverage" example
+  trio plus Brother's laser driver) and turns `services.avahi` on
+  (`nssmdns4 = true`, `openFirewall = true`). Checked against nixpkgs'
+  actual `cupsd.nix`/`avahi-daemon.nix` before writing anything:
+  `services.printing.browsed.enable` (the CUPS Remote Printer Discovery
+  daemon — cups-browsed, the DNS-SD-based replacement for CUPS's own
+  deprecated network browsing protocol) defaults to
+  `config.services.avahi.enable`, confirmed live with `nix eval` against
+  this flake's own evaluation, so turning avahi on IS the whole mDNS
+  discovery story — no second option to flip. Firewall: only 5353/udp
+  (mDNS itself, via avahi's `openFirewall`) is opened; no CUPS/IPP port
+  (631) was opened because this machine only needs to discover and print
+  TO printers, not share its own to the LAN, and opening a port nothing
+  here answers would be unearned attack surface.
+- tests: `ops/ralph/nixtest.sh` (+4 cases): `services.printing.enable` and
+  `services.avahi.enable` both true on the real evaluation; `nssmdns4` on
+  AND `5353` actually present in `networking.firewall.allowedUDPPorts`
+  (not just the option declared — the port a packet would actually be let
+  through on); `services.printing.browsed.enable` reads `true` with no
+  module of this loop's own setting it, proving the "no second switch"
+  claim against nixpkgs' real default rather than trusting the module's
+  own comment; the four declared driver packages
+  (`gutenprint-*`/`hplip-*`/`splix-*`/`brlaser-*`) all appear in
+  `services.printing.drivers` off the real evaluation. First attempt at
+  the browsed-enable case compared against a string containing a stray
+  `warning: Git tree ... is dirty` line because stderr was merged into the
+  captured value with `2>&1` — fixed to redirect stderr to its own
+  tempfile like every other case in the file, before this was committed.
+  `bash ops/ralph/verify.sh`: 2 gates over 4 paths (`hosts/ares/
+  default.nix`, `modules/printing.nix`, `ops/ralph/nixtest.sh`, plus
+  itself), GREEN in 139.9s (tools 917 unaffected, nixtest 46 — 42 prior +
+  4 new).
+- build: `nixos-rebuild build --flake .#ares` -> ok (CUPS, cups-browsed,
+  avahi-daemon, gutenprint/hplip/splix/brlaser and their closures, the
+  rebuilt `system-path`/`etc`/`system-units`/toplevel). Never switched.
+- files: modules/printing.nix, hosts/ares/default.nix, ops/ralph/nixtest.sh,
+  ops/ralph/HUMAN-VERIFY.md, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- note: an untracked, empty `.ralph-STOP` was found sitting in this
+  worktree at the start of this iteration (birth timestamp predates this
+  session). PROMPT.md STEP 5 only calls for that file once the ENTIRE
+  comfort backlog (Tracks F-K) is `[x]`/`[H]`/`[B]`, which is not true yet
+  (H through K are still all `[ ]`), so it was left exactly as found —
+  neither deleted nor committed nor treated as this iteration's own
+  stop-signal — since `loop-run.sh` reads it, not this session, and it is
+  not this session's file to interpret or remove.
+- next: G3 (update notifier: read-only `git fetch`, tell the user commits
+  exist, never auto-switch) is the next unchecked item in Track G. The
+  comfort backlog (Tracks F-K) is still far from resolved — F4/F5 need a
+  human decision, G9/G10 are `[B]`, and H through K are entirely `[ ]` —
+  so the loop keeps going per PROMPT.md STEP 5.

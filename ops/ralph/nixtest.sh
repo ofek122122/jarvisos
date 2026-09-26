@@ -577,6 +577,48 @@ t='blueman: the pairing GUI ships, so there is a way to pair with no tray yet'
 if grep -q '^blueman-' <<<"$names"; then ok "$t"
 else bad "$t" "blueman is not in environment.systemPackages: $(tail -3 <<<"$names")"; fi
 
+# --------------------------------------------------------------- printing
+# PLAN G2. modules/printing.nix declares CUPS with a broad driver set and
+# turns Avahi on for mDNS — the comment above the module claims cups-browsed
+# (services.printing.browsed.enable) needs no switch of its own because it
+# already defaults to config.services.avahi.enable; that claim is a fact
+# about the real evaluation, not this file, so it gets its own case.
+
+t='printing: CUPS and Avahi are both on'
+print_err=$(mktemp)
+out=$(nix eval '.#nixosConfigurations.ares' --apply \
+  '(c: if c.config.services.printing.enable && c.config.services.avahi.enable
+       then "both on" else "not both on")' 2>"$print_err")
+if [ "$out" = '"both on"' ]; then ok "$t"
+else bad "$t" "$out $(cat "$print_err")"; fi
+rm -f "$print_err"
+
+t='printing: mDNS resolution is on and its firewall port is actually open'
+print_err=$(mktemp)
+out=$(nix eval '.#nixosConfigurations.ares' --apply \
+  '(c: if c.config.services.avahi.nssmdns4 && (builtins.elem 5353 c.config.networking.firewall.allowedUDPPorts)
+       then "mdns reachable" else "mdns not reachable")' 2>"$print_err")
+if [ "$out" = '"mdns reachable"' ]; then ok "$t"
+else bad "$t" "$out $(cat "$print_err")"; fi
+rm -f "$print_err"
+
+t='printing: cups-browsed turns on by itself once avahi is on (no second switch)'
+print_err=$(mktemp)
+out=$(nix eval '.#nixosConfigurations.ares.config.services.printing.browsed.enable' 2>"$print_err")
+if [ "$out" = "true" ]; then ok "$t"
+else bad "$t" "$out $(cat "$print_err")"; fi
+rm -f "$print_err"
+
+t='printing: the declared driver set reaches CUPS (gutenprint, hplip, splix, brlaser)'
+driver_names=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+  '(c: builtins.concatStringsSep "\n" (map (p: p.name) c.config.services.printing.drivers))' 2>&1)
+missing=""
+for d in gutenprint hplip splix brlaser; do
+  grep -q "^${d}-" <<<"$driver_names" || missing="$missing $d"
+done
+if [ -z "$missing" ]; then ok "$t"
+else bad "$t" "missing:$missing — got: $(tr '\n' ' ' <<<"$driver_names")"; fi
+
 # ------------------------------------------------------------- snapshots
 # PLAN F3. modules/snapshots.nix declares a snapper timeline over disko.nix's
 # @root and @home subvolumes plus the one gap snapper's own module leaves
