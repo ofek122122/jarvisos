@@ -156,6 +156,26 @@ Item {
       compare(labels.itemAt(1), a, "and a");
     }
 
+    // TWO ROWS WITH ONE KEY, which is what the search window is for. A key is
+    // an identity and nothing here can promise the caller's are unique — niri
+    // can describe a desk carrying one id twice — so the scan for a surviving
+    // row starts at `i` rather than at 0. Everything before `i` was claimed by
+    // an earlier row THIS PASS, and the second row with a repeated key has to
+    // take the next one instead of stealing back the first: a scan from 0
+    // would move the claimed row down, leave the other in its place unset,
+    // and draw the same word twice off two delegates that had swapped.
+    function test_two_rows_with_one_key_each_keep_their_own_delegate() {
+      rows.sync([suite.row(7, "a", false), suite.row(7, "b", false)]);
+      compare(suite.labelsOn(), "a b");
+      const first = labels.itemAt(0);
+      const second = labels.itemAt(1);
+
+      rows.sync([suite.row(7, "a", false), suite.row(7, "b", false)]);
+      compare(suite.labelsOn(), "a b", "neither row was claimed by the other");
+      compare(labels.itemAt(0), first, "the first row kept its delegate");
+      compare(labels.itemAt(1), second, "and so did the one behind it");
+    }
+
     // …and the only reason it matters: a delegate that survives is one whose
     // Behavior has somewhere to move from. A rebuilt one has always been the
     // colour it is drawn in.

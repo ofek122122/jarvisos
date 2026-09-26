@@ -206,6 +206,27 @@ TestCase {
     compare(JSON.stringify(m.workspaces), before);
   }
 
+  function test_a_workspace_with_nowhere_to_be_drawn_takes_the_snapshot_with_it() {
+    const m = suite.live();
+    const before = JSON.stringify(m.workspaces);
+    // `output` is one of the three fields the strip cannot draw without,
+    // and the empty string is the shape a missing one arrives in when
+    // something upstream defaulted it rather than omitted it — a workspace
+    // that belongs to no monitor. It is not a monitor called "": the bar
+    // asks `workspacesOn(<screen name>)`, so this pip would be on no strip
+    // at all while still counting towards the desk the model reports. The
+    // whole snapshot goes, like any other unreadable one.
+    m.ingest(JSON.stringify({
+      "WorkspacesChanged": {
+        "workspaces": [
+          { "id": 1, "idx": 1, "name": null, "output": "HDMI-A-1", "is_urgent": false, "is_active": true, "is_focused": true, "active_window_id": 2 },
+          { "id": 9, "idx": 2, "name": null, "output": "", "is_urgent": false, "is_active": false, "is_focused": false, "active_window_id": null }
+        ]
+      }
+    }));
+    compare(JSON.stringify(m.workspaces), before, "the old desk was kept whole");
+  }
+
   // --- the deltas -------------------------------------------------------
 
   function test_activating_a_workspace_moves_the_active_one_on_its_output() {
@@ -261,6 +282,30 @@ TestCase {
     m.ingest('{"WorkspaceActivated":{"id":404,"focused":true}}');
     compare(JSON.stringify(m.workspaces), before);
     compare(m.workspaces.length, 4, "no phantom workspace was created");
+  }
+
+  function test_a_delta_cannot_name_a_workspace_two_of_them_answer_to() {
+    const m = suite.live();
+    // An id is how EVERY delta names its workspace, so a desk carrying the
+    // same id twice is one where "workspace 5" is not a question this model
+    // can answer. `find` says so by returning nothing, and the deltas are
+    // dropped — which matters more than it sounds: `applyActivated` and
+    // `applyUrgency` then walk the list by `w.id === id` and would patch
+    // BOTH, lighting an active pip on two monitors at once off one event.
+    m.ingest(JSON.stringify({
+      "WorkspacesChanged": {
+        "workspaces": [
+          { "id": 5, "idx": 1, "name": null, "output": "HDMI-A-1", "is_urgent": false, "is_active": true, "is_focused": true, "active_window_id": null },
+          { "id": 5, "idx": 1, "name": null, "output": "DP-1", "is_urgent": false, "is_active": false, "is_focused": false, "active_window_id": null }
+        ]
+      }
+    }));
+    const before = JSON.stringify(m.workspaces);
+    compare(m.workspaces.length, 2, "the snapshot itself is readable; it is the id that is not");
+    m.ingest('{"WorkspaceActivated":{"id":5,"focused":true}}');
+    m.ingest('{"WorkspaceUrgencyChanged":{"id":5,"urgent":true}}');
+    compare(JSON.stringify(m.workspaces), before, "an ambiguous id is not knowledge");
+    compare(m.workspaces.filter(w => w.active).length, 1, "one output did not gain an active workspace");
   }
 
   function test_an_activation_without_the_two_fields_is_dropped() {
