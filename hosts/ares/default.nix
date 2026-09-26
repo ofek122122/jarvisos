@@ -16,6 +16,7 @@
     ../../modules/audio.nix
     ../../modules/security.nix
     ../../modules/comfort.nix
+    ../../modules/snapshots.nix
     ../../modules/windows-compat.nix
     ../../modules/jarvis-services.nix
     ../../modules/boot-grub.nix

@@ -63,6 +63,16 @@ unit() {
     2>&1
 }
 
+# sysunit <unit-name> — the same question as unit(), for a SYSTEM unit
+# (systemd.services.*, not systemd.user.services.*): snapper's own module and
+# jv-snapshots-init both land in config.systemd.units, not
+# config.systemd.user.units.
+sysunit() {
+  nix eval --raw '.#nixosConfigurations.ares' --apply \
+    "(c: c.config.systemd.units.\"$1\".text)" \
+    2>&1
+}
+
 # ---------------------------------------------------------------- the knob
 # PLAN A46 / A41: jv-voice honours JARVIS_VOICE_OUTPUT_DEVICE, and until this
 # option existed the only way to set it was editing a unit by hand — the
@@ -538,6 +548,74 @@ names=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
   '(c: builtins.concatStringsSep "\n" (map (p: p.name) c.config.environment.systemPackages))' 2>&1)
 if grep -q '^xdg-user-dirs-' <<<"$names"; then ok "$t"
 else bad "$t" "xdg-user-dirs is not in environment.systemPackages: $(tail -3 <<<"$names")"; fi
+
+# ------------------------------------------------------------- snapshots
+# PLAN F3. modules/snapshots.nix declares a snapper timeline over disko.nix's
+# @root and @home subvolumes plus the one gap snapper's own module leaves
+# (creating `.snapshots`); everything below is an OPTION's effect on the real
+# evaluation, which tools/tests/test_snapshots.py (bare checkout, no nix)
+# cannot see.
+
+t='both configs point at the subvolumes disko.nix actually declares'
+snap_err=$(mktemp)
+subs=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+  '(c: "${c.config.services.snapper.configs.root.SUBVOLUME} ${c.config.services.snapper.configs.home.SUBVOLUME}")' 2>"$snap_err")
+if [ "$subs" = "/ /home" ]; then ok "$t"
+else bad "$t" "root/home SUBVOLUME: $subs $(cat "$snap_err")"; fi
+rm -f "$snap_err"
+
+t='the timeline is bounded, not left at upstream defaults or unbounded'
+snap_err=$(mktemp)
+limits=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+  '(c: with c.config.services.snapper.configs.root;
+      "${toString TIMELINE_LIMIT_HOURLY} ${toString TIMELINE_LIMIT_DAILY} ${toString NUMBER_LIMIT}")' 2>"$snap_err")
+if [[ "$limits" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]]; then ok "$t"
+else bad "$t" "hourly/daily/number limits not all bounded integers: $limits $(cat "$snap_err")"; fi
+rm -f "$snap_err"
+
+t='jv-snapshots-init creates .snapshots for / and /home, idempotently'
+# A script embedded in ExecStart is only a STORE-PATH STRING to an evaluation
+# (the derivation behind it was already coerced away) and cannot be `nix
+# build`-ed from there, which is exactly why it is a flake package rather
+# than an inline pkgs.writeShellScript (see pkgs/jv-snapshots-init's own
+# comment) — built and read directly, the same way the lock screen is below.
+init_said=$(nix build --no-link --print-out-paths '.#jv-snapshots-init' 2>&1)
+init=$(tail -1 <<<"$init_said")
+script=""
+[ -x "$init/bin/jv-snapshots-init" ] && script=$(cat "$init/bin/jv-snapshots-init")
+if [ -z "$script" ]; then bad "$t" "\`nix build .#jv-snapshots-init\` said: $(tail -3 <<<"$init_said")"
+elif grep -qF 'target="/"' <<<"$script" && grep -qF 'target="/home"' <<<"$script" \
+     && grep -q 'subvolume show' <<<"$script" && grep -q 'subvolume create' <<<"$script"; then
+  ok "$t"
+else bad "$t" "script does not check-then-create both / and /home: $script"; fi
+
+t='jv-snapshots-init is the one that actually runs at boot, out of the store'
+out=$(sysunit jv-snapshots-init.service)
+if grep -qF "ExecStart=$init/bin/jv-snapshots-init" <<<"$out"; then ok "$t"
+else bad "$t" "unit does not run the built package: $(grep ExecStart <<<"$out")"; fi
+
+t='snapper-timeline/-cleanup/-boot all wait for jv-snapshots-init to finish'
+for u in snapper-timeline.service snapper-cleanup.service snapper-boot.service; do
+  out=$(sysunit "$u")
+  if ! grep -q '^\[Unit\]$' <<<"$out"; then bad "$t" "$u is not a unit: $(tail -3 <<<"$out")"; break; fi
+  if ! grep -q '^Requires=.*jv-snapshots-init.service' <<<"$out" || ! grep -q '^After=.*jv-snapshots-init.service' <<<"$out"; then
+    bad "$t" "$u missing Requires=/After= jv-snapshots-init.service: $(grep -E 'Requires|After' <<<"$out")"
+    break
+  fi
+  [ "$u" = snapper-boot.service ] && ok "$t"
+done
+
+t='root is snapshotted on every boot'
+out=$(sysunit snapper-boot.service)
+if grep -q -- '--cleanup-algorithm number' <<<"$out" && grep -q 'ConditionPathExists=/etc/snapper/configs/root' <<<"$out"; then
+  ok "$t"
+else bad "$t" "$(tail -5 <<<"$out")"; fi
+
+t='jv-snapshot-restore ships on the machine'
+names=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+  '(c: builtins.concatStringsSep "\n" (map (p: p.name) c.config.environment.systemPackages))' 2>&1)
+if grep -q '^jv-snapshot-restore$' <<<"$names"; then ok "$t"
+else bad "$t" "jv-snapshot-restore is not in environment.systemPackages: $(tail -3 <<<"$names")"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

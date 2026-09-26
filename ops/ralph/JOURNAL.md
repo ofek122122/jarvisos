@@ -16089,3 +16089,66 @@ D57/D56/D64/D55/D62/D48/D45 (unread this iteration), E6's frame-count
 measurement (wants a compositor), D81/D67/D65 (want a human). The comfort
 backlog (Tracks F-K) is far from resolved — G through K are still entirely
 `[ ]` — so the loop keeps going per PROMPT.md STEP 5.
+
+## 2026-09-26 — F3: btrfs snapshots + rollback
+- built: modules/snapshots.nix declares services.snapper.configs for @root
+  and @home (hosts/ares/subvolumes.nix is the one shared list disko.nix's
+  subvolumes come from, read by both the module and the new package below —
+  PLAN E10's lesson applied here), snapshotRootOnBoot = true, and a bounded
+  retention policy (TIMELINE_LIMIT_* = 6/7/4/6/0, NUMBER_LIMIT{,_IMPORTANT} =
+  20/5 — literal integers, not left at upstream's own defaults, so the
+  timeline stays flat rather than merely growing slower). pkgs/jv-snapshots-init
+  fills the one gap snapper's own NixOS module leaves on purpose (the manual:
+  a SUBVOLUME "has to contain a subvolume named .snapshots"; the module never
+  creates one) — a flake PACKAGE, not an inline pkgs.writeShellScript, because
+  a script embedded in a systemd unit's ExecStart is only a store-path STRING
+  by the time an evaluation can see it, and nixtest.sh needs to `nix build`
+  and read what it actually runs (the same reason jv-lock/jv-wall are
+  packages). It is idempotent (checks `btrfs subvolume show` before
+  `create`) and ordered via requires+after before snapper-timeline/-cleanup/
+  -boot all finish. pkgs/jv-snapshot-restore is the "documented one-command
+  restore": `list <root|home>` / `restore <root|home> <n> [path...]`, which
+  fixes `undochange`'s range direction to `<n>..0` (the standard idiom — 0 is
+  always current — and typed backwards it would silently no-op rather than
+  fail loud) and restricts the config argument to exactly root|home.
+- why [H] not [x]: the item's own gate ("creates a file, snapshots, deletes,
+  restores, asserts it's back") was tried for real in this loop's own
+  worktree and deliberately abandoned — `df -T /tmp` names it
+  /dev/mapper/jarvis-root, the SAME real disk CLAUDE.md says this loop must
+  never damage, not a disposable VM. `btrfs subvolume create`/`snapshot`
+  succeed there as this unprivileged user; `btrfs subvolume delete` does not
+  (EPERM, no user_subvol_rm_allowed on this mount — confirmed by trying it),
+  neither does `rm -rf` on a subvolume, and there is no passwordless sudo. A
+  headless test that creates real subvolumes it cannot clean up would leave
+  permanent orphans on the real disk every run. nixpkgs already ships the
+  real round trip as a VM test (nixos/tests/snapper.nix) — not this repo's to
+  re-prove — so the real round trip is a human's to run once
+  (HUMAN-VERIFY.md has the exact commands); everything else got a gate.
+- tests: tools/tests/test_snapshots.py (10 new cases: bounded retention,
+  TIMELINE_CREATE+CLEANUP both on, both disko subvolumes configured, the init
+  script targets exactly / and /home and checks before it creates, every
+  snapper unit orders itself after jv-snapshots-init with both requires AND
+  after, and five cases on the restore wrapper's argument handling —
+  direction, numeric validation, the two-config allowlist, no unquoted
+  interpolation) -> 917 tools tests pass. ops/ralph/nixtest.sh (+8 cases: both
+  SUBVOLUMEs match disko.nix, the limits are bounded integers in the real
+  evaluation, jv-snapshots-init builds and its script checks-then-creates
+  both paths, the unit that runs at boot is the built package's own binary,
+  all three snapper units wait for it to FINISH not just start, root
+  snapshots on boot with --cleanup-algorithm number, jv-snapshot-restore
+  ships) -> 39 pass. bash ops/ralph/verify.sh: 3 gates over 8 paths, GREEN in
+  173.9s (tools 917, nixtest 39, shellload — named only because flake.nix
+  changed, unaffected). ops/ralph/hudscreens.sh run by hand for the same
+  reason: all 10 shots matched the sheet committed at HEAD, no HUD
+  regression.
+- build: nixos-rebuild build --flake .#ares -> ok (19 new derivations: the
+  snapper units, /etc/snapper/configs/{root,home}, jv-snapshots-init,
+  system-path for jv-snapshot-restore). Never switched.
+- files: modules/snapshots.nix, hosts/ares/subvolumes.nix, hosts/ares/default.nix,
+  pkgs/jv-snapshots-init/default.nix, pkgs/jv-snapshot-restore/default.nix,
+  flake.nix, ops/ralph/nixtest.sh, tools/tests/test_snapshots.py,
+  ops/ralph/PLAN.md, ops/ralph/HUMAN-VERIFY.md, ops/ralph/JOURNAL.md
+- next: F4 (game-launch VRAM handoff) is the next unchecked item in the
+  comfort backlog's top track. The comfort backlog (Tracks F-K) is still far
+  from resolved — G through K are entirely [ ] — so the loop keeps going per
+  PROMPT.md STEP 5.

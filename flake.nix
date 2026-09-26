@@ -129,6 +129,16 @@
           outputs = import ./hosts/ares/outputs.nix;
           cuda-smoke = self.packages.${system}.cuda-smoke;
         };
+        # jv-snapshot-restore — the one-command restore half of PLAN F3
+        # (modules/snapshots.nix declares the snapper timeline it restores
+        # from).
+        jv-snapshot-restore = pkgs.callPackage ./pkgs/jv-snapshot-restore { };
+        # jv-snapshots-init — the other half of PLAN F3: creates the
+        # `.snapshots` subvolume snapper's own module expects to already
+        # exist, for every subvolume hosts/ares/subvolumes.nix declares.
+        jv-snapshots-init = pkgs.callPackage ./pkgs/jv-snapshots-init {
+          subvolumes = builtins.attrValues (import ./hosts/ares/subvolumes.nix);
+        };
         default = self.packages.${system}.jarvis-doctor;
       };
 

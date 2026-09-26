@@ -79,10 +79,61 @@ the top unchecked item unless it is blocked.
       --flake .#ares` green. `[H]` because the actual lock-after-idle,
       lock-before-suspend, and warm-at-dusk behaviour can only be seen on
       the real desktop — see `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] F3. **btrfs snapshots + rollback.** Timed snapshots of `@root`/`@home`
-      (snapper or btrbk), a retention policy that cannot fill the disk, and a
-      documented one-command restore. Gate: a test that creates a file, snapshots,
-      deletes, restores, and asserts the file is back.
+- [H] F3. **btrfs snapshots + rollback.** DONE (this commit): `modules/snapshots.nix`
+      declares `services.snapper.configs.{root,home}` over disko.nix's own
+      `@root`/`@home` subvolumes (`hosts/ares/subvolumes.nix`, one shared
+      declaration read by both the module and the package below — PLAN E10's
+      "one list, not two hand-kept ones" lesson) plus
+      `snapshotRootOnBoot = true`. The retention policy is bounded, not left
+      at upstream's own defaults: `TIMELINE_LIMIT_{HOURLY,DAILY,WEEKLY,
+      MONTHLY,YEARLY} = 6/7/4/6/0` and `NUMBER_LIMIT{,_IMPORTANT} = 20/5` are
+      literal integers per config, so the timeline stays flat (≤23 scheduled +
+      ≤20 manual/boot snapshots per subvolume) rather than merely growing
+      slower. `pkgs/jv-snapshots-init` fills the one gap snapper's own NixOS
+      module leaves on purpose (its manual: SUBVOLUME "has to contain a
+      subvolume named .snapshots"; its module's own comment: creating one is
+      "not the NixOS way") — a package rather than an inline script so
+      `nixtest.sh` can `nix build` and read it, ordered via `requires`/`after`
+      before `snapper-timeline`/`-cleanup`/`-boot` all finish. `pkgs/
+      jv-snapshot-restore` is the "documented one-command restore": `list
+      <root|home>` and `restore <root|home> <n> [path...]`, which fixes
+      `undochange`'s range direction to `<n>..0` (the well-known idiom —
+      current is always `0` — and the one this file's own comment argues a
+      typed-backwards range would silently no-op rather than fail loud).
+      Neither wrapper reaches through jv-act: both are terminal tools a human
+      runs deliberately, the same tier as `nixos-rebuild` itself, not a
+      bus-driven capability (invariant 3 governs Jarvis's own actions, not a
+      human's).
+      **Why `[H]` and not `[x]`, in detail.** The item's own gate — "creates a
+      file, snapshots, deletes, restores, asserts it's back" — was tried for
+      real in this loop's own worktree and deliberately abandoned: `df -T
+      /tmp` names it `/dev/mapper/jarvis-root`, the SAME real disk CLAUDE.md
+      says this loop must never damage, not a disposable VM (unlike nixpkgs'
+      own `nixos/tests/snapper.nix`, which already runs this exact scenario
+      upstream). `btrfs subvolume create`/`snapshot` succeed there as this
+      unprivileged user; `btrfs subvolume delete` does not (EPERM — no
+      `user_subvol_rm_allowed` on this mount, confirmed by trying it), and
+      neither does `rm -rf` on a subvolume, and there is no passwordless
+      sudo. A headless test that creates real subvolumes it cannot clean up
+      would leave permanent orphans on Ofek's actual disk every time it runs
+      — worse than the bug it proves fixed. So the real round trip is a
+      human's to run (`ops/ralph/HUMAN-VERIFY.md` has the exact commands),
+      and `tools/tests/test_snapshots.py` (10 cases) + `ops/ralph/nixtest.sh`
+      (+8 cases) cover everything else: the retention bounds are real
+      integers, the init script is idempotent and targets exactly `/` and
+      `/home`, every snapper unit is ordered after it finishes (not just
+      started), root is snapshotted every boot, and the restore wrapper's
+      argument handling — direction, numeric validation, the two-config
+      allowlist, no unquoted interpolation — is correct before it ever reaches
+      a real `snapper`. `bash ops/ralph/verify.sh`: 3 gates over 8 paths,
+      GREEN in 173.9s (tools 917, nixtest 39, shellload — named because
+      `flake.nix` changed, unaffected). `ops/ralph/hudscreens.sh` was named
+      for the same reason and run by hand: all 10 shots matched the sheet
+      committed at HEAD (no HUD regression). `nixos-rebuild build --flake
+      .#ares` green (19 new derivations: the snapper units, `/etc/snapper/
+      configs/{root,home}`, `jv-snapshots-init`, `system-path` for `jv-
+      snapshot-restore`). Never switched. No schema, no jv-act, no boot path,
+      no pins, no disko.nix touched.
 - [ ] F4. **Game-launch VRAM handoff.** The blueprint specifies "game launch →
       brain unloads"; it was never built. Detect a game starting (gamemode's
       D-Bus signal is the clean hook), have jv-brain release the model, and
