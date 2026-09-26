@@ -15,6 +15,7 @@
   runCommand,
   resvg,
   jetbrains-mono,
+  python3,
 }:
 let
   theme = builtins.fromTOML (builtins.readFile ../../personality/theme.toml);
@@ -111,9 +112,19 @@ let
   # instead of a leftover.
   wordmarkUp = 110;
   subtitleUp = 68;
+
+  # AND THE GATE THAT READS THE PIXELS BACK (PLAN E11). `tools/artsample.py`
+  # decodes each PNG this builder writes and samples the three fractions above in
+  # the raster — because until it existed nothing in this repo had ever opened a
+  # render of this art, and E9 shipped a build where the drawing had collapsed
+  # into the top-left corner while resvg, this package and every gate exited 0.
+  # The decoder is the contact sheet's, unchanged, which is why this is two files
+  # and not a dependency: pure Python, and about a microsecond per pixel.
+  sampler = ../../tools/artsample.py;
+  decoder = ../../tools/hudsheet.py;
 in
 runCommand "jarvis-wallpaper"
-  { nativeBuildInputs = [ resvg ]; }
+  { nativeBuildInputs = [ resvg python3 ]; }
   ''
     mkdir -p "$out/share/backgrounds"
     fonts="${jetbrains-mono}/share/fonts"
@@ -241,6 +252,34 @@ runCommand "jarvis-wallpaper"
       resvg --skip-system-fonts --use-fonts-dir "$fonts" \
         "$geom.svg" "$out/share/backgrounds/jarvisos-$geom.png" 2>>resvg.log
     done
+
+    # NOW LOOK AT WHAT WAS DRAWN (PLAN E11), which nothing in this repo had ever
+    # done. Six renders, six pixels each: the reticle at the instrument's centre
+    # and the comet's head one outer ring above it must be the ember exactly —
+    # both are absolute-radius opaque discs, so the sample lands inside a solid
+    # fill at every geometry — and the four corners of the field must still be
+    # the field, cool and no brighter than the grid's own hairline.
+    #
+    # The fractions and the colours are the SAME BINDINGS the drawing above is
+    # composed from, interpolated rather than restated: a checker pointed at a
+    # hand-written 0.734 would keep passing the day somebody edits `instrumentX`,
+    # and a hex literal here would be one more place a colour lives (invariant 9).
+    # tools/tests/test_artsample.py is the third party that holds this call to
+    # both, since neither this file nor the checker can say it about itself.
+    #
+    # It is pointed at the OUTPUT DIRECTORY and not at a list of names, so the
+    # geometry the loop above gains next is checked without anybody remembering —
+    # and a glob that matches nothing is an error inside the sampler rather than
+    # an empty green.
+    mkdir -p sampler
+    cp ${decoder} sampler/hudsheet.py
+    cp ${sampler} sampler/artsample.py
+    python3 sampler/artsample.py \
+      --at ${toString instrumentX},${toString instrumentY} \
+      --radius ${toString instrumentR} \
+      --warm '${ember}' \
+      --field '${ground}' --field '${groundDeep}' --field '${line}' \
+      "$out/share/backgrounds"/*.png
 
     # A font family that does not resolve is not an error to resvg: it warns,
     # substitutes whatever it can find, and exits 0 — so the wordmark quietly
