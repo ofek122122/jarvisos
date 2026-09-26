@@ -14304,3 +14304,89 @@ is not worth chasing.)
   outside every bareness check), then **D69**, **B88**, **B95**, **D63**,
   **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D71**, **D48**,
   **D45**. **D67** and **D65** still want a human.
+
+## 2026-09-26 — D70: the screen that could only ever be photographed lit
+
+- built: **the quiet half of the narrow output.** D68 put a 280 px screen
+  under the HUD and took its picture LIT. The other half of invariant 10 —
+  a HUD with nothing to say leaves the screen pixel-identical to the bare
+  desktop — is made by `check_desk_is_bare`, which walked `sheet.OUTPUTS`
+  over one wide `grim` of the DESK. The narrow output sits to the RIGHT of
+  the desk on purpose (D68 kept it out of `OUTPUTS` so nine committed PNGs
+  would not be re-photographed to answer a question about a tenth), so the
+  desk capture cannot see it, and nothing else looked: `01-quiet` photographs
+  the desk alone and a lit shot's corner check only bounds the box that WAS
+  drawn. A surface that mapped on that screen with nothing to say was caught
+  by nothing at all. It now takes a second exposure, 280x1080 — 0.3 Mpx
+  against the desk's 33 — read by the same `drawn_box` against the same
+  backdrop. Six call sites, five of them in the idle probe, and the narrow
+  screen came back bare in every one.
+- **the coverage is derived, not counted.** The obvious gate is "there are
+  two captures", which is a sentence about today. The one written walks the
+  AST of `check_desk_is_bare`, expands its `"desk"` exposure back into
+  `sheet.OUTPUTS`, unions that with every single-output exposure, and insists
+  the result is every role in `ALL_OUTPUTS`. An output declared and
+  photographed by nobody goes red on that line rather than passing quietly
+  forever — which is precisely the failure D70 was, since `NARROW` was
+  declared at D68 and the bareness check never heard about it.
+- **and the half that was not in the item, which is why one more grim would
+  not have been enough.** The sentence being proven is `drawn_box` returning
+  None. `drawn_box` of an empty region is None; numpy slicing past the end of
+  an array returns a SMALLER array rather than raising; and not one capture in
+  this harness had its size checked. So a grim that came back as the wrong
+  screen, or as a 1x1 placeholder, or with the desk one monitor short off the
+  right, reads as "the HUD drew nothing here" — and that is the exact sentence
+  earned emptiness is proven with. A check over an image that is not the
+  screen is vacuous, not green, which is D68's own lesson about `check_corner`
+  arriving a second time by a different road.
+  The rule is `sheet.capture_size_complaint`, put in the SHEET for the reason
+  `row_bands` is there — a suite with no compositor and no numpy can then run
+  the rule itself instead of asserting that some source line mentions it, and
+  four mutations were graded against it. `shoot.check_grim_size` raises it. It
+  guards exactly the two verdicts where None is the PASS: `check_desk_is_bare`
+  and `check_corner(lit=False)` through `check_capture`. The other nineteen
+  captures are polls inside bounded waits where None means keep waiting, so a
+  vacuous read there fails loudly on the deadline instead of passing — they
+  are deliberately left alone, and the third gate says the ordering part out
+  loud: a size check that runs after the pixels are read is not a check.
+  `check_capture`'s hand-rolled `img.shape[:2] !=` is gone into the shared
+  rule and a gate refuses it by name.
+- the expensive shape in the item — an eleventh PNG of an empty 280 px screen
+  — was declined on the item's own grounds. It is a picture of nothing; the
+  assertion is worth more than the photograph, and the sheet stays at ten.
+- tests: `bash ops/ralph/verify.sh` **GREEN** — 2 gates over 4 paths, 130.4 s
+  (runtests tools 61.8 s / 758 passed, hudshots 68.5 s). The three new gates
+  were graded by mutation before being trusted: dropping the narrow exposure,
+  taking it and never reading it, moving the size check after the read, and
+  making the rule accept every size — four mutants, four reds, each in the
+  gate that owns the claim. Plus the gate `verify.sh` names and does not run:
+  `bash ops/ralph/hudscreens.sh` — **exit 0**, every probe green, all 10
+  shots matching HEAD (7 of them differed by the compositor's rounding and
+  were restored to the committed bytes, which is the sheet's own floor doing
+  its job), and the granted-width answer reproducing. The run went 196.6 ->
+  197.6 s: six 0.3 Mpx exposures, and the new size check is what makes the
+  six of them evidence rather than six files.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- **the iteration that built this was cut off between the gate and the
+  commit** — the work was in the worktree, the entry above was written, and
+  nothing was committed. The next iteration found it there and would not take
+  a verdict on inherited word, so every gate was run again on the tree as
+  found, before `git commit`: `verify.sh` **GREEN**, 2 gates over 6 paths
+  (6 and not the 4 above, because this entry and the PLAN were dirty by then),
+  129.8 s, runtests tools 61.7 s / 758 passed, hudshots 68.1 s / 16 shots
+  matching HEAD. `hudscreens.sh` **exit 0** again, 196.3 s, all 10 shots
+  matching HEAD with the same 7 restored by the rounding floor, and the
+  granted-width line reproducing a third time — so the sheet needs no new
+  bytes and this commit carries none. `nixos-rebuild build --flake .#ares`
+  green. The re-run is the record; the numbers above are the build run's.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  tools/tests/test_hudscreens.py, docs/hud/screens/README.md,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- commit: bbaf170
+- next: **D72** (raised here: `01-quiet` is the only dark shot on the sheet
+  and it is checked on three outputs of four — a plate that drew on the narrow
+  screen in answer to a frame with nothing in it would still pass), then
+  **D69**, **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**,
+  **D55**, **D62**, **D71**, **D48**, **D45**. **D67** and **D65** still want
+  a human.

@@ -1737,7 +1737,7 @@ human-reviewed step.
       checking before building it, and is the same question **D31** asks
       about pointing `--runner shots` at that harness. Raised by D27.
 
-- [ ] D70. **Earned emptiness has never been measured on the narrow
+- [x] D70. **Earned emptiness has never been measured on the narrow
       output.** D68 put a 280 px screen under the HUD and photographed it
       LIT. The other half of invariant 10 — that a HUD with nothing to say
       leaves the screen pixel-identical to the bare desktop — is checked by
@@ -1752,6 +1752,35 @@ human-reviewed step.
       cover every output the compositor has. The expensive shape is a tenth
       PNG of an empty 280 px screen, which is a picture of nothing and would
       be the second one on this sheet. Raised by D68.
+      **Done (bbaf170).** Two exposures where there was one: the desk in the
+      same wide `grim`, then a 280x1080 one of its own — 0.3 Mpx against the
+      desk's 33 — read by the same `drawn_box` against the same backdrop, so
+      the quiet claim now covers every output the compositor has. Six call
+      sites, five of them in the idle probe, and the narrow screen came back
+      bare in every one.
+      The coverage is DERIVED, not counted. The gate walks the AST of
+      `check_desk_is_bare`, expands its `"desk"` exposure back into
+      `sheet.OUTPUTS`, and insists the union is every role in `ALL_OUTPUTS` —
+      so an output declared and photographed by nobody goes red there instead
+      of passing quietly forever, which is exactly what D70 was.
+      The other half was not in the item, and it is the reason one more grim
+      would not have been enough. The sentence being proven is `drawn_box`
+      returning None; numpy slicing past the end of an array returns a
+      SMALLER array rather than raising; and no capture in this harness had
+      its size checked — so a grim that came back as the wrong screen, or
+      1x1, reads as "the HUD drew nothing here". The rule is
+      `sheet.capture_size_complaint`, in the sheet so a suite with no
+      compositor and no numpy can run the rule itself; `check_grim_size`
+      raises it; and it guards exactly the two verdicts where None is the
+      PASS — `check_desk_is_bare` and `check_corner(lit=False)` through
+      `check_capture`. The other nineteen captures are bounded waits where
+      None means keep waiting, so a vacuous read there fails loudly and they
+      are deliberately left alone. `check_capture`'s hand-rolled
+      `img.shape[:2] !=` is gone, and a gate refuses it by name.
+      The expensive shape in the item — an eleventh PNG of an empty 280 px
+      screen — was declined on the item's own grounds: it is a picture of
+      nothing, and the assertion is worth more than the photograph. Raised
+      **D72**.
 
 - [ ] D71. **The crowded corner has never met the narrow screen.** D68's
       picture is `03-confirm`: two plates, one of them capped. What D66's
@@ -1765,6 +1794,24 @@ human-reviewed step.
       item is really "is there a claim about the crowd that only a compositor
       can make", and the honest answer may be no, in which case write that
       down next to `tst_fit.qml` and close it. Raised by D68.
+
+- [ ] D72. **The only DARK shot on the sheet is checked on three outputs of
+      four.** D70 closed the quiet claim for the idle probe — no frames at
+      all, surface unmapped, and now the narrow output photographed for it.
+      `01-quiet` is a different dark: frames ARRIVE and every plate decides
+      it has nothing to show, which is the case where a plate drawing a
+      zero-height sliver or an empty glass rectangle would be a bug. Its
+      `captures` is `["desk"]`, the narrow output is outside the desk, and
+      `check_corner(lit=False)` — the other place where "nothing drawn" is
+      the pass — therefore never runs on it. The cheap shape is the one D70
+      used: in `check_capture`'s desk branch, a second grim of the narrow
+      output and `check_corner` over it, with no PNG written, so the sheet
+      still has ten pictures and one more assertion. The awkward part is that
+      the branch would then check an output for every desk shot including the
+      LIT ones (`02-heard`, `03-confirm`), where the box half of
+      `check_corner` is vacuous at that width (`w - SURFACE_W - INSET` is
+      -36) and only the left-inset half says anything — which is fine but
+      should be said out loud rather than discovered. Raised by D70.
 
 - [ ] D33. **Two copies of the HUD's box survive D16, and both are outside a
       shell.** The corner's width is one token now and both shells read it —
