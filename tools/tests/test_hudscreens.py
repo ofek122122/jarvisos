@@ -2121,12 +2121,13 @@ def test_the_lossy_shot_lights_exactly_the_two_plates_its_caption_names():
         "DictateState",
         "DropState",
         "EarsBudgets",
+        "GpuThermalState",
         "HealthState",
         "MicState",
         "OutputState",
     ], (
         f"{sorted(asks)} read sys.health now, and this shot was measured "
-        f"against six elements — a new reader may be drawing a plate the "
+        f"against seven elements — a new reader may be drawing a plate the "
         "caption does not mention"
     )
     for name in ("MicState", "EarsBudgets"):
@@ -2138,6 +2139,7 @@ def test_the_lossy_shot_lights_exactly_the_two_plates_its_caption_names():
         ("DropState", "jarvisd"),
         ("OutputState", "jv-voice"),
         ("DictateState", "jv-dictate"),
+        ("GpuThermalState", "jv-context"),
     ):
         assert asks[name] == {whose} and "jv-ears" not in asks[name], (
             f"core/{name}.qml now reads a jv-ears heartbeat, so this frame "

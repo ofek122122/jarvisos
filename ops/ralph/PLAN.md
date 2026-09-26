@@ -432,7 +432,89 @@ the top unchecked item unless it is blocked.
       `[H]` because seeing the real notification fire against the real
       disk, and confirming the dedupe genuinely holds across a live timer,
       needs a human — see `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] G5. Temperature/fan + GPU (VRAM) readout available to the bar.
+- [H] G5. **Temperature/fan + GPU (VRAM) readout available to the bar.** DONE
+      (this commit): `NvidiaSmiProbe.thermals()` (`services/jv-context/
+      jv_context/system.py`) is a second, independent `nvidia-smi
+      --query-gpu=temperature.gpu,fan.speed --format=csv,noheader,nounits`
+      call, alongside the existing VRAM query on the same card — same
+      three-answer contract as `vram_free_mb()` (None = no GPU, a tuple =
+      a reading, `ProbeUnavailable` = a card that stopped answering) and
+      sharing its `_absent` latch, so a missing driver still forks exactly
+      once total rather than twice. The two readings fail INDEPENDENTLY
+      (each in its own try/except in `snapshot()`), so a card that reports
+      VRAM but not its fan costs only the fan line, and vice versa — the
+      same "one probe's fault costs one field" discipline `gpu_vram_free_mb`
+      already followed. `gpu_temp_c`/`gpu_fan_pct` are **not** added to
+      `schemas/context.system.json` — that schema is frozen
+      (GUARDRAILS: schemas/** is human-review-only) — so `Snapshot` grew a
+      third field, `metrics`, that rides `sys.health`'s own free-form gauge
+      bag instead (`service.py`'s `_health_body()` now adds `body["metrics"]`
+      when non-empty), the exact seam F5c used for jv-dictate's `recording`
+      gauge. No schema change, no human-review item needed.
+      `shell/jv-hud/core/GpuThermalState.qml` reads jv-context's OWN
+      heartbeat (not `context.system`) with `DictateState`'s reading rules
+      (service-named metrics gauge, schema version/conf/period checks,
+      2-period staleness) rather than `VramState`'s snapshot-topic rules,
+      since the numbers live on a different topic now. Wired into
+      `HealthPlate.qml` as two new candidate lines — `gpu 82°C` / `gpu FAN
+      64%` — gated on `reporting`: `HealthPlate` draws NOTHING when nothing
+      is wrong (its own header), so a temperature sitting on screen all day
+      on a card that idles in the 30s-40s would be exactly the all-day
+      gauge §06 refuses. `hotThresholdC` defaults to 80°C: a GTX 1660 SUPER
+      throttles in the high 80s/low 90s, so 80 is early enough to warn and
+      late enough to never be ordinary background noise — a fact about
+      ares' own card, not a guess at another service's configuration
+      (contrast `VramState`'s deliberate refusal to judge VRAM
+      sufficiency against jv-brain's ladder). The fan line is a quote next
+      to the temperature, never a verdict, and never appears without it —
+      same relationship `VramState`'s `needLine` has to its own reading.
+      Tests: `services/jv-context/tests/test_context.py` (+13 cases) —
+      `parse_nvidia_smi_thermals` happy-path/failure parametrizations
+      (mirroring the VRAM parser's own, plus "half a reading" cases: a
+      readable temperature with an unreadable fan is refused whole, not
+      split), the shared-absent-latch test (one FileNotFoundError silences
+      both methods forever, still exactly one fork), a driver-stops-
+      answering fault test, `snapshot()`-level tests proving the two
+      gauges reach `read.metrics` and never `read.body`
+      (`from_body(ContextSystem, ...)` on every case, so a stray field
+      reaching the frozen schema would fail loud), independent-failure
+      tests for each probe, and one bus e2e test
+      (`test_gpu_thermals_reach_the_heartbeats_metrics_not_context_system`)
+      proving real `sys.health` frames over a real jarvisd carry
+      `metrics.gpu_temp_c`/`gpu_fan_pct` while `context.system` frames
+      never do. `shell/jv-hud/tests/tst_gputhermalstate.qml` (21 cases,
+      mirroring `tst_dictatestate.qml`'s shape) additionally proves the
+      earned-emptiness gate on its own terms: a cold card (42°C) is `known`
+      but never `reporting`, the threshold's own value counts as hot, the
+      fan line never appears without the temperature line, and a heartbeat
+      naming a different service (or with no gauge, a non-numeric gauge, a
+      v2 body, a hedged conf, no clock, or one gone stale past two periods)
+      is refused exactly like `DictateState`'s. `tools/gen_theme_qml.py`'s
+      `CORE` table gained one line (`shell/jv-hud/core/qmldir` regenerated
+      from it — a plate/element not listed there is not a type at all to
+      the engine, same F5c lesson). `tools/tests/test_hudscreens.py`'s
+      06-lossy pin (the "which elements read sys.health, and whose
+      heartbeat do they ask for by name" list) grew from six readers to
+      seven, `GpuThermalState` alongside `jv-context` in the "reads a
+      named service, never jv-ears'" group with `DropState`/`OutputState`/
+      `DictateState`. `bash ops/ralph/verify.sh`: 5 gates over 9 paths,
+      GREEN in 240.6s (jv-context 124, tools 934, qmltest 778 total —
+      including 21 new, hudshots, shellload). `ops/ralph/hudscreens.sh`
+      (named because `HealthPlate.qml`/`GpuThermalState.qml`/`qmldir`
+      changed) ran by hand: all 10 real-compositor shots matched the sheet
+      committed at HEAD byte-for-byte — no fixture in this repo ever
+      publishes a hot jv-context heartbeat, so the new lines correctly
+      never appear, which is the earned-emptiness claim proven rather than
+      assumed. `nixos-rebuild build --flake .#ares` -> ok (21 derivations:
+      `jv-context`'s rebuilt package/unit, the rebuilt `system-path`/
+      `etc`/`user-units`/toplevel). Never switched. No schema, no jv-act,
+      no boot path, no pins, no disko.nix touched.
+      `[H]` because this sandbox has no NVIDIA card: the real
+      `nvidia-smi --query-gpu=temperature.gpu,fan.speed` output (in
+      particular whether this card's driver answers `fan.speed` at all)
+      and the real HealthPlate line lighting up under real thermal load
+      both need ares' own hardware and a human watching the corner — see
+      `ops/ralph/HUMAN-VERIFY.md`.
 - [ ] G6. `jarvis-doctor --repair`: diagnose common breakage and offer fixes.
 - [ ] G7. SSH agent + config, VPN support, Syncthing — each declared.
 - [ ] G8. Sound theme: one quiet, on-brand notification sound.

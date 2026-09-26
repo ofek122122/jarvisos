@@ -16623,3 +16623,74 @@ work was entirely in `shell/jv-hud/`.
 - next: Track G continues at G5 (temperature/fan + GPU/VRAM readout for the
   bar). The comfort backlog is still far from resolved — H through K are
   entirely `[ ]` — so the loop keeps going per PROMPT.md STEP 5.
+
+## 2026-09-27 — GPU temperature/fan readout on HealthPlate (PLAN G5)
+- built: `NvidiaSmiProbe.thermals()` in `services/jv-context/jv_context/
+  system.py` — a second `nvidia-smi --query-gpu=temperature.gpu,fan.speed
+  --format=csv,noheader,nounits` call alongside the existing VRAM query,
+  same three-answer contract (None = no GPU, a tuple = a reading,
+  `ProbeUnavailable` = a card present but not answering) and sharing the
+  probe's `_absent` latch so a missing driver still forks once total, not
+  twice. The two readings fail independently in `snapshot()`, so a card
+  that answers for VRAM but not its fan costs only the fan half. Neither
+  `gpu_temp_c` nor `gpu_fan_pct` reaches `schemas/context.system.json`
+  (frozen, GUARDRAILS human-review-only) — `Snapshot` grew a `metrics`
+  field instead, which `service.py`'s `_health_body()` now folds into
+  `sys.health`'s own free-form gauge bag, the same seam F5c used for
+  jv-dictate's `recording` gauge. `shell/jv-hud/core/GpuThermalState.qml`
+  (new) reads jv-context's own heartbeat with `DictateState`'s reading
+  rules (service-named gauge, schema/conf/period checks, 2-period
+  staleness) and gates its two `HealthPlate` lines (`gpu 82°C` / `gpu FAN
+  64%`) on `reporting` — only once the card crosses `hotThresholdC`
+  (80°C, a fact about the GTX 1660 SUPER's own throttle point, not a
+  guess at another service's config) — so a card idling in the 30s-40s
+  draws nothing, matching `HealthPlate`'s own "nothing wrong, nothing
+  drawn" rule. Wired into `HealthPlate.qml` right after the vram/llm rows,
+  same "quote, never a verdict" relationship the fan line has to the
+  temperature above it.
+- tests: `services/jv-context/tests/test_context.py` (+13 cases) —
+  `parse_nvidia_smi_thermals` happy-path/failure parametrizations (incl. a
+  readable temperature with an unreadable fan refused as a whole reading,
+  not split), the shared-absent-latch test, a driver-stops-answering fault
+  test, snapshot()-level tests proving the gauges land in `read.metrics`
+  and never `read.body` (`from_body(ContextSystem, ...)` on every case),
+  independent-failure tests per probe, and one real bus e2e test proving
+  `sys.health` frames carry `metrics.gpu_temp_c`/`gpu_fan_pct` while
+  `context.system` frames never do.
+  `shell/jv-hud/tests/tst_gputhermalstate.qml` (21 cases, mirroring
+  `tst_dictatestate.qml`): the earned-emptiness gate itself (a cold 42°C
+  card is `known` but never `reporting`, the threshold value itself counts
+  as hot, the fan line never appears without the temperature), plus every
+  refusal `DictateState` already proves (wrong service, no gauge, a
+  non-numeric gauge, v2 body, hedged conf, no clock, staleness past two
+  periods). `tools/gen_theme_qml.py`'s `CORE` table gained one line
+  (`shell/jv-hud/core/qmldir` regenerated from it). `tools/tests/
+  test_hudscreens.py`'s 06-lossy pin (which elements read sys.health, and
+  whose heartbeat they name) grew six readers to seven — `GpuThermalState`
+  joins `DropState`/`OutputState`/`DictateState` in the "reads a named
+  service, never jv-ears'" group. `bash ops/ralph/verify.sh`: 5 gates over
+  9 paths, GREEN in 240.6s (jv-context 124, tools 934, qmltest 778 total,
+  hudshots, shellload). `ops/ralph/hudscreens.sh` (named for the
+  HealthPlate/GpuThermalState/qmldir changes) run by hand: all 10
+  real-compositor shots matched the sheet at HEAD byte-for-byte — no
+  fixture in this repo ever publishes a hot jv-context heartbeat, so the
+  new lines correctly never appeared, proving the earned-emptiness claim
+  rather than assuming it.
+- build: `nixos-rebuild build --flake .#ares` -> ok (21 derivations:
+  jv-context's rebuilt package/unit, the rebuilt system-path/etc/
+  user-units/toplevel). Never switched. No schema, no jv-act, no boot
+  path, no pins, no disko.nix touched.
+- files: services/jv-context/jv_context/system.py,
+  services/jv-context/jv_context/service.py,
+  services/jv-context/tests/test_context.py,
+  shell/jv-hud/core/GpuThermalState.qml (new),
+  shell/jv-hud/tests/tst_gputhermalstate.qml (new),
+  shell/jv-hud/HealthPlate.qml, shell/jv-hud/core/qmldir,
+  tools/gen_theme_qml.py, tools/tests/test_hudscreens.py,
+  ops/ralph/PLAN.md, ops/ralph/HUMAN-VERIFY.md, ops/ralph/JOURNAL.md
+- next: `[H]` because this sandbox has no NVIDIA card — the real
+  `nvidia-smi --query-gpu=temperature.gpu,fan.speed` output and the real
+  HealthPlate line under real thermal load both need ares' own hardware
+  (see HUMAN-VERIFY.md). Track G continues at G6 (`jarvis-doctor
+  --repair`). The comfort backlog is still far from resolved — H through K
+  are entirely `[ ]` — so the loop keeps going per PROMPT.md STEP 5.

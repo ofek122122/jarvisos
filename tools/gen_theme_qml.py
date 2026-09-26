@@ -169,6 +169,7 @@ CORE = (
     ("ActionState", "ActionState.qml"),  # did what Jarvis tried to do fail? (A37)
     ("OutputState", "OutputState.qml"),  # can you hear what Jarvis is saying? (A40)
     ("VramState", "VramState.qml"),  # how much of the card is left? (B40)
+    ("GpuThermalState", "GpuThermalState.qml"),  # is the card running hot? (G5)
     ("DropState", "DropState.qml"),  # did the bus throw frames away? (A75)
     ("GuardState", "GuardState.qml"),  # was a binary refused, and which? (A51)
     ("InstallState", "InstallState.qml"),  # did an install fail, and which? (A52)

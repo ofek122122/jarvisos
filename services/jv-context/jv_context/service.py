@@ -71,6 +71,10 @@ class ContextService:
         # None while the snapshot is whole; the note to beat out, when it
         # is not. Read by the heartbeat, written by the system pump.
         self._system_fault: Optional[str] = None
+        # The latest snapshot's gauges (gpu_temp_c, gpu_fan_pct, ...) for
+        # sys.health's own metrics bag — not context.system, whose schema
+        # is frozen. Empty until the first snapshot lands.
+        self._metrics: dict = {}
         # Set when that answer CHANGES, so the heartbeat does not have to
         # wait out its period to say so.
         self._health_now = asyncio.Event()
@@ -117,6 +121,7 @@ class ContextService:
                 # card looks exactly like a machine that has none. The
                 # frame goes out either way; the difference is said here.
                 self._set_fault(snap.gpu_note)
+                self._metrics = snap.metrics
                 await self.bus.publish("context.system", snap.body)
             await asyncio.sleep(self.cfg.system_period_s)
 
@@ -153,6 +158,8 @@ class ContextService:
             # the snapshot is not, or the snapshot is running a field
             # short. The note says which.
             body["notes"] = fault
+        if self._metrics:
+            body["metrics"] = self._metrics
         return body
 
     async def _pump_health(self) -> None:

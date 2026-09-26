@@ -60,6 +60,15 @@
 //     this machine to judge into one they can judge on the spot — and
 //     into the moment a closed game makes them equal, which is the whole
 //     reason to look. Never without the reading above it.
+//   · `gpu 82°C` (G5), only once the card is running hot enough that the
+//     figure is worth a look — a card that idles in the 30s-40s does not
+//     deserve an all-day thermometer, so this line follows the same
+//     earned-emptiness rule as the vram line above. `warn` rather than
+//     `text3`: unlike the ladder working as designed, a hot card is
+//     heading toward a fault.
+//   · `gpu FAN 64%` under THAT, the same "quote, never a verdict"
+//     relationship the vram/llm pair has — it explains the temperature
+//     above it and never appears without it.
 //
 // Colour is the severity and nothing else. Ember never appears: ember
 // means Jarvis is doing something (§06), and a service falling over is
@@ -96,6 +105,13 @@ Item {
     gpuFloorMb: root.health.llmGpuFloorMb
   }
 
+  // Is the card running hot? Its own gate — "hot enough to say" — rather
+  // than borrowed from anywhere else, because temperature is a fact about
+  // the machine and not a judgement any other service is making (G5).
+  readonly property GpuThermalState thermal: GpuThermalState {
+    bus: Bus
+  }
+
   // Did the bus throw frames away? Off jarvisd's own heartbeat, which
   // `HealthState` also reads — but through a second element rather than a
   // property on the first, because this is a different field with a
@@ -119,7 +135,7 @@ Item {
   // is its own reason to appear: on a machine where every service says
   // `ok` and the brain is on the card, a bus shedding frames is the only
   // finding there is, and `HealthState` cannot see it.
-  readonly property bool shown: root.health.reporting || root.drops.reporting
+  readonly property bool shown: root.health.reporting || root.drops.reporting || root.thermal.reporting
 
   // True while anything is still drawn, including the fade out, so
   // shell.qml can keep the surface mapped until the plate is really gone.
@@ -180,6 +196,26 @@ Item {
       out.push({
         "name": "llm",
         "detail": root.vram.needLine,
+        "tone": Theme.text3
+      });
+    // The card's own temperature, only while it is worth a look — hot
+    // enough that it explains something, the same "only when it is news"
+    // rule the vram line above follows. `warn`, not `text3`: unlike the
+    // ladder above (working as designed), a hot card is heading toward a
+    // fault.
+    if (root.thermal.reporting)
+      out.push({
+        "name": "gpu",
+        "detail": root.thermal.line,
+        "tone": Theme.warn
+      });
+    // What the fan is doing about it (G5) — a quote next to the reading,
+    // never a verdict, and never on its own: same relationship the vram/
+    // llm pair above has.
+    if (root.thermal.fanReporting)
+      out.push({
+        "name": "gpu",
+        "detail": root.thermal.fanLine,
         "tone": Theme.text3
       });
     return out;

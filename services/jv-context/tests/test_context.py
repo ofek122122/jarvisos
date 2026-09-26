@@ -22,6 +22,7 @@ from jv_context.system import (
     StubAudioProbe,
     StubGpuProbe,
     WpctlProbe,
+    parse_nvidia_smi_thermals,
     parse_nvidia_smi_vram,
     parse_wpctl_volume,
     snapshot,
@@ -297,6 +298,115 @@ def test_an_unreadable_gpu_costs_the_field_and_never_the_frame():
     from_body(ContextSystem, read.body)
 
 
+# --------------------------------------- the card's own temperature (G5)
+
+
+@pytest.mark.parametrize(
+    "text,pair",
+    [
+        ("47, 32\n", (47.0, 32.0)),
+        (" 47 , 32 \n", (47.0, 32.0)),
+        ("0, 0\n", (0.0, 0.0)),  # a spinning-down idle card still reads as zero
+        ("47, 32\n52, 40\n", (47.0, 32.0)),  # one line per GPU; ares has one
+    ],
+)
+def test_nvidia_smi_parses_thermals_it_actually_prints(text, pair):
+    assert parse_nvidia_smi_thermals(text) == pair
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "\n\n",
+        "47\n",  # only one field — fan.speed missing from the line entirely
+        "[N/A], 32\n",  # temp unreadable
+        "47, [Not Supported]\n",  # fan unreadable — half a reading is refused
+        "nan, 32\n",
+        "47, -1\n",  # below the schema's own minimum for a percentage
+    ],
+)
+def test_nvidia_smi_never_invents_a_thermal_reading(text):
+    with pytest.raises(ProbeUnavailable):
+        parse_nvidia_smi_thermals(text)
+
+
+def test_thermals_share_the_vram_probes_absent_latch(monkeypatch):
+    """One missing binary means no card at all — asking through either
+    method must not fork a second time to relearn it."""
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(a)
+        raise FileNotFoundError(2, "No such file or directory", "nvidia-smi")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    probe = NvidiaSmiProbe()
+    assert probe.vram_free_mb() is None
+    assert probe.thermals() is None
+    assert probe.thermals() is None
+    assert len(calls) == 1, f"latched off, yet forked {len(calls)} times"
+
+
+def test_a_driver_that_stops_answering_thermals_is_a_fault(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 9, "", "no perms\n"),
+    )
+    with pytest.raises(ProbeUnavailable):
+        NvidiaSmiProbe().thermals()
+
+
+def test_nvidia_smi_happy_path_reads_the_thermals(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, "47, 32\n", ""),
+    )
+    assert NvidiaSmiProbe().thermals() == (47.0, 32.0)
+
+
+def test_thermals_are_metrics_never_context_system_fields():
+    """gpu_temp_c/gpu_fan_pct are not in schemas/context.system.json
+    (frozen) — they ride sys.health's own free-form metrics instead."""
+    read = snapshot(StubAudioProbe(), StubGpuProbe(5109.0, (47.0, 32.0)))
+    assert "gpu_temp_c" not in read.body and "gpu_fan_pct" not in read.body
+    assert read.metrics == {"gpu_temp_c": 47.0, "gpu_fan_pct": 32.0}
+    assert read.gpu_note is None
+    from_body(ContextSystem, read.body)
+
+
+def test_no_gpu_means_no_thermal_metrics_and_no_fault():
+    read = snapshot(StubAudioProbe(), StubGpuProbe(None, None))
+    assert read.metrics == {}
+    assert read.gpu_note is None
+
+
+def test_an_unreadable_thermal_probe_costs_the_metrics_and_never_the_frame():
+    read = snapshot(
+        StubAudioProbe(), StubGpuProbe(5109.0, ProbeUnavailable("nvidia-smi exited 9"))
+    )
+    assert read.body["gpu_vram_free_mb"] == 5109.0
+    assert read.metrics == {}
+    assert read.gpu_note and "nvidia-smi exited 9" in read.gpu_note
+    from_body(ContextSystem, read.body)
+
+
+def test_vram_and_thermals_fail_independently_and_both_notes_survive():
+    """Each probe call is its own try/except — one failing must not hide
+    the other's fault text from the heartbeat."""
+    read = snapshot(
+        StubAudioProbe(),
+        StubGpuProbe(
+            ProbeUnavailable("vram exited 9"), ProbeUnavailable("thermals exited 2")
+        ),
+    )
+    assert "gpu_vram_free_mb" not in read.body
+    assert read.metrics == {}
+    assert read.gpu_note and "vram exited 9" in read.gpu_note and "thermals exited 2" in read.gpu_note
+
+
 # ------------------------------------------------------------ e2e on bus
 
 
@@ -548,3 +658,30 @@ async def test_the_card_comes_back_and_the_heartbeat_says_so(bus_addr):
         for b in frames
         if b["topic"] == "context.system"
     ), "the field never came back"
+
+
+async def test_gpu_thermals_reach_the_heartbeats_metrics_not_context_system(bus_addr):
+    """gpu_temp_c/gpu_fan_pct ride sys.health's free-form `metrics` bag
+    (G5) — schemas/context.system.json is frozen and carries neither."""
+    watcher = await watch(bus_addr, ["context.*", "sys.health"])
+    gpu = StubGpuProbe(5109.0, (47.0, 32.0))
+    svc_bus = await BusClient.connect(bus_addr, src="jv-context")
+    cfg = ContextConfig(system_period_s=0.05, health_period_s=0.1)
+    svc = ContextService(
+        svc_bus, MockBackend([], linger_s=0.5), StubAudioProbe(), cfg, gpu=gpu
+    )
+    await svc.run()
+
+    frames = await drain(watcher, 0.5)
+    await svc_bus.close()
+    await watcher.close()
+
+    beats = [f["body"] for f in frames if f["topic"] == "sys.health"]
+    with_metrics = [b for b in beats if b.get("metrics", {}).get("gpu_temp_c") == 47.0]
+    assert with_metrics, f"no heartbeat ever carried the gpu thermals: {beats}"
+    assert with_metrics[-1]["metrics"] == {"gpu_temp_c": 47.0, "gpu_fan_pct": 32.0}
+
+    snaps = [f["body"] for f in frames if f["topic"] == "context.system"]
+    assert snaps and all(
+        "gpu_temp_c" not in b and "gpu_fan_pct" not in b for b in snaps
+    )
