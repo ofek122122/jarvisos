@@ -133,20 +133,36 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       makes a build fail without one.
       Raised by it: **E12** below.
 
-- [ ] E12. **`nixtest.sh` blames the jv-wall wrapper for a derivation that was
-      never built.** Its lock-screen check reads `JV_WALL_DIR` out of the BUILT
-      wrapper — deliberately, so an interpolation that evaluated to the wrong
-      store path cannot look right in the source — behind `[ -r "$wall_bin" ]`,
-      and prints "sets no JV_WALL_DIR, so nothing says which art it draws" when
-      the file simply is not in the store yet. E11 moved the jarvis-wallpaper
-      hash, so the new jv-wall path had been evaluated and not realized: the gate
-      went red, `--baseline` said NEW (correctly — it IS caused by the change),
-      and `nixos-rebuild build` made it green with nothing else touched. Any
-      change under `pkgs/` that jv-wall depends on reproduces it, and it costs
-      the iteration a `--baseline` run and a false accusation. Fix: realize the
-      path (`nix build --no-link .#jv-wall`) or, if that is too much for a 30 s
-      gate, say "not built here — run nixos-rebuild build" instead of naming a
-      wrapper that is innocent. Two lines, and the message is the point.
+- [x] E12. **`nixtest.sh` blamed the jv-wall wrapper for a derivation that was
+      never built** (f25e455). Its lock-screen check reads `JV_WALL_DIR` out of
+      the BUILT wrapper — deliberately, so an interpolation that evaluated to
+      the wrong store path cannot look right in the source — and a store path
+      an evaluation produced is not one that was built. Behind
+      `[ -r "$wall_bin" ]`, an absent file fell into the `-z "$art"` branch and
+      came out as "sets no JV_WALL_DIR", a claim about the contents of a file
+      the gate could not open.
+      The gate realizes it now: `nix build --no-link --print-out-paths
+      '.#jv-wall'`, only when the file is absent, **2.6 s** — the expensive half
+      (jarvis-wallpaper's six renders) was already built for `.#jv-lock` two
+      cases earlier. Confirmed it is the same derivation the unit starts: the
+      attribute prints `70w1dvwq…-jv-wall-0.1.0`, the exact ExecStart path,
+      because `modules/theme.nix` installs `self.packages.x86_64-linux.jv-wall`.
+      If it is STILL unreadable the message names the path and hands over what
+      nix said, because a build that FAILED and a build that SUCCEEDED and left
+      the path unreadable are different findings — the second means `.#jv-wall`
+      and the unit have drifted apart.
+      Also: the section's three `/nix/store` literals were a guess. A `grep -o`
+      that matches nothing is not an error here, it is the empty string, which
+      each check reads as a different confident sentence; on a relocated store
+      the gate said "the wallpaper unit does not start jv-wall". They ask
+      `NIX_STORE_DIR` now.
+      `tools/tests/test_nixtest.py` (10 tests) LIFTS the case out of the shipped
+      script — between the `t='…'` that names it and the `fi` that closes it —
+      and runs it against a fake `nix`, unit and store, once per outcome. A test
+      that grepped for `nix build` would pass on a gate that built the wrong
+      attribute, built it after the read, or built it and printed the accusation
+      anyway. The one thing it does not cover is the case's green path against
+      the real evaluation; that is the gate, and `verify.sh` runs it.
 
 - [ ] E7. **Creative — Jarvis-aware desktop**: let the desktop reflect the
       assistant. e.g. the wallpaper's ember reacting to speech.state, a

@@ -15324,3 +15324,86 @@ is not worth chasing.)
   `git log` against the journal before assuming the tree is the one the last
   entry describes. And run `nixos-rebuild build` BEFORE `verify.sh` if you
   touched anything under `pkgs/`, until E12 lands.
+
+## 2026-09-26 — E12: the gate stopped blaming a wrapper that was never built
+
+- **what**: `ops/ralph/nixtest.sh`'s lock-screen case realizes the jv-wall
+  wrapper before reading it, reports an unrealized path as an unrealized path,
+  and asks Nix where the store is instead of assuming. Plus
+  `tools/tests/test_nixtest.py` (10 tests), which LIFTS that case out of the
+  shipped script and runs it.
+- **why**: raised by E11's own run. Every other check in that file asks an
+  evaluation a question and reads the text it printed; text is always there.
+  One check has to open a FILE — the wallpaper unit's `ExecStart` into the
+  wrapper, then `JV_WALL_DIR` out of its bytes, deliberately, because an
+  interpolation that evaluated to the wrong store path looks perfectly right
+  in `pkgs/jv-wall/default.nix`. **A store path an evaluation produced is not
+  a store path that was built.** Guarded by `[ -r "$wall_bin" ]`, an absent
+  wrapper fell into the `-z "$art"` branch and came out as "…/bin/jv-wall sets
+  no JV_WALL_DIR, so nothing says which art it draws" — a claim about the
+  contents of a file the gate could not open. E11 moved the jarvis-wallpaper
+  hash, which moved jv-wall's; the gate went red, `--baseline` said NEW
+  (correctly — the change really did cause it), and `nixos-rebuild build` made
+  it green with nothing else touched. Any change under `pkgs/` that jv-wall
+  depends on reproduces it.
+- **the fix is two things, and the second is the one that matters.** It
+  realizes the path: `nix build --no-link --print-out-paths '.#jv-wall'`, run
+  only when the file is absent, measured at **2.6 s** — cheap because
+  `.#jv-lock` two cases earlier already built the expensive half
+  (jarvis-wallpaper's six rasterized renders) and this is a wrapper over it.
+  Confirmed the assumption it rests on: `.#jv-wall` prints
+  `/nix/store/70w1dvwq…-jv-wall-0.1.0`, the exact path the unit names, because
+  `modules/theme.nix` installs `self.packages.x86_64-linux.jv-wall`. And if the
+  path is STILL unreadable it says so and hands over what nix said, because
+  those are two different findings: a build that failed is a broken flake, a
+  build that succeeded and left the path unreadable means the attribute the
+  gate builds and the one the unit starts have drifted apart — invisible if
+  the message is a fixed sentence.
+- **the store was a guess, in three places.** `grep -o '/nix/store/…'` matching
+  nothing is not an error here, it is the empty string, and each of the three
+  checks reads that as a different confident sentence about the flake — the
+  `wall_bin` one as "the wallpaper unit does not start jv-wall". Nix decides
+  where the store lives; `store="${NIX_STORE_DIR:-/nix/store}"` now asks it.
+  Not a test hook (it is Nix's own variable) but it is also what made the case
+  runnable against a fake store, which is the next bullet.
+- **the test RUNS the case rather than reading it.** `test_nixtest.py` cuts the
+  block out of the shipped script between the `t='…'` that names it and the
+  `fi` that closes it, and executes it with `ok`/`bad`/`is_unit`/`unit` and a
+  bash function named `nix` supplied by the harness — so the text under test is
+  the text that ships, and a rewrite that stops doing what E12 asked fails here
+  even if it still looks reasonable. Ten tests over six outcomes: the absent
+  wrapper is not accused of its contents and its path is named; nix's words
+  reach the message (a build printing a DIFFERENT store path must not read as a
+  build that failed); the build is attempted, is `.#jv-wall`, and carries
+  `--no-link` so no `./result` lands in the worktree; realizing it makes the
+  case pass in the SAME run; a built wrapper with no variable is still accused
+  (that sentence is true there) and costs no build; the two-surfaces-one-set-of-
+  art claim still holds both ways; and neither a refused evaluation nor a unit
+  that starts swaybg builds anything. **A test that grepped the script for
+  `nix build` would pass on a gate that built the wrong attribute, built it
+  after the read, or built it and then printed the accusation anyway.**
+- **what it deliberately does not cover**: the case's green path against the
+  real ares evaluation. That is the gate itself, and `verify.sh` runs it
+  whenever the flake moves — it did, below.
+- **tests**: `tools` 858 passed (was 848; +10 new), red first on 6 of them
+  against the old script. `bash ops/ralph/nixtest.sh` 14 passed.
+  `bash ops/ralph/verify.sh` — 2 gates over 2 paths, GREEN in 101.6 s
+  (tools 72.5 s, nixtest 29.1 s). build: `nixos-rebuild build --flake .#ares`
+  green. Never tested, never switched. No schema, no jv-act, no boot path,
+  no pins, no `pkgs/` touched — which is also why the E12 symptom could not
+  reproduce on this run and had to be reproduced in the harness instead.
+- **files**: ops/ralph/nixtest.sh, tools/tests/test_nixtest.py (new),
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- commit: f25e455
+- next: **E10** (the geometry list as a package argument `hosts/ares` fills
+  from its declared outputs — E11's pixel gate already covers whatever the list
+  becomes, since it samples the output DIRECTORY), then **D82**, **D79**,
+  **D71**, **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**,
+  **D55**, **D62**, **D48**, **D45**. E6's remaining half is still the
+  frame-count MEASUREMENT and wants a compositor. **D81** is the GUARDRAILS
+  wording exit 3 needs and wants a HUMAN; **D67** and **D65**'s greeter half
+  do too. The note from last iteration is now stale in its second half: you no
+  longer need `nixos-rebuild build` before `verify.sh` after a `pkgs/` change,
+  the gate realizes what it reads. The FIRST half stands — this branch is
+  hand-driven in parallel, so check `git log` against the journal before
+  assuming the tree is the one the last entry describes.
