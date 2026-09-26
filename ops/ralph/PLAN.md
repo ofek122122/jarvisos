@@ -5228,7 +5228,7 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       for the pyprojects itself rather than asking where they are, and
       demands each package resolve to its own directory (not to nothing, a
       missed reader, and not to a namesake elsewhere, a wrong one).
-      4 mutations, 4 caught. — HEAD
+      4 mutations, 4 caught. — d51f58d
 
 - [ ] B95. **The search path is one list for ten suites, and no interpreter
       on this machine agrees with it.** `_package_bases` is computed once and
