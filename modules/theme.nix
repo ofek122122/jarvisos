@@ -28,6 +28,7 @@
 let
   wallpaper = self.packages.x86_64-linux.jarvis-wallpaper;
   jv-bar = self.packages.x86_64-linux.jv-bar;
+  jv-wall = self.packages.x86_64-linux.jv-wall;
   jv-notify = self.packages.x86_64-linux.jv-notify;
   jv-lock = self.packages.x86_64-linux.jv-lock;
 
@@ -124,16 +125,20 @@ in
   environment.etc."xdg/gtk-3.0/settings.ini".text = gtkSettings;
   environment.etc."xdg/gtk-4.0/settings.ini".text = gtkSettings;
 
-  # The wallpaper: swaybg, part of the graphical session (like jv-hud). Fills
-  # every output; 0 cost once painted.
+  # The wallpaper: jv-wall, a Quickshell BACKGROUND layer (replaces swaybg).
+  # Two things swaybg could not do: render the art PER OUTPUT (swaybg scaled
+  # one 1440p PNG onto the 1080p panels and cropped the instrument — PLAN D10),
+  # and carry the small amount of motion §06 allows (the glow breathing, the
+  # comet drifting). JV_MOTION=0 freezes it back to the static image, and so
+  # does prefers-reduced-motion.
   systemd.user.services.jarvis-wallpaper = {
-    description = "JarvisOS wallpaper";
+    description = "JarvisOS wallpaper (animated, per-output)";
     unitConfig.ConditionUser = "ofek";
     wantedBy = [ "graphical-session.target" ];
     partOf = [ "graphical-session.target" ];
     after = [ "graphical-session.target" ];
     serviceConfig = {
-      ExecStart = "${pkgs.swaybg}/bin/swaybg -m fill -i ${wallpaper}/share/backgrounds/jarvisos.png";
+      ExecStart = "${jv-wall}/bin/jv-wall";
       Restart = "on-failure";
       RestartSec = 2;
     };

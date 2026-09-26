@@ -9,6 +9,8 @@
     ../../modules/desktop.nix
     ../../modules/fonts.nix
     ../../modules/theme.nix
+    ../../modules/apps.nix
+    ../../modules/store.nix
     ../../modules/audio.nix
     ../../modules/security.nix
     ../../modules/windows-compat.nix

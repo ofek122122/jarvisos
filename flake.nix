@@ -95,6 +95,11 @@
         # this output exists so it can be built and checked on its own.
         archivo = pkgs.callPackage ./pkgs/archivo { };
         jarvis-wallpaper = pkgs.callPackage ./pkgs/jarvis-wallpaper { };
+        # jv-wall — the animated wallpaper; same pinned-launcher shape as
+        # jv-hud/jv-bar, with the per-output renders pinned into its wrapper.
+        jv-wall = pkgs.callPackage ./pkgs/jv-wall {
+          jarvis-wallpaper = self.packages.${system}.jarvis-wallpaper;
+        };
         cuda-smoke = pkgs.callPackage ./pkgs/cuda-smoke { };
         jarvis-doctor = pkgs.callPackage ./pkgs/jarvis-doctor {
           cuda-smoke = self.packages.${system}.cuda-smoke;

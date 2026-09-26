@@ -124,6 +124,19 @@ runCommand "jarvis-wallpaper"
       wp.svg "$out/share/backgrounds/jarvisos.png" 2>resvg.log
     cat resvg.log
 
+    # PER-OUTPUT RENDERS (PLAN D10). The art above is composed for a 16:9
+    # 2560x1440 field; `swaybg -m fill` scaling that onto ares' two 1080p
+    # panels cropped the instrument and the wordmark by an amount nobody
+    # chose. resvg can rasterize the SAME vector at another pixel size, so
+    # each connected geometry gets its own correctly-composed file and
+    # nothing is ever scaled. jv-wall picks the file matching its screen.
+    for geom in 2560x1440 1920x1080 3840x2160 2560x1080 1366x768; do
+      w=''${geom%x*}; h=''${geom#*x}
+      resvg --skip-system-fonts --use-fonts-dir "$fonts" \
+        --width "$w" --height "$h" \
+        wp.svg "$out/share/backgrounds/jarvisos-$geom.png" 2>>resvg.log
+    done
+
     # A font family that does not resolve is not an error to resvg: it warns,
     # substitutes whatever it can find, and exits 0 — so the wordmark quietly
     # changes face and the PNG still builds. That is the same silent
