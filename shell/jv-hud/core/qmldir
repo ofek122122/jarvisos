@@ -4,8 +4,9 @@
 # but QtQuick, so `qmltestrunner` can load it without the quickshell
 # binary (which links its QML plugin into itself). Keep it that way:
 # one Quickshell import here would take the headless tests with it.
-# MotionPolicy is generated into every shell; the rest are this one's, and
-# new ones go in CORE in tools/gen_theme_qml.py.
+# MotionPolicy is generated into every shell, and the SHARED_CORE types
+# below it into every shell that names one; the rest are this one's,
+# and new ones go in CORE in tools/gen_theme_qml.py.
 MotionPolicy 1.0 MotionPolicy.qml
 BusModel 1.0 BusModel.qml
 SpeechState 1.0 SpeechState.qml

@@ -54,9 +54,40 @@
 # nonzero, naming the screens that moved: that is the refresh telling you
 # what you changed, not a failure — look at the new PNGs and commit them.
 #
+# AND IT READS WHAT THE SHELL SAID (PLAN D39). Twelve real quickshells run in
+# a pass of this — one per shot, one per idle window — and every one of them
+# has written its output to a file since the first version of this harness,
+# where nothing has ever opened it. D36 made the three STAGED harnesses refuse
+# a run whose QML threw; this is the same rule over the only gate that loads
+# `shell.qml` at all, through the same `tools/qmlerrors.py`. Two things had to
+# be measured first and neither is what D38 predicted: quickshell installs a
+# message handler of its own, so the journald backend never takes its output
+# (QT_FORCE_STDERR_LOGGING is not needed here), and it colours every line with
+# ANSI escapes whether or not anything is watching — which would have made
+# this scan clean forever. NO_COLOR below is that, and it is load-bearing.
+#
+# THE ANSWER, first time of asking: the real HUD says nothing that throws.
+# 7,170 lines across the twelve logs of a full pass, clean, in 0.1 s. It needs
+# no census the way the staged harnesses do — a scan of an empty log reads
+# clean, but this harness has already proved every one of those logs is being
+# written before it uses it: each shell is started and then WAITED for, on
+# `Configuration Loaded`, which is quickshell's own handler putting that line
+# in that file.
+#
+# AND THE INSTRUMENT IS LIVE, proved by injection rather than by reading the
+# code: a `property var injectedFault: modelData.noSuchThing.count` on the
+# PanelWindow — the D34 shape, invisible to qmllint — and this gate ends 1,
+# naming `shell/jv-hud/shell.qml:90` in all twelve logs, three times in each
+# (once per monitor). Everything else about that run was GREEN. Every probe
+# passed: the corner, the zone, the focus, the growth, the click, 0 commits
+# in every idle window. And all nine photographs still matched the sheet
+# committed at HEAD, to inside the noise floor — because a QML binding that
+# throws keeps the value it already had. Without this scan that run was a
+# perfect pass with a shell throwing on every screen.
+#
 # reads: docs/hud/screens flake.lock flake.nix personality/theme.toml
 #        pkgs/jv-hud services/jarvisd shell/jv-hud tools/hudscreens
-#        tools/hudsheet.py
+#        tools/hudsheet.py tools/qmlerrors.py
 #
 # Declared and NOT bound (PLAN B72). `ops/ralph/verify.sh` runs every gate it
 # plans; this one is named there instead, beside the paths that asked for it,
@@ -81,16 +112,17 @@
 # pictures need — and prints the table at the end. The answer is NO, and the
 # numbers are why (measured here, and the table re-measures them):
 #
-#     probe  144.8 s  80.5%   ·   sheet  34.9 s  19.4%   of 179.8 s
+#     probe  154.8 s  79.4%   ·   sheet  39.9 s  20.5%   of 194.9 s
 #
-# A run that kept no picture at all would still pay 2m25s of the 3m00s,
+# A run that kept no picture at all would still pay 2m35s of the 3m15s,
 # because the pictures are not what costs: `grim` and the PNG encodes
-# come to 0.9 s BETWEEN them, and almost the whole sheet half is the read-back
-# against HEAD (34.3 s). What costs is the idle probe — 97.6 s, 54% of
+# come to 1.1 s BETWEEN them, and almost the whole sheet half is the read-back
+# against HEAD (39.2 s). What costs is the idle probe — 97.7 s, 50% of
 # everything, five windows each deliberately holding still for ten seconds —
-# and that is the least skippable verdict in the file. The 2m25s this header
-# quoted until now is where the same measurement lands the other lesson: B74's
-# comparison added 34 s to the run and nobody re-measured the total.
+# and that is the least skippable verdict in the file. Re-measured at D39,
+# which is the standing lesson of this paragraph: B74's comparison added 34 s
+# to the run and nobody re-measured the total, and D39's own scan — the one
+# addition since — costs 0.1 s of it.
 # The path list above is in `DECLARED_GATES` in tools/dependents.py, held
 # equal to this one by tools/tests/test_dependents.py; `flake.lock` is in it
 # on this script's own argument, that a sheet rendered against a different Qt
@@ -101,7 +133,7 @@ root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 out="${1:-$root/docs/hud/screens}"
 
 # WHAT THE RUN COSTS, booked as it is spent (PLAN B75). Two clocks write one
-# file: these three phases are the shell's, the rest are booked inside
+# file: four of these phases are the shell's, the rest are booked inside
 # tools/hudscreens/shoot.py, and `sheet.PHASES` says which half of the run
 # each belongs to — the half a verdict-only run would still pay, or the half
 # only the pictures need. The table is printed at the end, below.
@@ -207,6 +239,15 @@ sleep 1
 # layer-shell attached properties quietly fail to attach — which looks
 # like a HUD that loaded and drew nothing.
 export QT_QPA_PLATFORM=wayland
+
+# Quickshell colours its log with ANSI escapes whether or not anything is
+# watching, and every shell here logs to a FILE (see `Proc` in shoot.py). A
+# coloured log has `\x1b[33m` in front of every level, which is not a prefix
+# `tools/qmlerrors.py` knows — so the scan below would come back clean over a
+# HUD that threw on every frame. Measured, not assumed. Exported here rather
+# than added to one env dict because the shells are started from five places
+# and a scan that covers four of them is not a gate.
+export NO_COLOR=1
 book compositor "$compositor_t0"
 
 export JV_SCREENS_OUT="$out"
@@ -218,6 +259,35 @@ export WEV_BIN="$wev/bin/wev"
 export SWAYMSG_BIN="$sway/bin/swaymsg"
 
 "$py/bin/python" "$root/tools/hudscreens/shoot.py"
+
+# AND READ WHAT THE SHELLS SAID (PLAN D39), before anything is said about the
+# pictures: a photograph of a scene that threw is not evidence of anything,
+# however right it looks. Every `*-hud.log` in the stage, through the same
+# scanner the three staged harnesses use since D36 — the shapes differ (a
+# level and a category instead of `QWARN :`, `@path[line:col]` instead of
+# `file://…:line:`) and the rule does not.
+#
+# `--prefix` because quickshell prints paths relative to the directory holding
+# `shell.qml`, which at runtime is a store path: without it the report would
+# name `core/BusModel.qml`, which is three directories in this repository. The
+# root comes out of `sheet.SHELL_ROOT` rather than being written here, because
+# this script may not contain that path in any line it executes — the rule
+# that keeps it from ever staging a HUD.
+#
+# The status is caught rather than allowed to end the run, for the same
+# reason the comparison's is: the cost table below is the report a run that
+# found something is read for, and `set -e` would take it with it. An
+# unmatched glob arrives at the scanner as its own pattern and is refused
+# there, which is the right answer — a run that started no shell is not a
+# clean one.
+scan_t0=$(date +%s.%N)
+shellroot=$("$py/bin/python" -c "
+import sys; sys.path.insert(0, '$root/tools/hudscreens'); import sheet
+print(sheet.SHELL_ROOT)")
+scan_status=0
+"$py/bin/python" "$root/tools/qmlerrors.py" "$stage"/*-hud.log \
+  --prefix "$shellroot" --rerun "bash ops/ralph/hudscreens.sh" || scan_status=$?
+book qmlerrors "$scan_t0"
 
 # And READ THEM BACK (B74). Until this line these were pictures that
 # could only be overwritten: `hudshots.sh` has compared its own sheet against
@@ -260,4 +330,8 @@ total = time.time() - float(sys.argv[3])
 print("\n".join(sheet.cost_table(records, total)))
 EOF
 
+# A shell that threw is the worse news of the two, and it is the one that
+# invalidates the other: the comparison's verdict is about pictures that were
+# drawn by that shell. So it wins the exit code.
+[ "$scan_status" -ne 0 ] && exit "$scan_status"
 exit $compare_status

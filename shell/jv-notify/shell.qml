@@ -133,13 +133,33 @@ ShellRoot {
         // Oldest first, so the newest plate is the one nearest the corner —
         // the shortest distance from where a message appears to where the
         // last one did.
+        // Keyed by the notification's id, never by position (PLAN D37).
+        // `Notifications.onScreen` is a ListModel `NotifyModel` keeps in step
+        // with `toasts`, so a plate that is still up keeps its delegate — and
+        // a delegate that survives keeps `arrived` true and does not fade in
+        // again. Repeating over the array instead meant every plate in the
+        // corner was destroyed and rebuilt whenever ANY notification arrived,
+        // was replaced or went away, so all three blinked and the fade stopped
+        // meaning "this one is new".
+        //
+        // The record is rebuilt from the roles because a ListModel holds
+        // values, not objects: `Toast` takes one record, which is what lets it
+        // import nothing but QtQuick and the generated Theme.
         Repeater {
-          model: Notifications.toasts
+          model: Notifications.onScreen
 
           Toast {
-            required property var modelData
+            required property string appName
+            required property string summary
+            required property string body
+            required property int urgency
 
-            toast: modelData
+            toast: ({
+                "appName": appName,
+                "summary": summary,
+                "body": body,
+                "urgency": urgency
+              })
           }
         }
       }

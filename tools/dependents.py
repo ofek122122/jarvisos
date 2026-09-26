@@ -42,12 +42,14 @@ finds it two ways — the directories `import "..."` puts on the path, and the
 walks them, from the drivers outward, and a `core/` element three types below
 the contact sheet is reached.
 
-AND THE TWO GATES THAT ARE A NIX EVALUATION (B72). `ops/ralph/nixtest.sh` and
-`ops/ralph/hudscreens.sh` read `.#nixosConfigurations.ares` and `.#jv-hud` —
-flake attributes, not paths, so there is no syntax to walk. Those two are
-DECLARED, in `DECLARED_GATES`, and the declaration is checked against the
-`# reads:` header of the script it describes. One of them is not run for you,
-and says so where the plan is printed rather than being left out in silence.
+AND THE THREE GATES THAT ARE A NIX EVALUATION (B72, D41).
+`ops/ralph/nixtest.sh` reads `.#nixosConfigurations.ares`,
+`ops/ralph/hudscreens.sh` reads `.#jv-hud`, and `ops/ralph/shellload.sh` reads
+all three shell derivations — flake attributes, not paths, so there is no
+syntax to walk. Those three are DECLARED, in `DECLARED_GATES`, and the
+declaration is checked against the `# reads:` header of the script it
+describes. One of them is not run for you, and says so where the plan is
+printed rather than being left out in silence.
 
 AND THE GATES THEMSELVES (B73). Every rule above walks from a suite OUTWARD
 to the sources it reads, and none of them can walk to the script that does the
@@ -494,7 +496,9 @@ class QmlGate:
     table behind.
 
     `also` is what the gate reads that is not QML at all: the comparator it
-    runs, and the committed sheet it compares against.
+    runs, the committed sheet it compares against, and the scanner that reads
+    the runner's own output back for errors it threw while staying green
+    (PLAN D36).
     """
 
     script: str
@@ -527,14 +531,15 @@ QML_GATES = (
         script="ops/ralph/hudshots.sh",
         entry="tools/hudshots/scene",
         mounts=(
-            # The drivers sit in `$stage/shots` beside a copy of Sessions.qml…
-            (".", ("tools/hudshots/scene", "shell/jv-hud/tests")),
+            # The drivers sit in `$stage/shots` beside a copy of Sessions.qml
+            # and the shared probe body the second engine loads (PLAN D38)…
+            (".", ("tools/hudshots/scene", "shell/jv-hud/tests", "tools/qmlprobe")),
             # …and `$stage` itself is the shell, with the two singletons that
             # import Quickshell replaced. `shell.qml` is deleted from the
             # stage and is not a type, so nothing reaches it from here.
             ("..", ("shell/jv-hud", "tools/hudshots/stub")),
         ),
-        also=("tools/hudsheet.py", "docs/hud"),
+        also=("tools/hudsheet.py", "tools/qmlerrors.py", "docs/hud"),
     ),
     # And the notification corner's (PLAN D20), the same assembly one shell
     # over. Same argument for a second script as for `notifytest.sh`: a change
@@ -544,14 +549,14 @@ QML_GATES = (
         entry="tools/notifyshots/scene",
         mounts=(
             # The driver and the staged strip sit together in `$stage/shots`…
-            (".", ("tools/notifyshots/scene",)),
+            (".", ("tools/notifyshots/scene", "tools/qmlprobe")),
             # …and `$stage` itself is the shell, with the two singletons that
             # import Quickshell replaced: `Notifications` (it IS the D-Bus
             # server) and `Motion`. `shell.qml` is deleted from the stage and
             # is not a type, so nothing reaches it from here.
             ("..", ("shell/jv-notify", "tools/notifyshots/stub")),
         ),
-        also=("tools/hudsheet.py", "docs/notify"),
+        also=("tools/hudsheet.py", "tools/qmlerrors.py", "docs/notify"),
     ),
     # And the top bar's (PLAN D13), which makes it one harness per shell.
     # Third script for the third shell, same argument as `bartest.sh`: what is
@@ -562,14 +567,14 @@ QML_GATES = (
         entry="tools/barshots/scene",
         mounts=(
             # The driver and the staged strip sit together in `$stage/shots`…
-            (".", ("tools/barshots/scene",)),
+            (".", ("tools/barshots/scene", "tools/qmlprobe")),
             # …and `$stage` itself is the shell, with the two singletons that
             # import Quickshell replaced: `Niri` (it runs the event stream as a
             # child process) and `Motion`. `shell.qml` is deleted from the
             # stage and is not a type, so nothing reaches it from here.
             ("..", ("shell/jv-bar", "tools/barshots/stub")),
         ),
-        also=("tools/hudsheet.py", "docs/bar"),
+        also=("tools/hudsheet.py", "tools/qmlerrors.py", "docs/bar"),
     ),
 )
 
@@ -809,16 +814,19 @@ def qml_readers(
 
 # --------------------------------------------------------- declared gates
 #
-# Two gates are neither Python, nor QML, nor Rust, and nothing above can find
-# either, because what they read is a NIX EVALUATION (PLAN B72).
+# Three gates are neither Python, nor QML, nor Rust, and nothing above can find
+# any of them, because what they read is a NIX EVALUATION (PLAN B72, D41).
 # `ops/ralph/nixtest.sh` asserts what a module OPTION does to the unit text
 # ares is handed — its subject is the flake attribute
 # `.#nixosConfigurations.ares`, and an attribute is not a path that any syntax
 # tree names. `ops/ralph/hudscreens.sh` is the same shape one level further
 # out: it photographs the REAL `.#jv-hud` through a real compositor, so what
 # it reads is a derivation and not a set of QML imports.
+# `ops/ralph/shellload.sh` is that again for all three shells at once: it LOADS
+# `.#jv-hud`, `.#jv-bar` and `.#jv-notify` under a real quickshell and refuses
+# a run whose QML threw, which is the only gate two of those three files have.
 #
-# So these two are DECLARED rather than derived — and a declaration that
+# So these three are DECLARED rather than derived — and a declaration that
 # nothing checks is the prose that had already failed once (B68), so it is
 # checked twice: every path must exist, and the SCRIPT must say the same list
 # in its own `# reads:` header. `test_dependents.py` holds both, which is what
@@ -881,11 +889,69 @@ DECLARED_GATES = (
             # that can go wrong quietly: a floor set too high turns a changed
             # HUD into a green run.
             "tools/hudsheet.py",
+            # And the scanner it reads the real shell's own logs with (D39).
+            # Same argument one step further: a scanner that stopped matching
+            # what quickshell prints would report a silent HUD, and this is
+            # the only gate that ever runs one.
+            "tools/qmlerrors.py",
         ),
         runs_here=False,
         note=(
             "3m00s, a compositor, and a sheet of pictures for a human — "
             "run it yourself, look at the shots, commit them"
+        ),
+    ),
+    DeclaredGate(
+        script="ops/ralph/shellload.sh",
+        # The three shells, as the derivations that build them — and this one
+        # IS a step (PLAN D41). It is the cheap half B75 asked `hudscreens.sh`
+        # for: one headless sway, one real quickshell per shell, a wait on
+        # `Configuration Loaded` and the D39 scan of what each one said. 25 s,
+        # no screenshots, no sheet to rewrite, and a verdict at the end — so
+        # unlike its sibling above there is nothing here a gate cannot collect.
+        #
+        # What it buys that nothing else does: the bar's and the notifier's
+        # `shell.qml` are never LOADED by any other gate in this repo. Every
+        # shot harness deletes `shell.qml` from its stage, because ShellRoot
+        # and the layer-shell attached properties cannot resolve outside
+        # quickshell's own binary — so those two files were held by qmllint
+        # alone, and a `var` binding that throws is invisible to a linter.
+        reads=(
+            "flake.lock",
+            "flake.nix",
+            # The generated Theme.qml in each shell is checked against this at
+            # build time, and a token that moved is a binding that re-evaluates.
+            "personality/theme.toml",
+            "pkgs/jv-bar",
+            "pkgs/jv-hud",
+            "pkgs/jv-notify",
+            # THE BUS, which this gate deliberately did not read until D43.
+            # The old reason was good and is no longer true: nothing here
+            # started a broker, so the HUD ran blind and a change to the bus
+            # could not move the verdict. The HUD's half of this gate IS that
+            # broker now — `jarvisd` on the run's own socket, eleven composed
+            # frames at 1 Hz, and ten of the HUD's eleven plates lit — so all
+            # three paths that carry a frame from the bus into a plate are
+            # here: the broker, the client library both the publisher and the
+            # bridge speak through, and the bridge itself, which is the child
+            # process pkgs/jv-hud pins into the wrapper. Any one of them can
+            # turn ten lit plates into none.
+            "services/jarvisd",
+            "services/jv-hud-bridge",
+            "services/pylib",
+            "shell/jv-bar",
+            "shell/jv-hud",
+            "shell/jv-notify",
+            # The reader that turns two running brokers into a verdict (D51).
+            # Everything this gate concludes about the HUD is a reading of what
+            # a `jarvisd` did, and a broker that refused the bridge reads from
+            # the corner as a HUD that ignored its frames.
+            "tools/brokerlog.py",
+            # The scanner that turns a loaded shell into a verdict. Without it
+            # this gate reports that three shells started, which is not the
+            # question it was written for.
+            "tools/qmlerrors.py",
+            "tools/shellload",
         ),
     ),
 )
@@ -1017,7 +1083,7 @@ def _report(
     lines += _skipped(skipped)
     lines += [
         "",
-        "(Python, QML, and the two nix gates that are declared. Rust is not read:",
+        "(Python, QML, and the three gates that are declared. Rust is not read:",
         " a change under services/jarvisd or services/jv-act is",
         " `bash ops/ralph/cargotest.sh <crate>`, always.)",
     ]

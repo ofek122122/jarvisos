@@ -86,6 +86,35 @@ QtObject {
   // a bottom-anchored column puts the newest nearest the corner.
   readonly property var toasts: root.entries.slice(Math.max(0, root.entries.length - root.maxVisible))
 
+  // THE SAME LIST, BY IDENTITY — what the surface actually repeats over, and
+  // the reason the corner stopped blinking (PLAN D37).
+  //
+  // `toasts` above is a fresh JS array every time anything is sent, replaced,
+  // withdrawn or expired; it has to be, because a list mutated in place is a
+  // list no binding hears about. A `Repeater` handed a fresh array does not
+  // diff it — it destroys every delegate and builds new ones — and a rebuilt
+  // `Toast` is one that starts at `arrived` false and fades up from zero
+  // AGAIN. So every plate in the corner announced itself as new whenever any
+  // other notification arrived, and a download updating its own progress made
+  // all three of them blink. `core/KeyedRows.qml` syncs by the notification's
+  // own key, so a plate that is still up keeps its delegate and stays exactly
+  // where it was.
+  //
+  // Only the fields a plate DRAWS go in, and every one of them is a
+  // primitive: a ListModel's roles are values, not objects, so `handle` (the
+  // sender-facing object this file calls `expire()` on) and `deadline` (the
+  // lifecycle's, never the plate's) stay here where they belong. `key` is
+  // carried because it is what makes a row the same row.
+  readonly property KeyedRows onScreen: KeyedRows {}
+
+  onToastsChanged: root.onScreen.sync(root.toasts.map(e => ({
+    "key": e.key,
+    "appName": e.appName,
+    "summary": e.summary,
+    "body": e.body,
+    "urgency": e.urgency
+  })))
+
   // How many are being tracked and NOT shown. They are older than everything
   // on screen, which is the word the surface uses for them.
   readonly property int earlier: Math.max(0, root.entries.length - root.maxVisible)

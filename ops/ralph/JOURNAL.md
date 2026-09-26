@@ -12494,3 +12494,1044 @@ is not worth chasing.)
   **D33** (the last two copies of the HUD's box, a half-decision) and **D17**
   (the strip's empty right half, the first Track D item needing a real SOURCE
   rather than a token).
+
+## 2026-09-26 — iteration 126 — the teal was never moving
+
+- **what**: D34. `shell/jv-bar/core/KeyedRows.qml` (a ListModel synced by key),
+  `Workspaces.qml` keyed on niri's workspace id, `tools/barshots/scene/
+  tst_settle.qml` (the gate that can see an ease), `tests/tst_keyedrows.qml`
+  (12 cases + a real Repeater), `tools/barshots/scene/Desk.qml` (one copy of
+  the recorded line for both drivers).
+- **why it is worth an iteration, and it is not the animation.** D34 was raised
+  as a suspicion — "the teal MAY be arriving snapped". The first thing built
+  was the thing that could answer it, and it answered red: on the real strip,
+  through the real `NiriModel`, every sample of the label colour was already at
+  the target in the frame the focus delta landed —
+  `#6e7e89/#4fb8bf` six times over. `Ease on color` has been attached to
+  nothing since D1. The Repeater's model is the array `NiriModel` replaces
+  wholesale (it must; that rule is written into the model in those words), a
+  Repeater handed a new array destroys its delegates, and a Behavior does not
+  animate an initial assignment. Every label was a new Text that had always
+  been teal.
+- **WHY NOTHING CAUGHT IT, which is the part worth keeping.** Every gate this
+  shell had was structurally incapable. `tests/` is pure arithmetic with no
+  engine under it; `nix build .#jv-bar` is a linter; and the sheet — which has
+  a shot NAMED for this animation — waits `fadeInMs + easeMs` before it grabs,
+  on purpose, so that what lands in the PNG is a finished colour. A settled
+  colour looks identical either way. Three gates, one of them a picture of the
+  exact phenomenon, and none of them could tell a 200 ms ease from an
+  assignment. The new driver does one thing they cannot: it samples DURING the
+  move and requires a value that is neither end.
+- **KEYED BY IDENTITY, NOT BY POSITION**, and the second sync is the one
+  everybody writes first. A ListModel synced positionally also keeps its
+  delegates — and hands each survivor its NEIGHBOUR's workspace when the desk
+  grows at the left, so the strip cross-fades between two unrelated
+  workspaces: a 200 ms lie about a change that is instantaneous. Workspaces do
+  not slide into existence; niri either has one or does not. `KeyedRows` takes
+  a `key` per row precisely so "the colour eases, the desk snaps" is one rule
+  instead of two, and `test_a_workspace_arriving_snaps_and_recolours_nothing`
+  is the half of the settle driver that fails if that is ever swapped back.
+- **THE FIX FOUND A SECOND FAULT, and it had been latent for two iterations.**
+  Keeping the list in step means reading `shown` the moment it changes — and
+  `shown` was the end of a chain of four properties (widths → weighed → plan →
+  compose). QML notifies the dependents of `workspaces` in whatever order it
+  likes, so an eagerly-read `shown` can compose the PREVIOUS desk's plan over
+  THIS desk's array. It threw a TypeError once per emptied desk. It could not
+  have shown before: a lazy property is evaluated when somebody asks, by which
+  time the chain has caught up. The whole derivation is now ONE binding over
+  ONE argument reaching only primitives — which is also the general lesson,
+  since a chain of derived properties is the default shape in this repo.
+- **AND THAT FAULT SHIPPED A GREEN RUN.** The TypeError sat in the middle of
+  `8 passed, 0 failed`, with eleven byte-correct PNGs beside it, because a
+  binding that throws keeps its last value and recovers on the next
+  evaluation. The only evidence was one line of runner output. None of the
+  three shot harnesses fails on a console warning — raised as **D36**, with
+  the reason it was not done blind.
+- **THE ELEVEN SHOTS ARE BYTE-IDENTICAL.** `hudsheet: all 11 shots match the
+  sheet committed at HEAD`, before and after. The rule changed nothing that
+  was already settled, which is exactly the claim that deserves pictures
+  behind it — and it is what says the row's arithmetic (D32's collapse, D13's
+  margins) came through the restructure untouched.
+- tests: `bash ops/ralph/verify.sh` GREEN — 3 gates over 10 paths (tools
+  **575 pass**, bartest **59** with the new KeyedRows suite, barshots **8**
+  with the new settle driver), 75 s. Two gates went red on the way and both
+  were right: `test_the_colour_of_a_reading_is_chosen_where_the_word_is`
+  (the delegate reads a role now, not `modelData`) and
+  `test_no_qml_file_carries_a_literal_colour` (the new suite needed two
+  colours; they are named ones, deliberately not §06 tokens).
+  build: `nixos-rebuild build --flake .#ares` green — and it caught the one
+  thing bartest cannot, a missing `pragma ComponentBehavior: Bound` in the new
+  suite, because `-W 0` in pkgs/jv-bar lints `tests/` too. No schema change,
+  no jv-act, no boot path, no pins. Never tested, never switched.
+- files: shell/jv-bar/{Workspaces.qml,core/KeyedRows.qml,core/qmldir,
+  tests/tst_keyedrows.qml}, tools/gen_theme_qml.py, tools/barshots/scene/
+  {Desk.qml,Strip.qml,tst_settle.qml,tst_shots.qml},
+  tools/tests/test_barshots.py, ops/ralph/PLAN.md
+- next: **D37** is the one this raised and it is the same shape in another
+  shell — `shell/jv-notify/shell.qml` repeats over an array the daemon
+  replaces wholesale, with the toast's fade-in Behavior inside the delegate,
+  so a second notification may be re-fading the first. Measure it before
+  fixing it; `KeyedRows` is already written and the key is the notification
+  id. Then **D36** (no harness fails on a console warning), then **D33** (the
+  last two copies of the HUD's box) and **D17** (the strip's empty right half,
+  the first Track D item wanting a real SOURCE rather than a token).
+
+## 2026-09-26 — iteration 127
+
+- **what**: D37. The notification corner's fade was running on every plate,
+  every time anything happened. `tools/notifyshots/scene/tst_settle.qml` (the
+  driver that samples DURING the fade), `core/KeyedRows.qml` promoted to a
+  SHARED_CORE type generated into both shells that need it, and
+  `NotifyModel.onScreen` — the toasts as rows keyed by the notification's own
+  id, which is what the surface now repeats over.
+- **why**: `Toast.qml` fades its plate up from zero on the frame after it is
+  built, and says why in a paragraph: something appearing in a corner you were
+  not looking at should read as an ARRIVAL rather than as a repaint. That is a
+  claim about one plate. `Notifications.toasts` is a JS array `NotifyModel`
+  replaces wholesale — it must; a list mutated in place is a list no binding
+  hears about — and a `Repeater` handed a new array destroys every delegate
+  and builds new ones. A rebuilt `Toast` is one that starts at `arrived` false
+  and fades in again. So every plate in the corner was making the claim, and
+  the fade stopped meaning anything.
+- **IT WAS REAL IN ALL THREE DIRECTIONS, and measured before it was fixed.**
+  The plan asked for exactly one case (a second notification arriving). The
+  driver found three, each worse than the last: a second notification refades
+  the ones already up; a REPLACEMENT — the download-at-40%-then-80% case
+  `NotifyModel` deliberately keeps in place, because it is one story and not
+  two — refades both plates, so a progress bar makes the corner strobe; and a
+  WITHDRAWAL refades the survivors, so a notification LEAVING announces the
+  others as new. Every one went to opacity 0 and climbed back, not to some
+  intermediate value: this was not a subtle re-ease, it was a full rebuild.
+- **THE SAME FAULT AS D34, IN THE OPPOSITE DIRECTION**, which is why the fix
+  was already written. In the bar a rebuilt delegate meant an `Ease on color`
+  that never ran — the teal was simply painted already there. In the notifier
+  a rebuilt delegate means a fade that runs when nothing arrived. One cause,
+  two symptoms that look like nothing and like too much, and a still picture
+  can hold neither.
+- **NO PICTURE COULD HAVE CAUGHT IT, and the sheet says so by not moving.**
+  `docs/notify`'s shots wait past `fadeInMs` before they grab, on purpose, so
+  what lands in a PNG is a settled plate — which means a corner that blinked
+  on its way to that frame and a corner that never moved are byte-identical
+  files. Same for every other gate this shell has: `shell/jv-notify/tests` is
+  the model's arithmetic with no engine under it, `test_notifyshots.py` reads
+  QML as text, `nix build .#jv-notify` is a linter. All ten shots are
+  byte-identical after the fix, which is the claim that deserved pictures: the
+  rule changed nothing that was already settled.
+- **A THIRD CATEGORY IN THE GENERATOR, and the line it draws is a real one.**
+  `MotionPolicy` is in GENERATED_CORE and lands in every shell by the shell
+  existing, because §06's stillness rule is a RULE and applies to a surface
+  whether or not it asked. `KeyedRows` is MACHINERY: it means nothing to a
+  shell with no list something replaces wholesale, and generating it into the
+  HUD would have put a file there that no gate of the HUD's reads. So
+  `SHARED_CORE` is a body table the per-shell `*_CORE` registry opts into, and
+  `outputs()` writes the file for exactly the shells that name the type —
+  driven off the registry rather than a second list, so a qmldir line pointing
+  at nothing and a renderer nobody names are both impossible. Three tests pin
+  it, including that the two copies stay byte-identical (the motion trio's
+  reason: two answers to "are these rows the same rows" is how one shell gets
+  a meaningless fade back).
+- **`handle` AND `deadline` DO NOT GO IN THE ROWS.** A ListModel's roles are
+  values, so the sender-facing object the model calls `expire()` on would be
+  flattened into something nobody meant. The rows carry `key` and the four
+  fields a plate draws, and the delegate rebuilds the record from them — which
+  is also what keeps `Toast.qml` importing nothing but QtQuick and the
+  generated Theme.
+- **THE BUILD CAUGHT WHAT NINE GREEN GATES COULD NOT.** `verify.sh` was GREEN
+  over the working tree while `nixos-rebuild build` failed with `stale
+  generated files: core/KeyedRows.qml` — the new file was untracked, and a
+  flake's source filter excludes untracked files, so the sandbox got a
+  jv-notify whose qmldir named a file that was not there and `--check` said
+  so. Every suite here reads the worktree; only the build reads what git would
+  hand over. `git add` and it was green.
+- tests: `bash ops/ralph/verify.sh` GREEN — 9 gates over 15 paths (tools
+  **581 pass**, notifytest **27** with the three new keyed-row suites,
+  notifyshots **8** with the new settle driver, and the HUD's and bar's sheets
+  unmoved), 187 s; re-run as `--since HEAD~1` against what the commit actually
+  took, also green. `bash ops/ralph/hudscreens.sh` run by hand because
+  `shell/jv-hud/core/qmldir` changed (a comment): **all 9 screens match the
+  sheet at HEAD** — the generated prose moved no pixel.
+  build: `nixos-rebuild build --flake .#ares` green (second attempt; see
+  above). No schema change, no jv-act, no boot path, no pins. Never tested,
+  never switched.
+- files: shell/jv-notify/{shell.qml,Notifications.qml,Toast.qml,
+  core/NotifyModel.qml,core/KeyedRows.qml,core/qmldir,
+  tests/tst_notifymodel.qml}, shell/jv-bar/core/{KeyedRows.qml,qmldir},
+  shell/jv-hud/core/qmldir, tools/gen_theme_qml.py,
+  tools/notifyshots/{scene/Strip.qml,scene/tst_settle.qml,
+  stub/Notifications.qml}, tools/tests/test_gen_theme_qml.py, ops/ralph/PLAN.md
+- next: **D36** is now the one with the most behind it — three shot harnesses
+  that pipe the runner's output straight through, and D34's TypeError shipped
+  a green run because of it. Both settle drivers exist now, so whoever takes
+  it can run all three first and read what is already there (the notifier's
+  and the bar's are quiet; hudshots has never been checked). Then **D33** (the
+  last two copies of the HUD's box) and **D17** (the strip's empty right half,
+  the first Track D item wanting a real SOURCE rather than a token).
+
+## 2026-09-26 — iteration 128
+
+- **what**: D36. `tools/qmlerrors.py` — the runner's own output, read back —
+  plus the three lines in each of `ops/ralph/{hud,notify,bar}shots.sh` that
+  capture it and hand it over, and `tools/tests/test_qmlerrors.py`.
+- **why**: D34's second fault announced itself exactly once, as a `TypeError`
+  in the middle of a run that ended `8 passed, 0 failed` and wrote eleven
+  correct PNGs. A QML handler that throws keeps whatever the property already
+  had and recovers on the next evaluation, so the surface stays plausible, the
+  contact sheet stays byte-identical, every assertion still holds — and one
+  `QWARN` line in output nobody reads is the entire evidence. All three shot
+  harnesses piped the runner straight through.
+- **RAN ALL THREE FIRST, which is what the item asked for and was the right
+  order.** hudshots (67 s, 23 assertions, 16 shots) had never been checked for
+  warnings at all. All three are clean at d605f4b: zero QWARN lines between
+  them, and the only console voices in any of them are the two settle drivers'
+  samples and the bar sheet's eleven "px between the workspaces and the clock"
+  lines. So the rule went in over a green baseline rather than red for reasons
+  of its own.
+- **THE DISCRIMINATOR IS THE SHAPE THE ENGINE PRINTS, not the words in the
+  message.** The item was explicit that `console.warn` is a legitimate voice
+  here — `NiriModel` uses it for a line of the niri event stream it REFUSES to
+  parse — so "fail on any warning" would make a service's honesty a failure.
+  QtTest writes console output as `qml: <text>`, with no source location, and
+  an error the engine caught as `file:///…/T.qml:7: TypeError: …`, a location
+  and one of ECMAScript's seven error names. A warning whose text quotes
+  "TypeError:" is therefore still a voice, and there is a test that says so.
+- **PROVED BY INJECTION, and the injection is the whole argument for the
+  gate.** A handler in `Toast.qml` reading a property of `undefined`: the
+  runner said `8 passed, 0 failed`, the ten PNGs came out BYTE-IDENTICAL
+  (`git status docs/notify` clean after the run), and `qmlerrors` refused —
+  naming `Toast.qml:129`, the four test bodies it threw in, and the 23 lines
+  collapsed into them. That collapse came out of the run: one handler in one
+  delegate throws once per plate the scene builds, and the first report was
+  fourteen copies of one sentence, which would bury a second fault under the
+  first.
+- **THE FIRST INJECTION NEVER REACHED THE ENGINE, and that is worth knowing.**
+  `var gone = undefined; void gone.count` was caught by `qmllint` inside the
+  stage, before the runner ran. The statically visible version of this fault is
+  already gated; what reaches the engine is the dynamically typed one —
+  `root.toast.nothingHere.count`, where `toast` is a `var` — which is exactly
+  D34's shape, a value composed at runtime from somewhere else.
+- **AND WHAT IT CANNOT SEE, measured rather than assumed (now D38).** Probing
+  Qt 6.11.1 to write the rule turned up a bigger hole than the one being
+  closed: qmltestrunner prints NOTHING logged while no test function is
+  running. A `console.warn` in `Component.onCompleted` vanishes, and an error
+  thrown by a declarative binding prints nothing ever — `property int n:
+  subject.absent.count` silently yields 0, and so does a binding calling a
+  function that throws, and so does `JSON.parse("{")`. So the three drivers are
+  covered exactly where they DO their work (inside a test body, which is where
+  D34's TypeError was) and not at all for the scene each declares at its root.
+  D38 has the probe and two candidate answers; D39 is the same rule for
+  `hudscreens.sh`, which is a real compositor rather than QtTest and costs
+  3m00s, so its first run belongs to an iteration already paying that price.
+- **WIRING, because a gate that reads a new file and cannot say so is the
+  failure B68–B70 exist for.** `tools/qmlerrors.py` is in each shot gate's
+  `also` table in `dependents.py`, so a change to the scanner runs all three
+  harnesses plus its own suite (checked by a test, and by the existing test
+  that every path a gate claims to stage exists and is named in the script).
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 6 paths (tools **595
+  pass**, 14 of them new; all three shot harnesses green and all 37 shots
+  byte-identical), 160.7 s; re-run as `--since HEAD~1` against what the commit
+  took, also green (7 paths, same 4 gates). `hudscreens.sh` was NOT named by
+  either plan and was not run. build: `nixos-rebuild build --flake .#ares`
+  green. No schema change, no jv-act, no boot path, no pins. Never tested,
+  never switched.
+- files: tools/qmlerrors.py (new), tools/tests/test_qmlerrors.py (new),
+  tools/dependents.py, ops/ralph/{hudshots,notifyshots,barshots}.sh,
+  ops/ralph/PLAN.md
+- next: **D38** is the one this iteration earned — it is the other half of the
+  same question, it has a measurement in it that nothing else can answer
+  (is any binding in any of the three shells silently failing right now), and
+  the probe is written down. Then **D33** (the last two copies of the HUD's
+  box, a small clean-up with a decision in it) and **D17** (the strip's empty
+  right half — the first Track D item that wants a real SOURCE rather than a
+  token).
+
+## 2026-09-26 — iteration 129 — D38: a second engine, because the first one
+## decides what it prints by filename
+
+- built: `tools/qmlprobe/Probe.qml` plus one `warnprobe.qml` per harness, and
+  the other half of `tools/qmlerrors.py`. D36 made all three shot harnesses
+  refuse a run whose QML threw by reading the runner's output back; D38 is the
+  scene that output never mentions. The answer is not a cleverer scan, it is a
+  second ENGINE: plain `qml` installs no message handler, so the same staged
+  scene loaded under it prints what the engine wrote, and the scanner reads
+  both — the `QWARN :` prefix that looked like the shape of a fault turned out
+  to be optional, and the discriminator (a `file:line:` plus one of
+  ECMAScript's seven error names) was never it.
+- **THE HOLE IS ALPHABETICAL, and that is new.** D36 wrote down that QtTest
+  drops what is logged while no test function is running. What nobody had
+  measured is WHICH scene that is. A driver's scene is built before the run
+  begins only if its file is FIRST in the directory; every later driver's is
+  built between two test functions, where the handler prints it as
+  `UnknownTestFunc()`. Two identical files in one directory prove it:
+
+      PASS   : qmltestrunner::Probea::cleanupTestCase()
+      QWARN  : qmltestrunner::UnknownTestFunc() qml: warn from b onCompleted
+      QWARN  : qmltestrunner::UnknownTestFunc() …/tst_b.qml:7: TypeError: …
+      PASS   : qmltestrunner::Probeb::initTestCase()
+
+  So which of a harness's surfaces D36 covered was decided by a filename, and
+  what covered the shell's own scene was an ACCIDENT — a second driver
+  instantiating it after the run had started. The probe makes it deliberate
+  and independent of how anything is named.
+- **THE MEASUREMENT D38 ASKED FOR, taken, and the answer is clean.** All three
+  shells load without a single throw in the state no sheet is a picture of:
+  before a bus frame, a notification or a compositor event has arrived. The
+  HUD's corner builds 78 objects, the bar's strip 11, the notifier's column 3.
+  Nothing in any of the three shells is silently failing right now.
+- **THE FIRST VERSION WAS WRONG AND THE MEASUREMENT SAID SO.** It read every
+  property of every object in the tree — 9,319 of them on the HUD — on the
+  theory that a QML binding is lazy and one nobody asks for never evaluates.
+  It is not lazy. An injected `property int injected:
+  root.loose.nothingHere.count` on the bar's strip, and the identical fault
+  written as a `property var`, BOTH printed with the walk disabled and the
+  census reading nothing at all. So 9,319 reads bought nothing, and what is
+  left is a census — which buys the one claim a run cannot otherwise make,
+  that a scene was really built here, and `Qt.exit(3)` when it was not.
+- **QT_FORCE_STDERR_LOGGING, which is the finding with the longest reach.**
+  This Qt is built with the journald backend, so a Qt program whose stderr is
+  a PIPE — which is exactly what `tee` makes it — prints NOTHING. Not the
+  errors, not `console.log`, not the probe's own census line. The first probe
+  run came back completely silent and looked like a pass. qmltestrunner is
+  unaffected, because QtTest writes its own `QWARN :` lines to stdout itself,
+  which is why D36 has always worked. D39 (`hudscreens.sh`, which pipes real
+  quickshell through `tee`) is now a different question than it was: not what
+  shape its lines have, but whether it has ever emitted one.
+- **PROVED BY INJECTION, twice, and the second injection raised D40.**
+  · A `var`-shaped fault on the staged strip's root — invisible to qmllint,
+    D34's own shape — and `bash ops/ralph/barshots.sh` ends 1 at the probe,
+    naming `shots/Strip.qml:31`, before a single PNG is written.
+  · The same fault in the root of `tst_settle.qml`, the FIRST driver in that
+    directory, and the whole harness went green: `8 passed, 0 failed`, eleven
+    byte-identical shots, `nothing threw` on both logs, exit 0. Neither half
+    can see a driver's own root — QtTest drops it, and the probe's subject is
+    the shell's scene, not a driver's. That is the right target and it is
+    still a hole, so it is written down as **D40** rather than left as a thing
+    one iteration happened to know.
+- wiring: `tools/qmlprobe` is in each shot gate's `.` mount in
+  `dependents.py`, so a change to the shared probe body runs all three
+  harnesses — held by a test, alongside the existing one that every directory
+  a gate claims to stage exists and is named in the script that stages it.
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 10 paths (tools **604
+  pass**, 9 of them new; all three shot harnesses green, all 37 shots
+  byte-identical), 161.8 s. `hudscreens.sh` was not named by the plan and was
+  not run. build: `nixos-rebuild build --flake .#ares` green. No schema
+  change, no jv-act, no boot path, no pins. Never tested, never switched.
+- files: tools/qmlprobe/Probe.qml (new),
+  tools/{hud,bar,notify}shots/scene/warnprobe.qml (new), tools/qmlerrors.py,
+  tools/tests/test_qmlerrors.py, tools/dependents.py,
+  ops/ralph/{hudshots,barshots,notifyshots}.sh, ops/ralph/PLAN.md
+- next: **D39** is now cheap and has an answer in it — the same
+  `QT_FORCE_STDERR_LOGGING` line, in the one gate that loads `shell.qml` at
+  all, and an iteration that pays its 3m00s anyway gets the first honest look
+  at what a real compositor session has been printing into nothing. Then
+  **D33** (the last copies of the HUD's box) and **D17** (the strip's empty
+  right half, the first Track D item that wants a real SOURCE).
+
+## 2026-09-26 — iteration 130 — the real HUD had been talking to nobody for
+## thirty iterations
+
+- built: the D39 half of `tools/qmlerrors.py`, and the wiring that makes
+  `ops/ralph/hudscreens.sh` read what the REAL shell said. That gate starts
+  twelve real quickshells in a pass — one per shot, one per idle window —
+  and every one of them has written its output to a file since the first
+  version of the harness, where nothing had ever opened it. D36 made the
+  three STAGED harnesses refuse a run whose QML threw; this is the same rule
+  over the only gate in this repo that loads `shell.qml` at all.
+- **D38's PREDICTION WAS WRONG, and that is the first finding.** D38 expected
+  `QT_FORCE_STDERR_LOGGING` to be the whole fix, because this Qt is built
+  with the journald backend and a Qt program whose stderr is not a terminal
+  prints nothing. It is not needed here: quickshell installs a message
+  handler of its OWN, so its output never goes near Qt's default sink and a
+  redirected file gets every line.
+- **THE REAL OBSTACLE WAS COLOUR, and it would have been silent.** Quickshell
+  writes ANSI escapes whether or not anything is watching, so a log written
+  to a file has `\x1b[33m  WARN\x1b[97m scene\x1b[0m: ` in front of every
+  message — which is not a prefix the scanner knows, so a coloured log scans
+  CLEAN. `NO_COLOR=1` is exported by the harness and is load-bearing. The
+  coloured line is a recorded fixture rather than a sentence, because a gate
+  that is green for the wrong reason is the thing all of D36–D39 is about.
+- **A THIRD SHAPE, and the same rule.** Recorded from quickshell 0.3.0:
+
+      WARN scene: @core/BusModel.qml[113:-1]: TypeError: Value is undefined
+     DEBUG qml: the arrival, sampled
+
+  A level and a CATEGORY instead of `QWARN :`, a location written
+  `@path[line:column]` relative to the shell's own root instead of
+  `file:///…:line:`, and a column of -1 when the engine had none (so it is
+  not printed — `shell.qml:8:-1` is a position no file has). Quickshell
+  separates the voice from the fault at the SOURCE — every `console.*` goes
+  out under `qml`, the engine's own errors under `scene` — which is a cleaner
+  discriminator than the one D36 had to infer. The location and the error
+  name are still required anyway: a category is a claim someone else makes
+  about a line, and the rule is about the shape the engine prints.
+  `console.log` arrives as DEBUG and `console.error` as ERROR, so the level
+  is not the discriminator and a test says so.
+- **THE ANSWER D39 ASKED FOR: the real HUD says nothing that throws.** 7,170
+  lines across the twelve logs of a full pass, clean, in 0.1 s.
+- **AND THE INSTRUMENT IS LIVE, proved by injection.** A `property var
+  injectedFault: modelData.noSuchThing.count` on the PanelWindow — the D34
+  shape, invisible to qmllint — and the gate ends 1, naming
+  `shell/jv-hud/shell.qml:90` in all twelve logs, three times in each (once
+  per monitor). **Everything else about that run was green.** Every probe
+  passed: the corner, the exclusive zone, the keyboard focus, the growth, the
+  click through the empty mask, 0 commits in every one of the five idle
+  windows. And all nine photographs still matched the sheet committed at HEAD
+  to inside the noise floor — because a QML binding that throws keeps the
+  value it already had. Without this scan, that was a perfect pass with a
+  shell throwing on every screen.
+- **NO CENSUS IS NEEDED HERE, unlike the staged harnesses**, and the reason is
+  already in the harness: D38 had to build `Probe.qml` because a staged scene
+  that silently built nothing would scan clean, but this one waits on
+  `Configuration Loaded` for every shell it starts — quickshell's own handler
+  putting that line in that file — so an empty log never gets past the start.
+  A test counts the `Proc("jv-hud", …)` sites and the waits and holds them
+  equal.
+- **`--prefix`, and where the path is allowed to live.** Quickshell's paths
+  are relative to the directory holding `shell.qml`, which at runtime is a
+  store path, so the report would otherwise name `core/BusModel.qml` — three
+  directories in this repo. The root comes out of the new `sheet.SHELL_ROOT`
+  rather than the script, because `hudscreens.sh` may not contain the string
+  `shell/jv-hud` in any line it EXECUTES: that is the rule
+  (`test_the_harness_photographs_the_shipped_binary_and_stages_nothing`) that
+  keeps this gate from ever staging a HUD, and it caught the first version of
+  this change. Two new tests hold both ends — the root is the directory that
+  really has `shell.qml`, and the script really reads it.
+- also: `qmlerrors.py` takes MORE THAN ONE log now (twelve here; a scan of one
+  would have been the harness choosing which surface to believe), the report
+  names which log when there is more than one, and an unmatched glob arrives
+  as its own pattern and is refused — a run that started no shell is not a
+  clean one. The run's cost was re-measured while it was open, which is that
+  paragraph's standing lesson: probe 154.8 s / 79.4%, sheet 39.9 s / 20.5%,
+  of 194.9 s; the new scan is 0.1 s of it.
+- tests: `bash ops/ralph/verify.sh` GREEN — 4 gates over 6 paths (tools **619
+  pass**, 15 of them new; all three shot harnesses green, all 37 shots
+  byte-identical), 162.2 s. `ops/ralph/hudscreens.sh` was named by the plan
+  and RUN, twice: once clean (exit 0, sheet unchanged, `docs/hud/screens`
+  restored to its committed bytes) and once with the injection above into a
+  scratch directory (exit 1). build: `nixos-rebuild build --flake .#ares`
+  green. No schema change, no jv-act, no boot path, no pins. Never tested,
+  never switched.
+- files: tools/qmlerrors.py, tools/tests/test_qmlerrors.py,
+  tools/hudscreens/sheet.py, tools/tests/test_hudscreens.py,
+  tools/dependents.py, ops/ralph/hudscreens.sh, ops/ralph/PLAN.md
+- next: **D41**, raised by this one and the sharpest thing it measured — the
+  bar's and the notifier's `shell.qml` are never LOADED by anything, only
+  linted, because every shot harness deletes `shell.qml` from its stage on
+  purpose. The cheap answer is a probe-only run per shell (headless sway, one
+  quickshell, `Configuration Loaded`, this scan) with no pictures and none of
+  the 97.7 s idle probe that is most of what `hudscreens.sh` costs. Then
+  **D33** (the last copies of the HUD's box) and **D17** (the strip's empty
+  right half, the first Track D item that wants a real SOURCE).
+
+## 2026-09-26 — iteration 131 — two of the three shells had never been
+## opened by an engine, only by a linter
+
+- built: **`ops/ralph/shellload.sh`** + `tools/shellload/{shells,load}.py` +
+  `tools/tests/test_shellload.py` — a gate that LOADS all three shells under a
+  real quickshell on a headless compositor and refuses a run whose QML threw
+  (PLAN D41, option (a) exactly). One sway, three quickshells, a wait on
+  quickshell's own `Configuration Loaded`, and `tools/qmlerrors.py` over what
+  each of them said, once per shell with its own `--prefix`.
+- **WHY IT HAD TO EXIST, and D39 is the iteration that could measure it.**
+  `ops/ralph/hudscreens.sh` was the only gate in this repo that ran a real
+  quickshell, so `shell/jv-hud/shell.qml` was the only `shell.qml` any engine
+  had ever opened. The bar's and the notifier's were qmllint-clean and nothing
+  more — every shot harness DELETES `shell.qml` from its stage on purpose,
+  because ShellRoot, PanelWindow and the layer-shell attached properties cannot
+  resolve outside quickshell's own binary. So the two surfaces that reserve
+  screen space and take this machine's `org.freedesktop.Notifications` name had
+  their outermost file held by a linter alone, and the D34/D39 shape — a `var`
+  binding that throws and leaves the surface plausible — is exactly what a
+  linter cannot see.
+- **THE INSTRUMENT IS LIVE, PROVED BY INJECTION THREE TIMES**, not by reading
+  the code. `property var injectedFault: modelData.noSuchThing.count` on the
+  bar's PanelWindow and on the notifier's — the D34 shape, invisible to
+  qmllint, so `nix build` was GREEN for both derivations — and the gate ends 1,
+  naming `shell/jv-bar/shell.qml:83` and `shell/jv-notify/shell.qml:80`, three
+  times each, once per monitor. The third injection is the one that earns its
+  keep: `root.toast.noSuchThing.count` inside **`Toast.qml`**, which only exists
+  on screen because this gate SENDS a notification — caught as
+  `shell/jv-notify/Toast.qml:51`, three times, which proves the wake is doing
+  real work and not decorating the log.
+- **THE SHARPEST THING IT MEASURED IS ABOUT THE BUS, and nobody predicted it.**
+  Run without `DBUS_SESSION_BUS_ADDRESS` replaced, `jv-notify` reaches the
+  USER'S OWN live session bus and races the real notification daemon for
+  `org.freedesktop.Notifications`. The observed line was `Could not register
+  notification server at org.freedesktop.Notifications, presumably because one
+  is already registered` — a harness losing a race it must never have been in,
+  and had it WON, a test gate would have taken over the notifications of the
+  desktop it was running inside. So the run starts its own `dbus-daemon`, and
+  with a config that has **no `<servicedir>`**: the first version used
+  `dbus-run-session`, which inherits the machine's service directories and duly
+  started xdg-desktop-portal, -gnome, -gtk and gnome-keyring inside a gate about
+  three QML files — none of them from this flake, all of them noise in the log
+  being scanned.
+- **AND THE NOTIFIER NOW HAS A REAL CLIENT, which is the first half of D22.**
+  `load.py` asks the running daemon `GetCapabilities` over the private bus and
+  gets exactly `['body']` — `Notifications.qml`'s honesty declaration surviving
+  into the bus name, with `actions` refused because the corner's input region is
+  empty — then `Notify` comes back with id 1. A test holds the two halves equal
+  by reading the QML's own flags, and another insists exactly one of them is
+  `true`. Nothing in this repo had ever proved that name was claimed, or that it
+  answered anybody.
+- **THE PRICE IS WHY IT IS A SECOND GATE RATHER THAN A FLAG ON THE FIRST.**
+  25.4 s, measured, against `hudscreens.sh`'s 3m15s — of which 97.7 s is an
+  idle probe holding still and the output is a directory of pictures somebody
+  has to look at. B75 asked whether there was a cheaper, bindable half of that
+  harness and answered no for the harness; this is the yes for the one question
+  that is a verdict. Third `DeclaredGate` in `tools/dependents.py`,
+  `runs_here=True`, so `verify.sh` runs it like any other step.
+- what it is NOT, written into the script's header and pinned by tests, because
+  every one of these is a limit somebody will otherwise read as coverage: not a
+  picture (nothing here looks at a pixel); the HUD runs with no jarvisd and the
+  bar with no niri, so for those two it covers the outermost file, the
+  per-screen delegate and the bindings evaluated whatever the state — which is
+  where D34's and D39's faults both were, and is not the whole shell (D43).
+  `shellload.sh` deliberately does NOT declare `services/jarvisd`: nothing here
+  starts a broker, so the bus cannot move this verdict.
+- the staging rule is the one `hudscreens.sh` already lives by and is worth
+  restating: the string `shell/` may not appear in any line this script
+  EXECUTES. The three roots live in `shells.py`, so the report can still name a
+  file a reader can open, and a `cp` out of the working tree — the natural fix
+  for a stubborn run — cannot be written here without failing a test.
+- also: the monitor list is stated in `shells.py` and held equal to
+  `sheet.OUTPUTS` by a test that reads both, rather than imported; an import
+  would have made every edit to the screen sheet's noise floor wake this gate.
+  Three outputs is the load-bearing part rather than the sizes — all three
+  shells build one surface per `Quickshell.screens` entry, so a one-output run
+  loads one delegate and calls it a shell.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 10 paths (tools **654
+  pass**, 35 of them new — 31 test functions, one of them parametrised five
+  ways; `shellload.sh` itself 25.4 s, all three shells clean). The gate was additionally run twice with faults injected (exit 1 both
+  times, naming all three injected lines) and the injections reverted. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/shells.py,
+  tools/shellload/load.py, tools/tests/test_shellload.py, tools/dependents.py,
+  tools/verify.py, tools/tests/test_qmlerrors.py (the scanner is read by two
+  gates now, not one), tools/tests/test_verify.py (the gate count, 10 -> 11),
+  ops/ralph/README.md, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D43**, the cheap half of what this gate cannot see — a `jarvisd` plus
+  one `--instant` replay would bring every HUD plate binding under the scan for
+  a second of run time, and the bar has no equivalent because `JV_BAR_NIRI` is
+  `--set` into its wrapper. Then **D44** ("it loaded" is not "it mapped": the
+  bar's exclusive zone is a verdict one `swaymsg -t get_workspaces` away, and
+  nothing has ever asked it), and **D33** (the last copies of the HUD's box).
+
+## 2026-09-26 — iteration 130 — "it loaded" is not "it mapped" (PLAN D44)
+
+- **the hole.** `ops/ralph/shellload.sh` waited on quickshell's own
+  `Configuration Loaded` and called that a loaded shell. That line is the root
+  component built — a `PanelWindow` whose layer-shell attached properties
+  failed to ATTACH gets it too, and `hudscreens.sh` was the only thing in this
+  repo that had ever looked at a surface, through `grim`, for the HUD alone.
+  So the bar, the one surface on this machine that takes screen space away
+  from every window, could have stopped reserving its strip and every gate
+  here would have stayed green.
+- **two questions, both over sway's own IPC, both free.** `SWAYMSG_BIN` and
+  `SWAYSOCK` into the driver (the second cost a run: `swaymsg` without it is
+  `Unable to retrieve socket path`, and the IPC socket is not the wayland one).
+  · **THE MONITORS, once, before any shell.** `WLR_HEADLESS_OUTPUTS=3` and the
+    `output` lines in the config were both REQUESTS and nothing had ever read
+    the answer. Every shell builds one surface per `Quickshell.screens` entry,
+    so a run that got one output would have loaded one delegate, scanned one
+    surface's worth of log and reported that all three shells load. It ends
+    the run on its own rather than being counted with the shells: three more
+    failures underneath that one would only bury it.
+  · **WHAT EACH SURFACE RESERVED, per shell, three times** — before it starts,
+    while it is up, after it is stopped. sway shrinks every workspace rect by
+    every exclusive zone, so the bar's verdict is full → shrunk → full on all
+    three monitors. The two outer readings are the control: a strip already
+    missing before the bar started was not the bar's, and one that never came
+    back was never a layer surface's zone.
+- **THE BAR'S HALF IS A PROOF OF MAPPING, AND THE INSTRUMENT IS LIVE.**
+  `exclusiveZone: 0` injected into `shell/jv-bar/shell.qml` and the gate ends
+  1, naming all three monitors and both numbers — while **everything else
+  about that run was green**: loaded in 0.40 s, `Configuration Loaded`
+  arrived, and the D39 scan said nothing threw on any of the three logs. An
+  unmapped surface reserves nothing, so 31 px cannot go missing unless the
+  strip is really there.
+- **AND THE LIMIT IS THE SHARPEST THING HERE, and it is not the one anybody
+  would guess.** A 100 px zone injected into the notifier DID bite — observed
+  areas 2560x1340 and 1920x980, the zone off the bottom edge it is anchored to
+  — but only once the surface was ALSO made `visible: true`. With its own
+  `visible: Notifications.anyLit` — false when the window is created, true a
+  moment later when the gate's notification arrives — the identical zone is
+  silently never published and every monitor reads whole. **A
+  conditionally-visible `PanelWindow` gets its exclusive zone at creation, and
+  a zone declared while it was invisible does not reach the compositor.** Both
+  of those shells are conditionally visible, and the HUD with no jarvisd is
+  never lit at all, so no surface of its is created here. So, written into
+  `shells.py`, the script header and the README rather than left for a reader
+  to assume: the bar's reading is a proof; the notifier's refutes a zone on a
+  surface that was mapped when it was born; **the HUD's refutes nothing about
+  today's HUD** — it is the line that notices the day the corner becomes
+  always-mapped and takes space, which is the future the bar already is, and
+  it is the control that makes the bar's 31 px the bar's.
+- **a third thing fell out and is D45.** The bar built with `exclusionMode:
+  ExclusionMode.Ignore`, zone untouched, STILL reserved all 31 px. So
+  `exclusionMode` is not what decides a strip — `exclusiveZone` and the
+  anchors are — and all three `shell.qml` plus `shoot.py`'s failure message
+  attribute an invariant-10 guarantee to the wrong property. Nothing is
+  broken; a comment naming the wrong guardrail is the one somebody edits away.
+  Left as its own commit rather than ridden in on the gate that found it.
+- the strip the gate expects is DERIVED on both sides: `bar_strip_px()` reads
+  `type.label_px + geometry.pad_px * 2` out of `personality/theme.toml`, and
+  `test_the_strip_this_gate_expects_is_the_one_the_bar_declares` holds that
+  equal to the bar's own `implicitHeight` expression — the invariant-1 shape
+  `OUTPUTS` vs `sheet.OUTPUTS` already uses, and a third file reading both.
+  A gate that pinned 31 would go red on a change to the type scale the bar
+  handled perfectly.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths (tools **664
+  pass**, 10 of them new; `shellload.sh` 25.4 s, **the same 25.4 s it cost
+  before** — nine IPC calls are free against three quickshell startups). The
+  gate was additionally run five times with faults injected: two that ended 1
+  and named the right monitors, and three that did NOT bite and are the
+  measurement above. All injections reverted; `git status` clean of them
+  before the verify run. build: `nixos-rebuild build --flake .#ares` green.
+  No schema change, no jv-act, no boot path, no pins. Never tested, never
+  switched.
+- files: ops/ralph/shellload.sh, tools/shellload/shells.py,
+  tools/shellload/load.py, tools/tests/test_shellload.py, ops/ralph/README.md,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D43**, which D44 made both cheaper to justify and more clearly
+  needed — the HUD's surface is not merely unlit here, it is never created, so
+  the mapping reading and the plate bindings are one jarvisd and one
+  `--instant` replay away from both being real. Then **D45** (three comments
+  and one failure message that name the wrong property, found above), and
+  **D33** (the last copies of the HUD's box).
+
+## 2026-09-26 — iteration 130 — the HUD had never been shown the bus by the gate that loads it (D43)
+
+- **what**: `ops/ralph/shellload.sh` starts a real `jarvisd`,
+  `tools/shellload/publish.py` puts eleven composed frames on it at 1 Hz, and
+  the HUD's own read-only bridge carries them into the plates. Ten of the
+  HUD's eleven plates light, on all three monitors, and `shell/jv-hud/
+  shell.qml` says which — one line per surface, naming the plates on it.
+- **why**: the gate's own header said it. The HUD here ran with no broker, so
+  `Bus` was blind, every plate refused to guess, and `visible: selfTest ||
+  stack.anyLit` was false — which means **no wl_surface of its was ever
+  created**. The mapping check D44 added was asking the compositor about a
+  shell that was not there, and every plate, every state machine under it and
+  every binding that only runs on a real frame was outside the gate that
+  loads the shipped HUD.
+- **THE COVERAGE IS MEASURED, and the file it reaches is the one whose own
+  header says no test can reach it.** `Bus.qml`'s first paragraph: "logic that
+  lands in this file is logic no test can reach" — the Process, the
+  SplitParser, the respawn timer, the monotonic clock. A `var`-typed throw
+  injected into its `latest()` forwarder (`model.latest(topic).body.nope.x` —
+  the D34 shape, and the FIRST attempt at this injection was caught by qmllint
+  at build time because `data.nope` is a member of a typed QString, which is
+  the layer below doing its job) ended the gate 1 with **25,992 thrown lines**
+  naming `shell/jv-hud/Bus.qml:48`.
+- **AND THE CONTROL IS THE WHOLE POINT.** The identical fault, with the HUD
+  pointed at a socket no broker was listening on, reports **`nothing threw in
+  8 lines of runner output`**. Not "newly caught" — *entirely invisible to
+  this repository an hour ago*. 8 lines versus 86 is also how much of the
+  HUD's own log existed before there was anything on the bus to talk about.
+- **the census had to be the HUD's own account, because nothing else can
+  answer.** The HUD reserves no space, takes no focus, and with
+  `ExclusionMode.Ignore` and no zone it changes nothing a compositor reports
+  when it maps — so "did the frames reach the plates" had no observable at
+  all, and a driver that graded itself on what it had just published would be
+  grading the bus. So the corner speaks: `jv-hud: corner on HEADLESS-1 shows
+  confirm state output heard reply action guard install mic health`. That is
+  also a thing the real machine wanted independently — the corner is unmapped
+  most of the time, so until now this machine kept no record of what it ever
+  showed, and "Jarvis never showed me the confirmation" and "Jarvis showed it
+  and I looked away" were the same empty screen afterwards.
+- **NAMES ONLY, and structurally rather than tidily** (invariant 7).
+  `plateName` is one word per element, so what reaches journald is WHICH
+  readings were on screen and never the words jv-ears took down, the question
+  jv-act asked or the file jv-guard refused. A test refuses a logged
+  expression that reaches for any of them.
+- **per monitor, and the report names the plate.** `Variants` builds one
+  surface per screen and each one's plates decide for themselves (D32's fault
+  was a row sized against the wrong monitor), so the census asks each monitor
+  by name. A `guard.verdict` dropped from the frame list ends the gate 1 with
+  `HEADLESS-1: showed [confirm state output heard reply action install mic
+  health], missing ['guard']` on all three — the first version of that message
+  printed the expected line back three times and left the reader to diff two
+  long strings, which is why the parser exists. A monitor that never wrote a
+  line at all is told apart from one that went dark: different repairs.
+- **composed frames, not the `--instant` replay D43 asked for, and the reason
+  is a measurement**: every recorded session in `harness/fixtures/sessions`
+  carries exactly three topics — audio.vad, audio.wake, audio.transcript —
+  because they are recordings of a MICROPHONE. Replaying one lights two
+  plates. Eight of the eleven are byte-equal to a named frame in
+  `tools/hudscreens/sheet.py` (restated with a test reading both, on the same
+  argument `OUTPUTS` makes for not importing it); the three that are new are
+  `guard.verdict`, `compat.install` and `brain.response`, because nothing in
+  this repo had ever composed one — which is exactly why those three plates
+  had never been fed a real frame by anything.
+- **the frame ORDER is load-bearing, and it is pinned.** `heard` goes dark
+  once `speech.state` is stamped after the words (HeardState latches
+  `answering`) and `action` goes the same way (ActionState's `noteExplained`),
+  so the speaking frame goes FIRST and everything else is newer than it. What
+  the corner then shows is a barge-in mid-answer — a real state, not a
+  contrivance. Republishing the whole set in order stays true every round:
+  round 2's speaking frame latches `answering`, then round 2's transcript
+  changes `transcriptKey` and clears it again.
+- **it republishes because one plate needs it to, and that is also how the
+  subscription race stops mattering.** `output` reads jv-context's 1 Hz
+  snapshot and OutputState calls one older than 3 s stale. A bus has no
+  backlog, so a frame sent before the bridge subscribed is simply gone and
+  nothing this driver can ask would say when it landed — republishing makes
+  the race stop mattering rather than trying to win it.
+- **the gate now reads the bus, which it deliberately did not.** The old
+  reason was good and is no longer true: `services/jarvisd`, `services/pylib`
+  and `services/jv-hud-bridge` are declared reads now — the three paths a
+  frame travels — so a `services/pylib` change is ten suites AND this gate,
+  which is the one test in `test_verify.py` whose number had to change.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 8 paths (tools **683
+  pass**, 12 of them new; `shellload.sh` **26.5 s**, against 25.4 s before —
+  a broker, eleven frames and ten lit plates for **1.8 s**). Additionally
+  `bash ops/ralph/hudscreens.sh` (named, 3m14s, run and looked at): all 9
+  shots match the sheet committed at HEAD — the new log line changes no
+  pixels, so there are no shots to commit — and `nothing threw in 7262 lines
+  across 12 logs`. The gate was run three times with faults injected: the
+  Bus.qml throw (ended 1, 25,992 lines), the same throw with no broker (the
+  control, `nothing threw in 8 lines`), and the dropped `guard.verdict`
+  (ended 1, naming the plate on all three monitors). All injections reverted;
+  `git status` clean of them before the verify run. build: `nixos-rebuild
+  build --flake .#ares` green. No schema change (the three new bodies are
+  checked against the frozen schemas by a test), no jv-act, no boot path, no
+  pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/publish.py,
+  tools/shellload/shells.py, tools/shellload/load.py,
+  shell/jv-hud/shell.qml, tools/dependents.py,
+  tools/tests/test_shellload.py, tools/tests/test_verify.py,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D47** — the eleventh plate, and it is the cheapest thing on this
+  list now: a second HUD start with `JARVIS_BUS` pointed at nothing, held
+  past LinkState's 5 s grace, and a corner that names exactly `link`. Six
+  seconds, and it would be the first thing anywhere to prove the HUD ever
+  admits it is blind. Then **D48** (the 25,992 lines, which measure one of
+  two things and nobody knows which), then **D45** (three comments and one
+  failure message naming the wrong property) and **D33**.
+
+## 2026-09-26 — iteration 131 — the eleventh plate (PLAN D47)
+
+- built: **the HUD is loaded TWICE by `ops/ralph/shellload.sh` now**, and the
+  second run exists to light the one plate the first cannot. `LinkPlate` is on
+  screen exactly while the HUD CANNOT see the bus, so it is mutually exclusive
+  with D43's ten: lighting it means taking the broker away, and then there are
+  no frames for anything else. So a fourth quickshell runs the same shipped
+  binary with `JARVIS_BUS` pointed at a path that is not a socket, waits out
+  `core/LinkState.qml`'s grace, and the corner has to name **exactly `link`**
+  on all three monitors.
+- **why it is worth five seconds, and the second reason is the stronger one.**
+  Until now nothing anywhere had watched a real HUD admit it was blind: the
+  grace is the whole judgement in `LinkState.qml` — say nothing until the
+  outage has outlasted the bridge's own retry and `Bus.qml`'s respawn — and a
+  HUD that reported instantly, or never, passed every gate in this repo.
+  `shell/jv-hud/tests` drives `LinkState` against a BusModel it owns, which is
+  a claim about the ELEMENT; this is the shipped shell, the shipped bridge, and
+  a machine that really is not running underneath it. And the other ten plates
+  have to stay DARK, which nothing could check before: every state machine
+  under that corner is built to REFUSE rather than guess, a refusal and a calm
+  machine draw the same nothing, and no picture can tell them apart. A corner
+  naming exactly one plate can.
+- **the grace is READ out of the QML, not copied into the gate**, and that is
+  the opposite of what `bar_strip_px()` and `hud_corner_line()` do. The
+  difference is what each number is FOR: those two are expectations — the gate
+  states what the shell must do and goes red when it does not, and a third
+  file holds the copy equal. This one is a duration the gate has to OUTLAST,
+  so a stale copy would make the gate flaky rather than red. `link_grace_s()`
+  parses it, `HUD_BLIND_TIMEOUT_S` is checked against it, and the failure
+  message quotes it — which is why the 600 s injection below reports itself.
+- **the scan loop iterates ENGINES now, not shells** (`scan_targets()`). A
+  fourth quickshell writes a fourth log, and `qmlerrors.py` over a file nobody
+  reads grades nothing. Both HUD logs are reported under the HUD's root
+  because both are the same store path.
+- **three injections, and the third is the surprise.** A `graceS` of 600
+  injected into the QML ends the run 1 and the report quotes the 600 back
+  (`after 12s of a bus that is not there and the HUD's own 600s grace`).
+  `|| true` on `MicPlate`'s `shown` — a plate guessing from a bus it cannot
+  see — comes back as `showed [link mic], unexpected ['mic']` on all three
+  monitors. And `JSON.parse("{")` in `LinkPlate.qml`'s own `text:` binding was
+  reported by **BOTH** HUD logs, three times each: a plate's children are
+  constructed WITH the plate — `visible`/`opacity` decide what is DRAWN, not
+  what exists — so nearly every binding under a plate that never shows was
+  already in the D39 scan. **This run adds the STATE, not a fourth log's worth
+  of scan coverage**, and that is now written into `shells.py` where somebody
+  would otherwise read it as coverage. Two further injections could not be
+  built, and both are good news: `root.nothing.here` is a qmllint failure in
+  `pkgs/jv-hud`, and a throw inside `LinkState`'s `reason` fails four of the
+  HUD's own QML tests — the shape that survives a build is the D34/D39 one,
+  which is the shape this gate is for.
+- **no QML changed.** The whole slice is the harness: the shipped HUD already
+  did this, and nothing had ever asked it to.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths (tools **693
+  pass**, 10 of them new; `shellload.sh` **32.0 s**, against 26.5 s before —
+  5.4 s for the eleventh plate, against the 6 s D47 estimated). All three
+  injections above were run against the full gate and all three ended 1; every
+  one reverted, and `git status` was clean of them before the verify run.
+  `hudscreens.sh` was NOT named by the gate and did not need to be: no shell
+  QML is touched, so there are no pixels to re-photograph. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/load.py,
+  tools/shellload/shells.py, tools/tests/test_shellload.py, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- next: **D49** — the other half of the plate, and it is the more dangerous
+  half: nothing proves the HUD ever STOPS saying NO BUS. `LinkState`
+  deliberately does not clear `waited` on reconnect, a plate that latched
+  forever passes the new run exactly as it passes now, and a permanent NO BUS
+  over a healthy machine teaches the user to ignore the one plate that
+  qualifies all the others. The bridge retries forever, so a `jarvisd` started
+  on the very path the blind run was pointed at should take the corner from
+  `link` to `nothing` — about 2 s. Then **D50** (the ceiling test is 2 s from
+  its limit and the next wait breaks the arithmetic, not the gate), then
+  **D48**, then **D45**.
+
+## 2026-09-26 — iteration 132 — the plate had to let go (PLAN D49 + D50)
+
+- built: **the blind run has a second act.** D47 proved the HUD says NO BUS;
+  nothing proved it ever STOPS. `core/LinkState.qml` deliberately never clears
+  the flag its grace set — `blind` goes false because `linked` went true — so a
+  `link` plate one edit away from latching forever passed D47's census exactly
+  as the shipped one does, and a permanent NO BUS over a healthy machine is the
+  worst fault this corner can have: it teaches the user to ignore the one plate
+  that qualifies all the others. So `load_blind` now starts a real broker on
+  the very socket that HUD has spent five seconds failing to reach, and the
+  corner has to go **DARK** — `nothing` on all three monitors, which
+  `hud_corner_plates` has spelled as a word rather than an absence since D43,
+  for exactly this reading.
+- **the reading is not vacuous, and that is why it is inside `load_blind`
+  rather than a run of its own.** An empty corner is also what a HUD that never
+  lit anything looks like. But the blind census has already required the NEWEST
+  line on every monitor to be `link`, and the census reads the newest — so the
+  only line that can satisfy `HUD_PLATES_RELINKED` is one the HUD wrote after
+  the broker arrived. The ordering is asserted, not assumed.
+- **the injection that works is not the obvious one, and it is the measurement
+  worth keeping.** `blind: root.waited` in `LinkState.qml` — the latch this
+  item is about — CANNOT BE BUILT: two of the HUD's own QML tests fail and
+  `pkgs/jv-hud` goes red before the gate starts. The element's own suite
+  already covers the element, which is good news of the D47 kind. What no
+  headless engine can cover is `Bus.qml`, the Quickshell half — and dropping
+  the bridge's own `{"t":"link","up":true}` line there ends this run **1**,
+  reporting `HEADLESS-1: showed [link], unexpected ['link']` on all three
+  monitors and taking the frames run down with it. That is the shipped-level
+  shape of this fault: a bridge that reports a live bus to a panel that goes on
+  saying it is blind. Nothing in this repo could see it before.
+- **both of the broker's own failure paths report themselves, and they are
+  different repairs.** A bad argument comes back as `the broker exited with 2
+  instead of listening on late-bus.sock` plus its stderr; a broker that comes up
+  and never binds as `never created late-bus.sock in 4s`. The socket gets its
+  own short budget on purpose — spending the corner's 16 s on a socket that was
+  never there reports the wrong repair — and the broker's log is quoted into the
+  census failure too, because a latched plate and a broker that refused the
+  bridge read identically from the corner alone. (The run above shows that
+  working: `jarvisd listening on …/late-bus.sock` printed under a corner that
+  still said `link`.)
+- **the wait is DERIVED, like the grace and unlike every expectation here.**
+  `bridge_max_backoff_s()` reads `MAX_BACKOFF_S` out of
+  `services/jv-hud-bridge`: by the time the broker appears the bridge's backoff
+  has doubled its way to the 8 s ceiling and the socket can arrive one instant
+  after a failed attempt, so `HUD_RELINK_TIMEOUT_S` is held above it by a test
+  that reads the bridge. A stale copy would make the gate flaky rather than red.
+  `HUD_BLIND_BUS` is `late-bus.sock` now, because `no-` stopped being true.
+- **and D50, which had to come with it: the ceiling is per-ENGINE.** The old
+  test summed every timeout in `shells.py` into one number ≤ 150 s and D47 left
+  it at 148, so this relink would have read as a cost problem when it is nine
+  seconds of waiting. Worse, the sum was not the worst case — it left out
+  `READY_TIMEOUT_S` entirely, 30 s per engine, and a quickshell that comes up
+  and then holds still forever is exactly the run a ceiling is for.
+  `engine_ceilings()` now states one bound per engine in `scan_targets()` (54 s
+  bar and notifier, 94 s frames run, 87 s blind run, all ≤ 100) — the claim
+  that stays true as runs are added — with the run's own 4× ceiling asserted
+  beside it so nobody reads a third of the truth. Neither is a budget: the
+  MEASURED run is 34.8 s.
+- **one real bug, found by touching it:** `corner_census`'s failure report
+  looped `for name, plates in got.items()`, shadowing the run name, so every
+  multi-monitor failure was headed by the LAST monitor rather than by which of
+  the HUD's runs it was about. Fixed; the injection above is the proof
+  (`jv-hud-blind: after 16s of …`).
+- **no QML changed, and no shell.** The whole slice is the harness plus one
+  export: the shipped HUD already lets go of the plate, and nothing had ever
+  watched it do so.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths (tools **701
+  pass**, 8 of them new; `shellload.sh` **34.8 s** against 32.0 s before — 2.6 s
+  for the second act). All three injections above were run against the full
+  gate: two ended 1 with the messages quoted, the third could not be built and
+  says so. Every one reverted, and `git status` was clean of them before the
+  verify run. `hudscreens.sh` was NOT named by the gate and did not need to be:
+  no shell QML is touched, so there are no pixels to re-photograph. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/load.py,
+  tools/shellload/shells.py, tools/tests/test_shellload.py, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- next: **D52** — the corner comes back empty and nothing proves it ever fills
+  again. The engine that was blind is never shown a frame; the ten-plate census
+  runs on a different quickshell that had a broker from birth. So nothing
+  anywhere proves a HUD which SURVIVED an outage can still light a plate, and
+  every cache in `BusModel` was emptied on the drop, `HealthState` threw away
+  its roster, and the subscription carrying frames is the bridge's second
+  rather than its first. `publish.py` against the late broker plus one more
+  census on the blind engine's own log is ~2 s, and it would make that run the
+  only place here where the whole outage cycle is walked end to end. Then
+  **D51** (two brokers, neither log read — and `qmlerrors.py` is the wrong
+  reader for a Rust log, so over one it says "nothing threw" whatever it says),
+  then **D48**, then **D45**.
+
+## 2026-09-26 — iteration 133 — and then it had to work again (PLAN D52)
+
+- built: the third act of `ops/ralph/shellload.sh`'s blind run. The HUD that
+  was blinded, said so, and let go of the plate is now SHOWN REAL FRAMES on the
+  broker that came back, and its corner has to light the same ten plates the
+  frames run lights. One engine's own log, in order, measured:
+  `1 plate` → `nothing` → `10 plates`. That is the whole outage cycle — blind →
+  says so → recovers → reports the machine again — and this is the only place
+  in the repo where it is walked end to end.
+- why, and it is one fault rather than a tidiness argument. **A HUD that is
+  LINKED, SILENT, and certain it is fine.** The corner going dark is a reading
+  of the SOCKET: `core/LinkState.qml` watches `Bus.linkUp` and never the
+  traffic. So a HUD that came back linked and then never accepted another frame
+  passes D49's census exactly as the shipped one does — and what the user gets
+  is a corner reporting a healthy machine as silence, forever, with no plate
+  qualifying it because the plate that would have is the one that just went
+  out.
+- **it is not the frames run's claim again, and the difference is state.** This
+  engine has been told the link is DOWN half a dozen times — one
+  `{"t":"link","up":false}` per failed connect on the bridge's doubling
+  backoff, against the frames run's one — and every one of them emptied both
+  `core/BusModel.qml` caches and `core/HealthState.qml`'s roster of services.
+  Then `LinkPlate` was the only thing on the surface. Then the SURFACE WAS
+  DESTROYED: `visible: selfTest || stack.anyLit`, and the dark census requires
+  `nothing` on all three monitors. The ten plates have to come back on a
+  surface that was torn down and rebuilt, on a model that has been emptied
+  repeatedly. Nothing here had ever asked for that.
+- **the corrected claim, because the first one I wrote was wrong.** D49's
+  plan entry says the subscription carrying these frames is the bridge's
+  SECOND. It is not: `Bus.qml` only respawns the bridge if the PROCESS stops,
+  and in this run it never does — it retries internally and its first
+  successful subscribe is the one after the broker arrives. The repeated
+  link-down lines above are what is really different, and they are what the
+  comments and the PLAN now say.
+- **both halves were injected, and the second is the measurement worth
+  keeping.**
+  · Pointing the late publisher at the INHERITED `JARVIS_BUS` — the script's
+    broker, which the blind HUD has never been able to see — ends the run 1
+    with `showed [nothing], missing [...]` on all three monitors. So the census
+    really reads that engine, on that bus.
+  · Making `core/BusModel.qml` drop frames after a SECOND link-down — a HUD
+    that survives one outage and not two, which is an ordinary reconnect bug —
+    ends the run 1 **while the frames run stays green, D49's dark census stays
+    green, and all 721 of the HUD's own headless QML tests pass**. One outage
+    is all any of them ever stages. Both injections reverted; `git status` was
+    clean of them before the verify run.
+- **`HUD_PLATES_LIT` itself, not a copy.** The recovered corner has to be the
+  SAME corner, and a third reading of one tuple is the point of it being a
+  tuple. `corner_census` now has four callers and still one definition.
+- **one number was split, and it is a correctness fix rather than a saving.**
+  The publisher's `round 1` wait borrowed `HUD_LIT_TIMEOUT_S`, which is about a
+  cold Qt building eleven plates. Starting a python process and connecting to a
+  socket that is already bound is the other kind of wait — the same asymmetry
+  `HUD_RELINK_BUS_TIMEOUT_S` already argues — and there are two publishers now,
+  so `HUD_PUBLISH_TIMEOUT_S` states it once for both. 4 s and deliberately not
+  5: the grace in `core/LinkState.qml` is 5.0 and
+  `test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate`
+  refuses any constant here that equals it, so that a read stays a read.
+- **the ceiling moved and the next act does not fit.** D50's per-engine bounds
+  are now 54 s (bar, notifier), 78 s (frames run — the split above took 16 s
+  off it), 98 s (blind run, three acts). 98 of 100. That is stated in
+  `engine_ceilings()` and in the PLAN rather than worked around: **D53 is now
+  load-bearing**, because 30 s of the blind engine's 98 is a cold-font-cache
+  argument that is false of every engine but the first.
+- **no QML changed and no shell.** The whole slice is the harness: one function
+  in the driver, two constants and a section in `shells.py`, six tests, and two
+  slicing helpers (`blind_text()`, `relink_text()`) that stop where the acts do
+  — the old slices ran to the end of the file, which was the same thing until
+  there was a third act under them.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths (tools **707
+  pass**, 6 of them new; `shellload.sh` **34.9 s** against 34.8 s before — the
+  third act is sub-second). `hudscreens.sh` was NOT named by the gate and did
+  not need to be: no shell QML is touched, so there are no pixels to
+  re-photograph. build: `nixos-rebuild build --flake .#ares` green. No schema
+  change, no jv-act, no boot path, no pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/load.py,
+  tools/shellload/shells.py, tools/tests/test_shellload.py, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- next: **D51** — this gate starts two brokers and reads neither of their logs.
+  A broker that accepted the bridge and then rejected every subscription, or
+  one logging a decode error per frame, is invisible: the run reads as a HUD
+  that ignored its frames, which is the wrong repair by a whole process. And
+  D52 makes that worse in the useful way — there are now two ways for the
+  recovered corner to stay dark and the broker's log is the only thing that
+  tells them apart. `qmlerrors.py` cannot be pointed at it (it knows
+  quickshell's `WARN scene:` prefixes; over a Rust tracing line it says
+  "nothing threw" whatever it says), so the shape is a second small reader over
+  two files. Then **D53** (which D54 waits on), then **D48**, then **D45**.
+
+## 2026-09-26 — iteration 133 — the gate started two brokers and read neither log
+
+- **what**: `tools/brokerlog.py`, a second reader for `ops/ralph/shellload.sh`
+  (PLAN D51). That gate starts two `jarvisd` — the script's, for the frames
+  run, and the one `relink()` starts on the blind HUD's own socket (D49) — and
+  until now the only thing that had ever opened either log was the failure
+  message D49 quotes it into. Every claim the gate makes about the HUD is a
+  reading of what those brokers did: ten plates, then `nothing`, then ten
+  plates again. A broker that came up and then refused the bridge's
+  subscription reads from the corner as a HUD that ignored its frames, which
+  is the wrong repair by a whole process.
+- **why it is its own reader and not `tools/qmlerrors.py`.** That file knows
+  three QML engines' prefixes and a Rust tracing line is none of them, so over
+  a broker's log it reports "nothing threw" whatever the log says — the exact
+  silence it was itself written to remove. Measured in both directions:
+  `qmlerrors.scan()` is empty over a broker log with an ERROR in it, and
+  `brokerlog.scan()` puts all three lines of a quickshell log in its
+  "tracing did not write this" pile rather than grading them.
+- **the rule, and it is stricter than "no ERROR lines" on purpose.** Every
+  line has to be one the broker wrote at INFO or below, AND one of them has to
+  say it is listening on the socket this run told it to bind. The census is the
+  floor under the fault rule: a log nobody wrote has no ERROR lines in it
+  either, which is precisely how the three staged harnesses graded themselves
+  clean before D38. `--listening` is per-broker, so this is one invocation per
+  log — a reader handed both could only have checked neither.
+- **refusing a line it cannot PARSE is what makes it more than a level
+  filter.** What a Rust process writes when it is not well is mostly not
+  tracing at all. `Error: Permission denied (os error 13)` is what `main`
+  returning `Err` prints, and a panic in a SPAWNED task does not end the
+  process — it leaves the accept loop dead under a run that goes on waiting.
+  Neither has a level to filter on, and this reader did not have to predict
+  either shape to catch them.
+- **both halves were injected into the real gate, in one run, and both went
+  red while everything else stayed green** — `all 4 runs loaded and mapped`,
+  four clean `qmlerrors` scans, and exit 1 from the brokers alone. Injection A
+  put the recorded anyhow line in front of the frames broker; injection B
+  emptied `late-broker.log` before the readers ran (the D38 hole, which only
+  the census can catch). Both reverted; `git status` clean of them before the
+  verify run below.
+- **every fixture is recorded from the binary this flake builds**, not
+  invented: the listening line, the coloured listening line, and
+  `DEBUG jarvisd::broker: conn 0: frame too large: 4294967295 bytes` — got by
+  running the real broker with `RUST_LOG=jarvisd=debug` and sending it four
+  0xff bytes. That last one is the limit rather than the coverage, and it is
+  now D56: the decode error D51 named is at DEBUG and the broker defaults to
+  `info`, so in a shellload run it is never written at all.
+- **`NO_COLOR=1` covers the brokers too, and the failure direction is the
+  better one.** tracing colours its level whether or not anything is watching;
+  a coloured broker log parses as NO lines, so the census fails and the run
+  goes red rather than green. It is a fixture rather than a sentence.
+- **one path stopped being spelled twice.** The frames broker's socket and log
+  basename moved into `shells.py` (`FRAMES_BUS`, `FRAMES_BROKER_LOG`) and the
+  script reads them, because the reader has to open the same file the redirect
+  wrote and two spellings of one path is how a gate ends up grading a file
+  nobody writes.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 6 paths (tools **726
+  pass**, 19 of them new; `shellload.sh` **34.8 s** against 34.8 s before — two
+  file reads). `hudscreens.sh` was not named by the gate and did not need to
+  be: no shell QML changed, so there are no pixels to re-photograph. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: tools/brokerlog.py, tools/tests/test_brokerlog.py,
+  ops/ralph/shellload.sh, tools/shellload/shells.py, tools/dependents.py,
+  tools/tests/test_shellload.py, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D53** — the first quickshell pays for a cold Qt and the other three
+  do not, and all four are given 30 s for it. It is load-bearing now: D52 took
+  the blind engine to 98 s of its 100 s ceiling, so that run cannot grow a
+  fourth act until this moves, and **D54** is waiting behind it. Then **D57**
+  (this reader over `hudscreens.sh`'s broker, which is wiring only), then
+  **D56** (the DEBUG half above, which is a decision about flakiness rather
+  than a build), then **D48**, then **D45**.

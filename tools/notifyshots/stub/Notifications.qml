@@ -42,6 +42,7 @@ Item {
   // --- Notifications.qml's surface ------------------------------------
 
   readonly property var toasts: root.model ? root.model.toasts : []
+  readonly property var onScreen: root.model ? root.model.onScreen : null
   readonly property int earlier: root.model ? root.model.earlier : 0
   readonly property bool anyLit: root.model ? root.model.anyLit : false
 

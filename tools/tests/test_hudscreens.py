@@ -2840,3 +2840,62 @@ def test_the_run_prints_its_table_even_when_the_sheet_changed():
     assert driver.index("cost_table(") > driver.index("tools/hudsheet.py"), (
         "the table is printed before the comparison it is supposed to price"
     )
+
+
+# ------------------------- what the real shell said, read back (D39)
+#
+# Twelve real quickshells run in a pass of this harness — one per shot, one
+# per idle window — and every one of them has written its output to a file
+# since the first version of it, where nothing ever opened it. D36 made the
+# three STAGED harnesses refuse a run whose QML threw; this is the same rule
+# over the only gate that loads `shell.qml` at all.
+
+
+def test_the_root_quickshells_paths_are_under_is_the_hud_this_photographs():
+    """`sheet.SHELL_ROOT` is what turns `@core/BusModel.qml` in a log into a
+    file this repository has. A root that named the wrong directory would
+    produce a report whose every path is a plausible lie."""
+    root = ROOT / sheet.SHELL_ROOT
+    assert (root / "shell.qml").is_file(), (
+        f"{sheet.SHELL_ROOT} is not the directory quickshell is pointed at — "
+        "it holds no shell.qml"
+    )
+    assert (root / "core" / "BusModel.qml").is_file(), root
+
+
+def test_the_shell_root_is_declared_where_the_script_cannot_write_it():
+    """The other half of the staging rule. `SHELL_ROOT` lives in `sheet.py`
+    because `hudscreens.sh` may not contain that path in any line it executes,
+    and a constant nobody reads would be a comment. So: the script asks for
+    it, and does not spell it."""
+    code = [
+        line
+        for line in driver_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert any("SHELL_ROOT" in line for line in code), (
+        "ops/ralph/hudscreens.sh does not read sheet.SHELL_ROOT, so the scan's "
+        "report names paths relative to a store path"
+    )
+
+
+def test_every_shell_this_starts_is_one_this_heard_from():
+    """The liveness half of the D39 scan, and the reason it needs no census
+    of its own. `tools/qmlprobe/Probe.qml` exists because a staged scene that
+    silently built nothing would scan clean; here the harness already proves
+    each log is live before it uses it — every `Proc("jv-hud", …)` is followed
+    by `wait_for("Configuration Loaded")`, which is quickshell's own handler
+    writing that exact line into that exact file. A shell whose log stayed
+    empty never gets past its own start.
+
+    So: as many waits as shells. One more shell than waits and a log nobody
+    ever proved was being written would be handed to a scanner that can only
+    report what it reads.
+    """
+    shoot = (ROOT / "tools" / "hudscreens" / "shoot.py").read_text("utf-8")
+    shells = len(re.findall(r'"jv-hud",', shoot))
+    heard = shoot.count('wait_for("Configuration Loaded")')
+    assert shells and shells == heard, (
+        f"{shells} jv-hud processes are started and {heard} are waited for — a "
+        "shell nobody heard from writes a log the D39 scan cannot speak for"
+    )

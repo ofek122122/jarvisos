@@ -54,6 +54,20 @@ DESK_HEIGHT = max(o["height"] for o in OUTPUTS)
 # entry.
 BACKDROP = "#31353B"
 
+# Where quickshell's own paths are relative to (PLAN D39). The shell it runs
+# is a store copy of this directory, and the errors it logs name files inside
+# it — `@core/BusModel.qml[113:-1]` — so a report that did not know the root
+# would name three directories this repository has and one it does not.
+#
+# It lives HERE rather than in the script for a reason worth keeping: the
+# script must not contain the string `shell/jv-hud` at all. This harness's one
+# claim over the contact sheet is that it stages nothing, and
+# `test_the_harness_photographs_the_shipped_binary_and_stages_nothing` enforces
+# that by refusing the path in any line the shell executes — a blunt rule, and
+# the right one, because a `cp` from the working tree is exactly how this gate
+# would stop being a photograph of what ships.
+SHELL_ROOT = "shell/jv-hud"
+
 # The surface box shell.qml declares, and the inset it docks by. The shots
 # are checked against these: a plate that drew somewhere other than the
 # top-right corner of every monitor would be a layer-shell anchor that
@@ -1046,6 +1060,7 @@ PHASES = {
     "checks": (PROBE, "the monitors, the corner, the zone, the focus, the growth"),
     "idle": (PROBE, "five idle windows and the control for each"),
     "click": (PROBE, "one click over a plate, onto the window underneath"),
+    "qmlerrors": (PROBE, "every shell's own log, read for a throw"),
     "encode": (SHEET, "the PNGs, written"),
     "compare": (SHEET, "them read back against the sheet committed at HEAD"),
 }

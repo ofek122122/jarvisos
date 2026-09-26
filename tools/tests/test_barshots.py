@@ -38,6 +38,10 @@ SHEET = ROOT / "docs" / "bar"
 
 SCENE_DIR = SHOTS / "scene"
 SCENE = SCENE_DIR / "tst_shots.qml"
+# The lines niri wrote, kept once for every driver in the directory (PLAN D34):
+# the sheet and the settle both start from a desk, and two copies of a
+# recording drift twice.
+DESK = SCENE_DIR / "Desk.qml"
 # The surface shell.qml composes inside its PanelWindow, staged where an engine
 # without Quickshell can build it.
 STRIP = SCENE_DIR / "Strip.qml"
@@ -51,6 +55,10 @@ READINGS = ("urgent", "focused", "active", "idle")
 
 def scene_text() -> str:
     return SCENE.read_text("utf-8")
+
+
+def desk_text() -> str:
+    return DESK.read_text("utf-8")
 
 
 SHEET_ENTRY = re.compile(
@@ -220,6 +228,20 @@ def test_no_driver_keeps_its_own_copy_of_the_surface():
         )
 
 
+def test_no_driver_keeps_its_own_copy_of_the_recording():
+    """One copy of the line niri wrote, in Desk.qml, for the same reason there
+    is one copy of the surface. A driver that pasted the snapshot in again
+    would be a second thing to keep in step with
+    harness/fixtures/niri/ares-desk.jsonl, and the gate above would only ever
+    look at one of them."""
+    for driver in sorted(SCENE_DIR.glob("tst_*.qml")):
+        stray = re.findall(r"WorkspacesChanged", strip_qml_comments(driver.read_text("utf-8")))
+        assert not stray, (
+            f"{driver.name} writes a niri snapshot itself — put it in Desk.qml, which "
+            "is the one file pinned to the recording"
+        )
+
+
 def test_the_stand_ins_offer_everything_the_real_singletons_do():
     """A strip reading `Niri.somethingTheStandInForgot` does not error: QML
     hands it `undefined`, the Repeater builds nothing, and the shot is a picture
@@ -299,10 +321,10 @@ def test_the_drivers_snapshot_is_the_line_niri_really_wrote():
     and leaves a sheet of nine pictures of an empty bar that all look plausible.
     """
     lines = [l for l in RECORDING.read_text("utf-8").splitlines() if l.strip()]
-    recorded = re.search(r"property string recorded:\s*'([^']*)'", scene_text())
-    assert recorded, "the scene no longer carries the recorded snapshot"
+    recorded = re.search(r"property string recorded:\s*'([^']*)'", desk_text())
+    assert recorded, "Desk.qml no longer carries the recorded snapshot"
     assert recorded.group(1) == lines[0], (
-        "the snapshot in tools/barshots/scene/tst_shots.qml is not "
+        "the snapshot in tools/barshots/scene/Desk.qml is not "
         "harness/fixtures/niri/ares-desk.jsonl line 1 any more. One of the two "
         "was edited; the recording is the one that is evidence."
     )
@@ -317,7 +339,7 @@ def test_a_composed_desk_is_built_in_the_shape_niri_sends():
     of the recorded line."""
     lines = [l for l in RECORDING.read_text("utf-8").splitlines() if l.strip()]
     real = set(json.loads(lines[0])["WorkspacesChanged"]["workspaces"][0])
-    built = set(re.findall(r'"(\w+)":\s*r\.|"(\w+)":\s*null', strip_qml_comments(scene_text())))
+    built = set(re.findall(r'"(\w+)":\s*r\.|"(\w+)":\s*null', strip_qml_comments(desk_text())))
     composed = {a or b for a, b in built}
     assert composed == real, (
         f"the composed snapshot writes {sorted(composed)} and niri sends "
@@ -398,13 +420,13 @@ def test_the_colour_of_a_reading_is_chosen_where_the_word_is():
     assert "function tint(reading: string): color" in row
     # The word is attached to the label ONCE, in `entry()`, and everything
     # downstream carries that word rather than asking again: the delegate
-    # paints `tint(modelData.reading)` and the caption prints the same string.
-    # A delegate that re-derived the reading from the workspace would be a
-    # second decision, and two decisions can differ.
+    # paints `tint(reading)` off its own role and the caption prints the same
+    # string. A delegate that re-derived the reading from the workspace would
+    # be a second decision, and two decisions can differ.
     assert "\"reading\": root.reading(w)" in row, (
         "the things this row draws no longer carry the word `reading()` gave them"
     )
-    assert "color: root.tint(modelData.reading)" in row, (
+    assert "color: root.tint(reading)" in row, (
         "the delegate no longer takes its colour through tint(reading()), so the "
         "word in the caption and the colour on screen are two decisions"
     )
@@ -415,7 +437,7 @@ def test_the_colour_of_a_reading_is_chosen_where_the_word_is():
     # thing on screen with a colour, and a sheet that photographed a row with
     # something in it the caption did not mention would be asserting less than
     # the picture shows.
-    assert "function hidden(plan: var): string" in row, (
+    assert "function hidden(ws: var, plan: var): string" in row, (
         "nothing decides what the workspaces behind the `+N` amount to, so the "
         "marker cannot be painted from a reading and is not in the caption"
     )

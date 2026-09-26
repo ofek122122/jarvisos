@@ -31,18 +31,25 @@ and that case is the only one where the author could not possibly have guessed
 the readers. Every step prints its own seconds so the table above can be
 re-measured by anyone who thinks it has drifted.
 
-AND THE TWO GATES THAT ARE A NIX EVALUATION (B72). `ops/ralph/nixtest.sh`
-reads `.#nixosConfigurations.ares` and `ops/ralph/hudscreens.sh` photographs
-`.#jv-hud`, and a flake attribute is not a path anything can walk — so those
-two are DECLARED in `dependents.DECLARED_GATES` against their own `# reads:`
-headers. `nixtest.sh` is a step like any other: 22 s, and it is the only thing
-in this repo that asserts what a module OPTION does to the unit text ares is
-handed. `hudscreens.sh` is not: 3m00s, a compositor, and a sheet of photographs
+AND THE THREE GATES THAT ARE A NIX EVALUATION (B72, D41).
+`ops/ralph/nixtest.sh` reads `.#nixosConfigurations.ares`,
+`ops/ralph/hudscreens.sh` photographs `.#jv-hud`, and `ops/ralph/shellload.sh`
+loads all three shells under a real quickshell; a flake attribute is not a path
+anything can walk, so all three are DECLARED in `dependents.DECLARED_GATES`
+against their own `# reads:` headers. Two of them are steps like any other:
+`nixtest.sh` at 22 s is the only thing in this repo that asserts what a module
+OPTION does to the unit text ares is handed, and `shellload.sh` at 25 s is the
+only thing that ever opens the bar's or the notifier's `shell.qml` at all.
+`hudscreens.sh` is not: 3m00s, a compositor, and a sheet of photographs
 somebody has to look at and commit — and they are not reproducible, so a
 bound run would dirty the tree this verdict was computed from every single
 time. It is NAMED instead, beside the paths that asked for it, on every
 verdict — green or red — because the failure being prevented here is a gate
-that is quietly not in the list.
+that is quietly not in the list. D41 is the answer to the obvious next
+question, and it is a qualified no: the CHEAP half of `hudscreens.sh` — did
+the shell load, did it say anything that throws — really is a verdict a gate
+can collect, and it is now this second gate. What stayed behind is the
+pictures and the 97.7 s idle probe, which is most of the price.
 
 AND THE RUNNERS (B73). `runtests.sh` and `cargotest.sh` are not suites and are
 read by none: they are HOW a suite runs — the venv and the PYTHONPATH for one,

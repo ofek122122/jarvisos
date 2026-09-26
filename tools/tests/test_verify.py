@@ -452,11 +452,21 @@ def test_listing_the_plan_runs_nothing(tmp_path):
 # ------------------------------------------------------- against the real repo
 
 
-def test_the_expensive_case_is_the_bus_library_and_it_is_ten_suites():
-    """The number B70 was arguing about, asserted rather than remembered."""
+def test_the_expensive_case_is_the_bus_library_and_it_is_ten_suites_and_a_shell():
+    """The number B70 was arguing about, asserted rather than remembered — and
+    it grew by one that is not a Python suite (PLAN D43).
+
+    `ops/ralph/shellload.sh` now starts a real broker and publishes real frames
+    to light the HUD's plates, so `services/pylib` is the client library that
+    carries them and a change to it can turn ten lit plates into none. Ten
+    suites plus that one gate; the ten are still the bulk of the price.
+    """
     steps = verify.plan(ROOT, ["services/pylib/jarvis_bus/client.py"])
-    assert len(steps) == 10
-    assert all(s.command.startswith("bash ops/ralph/runtests.sh") for s in steps)
+    suites = [s for s in steps if s.command.startswith("bash ops/ralph/runtests.sh")]
+    assert len(suites) == 10
+    assert [s.command for s in steps if s not in suites] == [
+        "bash ops/ralph/shellload.sh"
+    ]
 
 
 def test_editing_a_runner_is_the_expensive_case_too():
@@ -491,12 +501,13 @@ def test_every_gate_this_repo_names_is_planned_by_a_change_to_itself():
         dependents.RUNTESTS_SH,
         verify.CARGOTEST_SH,
     }
-    # Ten: three headless QML gates (the HUD's tests, the bar's, the
+    # Eleven: three headless QML gates (the HUD's tests, the bar's, the
     # notifier's), THREE contact sheets — one per shell, since D13 gave the bar
-    # the last one — the two declared gates (nixtest, hudscreens), and the two
-    # runners. The number is written down so that adding a gate is a deliberate
-    # edit here rather than a table that grew unnoticed.
-    assert len(gates) == 10, sorted(gates)
+    # the last one — THREE declared gates (nixtest, hudscreens, and shellload
+    # since D41), and the two runners. The number is written down so that
+    # adding a gate is a deliberate edit here rather than a table that grew
+    # unnoticed.
+    assert len(gates) == 11, sorted(gates)
     for script in sorted(gates):
         assert (ROOT / script).is_file(), script
         named = [s.command for s in verify.plan(ROOT, [script])]
