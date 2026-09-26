@@ -337,12 +337,59 @@ else
   bad "$t" "the evaluation was refused, but not by the overlap check: $(tail -3 <<<"$said")"
 fi
 
+# PLAN E16. The pair above asks whether the layout is a desk; this pair asks
+# whether the ROW check 5 compares is made of the kind of values `niri msg
+# outputs` prints. It is a different failure with a worse ending: the layout is
+# right, the build succeeds, and the doctor reports a healthy machine as broken
+# on every boot, because `toString 2560.0` is "2560.000000" and no compositor
+# ever prints that.
+t='the doctor refuses a position that is not a pair of integers'
+# The float is the case that BUILDS — it passes the overlap arithmetic, since
+# floats add and compare like ints — and it is on the second entry with a string
+# `y` beside it, so this also checks that both faults of one entry and every
+# faulted entry are reported at once. A refusal that stopped at the first is a
+# rebuild per typo.
+said=$(nix eval --raw '.#jarvis-doctor' --apply "$override"'[
+  { name = "A"; width = 2560; height = 1440; refresh = "144.006"; x = 0; y = 0; }
+  { name = "B"; width = 1920; height = 1080; refresh = "60.000"; x = 2560.0; y = "0"; }
+]; }).outPath' 2>&1)
+if grep -qE 'B: x = 2560\.0 .*, y = "0" ' <<<"$said"; then ok "$t"
+elif grep -q "^$store/" <<<"$said"; then
+  bad "$t" "a monitor declared at x = 2560.0 evaluated fine, and ships 2560.000000 as its position: $(grep "^$store/" <<<"$said" | tail -1)"
+else
+  bad "$t" "the evaluation was refused, but not by the row check, naming the entry and both fields: $(tail -3 <<<"$said")"
+fi
+
+t='the doctor refuses a row niri could not have printed'
+# The other three columns. `refresh = 144.006` is the rate ares really needs
+# written as a number, `name = ""` BUILDS and makes check 5 tell two lies (no
+# live output matches it, and every live output becomes undeclared), and an
+# absent `height` must read as absent rather than as a Nix error about a
+# missing attribute.
+said=$(nix eval --raw '.#jarvis-doctor' --apply "$override"'[
+  { name = ""; width = 2560; refresh = 144.006; x = 0; y = 0; }
+]; }).outPath' 2>&1)
+# The prefix is part of the claim: the message's own name for the entry cannot
+# come straight off `o.name`, or the one entry whose NAME is the fault is
+# reported by a blank (or, for a non-string name, by an interpolation that
+# throws instead of printing).
+if grep -q 'an unnamed entry: name = "" ' <<<"$said" &&
+  grep -q 'height = absent' <<<"$said" &&
+  grep -q 'refresh = 144.006' <<<"$said"; then ok "$t"
+elif grep -q "^$store/" <<<"$said"; then
+  bad "$t" "a row with a blank name and a float refresh rate evaluated fine: $(grep "^$store/" <<<"$said" | tail -1)"
+else
+  bad "$t" "the evaluation was refused, but not with all three columns named: $(tail -3 <<<"$said")"
+fi
+
 t='the doctor accepts a gap, a touching edge and a monitor above the primary'
 # The other half, and not a formality: a refusal that also refuses the real
 # desk is a refusal nobody can ship. All three of these are legal and ares has
 # the first two — B's left edge IS A's right edge (2560), B leaves 360 px of no
 # screen under itself beside a taller primary, and C is the layout E14 wrote a
-# `y` for: detached, and above.
+# `y` for: detached, and above. It is the green half of the E16 row check as
+# well: every column of all three entries is a value niri could have printed,
+# so a schema that refused any of these would be a schema that refuses ares.
 said=$(nix eval --raw '.#jarvis-doctor' --apply "$override"'[
   { name = "A"; width = 2560; height = 1440; refresh = "60.000"; x = 0; y = 0; }
   { name = "B"; width = 1920; height = 1080; refresh = "60.000"; x = 2560; y = 0; }

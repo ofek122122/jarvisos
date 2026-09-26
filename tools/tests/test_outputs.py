@@ -68,7 +68,25 @@ def _nix_uncommented(text: str) -> str:
     return "".join(out)
 
 
-_FIELD = re.compile(r"(?P<key>[A-Za-z_][\w-]*)\s*=\s*(?P<val>\"[^\"]*\"|[\w.]+)\s*;")
+def _where(path: Path) -> str:
+    """This file's name for a message, whether or not it is in the checkout. The
+    parser's four refusals all name the file they are refusing, and since PLAN
+    E16 it is pointed at declarations nobody owns — a `tmp_path` written to carry
+    the one bad value ares must never carry — so `relative_to(ROOT)` alone turns
+    a finding into a ValueError about a subpath."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+# The `-?` is not decoration: `y = -1080` is the layout PLAN E14 gave the
+# declaration a `y` FOR — a monitor mounted above the primary — and without it
+# this parser matched no field at all on that entry and refused the whole file
+# as one it cannot read. ares has no negative coordinate today, and the rule
+# that reads the desk (`overlap_of`, below) is fed dicts rather than this file,
+# so nothing in this repo would have said so until somebody declared one.
+_FIELD = re.compile(r"(?P<key>[A-Za-z_][\w-]*)\s*=\s*(?P<val>\"[^\"]*\"|-?[\w.]+)\s*;")
 
 
 def declared_outputs(path: Path) -> list[dict]:
@@ -93,7 +111,7 @@ def declared_outputs(path: Path) -> list[dict]:
     # parser is reading a file it was not written for.
     leftover = re.sub(r"\{[^{}]*\}", "", body)
     assert not re.search(r"[A-Za-z]", leftover), (
-        f"{path.relative_to(ROOT)} is not a flat list of attrsets any more "
+        f"{_where(path)} is not a flat list of attrsets any more "
         f"({leftover.strip()!r} is left over) — declared_outputs() would report "
         "a subset of it as the whole truth"
     )
@@ -101,20 +119,40 @@ def declared_outputs(path: Path) -> list[dict]:
         out: dict = {}
         for field in _FIELD.finditer(block):
             raw = field.group("val")
+            key = field.group("key")
             if raw.startswith('"'):
-                out[field.group("key")] = raw[1:-1]
+                out[key] = raw[1:-1]
             elif raw in ("true", "false"):
-                out[field.group("key")] = raw == "true"
+                out[key] = raw == "true"
+            elif re.fullmatch(r"-?\d+", raw):
+                out[key] = int(raw)
+            elif re.fullmatch(r"-?\d+\.\d+", raw):
+                # A FLOAT STAYS A FLOAT (PLAN E16). `x = 2560.0` is a legal Nix
+                # value, and it is the defect E16 is about: it builds, and
+                # `toString` ships it to jarvis-doctor's expectation as
+                # "2560.000000", which is a position no compositor prints. This
+                # used to be `int(raw)`, so the declaration that carries it made
+                # twelve suites die with "invalid literal for int() with base
+                # 10" — including the one below, written to catch exactly this
+                # and never reached. Rounding it here would be worse than the
+                # crash: the parser would report a declaration that is right.
+                out[key] = float(raw)
             else:
-                out[field.group("key")] = int(raw)
+                # Same argument as the two refusals below, one level down: a
+                # value this parser cannot read is not a value it may guess at.
+                raise AssertionError(
+                    f"{_where(path)} declares {key} = {raw!r}, which "
+                    "declared_outputs() cannot read — every test in this repo "
+                    "that reads this file would be asserting about a guess"
+                )
         # Same argument as the leftover check, one level down: an entry whose
         # fields did not parse would be an output silently missing from the list.
         assert _FIELD.sub("", block).strip() == "", (
-            f"{path.relative_to(ROOT)} has an entry declared_outputs() cannot "
+            f"{_where(path)} has an entry declared_outputs() cannot "
             f"read: {block.strip()!r}"
         )
         entries.append(out)
-    assert entries, f"{path.relative_to(ROOT)} declares no outputs at all"
+    assert entries, f"{_where(path)} declares no outputs at all"
     return entries
 
 
@@ -442,3 +480,59 @@ def test_the_sheets_extra_canvas_is_not_a_corner_on_any_desk():
             "art is composed at, and a full corner makes the sheet's list read as a "
             f"desk on which {out['name']} is inside the primary"
         )
+
+
+# --------------------------------------- the row the doctor compares with
+
+
+def test_a_position_that_is_not_an_integer_is_reported_and_not_rounded(tmp_path):
+    """PLAN E16, on the parser every test in this repo reads the declaration
+    with. `x = 2560.0` is a legal Nix value and the exact defect: it builds, it
+    passes the overlap arithmetic (floats add and compare like ints), and
+    `toString` ships it to check 5's expectation as "2560.000000" — a position
+    `niri msg outputs` will never print, so the doctor reports a monitor that is
+    exactly where it was declared as misplaced, on every boot.
+
+    Until E16 `declared_outputs()` called `int()` on it. That is a crash, not a
+    finding: the declaration carrying one killed twelve tests across four suites
+    with "invalid literal for int() with base 10: '2560.0'" — including
+    `test_every_declared_output_says_what_the_art_and_the_layout_both_need`
+    above, which exists to catch precisely this and never got to run. Rounding
+    would have been worse than the crash, because then the parser reports a
+    declaration that is correct.
+    """
+    decl = tmp_path / "outputs.nix"
+    decl.write_text(
+        '[ { name = "A"; width = 2560; height = 1440; refresh = "144.006"; '
+        "x = 2560.0; y = -1.5; primary = true; } ]",
+        "utf-8",
+    )
+    (one,) = declared_outputs(decl)
+    assert one["x"] == 2560.0 and not isinstance(one["x"], int), (
+        f"x came back as {one['x']!r}: a float rounded into an int is this suite "
+        "reporting a declaration that jarvis-doctor will refuse"
+    )
+    assert one["y"] == -1.5, one
+    # A NEGATIVE coordinate parses at all, which is its own finding: until E16
+    # the field pattern had no `-?`, so an entry declaring `y = -1080` — the
+    # monitor-above-the-primary layout E14 gave this file a `y` for — matched no
+    # field and the whole file was refused as unreadable.
+    # And the integers around it are still integers, so the assertion that
+    # catches this is asking about the one field that is wrong.
+    assert isinstance(one["width"], int) and isinstance(one["height"], int), one
+
+
+def test_the_parser_refuses_a_value_it_cannot_read(tmp_path):
+    """The other half of the change above: `int()` used to be the thing that
+    noticed an unreadable value, by dying. Now that floats are read, anything
+    left has to be refused explicitly — a parser that falls through to the raw
+    text would hand every suite a string where a number belongs and each of them
+    would assert something different about it."""
+    decl = tmp_path / "outputs.nix"
+    decl.write_text('[ { name = "A"; width = someWidth; height = 1440; } ]', "utf-8")
+    try:
+        declared_outputs(decl)
+    except AssertionError as exc:
+        assert "someWidth" in str(exc), exc
+    else:
+        raise AssertionError("declared_outputs() read a value it cannot read")

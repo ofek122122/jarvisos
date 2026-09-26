@@ -415,6 +415,21 @@ def doctor_nix() -> str:
     return DOCTOR_NIX.read_text("utf-8")
 
 
+def row_columns() -> list[str]:
+    """The interpolations of the TSV row the package generates, in order —
+    `['${o.name}', '${toString o.width}', …]`. A helper rather than a regex in
+    one test because two tests now hold this row to something else: doctor.sh's
+    `read -r`, and the column list PLAN E16 types each field against."""
+    # `o:` and its row may be on one line or two — nixfmt breaks the line once
+    # the row is long enough, and it got long enough when PLAN E14 added `y`.
+    row = re.search(
+        r'writeText "jarvis-declared-outputs\.tsv"[\s\S]*?\n\s*o:\s*"(?P<row>[^"]*)"',
+        doctor_nix(),
+    )
+    assert row, "pkgs/jarvis-doctor no longer writes one interpolated row per output"
+    return row.group("row").rstrip("\\n").split(r"\t")
+
+
 def test_the_package_takes_the_outputs_it_checks_for_and_defaults_nothing():
     """Same claim `test_outputs.py` makes about the wallpaper, and for the same
     reason: a default would be ares' monitors guessed a fourth time, supplied
@@ -436,24 +451,61 @@ def test_the_package_refuses_an_empty_declaration():
     )
 
 
+def test_the_package_refuses_a_row_niri_could_not_have_printed():
+    """PLAN E16. The expectation is a TSV of STRINGS and the check above
+    compares each field with what `niri msg outputs` printed, so a value
+    `toString` mangles is not a wrong monitor — it is this doctor reporting a
+    healthy machine as broken for ever. `x = 2560.0` is the right position, it
+    passes E15's overlap arithmetic because floats add and compare like ints, it
+    BUILDS, and the row it ships says `2560.000000`. A quoted `x = "2560"` dies
+    inside that arithmetic instead, with "cannot coerce an integer to a string:
+    1920" — a number from another field of another entry, naming no output and no
+    file. `name = ""` builds too, and makes the check tell two lies at once.
+
+    Text, because this suite evaluates no Nix (`ops/ralph/nixtest.sh` provokes
+    both answers against the real flake). What it asks that the gate cannot is
+    the ORDER: the row check has to run BEFORE the overlap check, or the mangled
+    position is arithmetic somebody measures a desk with first.
+    """
+    src = doctor_nix()
+    faults = src.find("else if faults != [ ] then")
+    overlaps = src.find("else if overlaps != [ ] then")
+    assert faults > 0, (
+        "pkgs/jarvis-doctor no longer refuses a row whose fields are not the "
+        "kind of value niri prints — a float `x` builds and ships 2560.000000"
+    )
+    assert faults < overlaps, (
+        "the row check runs after the overlap check, so a string `x` still dies "
+        "in the overlap arithmetic naming another output's width, and a float "
+        "`x` is measured as a position before anyone asks whether it is one"
+    )
+    # …and it is reached from `declared`, the binding every consumer of the
+    # declaration goes through: a throw in a `let` nobody forces is not a check.
+    assert src.find("declared =") < faults, "the row check is not inside `declared`"
+
+
+def test_the_row_check_covers_exactly_the_columns_the_row_writes():
+    """E16's list and E13's row are the same six fields in the same order, and
+    neither file can see the other drift. A column added to the row and not to
+    the check is a field nothing types; a column checked and not written is a
+    check about nothing. Both are silent — the build succeeds either way."""
+    src = doctor_nix()
+    checked = re.findall(r'^\s*field = "(?P<f>\w+)";', src, re.M)
+    written = [f.strip("${}").removeprefix("toString ").removeprefix("o.") for f in row_columns()]
+    assert checked == written, f"the row check types {checked} and the row writes {written}"
+
+
 def test_the_generated_row_has_exactly_the_columns_the_check_reads():
     """The two halves of E13 are in different languages and neither can see the
     other: Nix writes the row, bash splits it. A column added to one and not
     the other shifts every field after it — `x` would be read as a refresh rate
     and compared against one, which reads like a monitor problem."""
-    src = doctor_nix()
-    # `o:` and its row may be on one line or two — nixfmt breaks the line once
-    # the row is long enough, and it got long enough when PLAN E14 added `y`.
-    row = re.search(
-        r'writeText "jarvis-declared-outputs\.tsv"[\s\S]*?\n\s*o:\s*"(?P<row>[^"]*)"', src
-    )
-    assert row, "pkgs/jarvis-doctor no longer writes one interpolated row per output"
-    written = row.group("row").rstrip("\\n").split(r"\t")
+    written = row_columns()
     read = re.search(r"while IFS=\$'\\t' read -r (?P<vars>[^\n;]*); do", DOCTOR_SH.read_text("utf-8"))
     assert read, "doctor.sh no longer splits the declaration into fields"
     assert len(written) == len(read.group("vars").split()), (
         f"pkgs/jarvis-doctor writes {len(written)} columns "
-        f"({row.group('row')!r}) and doctor.sh reads "
+        f"({written!r}) and doctor.sh reads "
         f"{read.group('vars').split()} out of them"
     )
     # …and they are the attributes the declaration actually carries, so a typo

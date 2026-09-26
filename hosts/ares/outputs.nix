@@ -47,6 +47,20 @@
 # each 1080p panel beside a 1440p primary. Edges that touch are legal too —
 # DP-1 begins at 2560, exactly where HDMI-A-1 ends.
 #
+# AND EVERY VALUE HERE IS THE KIND OF VALUE niri PRINTS (PLAN E16), which is a
+# different claim from "these numbers are right" and is checked in the same
+# place: `pkgs/jarvis-doctor` writes this declaration out as a TSV of STRINGS
+# and compares each field with what `niri msg outputs` printed, so `x = 2560.0`
+# — the right position, written as a float — builds, passes the overlap check
+# above (floats add and compare like ints), and ships `2560.000000` as a
+# position no compositor will ever print. The doctor would then report a
+# monitor that is exactly where it was declared as misplaced, on every boot.
+# So the pixels are ints, `refresh` is the exact decimal as a STRING (144.006,
+# not 144.006 the float, which cannot be interpolated at all, and not 144,
+# which is not a mode this machine is offered), and `name` is a non-empty
+# string. A value that is merely WRONG — `x = 2561` — is deliberately NOT
+# refused there: that is the disagreement check 5 exists to report.
+#
 # `primary = true` belongs to exactly one entry, and the wallpaper leans on it:
 # `jarvisos.png` — the art the lock screen shows and the art every UNDECLARED
 # geometry falls back to — is composed at the primary's size. Two primaries or
