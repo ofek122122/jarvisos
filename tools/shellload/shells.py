@@ -329,6 +329,40 @@ def sway_config() -> str:
 # covers the two conjuncts the compositor cannot show us, in the cheap gate, on
 # the commit that moves one.
 #
+# AND THE ANCHOR RULE ITSELF IS NOW MEASURED, EVERY SHAPE OF IT (D60), which
+# it was not while two tests rested on it. `ZONED_ANCHORS` in
+# `tools/tests/test_shellload.py` is sway's `apply_exclusive` written out by
+# hand — one edge, or an edge plus both perpendiculars, eight sets — and until
+# now six of those eight had never been through a compositor here at all: what
+# had been watched was the bar's `{top,left,right}` and run B's
+# `{bottom,left,right}`. A wrong entry in that list is a discarded zone this
+# gate calls a proof, so each remaining shape is one run of `shellload.sh` with
+# `jv-notify` anchored that way, `ExclusionMode.Normal`, `exclusiveZone: 100`,
+# `visible: true`, and nothing else moved:
+#
+#   anchors             reserved
+#   {top}               2560x1340 and 1920x980 — 100 off the height, RED
+#   {bottom}            2560x1340 and 1920x980 — 100 off the height, RED
+#   {left}              2460x1440 and 1820x1080 — 100 off the WIDTH, RED
+#   {right}             2460x1440 and 1820x1080 — 100 off the WIDTH, RED
+#   {left,top,bottom}   2460x1440 and 1820x1080, RED
+#   {right,top,bottom}  2460x1440 and 1820x1080, RED
+#
+# Six for six: every shape the rule accepts really is honoured, on both axes,
+# and the list the two cheap tests read is now evidence rather than recall. The
+# left/right shapes are also the first thing in this harness to take space off
+# a WIDTH — `usable_areas()` above models a strip off the top, and it reads
+# these correctly only because it compares whole rects.
+#
+# AND ONE SHAPE THE RULE REJECTS WAS MEASURED TOO, because it is the one a
+# person would expect to be honoured: anchored to ALL FOUR EDGES — the shape a
+# full-screen overlay takes — with the same live zone, the compositor reserved
+# NOTHING and this gate stayed green. `apply_exclusive` compares the anchor mask
+# for EQUALITY against one edge or one triplet, and four edges is neither. So an
+# overlay stretched across the screen can ask for a strip and silently not get
+# one, which is the failure direction nobody watches for; it is in
+# `DISCARDED_ANCHORS` beside the two corners for exactly that reason.
+#
 # THE CONSEQUENCE, PLAINLY. The bar's reading is a proof, and it is the only one
 # here: its window declares a zone, is always mapped AND is anchored to an edge
 # plus both perpendiculars, which is the one configuration in this repo whose

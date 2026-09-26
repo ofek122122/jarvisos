@@ -1189,22 +1189,39 @@ human-reviewed step.
       `tools/hudscreens/shoot.py` needed no correction — its
       `check_no_space_reserved` had the anchor rule right from the start.
 
-- [ ] D60. **Six of the eight entries in `ZONED_ANCHORS` are believed and two
-      are measured.** The list in `tools/tests/test_shellload.py` is sway's
-      `apply_exclusive` rule written out by hand — one edge, or an edge plus both
-      perpendiculars, eight sets in total — and it is now the load-bearing
-      conjunct of two tests: a wrong entry is a `reserves_top` the biconditional
-      accepts, which is a gate calling a discarded zone a proof. What has
-      actually been through a compositor is `{top,left,right}` (the bar, every
-      run) and `{bottom,left,right}` (D59 run B), plus two corners refuted
-      (`{top,right}` on the HUD, `{bottom,right}` on the notifier in run A). The
-      four singular edges and the two left/right triplets have never been
-      exercised here at all. It is one shellload run per entry (~35 s + a
-      rebuild) and the cheap half is worth doing first: `{bottom}` alone on the
-      notifier is one run and covers the whole singular-anchor branch, since
-      `apply_exclusive` matches the four edges with the same two comparisons.
-      The alternative — deriving the list from sway's source — is not available:
-      the flake pins a binary, not a checkout. Raised by D59.
+- [x] D60. **Six of the eight entries in `ZONED_ANCHORS` were believed and two
+      were measured; all eight are measured now, and so is a shape the rule
+      rejects.** (Done.) The list in `tools/tests/test_shellload.py` is sway's
+      `apply_exclusive` written out by hand — one edge, or an edge plus both
+      perpendiculars — and it is the load-bearing conjunct of two tests, so a
+      wrong entry is a gate calling a discarded zone a PROOF. Six runs of the
+      real gate, each `jv-notify` anchored that way with `ExclusionMode.Normal`,
+      `exclusiveZone: 100`, `visible: true` and nothing else moved:
+      · `{top}` and `{bottom}` → 2560x1340 and 1920x980, RED — off the height
+      · `{left}` and `{right}` → 2460x1440 and 1820x1080, RED — off the WIDTH,
+        the first thing in this harness ever to take space off one
+      · `{left,top,bottom}` and `{right,top,bottom}` → same widths, RED
+      Six for six: every shape the rule accepts really is honoured, on both
+      axes, and the two already watched (`{top,left,right}` every run of the
+      bar, `{bottom,left,right}` D59 run B) complete the eight.
+      **And a seventh run measured a shape the rule REJECTS, the one nobody
+      would expect it to**: anchored to ALL FOUR EDGES — what a full-screen
+      overlay takes — the same live zone reserved NOTHING and the gate stayed
+      green, because `apply_exclusive` compares the mask for EQUALITY against
+      one edge or one triplet and four edges is neither. So an overlay stretched
+      across the screen can ask for a strip and silently not get one.
+      What shipped is the ledger and the rule as a test: `ZONED_ANCHORS` is now
+      a shape → measurement map, `DISCARDED_ANCHORS` holds the three refuted
+      shapes (the HUD's corner D54, the notifier's D59 run A, four edges D60),
+      and `test_the_shapes_sway_zones_are_the_rule_they_claim_to_be` GENERATES
+      the eight from the four edges instead of proof-reading them and refuses
+      an entry with no measurement against it. `test_a_shell_whose_zero_is_only_
+      a_control_asks_for_nothing` now requires each control shell's corner to be
+      one that was WATCHED having its zone discarded, not merely one absent from
+      the accepted list. 4 mutations, 4 caught (a dropped triplet, a spurious
+      corner, an entry with an empty measurement, a corner dropped from the
+      refutation ledger). The alternative — deriving the list from sway's source
+      — is still not available: the flake pins a binary, not a checkout.
 
 - [ ] D61. **Two `visible:` bindings are now invariant-10 machinery and neither
       file says so.** `shell/jv-hud/shell.qml` and `shell/jv-notify/shell.qml`
@@ -1220,6 +1237,23 @@ human-reviewed step.
       `notifytest.sh` and `hudscreens.sh` (3 m, and the shots want looking at),
       so it belongs in an iteration that is touching a shell anyway. Raised by
       D59.
+
+- [ ] D62. **This gate can only express a strip taken off the TOP, and D60
+      measured two taken off the width.** `shells.usable_areas(px)` is
+      `(out["width"], out["height"] - px)`, `check_reserved`'s failure says "px
+      off the top of every one", `bar_strip_px` is a height and `Shell.
+      reserves_top` is a bool. That is exactly right for the three shells that
+      ship — the bar's strip is the only zone on this desktop — and it is why
+      the six D60 runs read as a rect mismatch rather than as a number: the
+      harness could see they were wrong but not say what they were. The day a
+      shell reserves a side strip (a dock is the obvious one, and §06 does not
+      forbid it) this model cannot describe it, and the failure it gives is a
+      dict-vs-dict diff a reader has to subtract by hand. The change is small
+      and it is not free: `reserves_top` is read by `load.py`, by both zone
+      tests and by `tools/hudscreens/shoot.py`'s sibling check, so it is an
+      edge + a width, everywhere, in one commit. Worth doing when something
+      actually needs a second zone — writing it now is a generality with one
+      user. Raised by D60.
 
 - [ ] D55. **A plate that came back LIT and EMPTY passes the new census.**
       `test_the_corner_names_the_plates_and_never_what_they_say` states the

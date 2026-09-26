@@ -13765,3 +13765,66 @@ is not worth chasing.)
   nowhere; it wants an iteration that is touching a shell anyway, because a
   comment there costs `hudscreens.sh`), then **D57**, **D56**, **D55**, **D48**,
   **D45**.
+
+## 2026-09-26 — D60: the rule two tests rest on had six entries nobody had ever run
+
+- **`ZONED_ANCHORS` was sway's `apply_exclusive` written out by hand, and six of
+  its eight entries were belief.** The list says which anchor shapes a
+  compositor honours an exclusive zone for — one edge, or an edge plus both
+  perpendiculars — and after D59 it is the load-bearing conjunct of both zone
+  tests: a wrong entry is a `reserves_top` the biconditional accepts, which is
+  this gate reporting three whole monitors as a PROOF that a discarded zone
+  takes nothing. What had actually been through a compositor was
+  `{top,left,right}` (the bar, every run) and `{bottom,left,right}` (D59 run B).
+- **Six runs of the real gate, and it is six for six.** Each is
+  `ops/ralph/shellload.sh` with `jv-notify` anchored that way,
+  `ExclusionMode.Normal`, `exclusiveZone: 100`, `visible: true`, nothing else
+  moved: `{top}` and `{bottom}` → 2560x1340 and 1920x980 on all three monitors,
+  RED; `{left}`, `{right}`, `{left,top,bottom}` and `{right,top,bottom}` →
+  2460x1440 and 1820x1080, RED. So every shape the rule accepts really is
+  honoured, on **both axes** — and the left/right ones are the first thing in
+  this harness ever to take space off a WIDTH, which the reading survives only
+  because it compares whole rects rather than a height.
+- **And a seventh run measured a shape the rule REJECTS, which is the one
+  nobody would expect it to.** Anchored to ALL FOUR EDGES — the shape a
+  full-screen overlay takes — with the same live zone, the compositor reserved
+  **nothing** and the whole 35-second gate stayed green. `apply_exclusive`
+  compares the anchor mask for EQUALITY against one edge or one triplet, and
+  four edges is neither. An overlay stretched across the screen can therefore
+  ask for a strip and silently not get one; it is in the ledger beside the two
+  corners so the next person to widen some anchors meets the fact rather than
+  rediscovering it.
+- **What shipped is the ledger and the rule as a test.** `ZONED_ANCHORS` is now
+  a shape → measurement map (each entry carries the rect the compositor
+  reported and which item measured it), `DISCARDED_ANCHORS` holds the three
+  refuted shapes (the HUD's corner D54, the notifier's D59 run A, four edges
+  D60), and `test_the_shapes_sway_zones_are_the_rule_they_claim_to_be`
+  GENERATES the eight from the four edges instead of proof-reading them —
+  a missing entry is a real zone called a control, a spurious one is a
+  discarded zone called a proof, and an entry with no measurement against it is
+  refused outright so a later addition cannot inherit the confidence of the
+  eight that were run. `test_a_shell_whose_zero_is_only_a_control_asks_for_
+  nothing` now also requires each control shell's corner to be one that was
+  WATCHED having its zone discarded, not merely one absent from the accepted
+  list. The D44 section in `tools/shellload/shells.py` carries the table.
+- 4 mutations, 4 caught: a dropped triplet entry, a spurious corner entry, an
+  entry with an empty measurement, and the notifier's corner dropped from the
+  refutation ledger. Every injection was reverted from a backup and the working
+  tree confirmed clean at `git status --porcelain` before the verify run — no
+  shell QML is in this commit, which is why `hudscreens.sh` was not named and
+  did not need to be.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 2 paths (tools **734
+  pass**, one of them new; `shellload.sh` 34.9 s, unchanged). build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: tools/tests/test_shellload.py, tools/shellload/shells.py,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D58** (the cold-Qt bound six times over in `tools/hudscreens/shoot.py`,
+  which still has no ceiling test at all — the bound first, the shrink second),
+  then **D61** (the two `visible:` bindings that are now invariant-10 machinery
+  and say so nowhere; it wants an iteration that is touching a shell anyway,
+  because a comment there costs `hudscreens.sh` — and after D60 that sentence
+  has a third thing to point at), then **D57**, **D56**, **D55**, **D62** (this
+  gate can only express a strip off the TOP, raised here and deliberately
+  parked: it is a generality with one user until something reserves a side),
+  **D48**, **D45**.

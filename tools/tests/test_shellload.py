@@ -582,13 +582,97 @@ def window_anchors(shell: shells.Shell) -> set[str]:
 # both perpendicular ones. `apply_exclusive` in sway matches an anchor mask
 # against exactly those two shapes per edge and drops the zone otherwise — which
 # is why a corner-anchored surface can declare any zone it likes and take
-# nothing. Measured in both directions, and the measurements are what this list
-# rests on: see the D44 section in `tools/shellload/shells.py`.
-ZONED_ANCHORS = [
-    {"top"}, {"bottom"}, {"left"}, {"right"},
-    {"top", "left", "right"}, {"bottom", "left", "right"},
-    {"left", "top", "bottom"}, {"right", "top", "bottom"},
-]
+# nothing.
+#
+# EVERY ENTRY IS MEASURED, and six of the eight were not until D60 — they were
+# this rule written out by hand and believed. That mattered because the list is
+# the load-bearing conjunct of both tests below: a wrong entry is a
+# `reserves_top` the biconditional accepts, which is this gate reporting three
+# whole monitors as a PROOF that a discarded zone takes nothing. Each one is a
+# run of the real gate, `ops/ralph/shellload.sh`, with `jv-notify` anchored that
+# way and nothing else changed — `ExclusionMode.Normal`, `exclusiveZone: 100`,
+# `visible: true`, every other shell shipped. The note against each is what the
+# compositor then reported on all three monitors, against a shipped 2560x1440
+# and 1920x1080. The D44 section in `tools/shellload/shells.py` is where the
+# whole record lives; this is the ledger the tests read.
+ZONED_ANCHORS = {
+    frozenset({"top"}): "2560x1340 and 1920x980 — 100 off the height (D60)",
+    frozenset({"bottom"}): "2560x1340 and 1920x980 — 100 off the height (D60)",
+    frozenset({"left"}): "2460x1440 and 1820x1080 — 100 off the width (D60)",
+    frozenset({"right"}): "2460x1440 and 1820x1080 — 100 off the width (D60)",
+    frozenset({"top", "left", "right"}): (
+        "the bar's own 31 px strip, off every monitor, on every run of this "
+        "gate — the one entry a shipped shell exercises (D44)"
+    ),
+    frozenset({"bottom", "left", "right"}): (
+        "2560x1340 and 1920x980, workspace `y: 0`, so off the bottom (D59 run B)"
+    ),
+    frozenset({"left", "top", "bottom"}): "2460x1440 and 1820x1080 (D60)",
+    frozenset({"right", "top", "bottom"}): "2460x1440 and 1820x1080 (D60)",
+}
+
+# And the shapes whose zone the compositor was watched DISCARDING, which is the
+# other direction and the one a list of accepted shapes cannot state. Same
+# injection throughout: a real zone, a mapped surface, and the whole 35-second
+# gate GREEN anyway.
+DISCARDED_ANCHORS = {
+    frozenset({"top", "right"}): "the HUD's corner — every monitor whole (D54)",
+    frozenset({"bottom", "right"}): (
+        "the notifier's corner, the shape that ships — every monitor whole "
+        "(D59 run A)"
+    ),
+    frozenset({"top", "bottom", "left", "right"}): (
+        "ALL FOUR EDGES, which is the shape a full-screen overlay takes and the "
+        "one nobody would expect to be dropped: `apply_exclusive` compares the "
+        "mask for EQUALITY against one edge or one triplet, and four edges is "
+        "neither — every monitor whole (D60)"
+    ),
+}
+
+
+def test_the_shapes_sway_zones_are_the_rule_they_claim_to_be():
+    """`ZONED_ANCHORS` is sway's `apply_exclusive` written out, so it is
+    generated here and compared rather than proof-read.
+
+    Two failures this refuses, and they are different failures. A MISSING or
+    misspelled entry — `{"left", "top", "bottom"}` typed as `{"left", "top"}` —
+    is a shell whose zone really does come off a monitor being called a control,
+    which is invariant 10 broken by a typo in a test. A SPURIOUS entry is the
+    same mistake pointing the other way: a discarded zone read as a proof of
+    mapping, so a bar that stopped mapping altogether keeps its green.
+
+    The generator is the rule in eight words — one edge, or an edge plus both
+    perpendiculars — and the list is 8 entries because there are four edges and
+    two shapes each. What it cannot check is that sway's rule IS this rule; that
+    is what the measurement against every entry is for, and this test also
+    refuses an entry that carries no measurement, because an unmeasured entry
+    added later would inherit the confidence of the eight that were run.
+
+    The flake pins a sway BINARY and not a checkout, so deriving the list from
+    its source is not available here — which is the whole reason these are
+    measurements and not a citation."""
+    perpendicular = {
+        "top": {"left", "right"},
+        "bottom": {"left", "right"},
+        "left": {"top", "bottom"},
+        "right": {"top", "bottom"},
+    }
+    rule = {frozenset({edge}) for edge in perpendicular} | {
+        frozenset({edge} | others) for edge, others in perpendicular.items()
+    }
+    assert set(ZONED_ANCHORS) == rule, sorted(
+        map(sorted, set(ZONED_ANCHORS) ^ rule)
+    )
+    assert len(rule) == 8
+    for shape, measurement in ZONED_ANCHORS.items():
+        assert measurement.strip(), sorted(shape)
+    # And the refutations are shapes the rule really does reject, or one of the
+    # two ledgers is describing a compositor the other one is not.
+    assert not set(DISCARDED_ANCHORS) & rule, sorted(
+        map(sorted, set(DISCARDED_ANCHORS) & rule)
+    )
+    for shape, measurement in DISCARDED_ANCHORS.items():
+        assert measurement.strip(), sorted(shape)
 
 
 def test_the_only_shell_whose_zone_is_proven_is_configured_for_it():
@@ -638,7 +722,7 @@ def test_the_only_shell_whose_zone_is_proven_is_configured_for_it():
         reserves = (
             window_declares_a_zone(shell)
             and window_always_mapped(shell)
-            and window_anchors(shell) in ZONED_ANCHORS
+            and frozenset(window_anchors(shell)) in ZONED_ANCHORS
         )
         assert reserves == shell.reserves_top, (
             shell.attr,
@@ -692,10 +776,18 @@ def test_a_shell_whose_zero_is_only_a_control_asks_for_nothing():
         # would be published at a moment the compositor was not listening.
         assert not window_always_mapped(shell), (shell.attr, window_visibility(shell))
         # And it is anchored to a bare corner, which sway drops a zone for.
-        assert window_anchors(shell) not in ZONED_ANCHORS, sorted(
+        assert frozenset(window_anchors(shell)) not in ZONED_ANCHORS, sorted(
             window_anchors(shell)
         )
         assert len(window_anchors(shell)) == 2, sorted(window_anchors(shell))
+        # And its corner is one the compositor was WATCHED discarding a zone
+        # for, rather than one merely absent from the list above — both of
+        # these two have been through the real gate with a live 100 px zone on
+        # them (D54, D59 run A), which is the only reason this loop is allowed
+        # to treat an anchor shape as a reason for the zero it reads.
+        assert frozenset(window_anchors(shell)) in DISCARDED_ANCHORS, sorted(
+            window_anchors(shell)
+        )
     # Both of them, or the loop above is a rule about an empty list.
     assert [s.attr for s in shells.SHELLS if not s.reserves_top] == [
         "jv-hud",
