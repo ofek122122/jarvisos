@@ -963,9 +963,22 @@ SHOTS = [
         "captures": ["desk"],
         # Nothing at all. jarvisd is up, the bridge is subscribed, every
         # plate has looked at the bus and decided it has nothing true to
-        # say — so the shell leaves all three surfaces unmapped and the
+        # say — so the shell leaves all four surfaces unmapped and the
         # screens are the desktop. This is the HUD's ordinary state and
         # the one picture that has to be boring.
+        #
+        # FOUR surfaces and one picture, which is the care in this shot
+        # (D72). `captures` is the list of PNGs, `desk` is `OUTPUTS`, and
+        # the narrow output is outside the desk — so for thirty iterations
+        # the sheet's only DARK shot was a verdict about three of the four
+        # screens the compositor has. It is dark in a way D70's idle probe
+        # is not: there, no frames arrive and nothing ever maps; here the
+        # frames ARRIVE and every plate refuses them, which is the case
+        # where a plate drawing an empty rectangle of glass is a bug.
+        # `shoot.check_capture` now takes a second 0.3 Mpx exposure of the
+        # narrow output for every desk shot and runs `check_corner` over it
+        # without writing a PNG — so this stays one picture, and the claim
+        # under it covers every screen there is.
         "source": "recorded from a live bus with nothing published on it",
         "frames": [],
     },

@@ -77,10 +77,17 @@ QML engine can answer:
 - **The keyboard never moves.** The seat's focused node is read with no
   HUD running and again while the HUD is drawing, and must be identical.
   *Verified: `WlrKeyboardFocus.Exclusive` fails.*
-- **Earned emptiness is real emptiness.** The quiet shot must come back
-  pixel-identical to the bare desktop, on all three monitors **and on the
-  narrow output** — which sits outside the desk capture, so it is looked at
-  through a second exposure of its own rather than through the wide one.
+- **Earned emptiness is real emptiness** — two different darks, and both
+  are now measured on **every output the compositor has**, the three
+  monitors and the 280 px one. That screen sits outside the desk capture on
+  purpose, so each dark is asked about it through a second 0.3 Mpx exposure
+  of its own rather than through the 33 Mpx wide one. The **idle** dark is
+  no frames at all: nothing published, no surface mapped, every screen
+  pixel-identical to the bare desktop. The **quiet** dark is `01-quiet` —
+  frames arrive and every plate decides it has nothing true to say, which
+  is the case where a plate drawing a zero-height sliver or an empty
+  rectangle of glass would be a bug. Neither costs a picture: the narrow
+  exposure is read and thrown away, and the sheet stays at ten PNGs.
   *Verified: a health plate that shows a well machine fails.*
 - **No space is reserved.** Each workspace's usable rect must still be the
   whole monitor. On today's corner-anchored surface this proves nothing —
@@ -390,11 +397,16 @@ screens that moved.
 
 **Recorded** from a live bus with nothing published on it. jarvisd is up,
 the bridge is subscribed, and every plate has looked at the bus and
-decided it has nothing true to say — so all three surfaces stay unmapped
+decided it has nothing true to say — so all four surfaces stay unmapped
 and the screens are just the desktop. This is the HUD's ordinary state,
 and the fact that this picture is boring is the whole of §06's earned
 emptiness. It is also the control: every other shot here is measured
 against it.
+
+Four surfaces, three monitors, one picture. The fourth screen is the
+280 px output, which is outside this capture by design — so the run takes
+a second exposure of it for every desk shot and insists on the same
+verdict there, without writing an eleventh PNG of an empty screen.
 
 ### 02-heard-desk.png
 

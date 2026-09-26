@@ -3654,6 +3654,69 @@ def test_a_capture_that_is_not_the_screen_is_refused():
     )
 
 
+# ------------ the dark verdict on the screen outside the picture (D72)
+#
+# The gate above is about the desktop with NO HUD on it. This one is about the
+# SHOTS, and the hole is the same shape: a desk capture is `sheet.OUTPUTS` in
+# one wide grim, the narrow output sits to the right of the desk on purpose,
+# and `01-quiet` captures the desk and nothing else.
+#
+# `01-quiet` is a different dark from D70's. There, no frames arrive at all
+# and the surfaces are never mapped. Here frames DO arrive and every plate
+# decides it has nothing true to show — which is the case where a plate
+# drawing a zero-height sliver or an empty rectangle of glass is a bug, and
+# the 280 px output is where such a thing is most likely (its 248 px of room
+# is under `ConfirmPlate`'s own cap) and least visible. `check_corner(lit=
+# False)` is the other place in shoot.py where "nothing drawn" is the pass,
+# and it had never run on that screen.
+#
+# Both halves below are derived off the sheet rather than asserted as shapes,
+# so a fifth output declared and photographed by nobody goes red here.
+
+
+def test_a_desk_capture_is_a_verdict_about_every_output_there_is():
+    """Which screens one desk exposure's verdict reaches — all of them, not
+    just the desk's. A shot's `captures` is the list of PICTURES it writes,
+    and the sheet has a shot that writes one, so the pictures cannot also be
+    the census of screens the shot is a claim about."""
+    covered = set()
+    for node in units_of("check_capture"):
+        # The desk image, sliced one monitor at a time.
+        if isinstance(node, ast.For) and ast.unparse(node.iter) == "sheet.OUTPUTS":
+            covered |= {o["role"] for o in sheet.OUTPUTS}
+    # And every screen it takes an exposure of its own for.
+    for call in calls_in("check_capture", "capture"):
+        covered.add(ast.literal_eval(call.args[0]))
+    missing = {o["role"] for o in sheet.ALL_OUTPUTS} - covered
+    assert not missing, (
+        f"a desk capture is checked on {sorted(covered)} and so says nothing "
+        f"about {sorted(missing)} — `01-quiet` captures the desk alone, so on "
+        "that screen a plate that lit up with nothing to say would be caught "
+        "by nothing at all"
+    )
+
+    # Every image it turns into a verdict is one size check and one corner
+    # verdict. The odd one out is either an exposure nobody read — a grim paid
+    # for to prove a sentence nobody said — or a read nobody sized, which is
+    # the vacuous pass D70 refuses.
+    sized = calls_in("check_capture", "check_grim_size")
+    verdicts = calls_in("check_capture", "check_corner")
+    assert len(sized) == len(verdicts), (
+        f"check_capture checks {len(sized)} image size(s) and takes "
+        f"{len(verdicts)} corner verdict(s)"
+    )
+    # And every one of them is asked the SHOT's question. A narrow exposure
+    # hard-wired to `lit=True` would pass `01-quiet` with a plate on it, and
+    # one hard-wired to False would fail `02-heard` — the dark half is the
+    # whole reason this exposure exists.
+    for call in verdicts:
+        lit = ast.unparse(call.args[-1])
+        assert lit == "shot['lit']", (
+            f"check_capture line {call.lineno} decides for itself whether the "
+            f"HUD should be drawn ({lit}) rather than asking the shot"
+        )
+
+
 def test_the_two_whole_image_verdicts_size_check_before_they_read():
     """`check_capture` and `check_desk_is_bare` are the two places that turn a
     whole image into a verdict, and a size check that runs AFTER the pixels
@@ -3668,11 +3731,35 @@ def test_the_two_whole_image_verdicts_size_check_before_they_read():
             if isinstance(c, ast.Call) and ast.unparse(c.func) in ("drawn_box", "check_corner")
         ]
         assert readers, f"{name} checks a size and then reads nothing"
-        assert min(c.lineno for c in sized) < min(c.lineno for c in readers), (
-            f"{name} reads pixels at line {min(c.lineno for c in readers)} "
-            f"before checking the image is the screen at "
-            f"{min(c.lineno for c in sized)}"
-        )
+        # One size check per read, in that order — not `the first check comes
+        # before the first read` (PLAN D72). Both of these functions now take
+        # a SECOND exposure of their own: `check_desk_is_bare` photographs the
+        # narrow output after walking the desk, and `check_capture`'s desk
+        # branch does the same. Under a min-against-min rule the second
+        # image's size check is optional, because the first one already sits
+        # above every read in the function — which is precisely the vacuous
+        # read D70 exists to refuse, arriving by a new door.
+        #
+        # So: walk the two kinds of site in source order and insist a read is
+        # never reached with fewer size checks behind it than reads. A second
+        # grim whose size nobody asked about goes red here, and so does one
+        # checked a line too late.
+        seen_sized = seen_read = 0
+        for lineno, is_read in sorted(
+            [(c.lineno, False) for c in sized] + [(c.lineno, True) for c in readers]
+        ):
+            if is_read:
+                assert seen_sized > seen_read, (
+                    f"{name} reads pixels at line {lineno} behind "
+                    f"{seen_sized} size check(s) and {seen_read} earlier "
+                    "read(s) — one of the images it turns into a verdict was "
+                    "never checked to be the screen it was asked for, and a "
+                    "capture that came back too small reads as 'the HUD drew "
+                    "nothing here'"
+                )
+                seen_read += 1
+            else:
+                seen_sized += 1
     assert "img.shape[:2] !=" not in shoot_text(), (
         "shoot.py has a hand-rolled capture-size comparison again — the rule "
         "is sheet.capture_size_complaint, which is the copy a test can run"

@@ -1837,7 +1837,9 @@ def capture(target: str, ppm: Path) -> None:
     subprocess.run(argv, check=True, capture_output=True)
 
 
-def check_capture(shot: dict, target: str, img: np.ndarray, background: np.ndarray) -> None:
+def check_capture(
+    shot: dict, target: str, ppm: Path, img: np.ndarray, background: np.ndarray
+) -> None:
     if target == "desk":
         # One monitor at a time: the desk shot's job is to answer whether
         # the same plate really is on all three, so it is checked as three
@@ -1846,6 +1848,58 @@ def check_capture(shot: dict, target: str, img: np.ndarray, background: np.ndarr
         for out in sheet.OUTPUTS:
             region = img[0 : out["height"], out["x"] : out["x"] + out["width"]]
             check_corner(f"{shot['file']} {out['name']}", region, background, shot["lit"])
+
+        # AND THE FOURTH SCREEN, which is not in the picture (PLAN D72).
+        #
+        # A desk capture is `sheet.OUTPUTS` in one wide `grim`, and the narrow
+        # output sits to the right of the desk on purpose, so every verdict
+        # taken off a desk shot was a verdict about three of the four screens
+        # the compositor has. D70 closed that for the desktop with no HUD on
+        # it (`check_desk_is_bare` takes its own second exposure for exactly
+        # this reason); this closes it for the shots.
+        #
+        # `01-quiet` is why it matters. Its `captures` is `["desk"]` and its
+        # `lit` is false, so the one DARK shot on the sheet — frames ARRIVE,
+        # and every plate decides it has nothing true to show — was never
+        # asked about the one screen where a plate drawing a zero-height
+        # sliver or an empty rectangle of glass is most likely and least
+        # visible. `check_corner(lit=False)` is the other place in this file
+        # where "nothing drawn" is the pass, and until this it never ran on
+        # that output at all.
+        #
+        # One 0.3 Mpx exposure against the desk's 33, and NO PNG: the sheet
+        # stays at ten pictures and gains an assertion. An eleventh photograph
+        # of an empty 280 px screen was declined on its own grounds (D70) —
+        # it is a picture of nothing, and the assertion is worth more.
+        #
+        # Said out loud rather than discovered: this runs for every desk shot
+        # including the LIT ones, and on a 280 px output the BOX half of
+        # `check_corner` is vacuous — `w - SURFACE_W - INSET` is -36, so
+        # `x0 >= left` is true of anything. What still bites there is the
+        # left-inset half (D66's clamp) and the right-hand gap, which is the
+        # same pair `03-confirm-narrow.png` was taken to photograph. So on
+        # `02-heard` and `03-confirm` this is a cheap restatement of a claim
+        # the sheet already makes; on `01-quiet` it is the only place the
+        # claim is made at all.
+        narrow = sheet.output_by_role("narrow")
+        narrow_ppm = ppm.with_name(f"{ppm.stem}-narrow.ppm")
+        capture("narrow", narrow_ppm)
+        narrow_img = read_ppm(narrow_ppm)
+        check_grim_size(f"{shot['file']} {narrow['name']}", narrow_img, narrow)
+        check_corner(
+            f"{shot['file']} {narrow['name']}", narrow_img, background, shot["lit"]
+        )
+        # Said out loud, because a check nobody can see run is not evidence.
+        # Every other probe in this file logs its measurement; this one has no
+        # PNG to point at, so the line is the only trace that the fourth screen
+        # was looked at — and it names the size the image came back as, which
+        # is the half that stops a vacuous read from reading as a pass.
+        log(
+            f"  and the screen outside the picture: {narrow['name']} came back "
+            f"{narrow_img.shape[1]}x{narrow_img.shape[0]} and "
+            f"{'is bare' if not shot['lit'] else 'draws in its corner'}, "
+            "no picture kept"
+        )
     else:
         out = sheet.output_by_role(target)
         check_grim_size(f"{shot['file']} {target}", img, out)
@@ -1991,7 +2045,7 @@ def main() -> int:
                     capture(target, ppm)
                     img = read_ppm(ppm)
                 with cost.phase("checks"):
-                    check_capture(shot, target, img, background)
+                    check_capture(shot, target, ppm, img, background)
                     if target == "primary" and shot.get("grows_from"):
                         # BEFORE the PNG is written, not after: a failed run
                         # that had already saved the picture would leave the
