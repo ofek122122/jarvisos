@@ -16,6 +16,7 @@
     ../../modules/audio.nix
     ../../modules/security.nix
     ../../modules/comfort.nix
+    ../../modules/bluetooth.nix
     ../../modules/snapshots.nix
     ../../modules/windows-compat.nix
     ../../modules/jarvis-services.nix

@@ -16152,3 +16152,59 @@ backlog (Tracks F-K) is far from resolved — G through K are still entirely
   comfort backlog's top track. The comfort backlog (Tracks F-K) is still far
   from resolved — G through K are entirely [ ] — so the loop keeps going per
   PROMPT.md STEP 5.
+
+## 2026-09-26 — bluetooth declared (PLAN G1); F4/F5 proposed to human review (R10/R11)
+- built: F4 (game-launch VRAM handoff) was next in the comfort backlog's top
+  track, but its own spec needs two GUARDRAILS human-review changes at once:
+  a new frozen `schemas/` topic for "a game is running" (bus-side design,
+  invariant 2) AND privilege for something to stop/restart the SYSTEM
+  `jv-llm.service` from an unprivileged, per-user gamemode hook — exactly
+  the invariant-3 boundary jv-act exists to gate. Wrote it up as proposal
+  **R10** in `docs/optimization-backlog.md` (both shapes considered: a
+  `sys.game` bus topic + new actuator, or gamemode's own `[custom]` hook
+  calling systemctl directly — both cross the same privilege line) and left
+  F4 `[ ]` with the check-in noted, per PLAN's own A11 precedent. F5
+  (dictation anywhere) hits the same wall from the other side: the injection
+  step needs a brand-new `jv-act` tool (`input.type_text`) — invariant 3 is
+  explicit that only jv-act injects input, and `grep inject services/jv-act`
+  finds nothing but two unrelated flag-injection doc comments in `exec.rs`.
+  Proposal **R11** covers it, same "propose the tool, build everything else"
+  shape PLAN J1 already prescribes; left F5 `[ ]` too — the push-to-talk/
+  Whisper/HUD half is still buildable in a future iteration against a fake
+  injector, just not this one.
+  Picked **G1 (Bluetooth)** instead: `modules/bluetooth.nix` declares
+  `hardware.bluetooth.enable`/`powerOnBoot = true` and
+  `settings.General.Enable = "Source,Sink,Media,Socket"` (BlueZ's own fix
+  for headset/speaker profiles; PipeWire/wireplumber, already the only audio
+  stack, speaks A2DP through it once BlueZ advertises it — no change needed
+  there) plus `services.blueman.enable = true` for the reviewed NixOS
+  pairing-GUI module (its own D-Bus mechanism service + polkit rules, none
+  hand-written here). No system tray exists yet (`H10` is `[ ]`), so the
+  "GUI path" G1 asks for is `blueman-manager`'s own `.desktop` entry — it is
+  automatically reachable through the app launcher (Mod+D) and the
+  tap-Super menu, both of which already list every installed `.desktop`
+  entry, so nothing needed binding a key or autostarting anything new.
+- tests: `ops/ralph/nixtest.sh` (+3 cases): builds the real
+  `/etc/bluetooth/main.conf` derivation and reads `AutoEnable=true` +
+  `Enable=Source,Sink,Media,Socket` off it (not the attrset — the bytes
+  bluetoothd is actually handed), reads `hardware.bluetooth.{enable,
+  powerOnBoot}` off the real evaluation, and confirms `blueman` lands in
+  `environment.systemPackages`. `bash ops/ralph/verify.sh`: 2 gates over 4
+  paths (`docs/optimization-backlog.md`, `hosts/ares/default.nix`,
+  `modules/bluetooth.nix`, `ops/ralph/nixtest.sh`), GREEN in 146.2s (tools
+  917 unaffected, nixtest 42 — 40 prior + 3 new, one of which
+  (`bluetooth radio: on...`) initially failed on `toString true` == `"1"`
+  in Nix, not `"true"`, and a second failure came from `2>&1` mixing a
+  `nix eval` warning into a variable a later `nix build` then choked on —
+  both fixed before this commit, never committed broken).
+- build: `nixos-rebuild build --flake .#ares` -> ok (23 new derivations:
+  `bluetooth.service`, `obex.service`, udev rules for BT hardware, blueman +
+  dbus-glib + openobex + obex-data-server, the rebuilt `system-path`/`etc`/
+  `system-units`/toplevel). Never switched.
+- files: modules/bluetooth.nix, hosts/ares/default.nix, ops/ralph/nixtest.sh,
+  docs/optimization-backlog.md (R10, R11), ops/ralph/PLAN.md,
+  ops/ralph/HUMAN-VERIFY.md, ops/ralph/JOURNAL.md
+- next: G2 (printing) is the next unchecked item in Track G. The comfort
+  backlog (Tracks F-K) is still far from resolved — F4/F5 need a human
+  decision before they can move, and H through K are entirely `[ ]` — so the
+  loop keeps going per PROMPT.md STEP 5.

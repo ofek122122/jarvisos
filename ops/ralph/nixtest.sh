@@ -549,6 +549,34 @@ names=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
 if grep -q '^xdg-user-dirs-' <<<"$names"; then ok "$t"
 else bad "$t" "xdg-user-dirs is not in environment.systemPackages: $(tail -3 <<<"$names")"; fi
 
+# -------------------------------------------------------------- bluetooth
+# PLAN G1. modules/bluetooth.nix declares the stack that was never written
+# down: the BlueZ daemon powers its radio on at boot, advertises the audio
+# profiles PipeWire (modules/audio.nix) needs for a headset, and
+# services.blueman ships the pairing GUI's .desktop entry — no tray to dock
+# into yet (H10), so the app launcher/tap-Super menu are the "GUI path".
+
+t='bluetooth radio: on, and powered on at boot (not left off after a reboot)'
+bt_err=$(mktemp)
+out=$(nix eval '.#nixosConfigurations.ares' --apply \
+  '(c: if c.config.hardware.bluetooth.enable && c.config.hardware.bluetooth.powerOnBoot
+       then "both on" else "not both on")' 2>"$bt_err")
+if [ "$out" = '"both on"' ]; then ok "$t"
+else bad "$t" "$out $(cat "$bt_err")"; fi
+rm -f "$bt_err"
+
+t='bluetooth: the real config BlueZ reads at boot carries both settings'
+main_conf_drv=$(nix eval --raw '.#nixosConfigurations.ares.config.environment.etc."bluetooth/main.conf".source.drvPath' 2>/dev/null)
+main_conf=$(nix build --no-link --print-out-paths "${main_conf_drv}^out" 2>&1 | tail -1)
+if [ ! -f "$main_conf" ]; then bad "$t" "did not build: $main_conf"
+elif grep -q '^AutoEnable=true$' "$main_conf" && grep -q '^Enable=Source,Sink,Media,Socket$' "$main_conf"; then
+  ok "$t"
+else bad "$t" "$(cat "$main_conf" 2>/dev/null)"; fi
+
+t='blueman: the pairing GUI ships, so there is a way to pair with no tray yet'
+if grep -q '^blueman-' <<<"$names"; then ok "$t"
+else bad "$t" "blueman is not in environment.systemPackages: $(tail -3 <<<"$names")"; fi
+
 # ------------------------------------------------------------- snapshots
 # PLAN F3. modules/snapshots.nix declares a snapper timeline over disko.nix's
 # @root and @home subvolumes plus the one gap snapper's own module leaves

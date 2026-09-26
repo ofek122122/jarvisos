@@ -141,15 +141,56 @@ the top unchecked item unless it is blocked.
       bus-side and mark `[H]` for the real game test. Gate: unit tests against a
       faked gamemode signal proving the unload/reload sequence and that a
       failure to unload never wedges the brain.
+      **Checked 2026-09-26: needs a new frozen `schemas/` topic (the
+      "game running" fact) AND privilege for something to stop/restart the
+      SYSTEM `jv-llm.service` from an unprivileged, per-user gamemode hook —
+      both are GUARDRAILS human-review items (schemas/**, and the invariant-3
+      boundary jv-act exists to gate). Proposal **R10** in
+      `docs/optimization-backlog.md` lays out both shapes considered.
+      **Blocked on human review; do not build this autonomously.** Nothing
+      needs to change in `jv-brain`/`jv-llm-launch` once the trigger and the
+      privilege exist — they already report whatever rung a VRAM-starved
+      launch lands on (`tests/test_vram_guard.py`).**
 - [ ] F5. **Dictation anywhere.** Hold a key → speak → text is typed into the
       focused window. Reuse jv-ears' existing Whisper path (do not add a second
       ASR); inject via `wtype`/virtual keyboard. Must be push-to-talk, must show
       a HUD indicator while recording (invariant 10: the mic state is never
       fakeable). Gate: tests on a WAV fixture producing the right keystrokes
       through a fake injector; `[H]` for speaking into it.
+      **Checked 2026-09-26: the injection half needs a NEW `jv-act` tool**
+      (`input.type_text`) — invariant 3 is explicit that only jv-act injects
+      input, and no injector of any kind exists in `services/jv-act` today.
+      Proposal **R11** in `docs/optimization-backlog.md` (same "propose the
+      tool, build everything else" shape PLAN J1 already prescribes).
+      **Blocked on human review for the injector; do not build the tool
+      autonomously.** The push-to-talk/Whisper/HUD-indicator half is still
+      open for a future iteration, gated on a fake injector.
 
 ### Track G — system comfort
-- [ ] G1. Bluetooth (`hardware.bluetooth` + a tray/GUI path). `[H]` to pair.
+- [H] G1. **Bluetooth.** DONE (this commit): `modules/bluetooth.nix` declares
+      `hardware.bluetooth.enable`/`powerOnBoot = true` plus
+      `settings.General.Enable = "Source,Sink,Media,Socket"` (the standard
+      fix for headset/speaker profiles — PipeWire/wireplumber, already the
+      only audio stack per `modules/audio.nix`, speaks A2DP through it once
+      BlueZ advertises the profile) and `services.blueman.enable = true` —
+      the reviewed NixOS module for the mechanism D-Bus service + polkit
+      rules, no hand-written polkit of this loop's own. No tray exists yet
+      (`H10` is still `[ ]`), so the "GUI path" G1 asks for is
+      `blueman-manager`'s own `.desktop` entry, already reachable the same
+      way every installed app is on this desktop: the app launcher (Mod+D)
+      and the tap-Super menu both list every `.desktop` entry on the
+      machine, so nothing here binds a key or autostarts anything new.
+      Gate: `ops/ralph/nixtest.sh` (+3 cases) builds the real
+      `/etc/bluetooth/main.conf` derivation and reads it (`AutoEnable=true`,
+      `Enable=Source,Sink,Media,Socket`), reads
+      `hardware.bluetooth.{enable,powerOnBoot}` off the real evaluation, and
+      confirms `blueman` lands in `environment.systemPackages`.
+      `bash ops/ralph/verify.sh`: 2 gates over 4 paths, GREEN in 146.2s
+      (tools 917, nixtest 42). `nixos-rebuild build --flake .#ares` -> ok (23
+      new derivations: bluetoothd's unit, blueman + its D-Bus/obex pieces,
+      udev rules, the rebuilt `system-path`/`etc`/toplevel). Never switched.
+      `[H]` because pairing a real device needs a human and a Bluetooth
+      peripheral — see `ops/ralph/HUMAN-VERIFY.md`.
 - [ ] G2. Printing (CUPS + driver set + mDNS discovery). `[H]` to print.
 - [ ] G3. Update notifier at login: read-only `git fetch`, tell the user commits
       exist, never auto-switch. (Designed weeks ago, never built.)
