@@ -1080,7 +1080,8 @@ human-reviewed step.
         `engine_ceilings()` so the claim is about the one wait D53 is about):
         78 s for the frames run (unchanged — it is the cold engine), 36 s for
         the bar and the notifier, **80 s for the blind run against 98 before**.
-        D54 fits now; before it did not.
+        D54 would have fit; it turned out not to be worth building (see
+        D54), so the headroom is still there — D58 is where to spend it.
       · Cost: unchanged at 34.8 s. Nothing here was ever spending the 30 s.
 
 - [ ] D58. **The other real-quickshell gate has the same 30 s, six times over,
@@ -1099,20 +1100,78 @@ human-reviewed step.
       honest first half is `engine_ceilings()`' equivalent over that harness,
       and the shrink is second. Raised by D53.
 
-- [ ] D54. **The compositor is never asked about the surface that came
-      BACK.** `load_blind` reads the screens three times — before, while, after
-      (D44) — and the `while` is taken when the corner is showing `link`. Then
-      D52's cycle destroys that surface (`visible: selfTest || stack.anyLit`,
-      and the dark census requires `nothing` on every monitor) and builds a new
-      one for the ten plates, and nobody asks sway anything about it. The HUD
-      reserves no space, so that reading is a refutation rather than a proof —
-      but it is the one this gate has, and a HUD whose rebuilt surface came
-      back with an exclusive zone on it would take a strip off all three
-      monitors and pass. One more `check_zone(shell, "while", up=True)` inside
-      `recover()`, after the census, is the whole of it; the arithmetic was the
-      catch (`engine_ceilings()` had 2 s of room and `MAPPED_TIMEOUT_S` is 8).
-      **Unblocked by D53**, which took the blind engine to 80 s: the 8 s fits
-      now, with 12 to spare. Raised by D52.
+- [x] D54. **The compositor is never asked about the surface that came
+      BACK** — asked now, three ways, and the answer is that asking is worth
+      nothing, so this is CLOSED BY MEASUREMENT rather than built. The proposal
+      was one more `check_zone(shell, "while", up=True)` inside `recover()`: D52
+      destroys the surface the D47 reading was taken on (`visible: selfTest ||
+      stack.anyLit` goes false while the corner says `nothing`) and builds
+      another for the ten plates, so the rebuilt surface looked like the one
+      object in this gate that could be carrying a zone nobody had ever read. It
+      was built, it ran green, and then it was injected against — three full runs
+      of the real gate, each on top of D43's frames:
+      · `exclusiveZone: 100` + `ExclusionMode.Normal`, unconditional, from birth:
+        all four engines GREEN, every monitor reported whole, on the lit frames
+        run and the lit blind run both.
+      · the same zone made to appear only on the REBUILT surface (a latch on
+        `onVisibleChanged`, so surface #1 is born with 0 and surface #2 with
+        100): green again, and the HUD's own log shows the latch fire —
+        `INJECT: lit, darkenings 1 zone 100` on all three monitors — while sway
+        went on reporting 2560x1440 and 1920x1080.
+      · and the same zone with `visible: true`, which is the run that says WHY:
+        green again. **Mapping was never the missing ingredient.**
+      **THE CAUSE IS THE ANCHOR**, and `tools/hudscreens/shoot.py` had already
+      found it from the other side — `check_no_space_reserved` says so in as many
+      words and reports the opposite direction measured: the HUD re-anchored
+      left+right+top with `ExclusionMode.Auto` took HEADLESS-1's usable area to
+      2560x880. sway honours an exclusive zone only for a surface anchored to ONE
+      edge or to an edge plus both perpendicular ones; this corner is top+right,
+      which is neither, so its zone is discarded whatever the value and whoever
+      is looking. The fourth reading was removed: 8 s of this gate's ceiling on a
+      check that cannot come back false is worse than no check, because it reads
+      as coverage in the log and in this file.
+      · What shipped instead, out of the same measurement: **the rule is a
+        test.** `test_the_only_shell_whose_zone_is_proven_is_configured_for_it`
+        pairs `reserves_top` with the window's own configuration — always mapped
+        (no `visible:` binding, or the literal `true`) AND anchors in a shape sway
+        zones — so the bar is the only shell here that PROVES anything, and a
+        `reserves_top` that drifted from the QML can no longer turn three whole
+        monitors into a proof that the corner takes nothing. Live in three
+        directions: HUD with `reserves_top=True` → red; the bar's anchors cut to
+        a corner → red; the bar gated on a condition → red.
+      · And the overstated claims are corrected where a reader meets them. D43's
+        amendment to `load()`'s comment — "the corner is lit, so a surface really
+        is there and really does leave every screen whole" — was wrong in its
+        second half; the D44 section in `shells.py` now carries all three
+        injections, names the anchor rule, and states the thing that actually
+        holds invariant 10 here: **every configuration in which this corner would
+        really take space is one where sway honours the zone, and a zone sway
+        honours is one this reading SEES.** What cannot be caught is a zone the
+        compositor itself discards, which is a HUD that takes nothing.
+      · And the ceiling arithmetic no longer hardcodes how many readings each
+        engine takes: `engine_zone_readings()` counts them off the driver, per
+        engine, so a reading added to the run and not to the arithmetic can no
+        longer be 8 s of pathological wait outside the bound — the exact shape of
+        the hole D50 found in the load wait. The blind engine stays at 80 s of
+        100; **D53's headroom is still unspent, and D58 is where to spend it.**
+
+- [ ] D59. **Two harnesses now give two different reasons for the same zero, and
+      one of them has to be wrong.** D44 recorded the notifier's injection biting
+      — `exclusiveZone: 100` came off every monitor, 2560x1340 and 1920x980 —
+      once its window was also made `visible: true`, and attributed the silent
+      case to the conditional visibility. D54 has just measured the HUD's zone
+      being discarded with `visible: true` set, and attributed it to the bare
+      corner anchor. But `jv-notify` is anchored **bottom+right**, which is a bare
+      corner too: under the rule sway's `apply_exclusive` states, its zone should
+      have been discarded exactly like the HUD's, visible or not. So either the
+      D44 notifier run changed something it did not record, or the anchor rule has
+      an exception these three runs have not found. It is one re-run to separate
+      them — the notifier, `visible: true`, `ExclusionMode.Normal`,
+      `exclusiveZone: 100`, anchors untouched — and the answer decides which
+      conjunct of `test_the_only_shell_whose_zone_is_proven_is_configured_for_it`
+      is load-bearing and which is belt to its braces. Cheap (one shellload run,
+      ~35 s plus a jv-notify rebuild) and it is the last unresolved thing about
+      what these three readings mean. Raised by D54.
 
 - [ ] D55. **A plate that came back LIT and EMPTY passes the new census.**
       `test_the_corner_names_the_plates_and_never_what_they_say` states the

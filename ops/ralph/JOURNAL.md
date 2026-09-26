@@ -13610,3 +13610,87 @@ is not worth chasing.)
   a DEFAULT over five quickshells AND four brokers, and that harness has no
   ceiling test at all — the bound comes first, the shrink second), then
   **D57**, **D56**, **D48**, **D45**.
+
+## 2026-09-26 — D54: the reading was built, injected against, and removed
+
+- **D54 is closed by measurement rather than built**, and that is the whole
+  iteration. The item asked for one more `check_zone(shell, "while", up=True)`
+  inside `recover()`: D52 destroys the surface the D47 reading was taken on
+  (`visible: selfTest || stack.anyLit` goes false while the corner says
+  `nothing`) and builds another for the ten plates, so the REBUILT surface
+  looked like the one object in this gate that could be carrying an exclusive
+  zone nobody had ever read. It was built TDD-first — 5 red, then green, the
+  real gate ran it and printed `the corner it rebuilt took no space off any
+  monitor either`, and the arithmetic fit: 88 s of blind-engine ceiling against
+  100, exactly the headroom D53 bought. Then it was injected against, and the
+  injection is why the code is not in this commit.
+- **Three injections, each a full run of the real gate**, on top of D43's frames:
+  · `exclusiveZone: 100` + `ExclusionMode.Normal` on the HUD, unconditional,
+    from birth — all four engines GREEN, every monitor reported whole, on the lit
+    frames run and the lit blind run both.
+  · the same zone made to appear ONLY on the surface D52 rebuilds (a latch on
+    `onVisibleChanged`, so surface #1 is born with 0 and surface #2 with 100) —
+    green again, and the HUD's own log proves the latch fired: `INJECT: lit,
+    darkenings 1 zone 100` on all three monitors, while sway went on reporting
+    2560x1440 and 1920x1080. That is the run that kills the feature: the fault
+    D54 exists to catch, staged exactly, passing.
+  · and the same zone with `visible: true` — green again, which is the run that
+    says WHY. **Mapping was never the missing ingredient**, and the first draft
+    of this journal entry, which blamed the conditional visibility, was wrong.
+- **The cause is the ANCHOR**, and `tools/hudscreens/shoot.py` had already found
+  it from the other side: `check_no_space_reserved` says so in as many words and
+  records the opposite direction measured — the HUD re-anchored left+right+top
+  with `ExclusionMode.Auto` took HEADLESS-1's usable area to 2560x880. sway
+  honours an exclusive zone only for a surface anchored to ONE edge or to an edge
+  plus both perpendicular ones; this corner is top+right, which is neither. Two
+  harnesses had two different explanations for the same zero and only one of them
+  had looked at the anchors.
+- **So the reading was removed.** 8 s of this gate's per-engine ceiling spent on
+  a check that cannot come back false is worse than no check: it reads as
+  coverage, in the run's log and in the PLAN. The blind engine stays at 80 s of
+  100 and D53's headroom is still unspent (D58 is where to spend it).
+- **What shipped instead is the rule, as a test.**
+  `test_the_only_shell_whose_zone_is_proven_is_configured_for_it` pairs
+  `reserves_top` with the window's own configuration — always mapped (no
+  `visible:` binding, or the literal `true`) AND anchors in a shape sway zones —
+  so the bar is the only shell whose zero/31 px reading is a PROOF, and a
+  `reserves_top` that drifted from the QML can no longer turn three whole
+  monitors into evidence that the corner takes nothing. Live in three directions:
+  HUD with `reserves_top=True` → red, the bar's anchors cut to a corner → red,
+  the bar gated on a condition → red. The first draft of the rule was
+  `visible:`-absent alone and rejected `visible: true`, which is a false
+  positive — found by injecting it, fixed, and the literal is now accepted.
+- **And the claim a reader meets is corrected.** D43 amended `load()`'s comment
+  to say the HUD's reading had become the HUD's own "with the frames above in it,
+  the corner is lit… so a surface really is there and really does leave every
+  screen whole". The second half was false. The D44 section in `shells.py` now
+  carries all three injections, the anchor rule, and the sentence that actually
+  holds invariant 10 here: **every configuration in which this corner would
+  really take space is one where sway honours the zone, and a zone sway honours
+  is one this reading SEES.** What cannot be caught here is a zone the compositor
+  itself discards — which is a HUD that takes nothing.
+- **One thing the arithmetic keeps from the removed feature**, because it is
+  worth keeping on its own: `engine_zone_readings()` counts the compositor
+  readings off the DRIVER, per engine, instead of `MAPPED_TIMEOUT_S * 3`
+  hardcoded. A reading added to the run and not to the ceiling is 8 s of
+  pathological wait outside the bound, which is the exact shape of the hole D50
+  found in the load wait — and it was about to be re-opened by this very item.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths (tools **732
+  pass**, one of them new; `shellload.sh` 34.9 s, unchanged — the removed reading
+  is the reason it is unchanged). `hudscreens.sh` was not named and did not need
+  to be: no shell QML is in this commit, and every injection above was reverted
+  from a backup before the verify run. build: `nixos-rebuild build --flake
+  .#ares` green. No schema change, no jv-act, no boot path, no pins. Never
+  tested, never switched.
+- files: tools/shellload/load.py, tools/shellload/shells.py,
+  tools/tests/test_shellload.py, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D59** (raised here, and it is the last unresolved thing about what
+  these three readings mean): D44 recorded the NOTIFIER's 100 px zone biting once
+  its window was `visible: true`, and `jv-notify` is anchored bottom+right — a
+  bare corner, which under the anchor rule should have been discarded like the
+  HUD's. Either that run changed something it did not record or the rule has an
+  exception; one re-run of the notifier injection separates them, and the answer
+  says which conjunct of the new test is load-bearing. Then **D58** (the same
+  cold-Qt bound, six times over, in `tools/hudscreens/shoot.py`, and that harness
+  still has no ceiling test at all — the bound first, the shrink second), then
+  **D57**, **D56**, **D55**, **D48**, **D45**.

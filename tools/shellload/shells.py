@@ -273,13 +273,53 @@ def sway_config() -> str:
 # `selfTest || stack.anyLit`), and the HUD with no jarvisd is never lit at
 # all, so no surface of its is ever created in this gate.
 #
-# So, plainly: the bar's reading is a proof. The notifier's refutes a zone on
-# a surface that was mapped when it was born. The HUD's refutes nothing about
-# today's HUD — it is the line that notices the day the corner becomes
-# always-mapped and takes space, which is the future the bar already is. It is
-# kept for the same reason `tools/hudscreens/shoot.py` keeps its own version
-# of this check, and for one more: it is the CONTROL that makes the bar's
-# 31 px the bar's.
+# AND LIGHTING THE CORNER DOES NOT REPAIR THAT, which is D54 and is why that
+# item is closed by measurement rather than built. D43 put real frames into this
+# run and D47 lights `LinkPlate` with no bus at all, so the HUD's surface really
+# is mapped at both of its `up=True` readings now — and the comment in `load()`
+# was amended to claim those readings had therefore become the HUD's own. They
+# have not. Three injections, each a full run of the real gate:
+#   · `exclusiveZone: 100` + `ExclusionMode.Normal`, unconditional, from birth —
+#     all four engines GREEN, every monitor whole, on the lit frames run and the
+#     lit blind run both.
+#   · the same zone made to appear only on the surface D52 REBUILDS (a latch on
+#     `onVisibleChanged`, so surface #1 is born with 0 and surface #2 with 100) —
+#     green again, with the HUD's own log showing the latch fire: `lit,
+#     darkenings 1 zone 100` on all three monitors, while sway went on reporting
+#     2560x1440 and 1920x1080.
+#   · and the same zone with `visible: true`, which is the one that says WHY —
+#     green again. Mapping was never the missing ingredient.
+#
+# THE CAUSE IS THE ANCHOR, and `tools/hudscreens/shoot.py` had already found it
+# from the other side: `check_no_space_reserved` there says so in as many words,
+# and reports the opposite direction measured — the HUD anchored left+right+top
+# with `ExclusionMode.Auto` took HEADLESS-1's usable area to 2560x880. sway
+# honours an exclusive zone only for a surface anchored to ONE edge or to an edge
+# plus both perpendicular ones; this corner is top+right, which is neither, so
+# its zone is discarded whatever the value and whoever is looking.
+#
+# WHICH LEAVES ONE THING UNRESOLVED, and it is a real one rather than a caveat:
+# `jv-notify` is anchored bottom+right, also a bare corner, and the injection
+# above says its 100 px zone DID come off every monitor (2560x1340, 1920x980)
+# once the window was made unconditionally visible. Under the rule sway's code
+# states that should have been discarded too. So one of these two attributions
+# is incomplete — see PLAN D59, which is one re-run of the notifier injection.
+#
+# THE CONSEQUENCE, PLAINLY. The bar's reading is a proof, and it is the only one
+# here: its window is always mapped AND anchored to an edge plus both
+# perpendiculars, which is the one configuration in this repo whose zone has been
+# watched reaching the compositor. The notifier's reading and both of the HUD's
+# are the CONTROL that makes the bar's 31 px the bar's, and nothing more —
+# `test_the_only_shell_whose_zone_is_proven_is_configured_for_it` is what keeps
+# `reserves_top` and that configuration from drifting apart.
+#
+# AND INVARIANT 10 IS STILL HELD, by the anchor rather than by this gate: every
+# configuration in which this corner would really take space off a monitor is one
+# where sway honours the zone, and a zone sway honours is one this reading SEES.
+# The HUD that starts reserving a strip is the HUD that re-anchored to the top
+# edge — `shoot.py` measured that exact change taking 560 px — and both this
+# gate and that one go red on it. What cannot be caught here is a zone the
+# compositor itself ignores, which is a HUD that takes nothing.
 
 
 def bar_strip_px(theme_toml: str) -> int:
@@ -997,6 +1037,17 @@ HUD_RELINK_TIMEOUT_S = 16.0
 # already started. The expectation is `HUD_PLATES_LIT` itself, unchanged and
 # not a copy: the recovered corner has to be the SAME corner, and a third
 # reading of one tuple is the whole point of it being a tuple.
+#
+# AND THE SURFACE IT REBUILDS IS NOT MEASURED, which was D54's whole proposal
+# and is the one thing this act deliberately does not do. The reasoning was
+# sound: this is the only place in the repo where a wl_surface of the HUD's is
+# destroyed and another created, so the rebuilt surface looked like the one
+# object that could be carrying a zone nothing here had ever read. The
+# measurement refutes it — this corner's zone is discarded by the compositor for
+# being anchored to a corner, on any surface it ever has (three injections, in
+# the D44 section above). A fourth `check_zone` here would have been 8 s of this
+# gate's ceiling spent on a reading that cannot come back false, which is worse
+# than no reading: it reads, in the log and in the plan, as coverage.
 
 # Where the late publisher's output goes, as a basename under the stage. Its
 # own file, and — like the late broker's and for the same reason — deliberately

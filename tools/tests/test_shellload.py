@@ -513,6 +513,117 @@ def test_the_shell_that_reserves_nothing_is_asked_the_same_question():
     )
 
 
+def window_body(shell: shells.Shell) -> str:
+    """This shell's own layer-shell window, from its declaration down.
+
+    The window, not the plates inside it: all three `shell.qml` declare their
+    `PanelWindow` at one indent under `Variants`, so its own properties are the
+    ones two spaces further in. A `visible:` on an element deeper than that is a
+    plate deciding whether it has anything to say, which is the opposite
+    question.
+    """
+    text = (ROOT / shell.root / "shell.qml").read_text("utf-8")
+    return text[text.index("    PanelWindow {") :]
+
+
+def window_visibility(shell: shells.Shell) -> str | None:
+    """The `visible:` binding on that window, or None if it has none."""
+    found = re.findall(r"^      visible: (.+)$", window_body(shell), re.MULTILINE)
+    assert len(found) <= 1, (shell.attr, found)
+    return found[0] if found else None
+
+
+def window_always_mapped(shell: shells.Shell) -> bool:
+    """Whether that window exists for as long as the shell does.
+
+    Absent is the shipped way of saying so — `PanelWindow.visible` defaults to
+    true — and the literal is the same statement written down, so both count.
+    What matters is whether the window was ever INVISIBLE, not the spelling.
+    """
+    gate = window_visibility(shell)
+    return gate is None or gate.strip() == "true"
+
+
+def window_anchors(shell: shells.Shell) -> set[str]:
+    """Which screen edges that window is anchored to."""
+    body = window_body(shell)
+    block = body[body.index("      anchors {") : body.index("      }")]
+    return set(re.findall(r"^        (\w+): true$", block, re.MULTILINE))
+
+
+# Which anchor sets sway honours an exclusive zone for: ONE edge, or an edge plus
+# both perpendicular ones. `apply_exclusive` in sway matches an anchor mask
+# against exactly those two shapes per edge and drops the zone otherwise — which
+# is why a corner-anchored surface can declare any zone it likes and take
+# nothing. Measured in both directions, and the measurements are what this list
+# rests on: see the D44 section in `tools/shellload/shells.py`.
+ZONED_ANCHORS = [
+    {"top"}, {"bottom"}, {"left"}, {"right"},
+    {"top", "left", "right"}, {"bottom", "left", "right"},
+    {"left", "top", "bottom"}, {"right", "top", "bottom"},
+]
+
+
+def test_the_only_shell_whose_zone_is_proven_is_configured_for_it():
+    """What the three zone readings are worth, as a rule rather than a
+    paragraph — and it is D54's measurement, which closed that item instead of
+    building it.
+
+    The premise D54 was raised on was that lighting the corner made the HUD's
+    reading the HUD's: D43 gave this gate real frames and D47 lights `LinkPlate`
+    with no bus, so a wl_surface of the HUD's really is mapped when the
+    compositor is asked. Three injections through the real gate say otherwise.
+    `exclusiveZone: 100` with `ExclusionMode.Normal`, unconditional, from birth:
+    every engine green, every monitor whole, on both lit runs. The same zone made
+    to appear only on the surface D52 rebuilds: green again, with the HUD's own
+    log showing the latch fire — `lit, darkenings 1 zone 100` on all three
+    monitors — while sway went on reporting them whole. And the same zone with
+    `visible: true`: green again, which is the one that says why. Mapping was
+    never the missing ingredient.
+
+    IT IS THE ANCHOR. sway honours an exclusive zone only for a surface anchored
+    to one edge or to an edge plus both perpendicular ones; this corner is
+    top+right, which is neither. `tools/hudscreens/shoot.py` found the same thing
+    from the other side and measured the opposite direction — the HUD re-anchored
+    left+right+top with `ExclusionMode.Auto` took HEADLESS-1 to 2560x880.
+
+    So `reserves_top` is a claim about a CONFIGURATION and not about a QML
+    property: this gate may call a reading a proof only for the shell whose
+    window is always mapped and whose anchors are a shape sway zones. The bar is
+    that shell. Both conjuncts are here because each was measured to matter for
+    one of these three — the anchor for the HUD, above; visibility for the
+    notifier, in D44 — and PLAN D59 is the one re-run that would separate them.
+
+    What this refuses is a `reserves_top` that drifted from the QML: a corner
+    told to reserve a strip would have its zone discarded by the compositor and
+    this gate would report three whole monitors as a PROOF that it takes
+    nothing."""
+    for shell in shells.SHELLS:
+        zoned = window_anchors(shell) in ZONED_ANCHORS
+        proven = window_always_mapped(shell) and zoned
+        assert proven == shell.reserves_top, (
+            shell.attr,
+            window_visibility(shell),
+            sorted(window_anchors(shell)),
+        )
+    # And it is the bar, alone — or the rule above is a tautology over a list
+    # with one kind of entry in it.
+    assert [s.attr for s in shells.SHELLS if s.reserves_top] == ["jv-bar"]
+    # The two that are only a control fail it for the two different reasons the
+    # D44 section states, so neither conjunct is carrying the whole rule.
+    hud = shells.hud_shell()
+    assert window_anchors(hud) == {"top", "right"}
+    assert window_anchors(hud) not in ZONED_ANCHORS
+    assert not window_always_mapped(hud)
+    # The bar's strip is the one number this gate proves, so the QML that
+    # publishes it has to be the QML that says so.
+    bar = next(s for s in shells.SHELLS if s.reserves_top)
+    assert window_anchors(bar) == {"top", "left", "right"}
+    body = window_body(bar)
+    assert "exclusionMode: ExclusionMode.Normal" in body
+    assert "exclusiveZone: surface.implicitHeight" in body
+
+
 def test_the_compositor_is_asked_over_its_own_socket():
     """`swaymsg` needs SWAYSOCK, which is a different socket from the wayland
     one and does not exist until sway has started. Without it every IPC call
@@ -605,6 +716,29 @@ def engine_load_bounds() -> dict[str, float]:
     }
 
 
+def engine_zone_readings() -> dict[str, int]:
+    """How many times each engine asks the compositor what it reserved.
+
+    COUNTED OFF THE DRIVER rather than written down here, because the count is
+    multiplied by `MAPPED_TIMEOUT_S` below: a reading added to the run and not to
+    the arithmetic is 8 s of pathological wait outside the ceiling, which is
+    exactly the hole D50 found in the load wait. A number in this file would go
+    stale the same way.
+
+    Two slices, because the engines do not share code the way they share a
+    compositor. `load()` runs once per entry in `shells.SHELLS`, so its readings
+    are each of those engines'. The blind engine's are everything from
+    `load_blind` down, which is its own three and — since D54 was measured and
+    closed rather than built — no fourth.
+    """
+    text = DRIVER.read_text("utf-8")
+    per_shell = text[text.index("def load(") : text.index("def load_blind(")]
+    blind = text[text.index("def load_blind(") : text.index("def main(")]
+    out = {shell.attr: per_shell.count("check_zone(shell,") for shell in shells.SHELLS}
+    out[shells.HUD_BLIND_LOG] = blind.count("check_zone(shell,")
+    return out
+
+
 def engine_ceilings() -> dict[str, float]:
     """The worst case of every wait ONE engine of this gate can spend.
 
@@ -629,10 +763,14 @@ def engine_ceilings() -> dict[str, float]:
     `READY_WARM_CEILING_S`. That is where the blind engine's headroom came
     from: 98 s of ceiling to 80.
     """
-    # Every engine pays for these: the load, and the three compositor readings
-    # around it (before / while / after, PLAN D44).
-    zones = shells.MAPPED_TIMEOUT_S * 3
-    out = {name: load + zones for name, load in engine_load_bounds().items()}
+    # Every engine pays for these: the load, and the compositor readings around
+    # it (before / while / after, PLAN D44), counted off the driver so the
+    # arithmetic cannot drift from the run.
+    reads = engine_zone_readings()
+    out = {
+        name: load + shells.MAPPED_TIMEOUT_S * reads[name]
+        for name, load in engine_load_bounds().items()
+    }
     base = out[shells.HUD_BLIND_LOG]
     # The frames run waits for the publisher's first round and then for the
     # corner to name ten plates. Two different waits on two different numbers
@@ -647,8 +785,8 @@ def engine_ceilings() -> dict[str, float]:
     # And the blind run is three acts: it waits out the grace, then the socket
     # and the corner going dark again (PLAN D49), then a second publisher and
     # the corner lighting back up (PLAN D52). It is this gate's most expensive
-    # engine by some way, and the next act added to it does not fit — see
-    # PLAN D53, which is where the headroom is.
+    # engine by some way, at 80 s of 100: the headroom D53 bought is still
+    # unspent, because the act D54 would have put here does not exist.
     out[shells.HUD_BLIND_LOG] = (
         base
         + shells.HUD_BLIND_TIMEOUT_S
@@ -676,6 +814,14 @@ def test_no_single_engine_can_hang_this_gate_for_minutes():
     assert sum(ceilings.values()) <= RUN_CEILING_S, ceilings
     assert RUN_CEILING_S <= ENGINE_CEILING_S * len(ceilings)
     assert 0 < shells.MAPPED_POLL_S <= 0.25
+    # And the compositor readings the arithmetic paid for are the ones the run
+    # really makes. This is the half of a ceiling that drifts silently: a reading
+    # is one line, it is 8 s of worst case, and D50's bug was exactly a wait the
+    # driver spent and the arithmetic did not know about.
+    reads = engine_zone_readings()
+    assert set(reads) == set(ceilings)
+    # Three per engine — before / while / after, PLAN D44 — for all four of them.
+    assert list(reads.values()) == [3] * len(reads), reads
     # And the frames go out faster than the plate that needs them goes stale,
     # or the ceiling above is spent waiting for a corner that keeps dimming.
     assert 0 < shells.HUD_ROUND_S <= 1.0

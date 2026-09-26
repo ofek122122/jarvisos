@@ -52,8 +52,11 @@ monitors `shells.OUTPUTS` declares — every shell builds one surface per
 delegate and call it a shell, and nothing checked. Second, PER SHELL, what it
 took off the top of each of them: `Configuration Loaded` is the root component
 built, and a `PanelWindow` whose layer-shell properties failed to attach gets
-that line too. See the D44 section in `shells.py` for which direction each
-shell's answer is a proof and which is only a refutation.
+that line too. Exactly one of the three answers is a PROOF — the bar's, whose
+window is always mapped and anchored to an edge plus both perpendicular ones,
+which is the only configuration sway zones. The other two are the control that
+makes the bar's 31 px the bar's; see the D44 section in `shells.py` for the
+injections that say so and for what still protects invariant 10.
 
 THE WAIT IS THE CENSUS. `qmlerrors.py` over an empty file reports "nothing
 threw", so a harness that started no engine would grade itself clean forever;
@@ -552,14 +555,18 @@ def load(shell: shells.Shell, stage: Path, ready: ReadyBudget) -> None:
         time.sleep(shells.HOLD_S)
         check_zone(shell, "while", up=True)
         # Said as what was measured rather than as what it implies. "Took
-        # nothing" is also true of a surface that was never created, which is
-        # what the notifier's reading still is — its `PanelWindow` is
-        # conditionally visible and a zone declared while it was invisible
-        # never reaches the compositor (the D44 section in `shells.py`). The
-        # HUD's used to be the same sentence about the same nothing and is
-        # not any more: with the frames above in it, the corner is lit on
-        # every monitor before this is asked, so a surface really is there
-        # and really does leave every screen whole (PLAN D43).
+        # nothing" is also true of a surface that was never created, and of one
+        # that exists and whose zone the compositor DISCARDED — and both of
+        # these readings are the second of those. sway honours an exclusive
+        # zone only for a surface anchored to one edge or to an edge plus both
+        # perpendicular ones; this corner is top+right, so a HUD carrying
+        # `exclusiveZone: 100` leaves all three monitors whole here — lit, on
+        # both runs, and `visible: true` as well (three injections, in the D44
+        # section in `shells.py`). So this is the control that makes the bar's
+        # 31 px the bar's and not evidence about what the corner takes. D43
+        # amended this comment to claim it had become the second, on the
+        # strength of the corner now being lit; mapping was never what was
+        # missing, and that claim was wrong.
         log(
             f"  {shell.attr}: "
             + (
@@ -627,9 +634,10 @@ def load_blind(stage: Path, ready: ReadyBudget) -> None:
         )
         # And this surface really is mapped while it says it — the plate lit,
         # so `visible: selfTest || stack.anyLit` is true and a wl_surface
-        # exists — which makes "took no space" the HUD's own reading here
-        # rather than a sentence about a window that was never created (the
-        # D44 section in `shells.py`).
+        # exists. It is still the CONTROL and not a reading about the corner's
+        # footprint, for the reason `load()` above states: a zone on a surface
+        # anchored to a bare corner is discarded by the compositor, mapped or
+        # not (measured in D54; the D44 section in `shells.py`).
         check_zone(shell, "while", up=True)
         log(f"  {shells.HUD_BLIND_LOG}: took no space off any monitor")
         # And then the bus arrives. Same quickshell, same surface, same log.
