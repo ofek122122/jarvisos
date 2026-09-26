@@ -25,7 +25,13 @@ from pathlib import Path
 
 import pytest
 
-from test_gen_theme_qml import ROOT, strip_qml_comments, theme_tokens
+from test_gen_theme_qml import (
+    ROOT,
+    hud_min_screen_height,
+    hud_surface_box,
+    strip_qml_comments,
+    theme_tokens,
+)
 
 sys.path.insert(0, str(ROOT / "tools" / "shellload"))
 import shells  # noqa: E402
@@ -206,16 +212,51 @@ def test_there_are_three_monitors_and_the_compositor_is_given_all_of_them():
     calls it a shell. D37's fault and D32's are both per-surface."""
     assert len(shells.OUTPUTS) == 3
     config = shells.sway_config()
-    for out in shells.OUTPUTS:
+    for out in shells.ALL_OUTPUTS:
         assert f"output {out['name']} mode {out['width']}x{out['height']}" in config
-    assert "WLR_HEADLESS_OUTPUTS=3" in script_text()
+
+
+def test_the_compositor_is_given_the_short_output_too():
+    """The config and the backend have to agree with each other, and neither is
+    written where the other can see it: `sway_config()` names the outputs and
+    `WLR_HEADLESS_OUTPUTS` says how many the backend makes. A config naming four
+    against a backend making three leaves the fourth unconfigured at whatever
+    size wlroots defaults to — which is a real screen, drawn on, and not the one
+    D75 added it to be."""
+    line = (
+        f"output {shells.SHORT['name']} mode "
+        f"{shells.SHORT['width']}x{shells.SHORT['height']} "
+        f"pos {shells.SHORT['x']} 0"
+    )
+    assert line in shells.sway_config(), f"the compositor is never told about {line!r}"
+    assert "len(shells.ALL_OUTPUTS)" in script_text(), (
+        "ops/ralph/shellload.sh writes its own WLR_HEADLESS_OUTPUTS instead of "
+        "asking shells.py how many outputs there are"
+    )
+    assert not re.search(r"^export WLR_HEADLESS_OUTPUTS=\d", script_text(), re.M), (
+        "ops/ralph/shellload.sh still has a literal output count in it"
+    )
+
+
+def test_the_short_output_sits_beside_the_monitors_and_not_over_one():
+    """Every output the compositor is given needs its own place in the layout,
+    or the fourth lands on top of a monitor and `check_outputs` fails on an `x`
+    nobody chose. To the RIGHT of all three, which is also what keeps it out of
+    every reading that is about ares."""
+    edges = []
+    for out in shells.ALL_OUTPUTS:
+        edges.append((out["x"], out["x"] + out["width"]))
+    edges.sort()
+    for (_, ends), (starts, _) in zip(edges, edges[1:]):
+        assert ends <= starts, edges
+    assert shells.SHORT["x"] == max(o["x"] + o["width"] for o in shells.OUTPUTS)
 
 
 def test_the_compositor_config_comes_from_the_one_place_that_declares_it():
     """The script may not write its own monitor list: a size that drifted
     between the two would make the checks be about a machine nobody ran."""
     assert "shells.sway_config()" in script_text()
-    for out in shells.OUTPUTS:
+    for out in shells.ALL_OUTPUTS:
         assert out["name"] not in "\n".join(executed_lines())
 
 
@@ -492,10 +533,15 @@ def test_the_usable_area_is_the_monitor_minus_the_strip_on_every_one():
     """Every monitor, not the first. The bar builds one surface per
     `Quickshell.screens` entry, so a strip reserved on one output and missing
     from the other two is exactly the per-surface fault D32 and D37 both
-    were."""
+    were.
+
+    Every OUTPUT since D75, which is one more than the monitors: a strip is a
+    property of the bar's surface, so the short screen is owed one too, and on
+    that output it is arithmetic rather than a decision — 31 px shorter than
+    itself, like all the rest."""
     whole = shells.usable_areas(0)
     assert whole == {
-        out["name"]: (out["width"], out["height"]) for out in shells.OUTPUTS
+        out["name"]: (out["width"], out["height"]) for out in shells.ALL_OUTPUTS
     }
     strip = shells.usable_areas(31)
     assert set(strip) == set(whole)
@@ -847,7 +893,7 @@ def test_a_shell_is_read_before_during_and_after_it_runs():
 
 
 def test_the_monitors_the_compositor_really_has_are_checked_before_any_shell():
-    """The floor under everything else. `WLR_HEADLESS_OUTPUTS=3` and the
+    """The floor under everything else. `WLR_HEADLESS_OUTPUTS` and the
     `output` lines in the config are both REQUESTS; until D44 nothing read the
     answer, and a run that got one output would have loaded one delegate per
     shell, scanned one surface's worth of log and reported that all three
@@ -1255,16 +1301,16 @@ def test_the_corner_is_read_on_every_monitor_and_not_just_somewhere():
     name and this holds the parser to answering per monitor."""
     said = "\n".join(
         shells.hud_corner_line(out["name"], shells.HUD_PLATES_LIT)
-        for out in shells.OUTPUTS[:-1]
+        for out in shells.ALL_OUTPUTS[:-1]
     )
-    for out in shells.OUTPUTS[:-1]:
+    for out in shells.ALL_OUTPUTS[:-1]:
         assert shells.hud_corner_plates(said, out["name"]) == list(
             shells.HUD_PLATES_LIT
         ), out["name"]
-    missed = shells.OUTPUTS[-1]["name"]
+    missed = shells.ALL_OUTPUTS[-1]["name"]
     assert shells.hud_corner_plates(said, missed) is None, missed
     driver = code_lines(DRIVER)
-    assert "for out in shells.OUTPUTS" in driver
+    assert "for out in shells.ALL_OUTPUTS" in driver
 
 
 def test_a_corner_that_never_spoke_is_told_apart_from_one_that_went_dark():
@@ -1305,6 +1351,137 @@ def test_the_corner_names_the_plates_and_never_what_they_say():
     # Nothing in the logged expression may reach into a plate's own content.
     for reach in ("text", "summary", "body", "transcript", "verdict", "file"):
         assert reach not in logged, reach
+
+
+# ------------------- the screen the corner does not fit on (PLAN D75)
+#
+# The fourth output, which is not a monitor. `shell/jv-hud/shell.qml` declares
+# the shortest screen its corner is for and D74 settled that as a DECLARED
+# FLOOR rather than as a clamp: on a shorter screen the compositor crops the
+# bottom of the stack, every plate is still drawn, and the shell says so in its
+# log. `tools/tests/test_gen_theme_qml.py` grades the declaration by reading
+# shell.qml, which is all a suite with no compositor can do with a file no
+# engine in this repo loads. These are the gates that make the gate itself ask
+# the question as a behaviour — the ones that do not need a compositor.
+
+
+def test_the_short_output_is_under_the_floor_the_hud_declares():
+    """The whole point of the fourth output, and the number is not this file's
+    to choose: 768 has to be under `shell/jv-hud/shell.qml`'s own floor or the
+    compositor crops nothing, the HUD says nothing, and the reading in
+    `load.py` waits three seconds to assert that a shell was quiet about a
+    screen it had no business mentioning.
+
+    The floor is read out of the shell rather than restated here, which makes
+    this the third file holding the two together: a plate that made the corner
+    taller raises the floor, and an output between the old floor and the new
+    one would make this gate green and vacuous at the same time."""
+    floor = hud_min_screen_height()
+    assert shells.SHORT["height"] < floor, (
+        f"{shells.SHORT['name']} is {shells.SHORT['height']}px and shell.qml's "
+        f"corner is {floor}px, so it is not a short screen at all and nothing "
+        "this gate reads about it can fail"
+    )
+    # And it is not one of ares', which is the care `sheet.py` takes over its
+    # own fourth output: `OUTPUTS` is the machine that exists, and three things
+    # in this file count it.
+    assert shells.SHORT not in shells.OUTPUTS
+    assert all(out["height"] >= floor for out in shells.OUTPUTS), (
+        "one of ares' monitors is now under the floor shell.qml declares — "
+        "which is a decision to reopen (D74), not a harness to adjust"
+    )
+
+
+def test_each_harness_fourth_output_asks_one_question_and_not_the_others():
+    """Two harnesses, two compositors, two fourth outputs, and they are not the
+    same experiment. `sheet.py`'s is 280 px WIDE and 1080 tall: the width
+    question (D66's clamp, which is real code), photographed. This one is 1024
+    px wide and 768 TALL: the height question (D74's floor, which is a
+    declaration and a warn), read out of a log. Each has to be clear of the
+    other's question, or a failure on one axis is reported as the other —
+    and both bounds come from the shell they are both about."""
+    corner_w, _ = hud_surface_box()
+    floor = hud_min_screen_height()
+    assert shells.SHORT["width"] >= corner_w, (
+        f"{shells.SHORT['name']} is {shells.SHORT['width']}px wide against a "
+        f"{corner_w}px corner, so it is also asking D68's width question and "
+        "a clipped sentence there would be read as a cropped stack"
+    )
+    assert sheet.NARROW["height"] >= floor, (
+        f"the screen sheet's narrow output is {sheet.NARROW['height']}px tall "
+        f"against a {floor}px corner, so it is also a short screen — and the "
+        "pictures taken of it would be pictures of a cropped corner"
+    )
+    assert sheet.NARROW["width"] < corner_w
+    # The names collide on purpose and it is the backend's doing: the fourth
+    # output of a headless wlroots is HEADLESS-4 whatever it was made for.
+    assert shells.SHORT["name"] == sheet.NARROW["name"]
+
+
+def test_the_short_screen_line_this_gate_reads_is_the_one_the_hud_writes():
+    """The copy, and the third file that holds both ends equal — the shape
+    `hud_corner_line()` already uses, because the string only exists inside a
+    running QML engine. Assembled here out of the QML's own literals, so a
+    reworded warn fails this rather than turning the reading in `load.py` into
+    a three-second wait with no explanation."""
+    body = hud_shell_text()
+    warns = re.findall(r"console\.warn\((.*?)\);", body, re.S)
+    assert len(warns) == 1, warns
+    literals = re.findall(r'"([^"]*)"', warns[0])
+    # The template, in the order the QML concatenates it: the prefix, the
+    # joiner before the screen's height, the one before the corner's, and
+    # whatever is left of the sentence. The three numbers are sentinels — this
+    # is a claim about the wording and not about the floor, which is read out of
+    # the shell by the gate above.
+    assembled = (
+        literals[0] + "HEADLESS-9" + literals[1] + "111"
+        + literals[2] + "222" + "".join(literals[3:])
+    )
+    assert shells.hud_short_screen_line("HEADLESS-9", 111, 222) == assembled, (
+        "the template in shells.py is not the one shell.qml writes: "
+        f"{shells.hud_short_screen_line('HEADLESS-9', 111, 222)!r} against "
+        f"{assembled!r}"
+    )
+
+
+def test_the_short_screen_report_is_per_output_and_reads_the_newest():
+    """A screen that changed mode under a running HUD is entitled to a second
+    verdict, and the report is per output because the news is WHICH screen. A
+    parser that answered from any line would let a warn about the short output
+    stand in for silence about a monitor — which is the absence half of the
+    reading in `load.py`, and the half no regex over shell.qml can ask."""
+    said = "\n".join(
+        [
+            "  WARN qml: " + shells.hud_short_screen_line("HEADLESS-4", 600, 826),
+            "  WARN qml: " + shells.hud_short_screen_line("HEADLESS-4", 768, 826),
+        ]
+    )
+    assert shells.hud_short_screen_report(said, "HEADLESS-4") == (768, 826)
+    assert shells.hud_short_screen_report(said, "HEADLESS-1") is None
+    assert shells.hud_short_screen_report("", "HEADLESS-4") is None
+    # Prefixed by whatever quickshell's logger puts in front of it, which is why
+    # the line is searched for rather than matched from the start.
+    bare = shells.hud_short_screen_line("HEADLESS-4", 768, 826)
+    assert shells.hud_short_screen_report(bare, "HEADLESS-4") == (768, 826)
+
+
+def test_the_short_screen_warn_is_invisible_to_the_scan_that_reads_the_log():
+    """Which is why the driver has to ASSERT it. `tools/qmlerrors.py` requires
+    a source location and one of ECMAScript's error names, so a `console.warn`
+    carrying plain prose reads clean through it — measured here rather than
+    assumed, because the whole D75 reading rests on it: if the scan DID fail on
+    this line, every run of this gate would now be red and the assertion below
+    would be the thing nobody could find."""
+    line = "  WARN qml: " + shells.hud_short_screen_line("HEADLESS-4", 768, 826)
+    assert qmlerrors.scan(line, prefix=shells.hud_shell().root) == []
+    driver = code_lines(DRIVER)
+    assert "hud_short_screen_report" in driver, (
+        "the driver no longer reads the line at all, and nothing else in this "
+        "repo can see it"
+    )
+    # Both directions: the short output has to have said it and the monitors
+    # have to have been left out of it.
+    assert "shells.SHORT" in driver and "for out in shells.OUTPUTS" in driver
 
 
 def test_the_frames_this_gate_publishes_are_the_screen_sheets_own():
@@ -1615,7 +1792,7 @@ def test_the_blind_corner_must_name_the_dark_plate_and_nothing_else():
 
 def test_every_reading_of_the_corner_is_the_same_reading():
     """One census, three callers. The way a corner is READ — newest line per
-    monitor, every monitor, exact order — is the same question whether there are
+    screen, every screen, exact order — is the same question whether there are
     ten plates on it, one, or none, and two copies of it would be two answers.
     The third caller is D49's: the same blind HUD once the bus arrives."""
     text = DRIVER.read_text("utf-8")
@@ -1724,7 +1901,7 @@ def test_the_corner_that_comes_back_is_empty_and_that_is_an_expectation():
 def test_the_empty_corner_is_only_read_after_the_hud_said_it_was_blind():
     """What makes that reading mean anything. An empty corner is also what a HUD
     that never lit a plate looks like — so this only counts because the blind
-    census has already required the NEWEST line on every monitor to be `link`,
+    census has already required the NEWEST line on every screen to be `link`,
     and `hud_corner_plates` reads the newest. Order, therefore, is load-bearing:
     the relink is inside `load_blind`, after its census."""
     text = DRIVER.read_text("utf-8")
@@ -1855,7 +2032,7 @@ def test_the_hud_that_survived_the_outage_has_to_light_a_plate_again():
 def test_the_recovered_corner_is_only_read_after_the_corner_went_dark():
     """What makes the reading mean anything, and it is D49's own argument one
     act further on. `hud_corner_plates` reads the NEWEST line, and the relink
-    census has already required that line to be `nothing` on every monitor — so
+    census has already required that line to be `nothing` on every screen — so
     ten plates here can only be a line the HUD wrote after the bus came back.
     Order is load-bearing, which is why `recover` is called from inside
     `relink` rather than being a run of its own: the broker has to still be

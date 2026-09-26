@@ -197,6 +197,56 @@ OUTPUTS = [
     {"name": "HEADLESS-3", "width": 1920, "height": 1080, "x": 4480},
 ]
 
+# ------------------------------------- the output that is not a monitor (D75)
+#
+# ares' shortest screen is 1080 px. This one is 768, and it exists to ask the
+# one thing the three above cannot: what the HUD does on an output SHORTER THAN
+# ITS OWN SURFACE.
+#
+# `shell/jv-hud/shell.qml` declares an 826 px corner, and D74 settled the
+# height question as a DECLARED FLOOR rather than as a clamp — on a screen
+# under the floor the compositor crops the bottom of the stack, every plate is
+# still drawn (a dropped plate is indistinguishable from a machine with nothing
+# to report; a cropped one is visibly cropped), and the shell SAYS SO in its
+# log. Until this output, the saying-so was graded by a regex over shell.qml in
+# `tools/tests/test_gen_theme_qml.py` — which is all a suite with no compositor
+# can do with a file no engine in this repo loads. Here it is a BEHAVIOUR: the
+# warn either arrives naming this output or it does not, and it has to be
+# absent from the three above it, which is the half no regex can ask.
+#
+# 768 rather than something dramatic, and it is the panel shell.qml's own
+# comment names: it has to be under the floor (or it asks nothing at all) and
+# tall enough that the corner is really CROPPED rather than mostly absent. A
+# 200 px output would make a better anecdote and a worse reading.
+#
+# 1024 WIDE, and that is the whole care taken over the size: it clears the
+# HUD's 300 px surface by enough that this output asks the HEIGHT question and
+# only that one. `tools/hudscreens/sheet.py`'s fourth output is the other way
+# round — 280 px wide and 1080 px tall, the width question and only that one —
+# and `test_each_harness_fourth_output_asks_one_question_and_not_the_others`
+# holds the two apart by reading the shell they are both about. Same name in
+# both, because the name is the headless backend's and the fourth output of a
+# compositor is HEADLESS-4 whatever it was made for.
+#
+# It is NOT in `OUTPUTS`, for the reason sheet.py's is not in its own: every
+# claim this file makes about a MONITOR — three surfaces from `Variants`, the
+# strip the bar reserves on each of them — is about the machine that exists,
+# and a fourth entry there would quietly make the count of ares' screens four.
+SHORT = {
+    "name": "HEADLESS-4",
+    "width": 1024,
+    "height": 768,
+    "x": sum(o["width"] for o in OUTPUTS),
+}
+
+# Every output the compositor is given, which is not every monitor. The
+# difference is load-bearing in both directions, exactly as it is in
+# `sheet.py`: `OUTPUTS` is ares, and everything that is a claim about a
+# SURFACE rather than about ares — the compositor's config, the exclusive
+# zone the bar takes, the corner the HUD docks to and what it says about the
+# screen under it — is about all four.
+ALL_OUTPUTS = OUTPUTS + [SHORT]
+
 
 def sway_config() -> str:
     """The compositor the shells are loaded on, as a config file.
@@ -211,7 +261,12 @@ def sway_config() -> str:
         # No keybindings and no decorations. There is no user in this session.
         "default_border none",
     ]
-    for out in OUTPUTS:
+    # ALL of them, monitors and not: a config naming three against a backend
+    # making four leaves the fourth at whatever size wlroots defaults to —
+    # which is a real screen, drawn on, and not the one it was added to ask
+    # about. The count the backend is given comes from `len(ALL_OUTPUTS)` in
+    # the script for the same reason.
+    for out in ALL_OUTPUTS:
         lines.append(
             f"output {out['name']} mode {out['width']}x{out['height']} "
             f"pos {out['x']} 0"
@@ -423,10 +478,16 @@ def usable_areas(reserved_top_px: int) -> dict[str, tuple[int, int]]:
     Keyed by output name and in the shape `swaymsg -t get_workspaces` reports,
     so the comparison in `load.py` is one `==` between two dicts and a failure
     can print both.
+
+    Every output the compositor has, not every monitor (D75). A strip is a
+    property of the BAR's surface and `Variants` builds one per screen, so the
+    short output is owed one exactly as the three monitors are — and this is
+    arithmetic rather than a decision: it is 31 px shorter than itself like
+    everything else.
     """
     return {
         out["name"]: (out["width"], out["height"] - reserved_top_px)
-        for out in OUTPUTS
+        for out in ALL_OUTPUTS
     }
 
 
@@ -937,6 +998,74 @@ def hud_corner_plates(said: str, monitor: str) -> list[str] | None:
         return None
     names = found[-1].split(prefix, 1)[1].strip()
     return [] if names == "nothing" else names.split(" ")
+
+
+# ------------------------------ what the HUD says about a short screen (D75)
+#
+# The other thing `shell/jv-hud/shell.qml` writes to its log, and the only
+# reading anywhere of D74's decision as a behaviour. A COPY of the QML's
+# template, like `hud_corner_line()` above and for the same reason — the string
+# exists only inside a running engine — and
+# `test_the_short_screen_line_this_gate_reads_is_the_one_the_hud_writes` holds
+# the two equal by assembling this one out of the QML's own literals.
+#
+# It is a `console.warn` and not an error, which is why this gate has to ASSERT
+# it: `tools/qmlerrors.py` requires a source location and one of ECMAScript's
+# error names, so a HUD that warned on every frame reads clean through that
+# scan whatever it said. A line nobody asserts is a line nobody has checked.
+HUD_SHORT_SCREEN = (
+    "jv-hud: {monitor} is {height}px tall and this corner is {floor}px, so "
+    "the compositor is cropping the bottom of it — every plate is still "
+    "drawn, and the bottom one is the health plate"
+)
+
+
+def hud_short_screen_line(monitor: str, height_px: int, floor_px: int) -> str:
+    """The line the HUD logs about `monitor` being under its corner's floor."""
+    return HUD_SHORT_SCREEN.format(monitor=monitor, height=height_px, floor=floor_px)
+
+
+def hud_short_screen_report(said: str, monitor: str) -> tuple[int, int] | None:
+    """(the screen's height, the corner's floor) as the NEWEST such line for
+    `monitor` reported them, or None if it never said anything about it.
+
+    The two numbers are read back rather than matched against expected ones,
+    because the floor is the one number this harness must not know: it is
+    `surface.implicitHeight` in shell.qml, a literal there on purpose (D74),
+    and a copy here would be the drift `test_gen_theme_qml.py` refuses. What
+    the driver does with the pair is assert that the height is the one the
+    COMPOSITOR was given for this output and that the floor is above it — so
+    the reading grades the shell's arithmetic without restating either.
+
+    The newest for the same reason `hud_corner_plates` reads the newest: this
+    is a per-screen binding and a monitor that changed mode under a running HUD
+    is entitled to a second verdict.
+
+    None is the failure D74 leaves room for and no regex can see — a
+    declaration whose binding is never evaluated, or a change handler nothing
+    ever calls, both of which read out of the file exactly like a working one.
+    """
+    head, rest = HUD_SHORT_SCREEN.split("{height}")
+    mid, tail = rest.split("{floor}")
+    pattern = re.compile(
+        re.escape(head.format(monitor=monitor))
+        + r"(\d+)"
+        + re.escape(mid)
+        + r"(\d+)"
+        + re.escape(tail)
+    )
+    found = [m for m in (pattern.search(line) for line in said.splitlines()) if m]
+    if not found:
+        return None
+    return int(found[-1].group(1)), int(found[-1].group(2))
+
+
+# How long the HUD is given to have said it. Short, and it is insurance rather
+# than a wait: the census above has already required every one of the four
+# surfaces to name its plates, so all four `Variants` delegates exist and their
+# bindings have run by the time this is read. Not 5.0 — see
+# `test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate`.
+HUD_SHORT_SCREEN_TIMEOUT_S = 3.0
 
 
 # ------------------------------------------- the blind HUD (PLAN D47)
