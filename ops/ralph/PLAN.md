@@ -150,18 +150,32 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       its own list (bare checkout, no Nix) and the test is the third party.
       13 mutations, all caught. Raised by it: **E14** below.
 
-- [ ] E14. **`hosts/ares/outputs.nix` declares `x` and no `y`, and three
-      things now assume the answer is 0.** `jarvis-doctor` compares only the
-      left edge of `Logical position: X, Y` and says so in a comment;
-      `tools/hudscreens/sheet.py` lays its three headless outputs out in a row
-      at y=0; and the niri rules PLAN E5 will generate have to write a `y` the
-      declaration cannot supply. A monitor mounted above another is a legal
-      layout this repo currently cannot describe, and the failure is quiet in
-      the direction that matters — the doctor would pass. Add `y` to the
-      declaration (0 on all three of ares'), spend it in the doctor's compare
-      and the sheet's layout, and delete
-      `test_the_check_does_not_claim_a_vertical_position`, which exists to go
-      red the day this is done.
+- [x] E14. **`hosts/ares/outputs.nix` declared `x` and no `y`** (779dac1).
+      Four things read that absence as a zero, not three: the doctor compared
+      only the left edge of `Logical position: X, Y`, the screen sheet
+      configured its compositor `pos {x} 0`, `shoot.py` photographed the desk
+      from a literal `0,0`, and it read each monitor's pixels out of that image
+      at a literal vertical zero. `y` is declared now (0 on all three, written
+      anyway — a zero somebody declared is a decision) and SPENT: a 6-column
+      row the doctor compares both halves of, `sway_config()` placing each
+      output at its declared corner, `DESK` as the layout's bounding box with
+      its origin, and `sheet.desk_slice(out)` for where one monitor's pixels
+      are inside a desk capture. `test_the_check_does_not_claim_a_vertical_
+      position` is deleted, as it was written to be. Two of the new tests were
+      green on a mutation first — every `y` on ares is 0 — and now run the real
+      function against a desk nobody owns.
+
+- [ ] E15. **Nothing checks that ares' declared monitors do not OVERLAP, and
+      the sheet's three do.** `test_the_monitors_are_ares_monitors` proves no
+      two of `sheet.OUTPUTS` overlap (E14), but that is a claim about the
+      headless harness; `hosts/ares/outputs.nix` itself has no such gate, and
+      with a `y` in hand two monitors can now be declared on top of each other
+      — which is a legal Nix file, a successful build, bespoke art composed for
+      both, and a doctor that PASSES if niri happens to lay them out the way
+      they were declared. The check belongs in `test_outputs.py` (pure
+      geometry, one pairwise loop) and wants a decision about GAPS, which are
+      legal and which ares has: the two 1080p panels leave 360 px of no screen
+      under them.
 
 - [x] E11. **Nothing in this repo read a pixel of the art** (774e7d1).
       `tools/artsample.py` + `tools/tests/test_artsample.py` (14 tests), called

@@ -15629,3 +15629,95 @@ is not worth chasing.)
   greeter half do too. Standing note: this branch is hand-driven in parallel,
   so check `git log` against the journal before assuming the tree is the one
   the last entry describes.
+
+## 2026-09-26 — E14: a monitor's position is both of its coordinates
+
+- **what**: `hosts/ares/outputs.nix` grew a `y` (0 on all three monitors), and
+  the four places that had been reading its absence as a zero now read the
+  declaration. `pkgs/jarvis-doctor` writes a 6-column row and `doctor.sh`
+  compares BOTH halves of niri's `Logical position: X, Y`;
+  `tools/hudscreens/sheet.py` configures its compositor at each output's
+  declared corner, computes `DESK` as the layout's bounding box (origin
+  included) and gained `desk_slice(out)`, which is where one monitor's pixels
+  are inside a desk capture; `tools/hudscreens/shoot.py` photographs the desk
+  from `DESK_X,DESK_Y` and reads each monitor's region through `desk_slice`
+  instead of `img[0 : height, x : x + width]`.
+- **why**: a monitor mounted ABOVE another is a legal desk, and this repo could
+  not describe one. The failure ran in the direction that matters — the doctor
+  read the position line and threw half of it away, so a side panel sitting a
+  screen-height too low was three PASS lines and no finding: right modes, right
+  names, a desktop whose bar and wallpaper are placed for a row of three that is
+  not a row. `y` is 0 on ares and is written anyway, because a zero somebody
+  declared is a decision and a zero nobody wrote is a guess. PLAN E5 was going
+  to have to invent one.
+- **the shape of the sheet's half**: the harness's failures were all one shape —
+  the capture is the right SIZE, so `check_grim_size` passes; numpy slicing past
+  an edge returns a SMALLER array rather than raising; `drawn_box` of an empty
+  region is None; and None is spelt "the HUD drew nothing here". A desk
+  photographed from 0,0 when the top-left monitor is elsewhere, or a region read
+  at a vertical zero, is a picture of the wrong rectangle read as earned
+  emptiness. `desk_slice` is returned rather than applied so a test with no
+  numpy can run the arithmetic itself.
+- **what the tests changed to**: `test_doctor.py` gained both sides of the new
+  claim — a panel that slid below the primary is one failure that names it, and
+  a monitor declared at y=-1080 is a layout the check can both verify and
+  REPORT (the pass has to name the position, or the green half would also pass
+  on a check that ignores the vertical entirely). It lost
+  `test_the_check_does_not_claim_a_vertical_position`, which existed to go red
+  the day this was done. `test_hudscreens.py` stopped proving the panels tile a
+  row with `x += width` — a row is one legal layout of several now — and proves
+  no two OVERLAP instead, with the note that ares' desk has 1.4 Mpx of no
+  screen at all in it (the 360 px under each 1080p panel beside a 1440p
+  primary), which is exactly why every verdict is read per monitor through
+  `desk_slice` rather than off the whole image.
+- **the two tests that were green on a mutation**: every `y` on ares is 0, so
+  `pos {x} 0` and `top = out["y"]` both survived the first falsification pass —
+  the tests were accidentally true. Both now run the real function against a
+  desk nobody owns: `monkeypatch.setattr(sheet, "ALL_OUTPUTS", [one output at
+  y=-720])` for the config, and `DESK_X/DESK_Y = -1920,-720` for the slice. That
+  is the only thing that can tell `out["y"]` from `out["y"] - DESK_Y`, and it is
+  the same trick `test_doctor.py` has used since E13 (a declaration of a monitor
+  no machine in this repo has ever had).
+- **falsified**: 11 mutations, each caught by the test whose claim it breaks —
+  the awk dropping `y = $4`, the compared row dropping its sixth field, the
+  package not writing the column, one output losing its `y`, the compositor
+  configured at a literal zero, the desk photographed from a literal corner, a
+  region read at a literal vertical zero, `desk_slice` forgetting the origin
+  (both axes and the vertical alone), and the two accidental greens above.
+  Mutations were made against a `cp` in `$TMPDIR` and restored with `cp` — never
+  `git checkout --`, for E10's reason.
+- **incidental**: `nix fmt` breaks the interpolated row across two lines now
+  that it carries a sixth field, so `test_the_generated_row_has_exactly_the_
+  columns_the_check_reads` matches `o:\s*"` rather than `o: "`. The file is
+  nixfmt-clean; there is still no formatting gate.
+- **tests**: `tools` 890 passed (was 888; +2 net — three new, one deleted).
+  `bash ops/ralph/nixtest.sh` 16 passed (its doctor case now generates the
+  6-column row and its row regex accepts a NEGATIVE coordinate, which a monitor
+  above the primary has). `bash ops/ralph/verify.sh` — 2 gates over 9 paths,
+  GREEN in 111.6 s (tools 74.2, nixtest 37.4).
+  `bash ops/ralph/hudscreens.sh`, named because sheet.py and shoot.py moved:
+  run, 206.2 s, 8 of 10 shots differed only by the compositor's rounding and
+  were restored to the committed bytes — all 10 match HEAD, nothing to commit.
+  The layout numbers did not move, so no picture should have changed, and none
+  did. build: `nixos-rebuild build --flake .#ares` green. Never tested, never
+  switched. No schema, no jv-act, no boot path, no pins touched.
+- **measured**: the built doctor exports a TSV of three 6-column rows, and run
+  live inside the niri session on ares check 5 prints `HDMI-A-1 at 2560x1440 @
+  144.006 Hz, at 0,0 in the layout`, the same for DP-1 at 2560,0 and DP-2 at
+  4480,0, plus "no output beyond the 3 this flake declares" — 4 PASS, exit 0.
+- **files**: hosts/ares/outputs.nix, pkgs/jarvis-doctor/default.nix,
+  pkgs/jarvis-doctor/doctor.sh, ops/ralph/nixtest.sh, tools/hudscreens/sheet.py,
+  tools/hudscreens/shoot.py, tools/tests/test_doctor.py,
+  tools/tests/test_hudscreens.py, tools/tests/test_outputs.py,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **E5** — it is as cheap as it will ever be: `hosts/ares/outputs.nix` now
+  carries `name`, `refresh`, `x` AND `y`, the doctor checks the live layout
+  against all four, and the screen sheet is laid out from the same list, so a
+  niri rule generated from it has three gates waiting the day it lands. Then
+  **D82**, **D79**, **D71**, **B88**, **B95**, **D63**, **D61**, **D57**,
+  **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. E6's remaining half is
+  still the frame-count MEASUREMENT and wants a compositor. **D81** is the
+  GUARDRAILS wording exit 3 needs and wants a HUMAN; **D67** and **D65**'s
+  greeter half do too. Standing note: this branch is hand-driven in parallel, so
+  check `git log` against the journal before assuming the tree is the one the
+  last entry describes.
