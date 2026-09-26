@@ -1873,14 +1873,15 @@ def check_capture(
         # it is a picture of nothing, and the assertion is worth more.
         #
         # Said out loud rather than discovered: this runs for every desk shot
-        # including the LIT ones, and on a 280 px output the BOX half of
-        # `check_corner` is vacuous — `w - SURFACE_W - INSET` is -36, so
-        # `x0 >= left` is true of anything. What still bites there is the
-        # left-inset half (D66's clamp) and the right-hand gap, which is the
-        # same pair `03-confirm-narrow.png` was taken to photograph. So on
-        # `02-heard` and `03-confirm` this is a cheap restatement of a claim
-        # the sheet already makes; on `01-quiet` it is the only place the
-        # claim is made at all.
+        # including the LIT ones, and on a 280 px output `check_corner` loses
+        # the LEFT bound of its box — `w - SURFACE_W - INSET` is -36, so
+        # `x0 < left` is true of nothing. Exactly that one bound, and the item
+        # that raised this said "the box half" when it meant it: `y1 > bottom`
+        # still holds the stack to 842 px, the right-hand gap still holds it
+        # to the inset, and D66's clamp (the `x0 < INSET - 2` below) is what
+        # replaces the bound that went. So on `02-heard` and `03-confirm` this
+        # is a cheap restatement of claims `03-confirm-narrow.png` already
+        # makes; on `01-quiet` it is the only place any of them is made.
         narrow = sheet.output_by_role("narrow")
         narrow_ppm = ppm.with_name(f"{ppm.stem}-narrow.ppm")
         capture("narrow", narrow_ppm)

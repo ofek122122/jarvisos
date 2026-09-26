@@ -1782,6 +1782,33 @@ human-reviewed step.
       nothing, and the assertion is worth more than the photograph. Raised
       **D72**.
 
+- [ ] D73. **Two of `check_corner`'s four box bounds are bounds of the
+      IMAGE, and so are vacuous on every output.** Counting them honestly for
+      D72 turned up something the narrow output has nothing to do with. The
+      box check is
+      `if x0 < left or x1 >= w or y0 < 0 or y1 > bottom`, and `drawn_box`
+      returns indices into an array `w` wide and `h` tall — so `x1 >= w` and
+      `y0 < 0` cannot be true of anything it ever returns, on any screen.
+      They read as "the HUD did not draw off the right edge" and "not above
+      the top edge", which are claims a photograph cannot make at all: a
+      plate drawn past an output's edge is CLIPPED by the compositor, and what
+      arrives in the ppm is the part that landed. So the four-term condition
+      that looks like it fences a box on all four sides really has two live
+      terms — `x0 < left` (which 280 px then takes away, leaving one) and
+      `y1 > bottom`.
+      Not a bug, and the fix is probably not to delete them: a reader who has
+      to work out that two terms are tautologies is the cost, and `x1 >= w`
+      is genuinely the right assertion the day someone passes `check_corner` a
+      REGION cut out of a wider image — which is exactly what the desk branch
+      does, where `region` is a slice and an overflow would land in the
+      neighbouring monitor's pixels rather than off the image. That may make
+      `x1 >= w` live for the three desk monitors and dead only for the
+      single-output captures, which is worth settling rather than guessing.
+      So: work out which of the four terms is live in which caller, say it in
+      the code, and if a term is dead everywhere then either delete it or
+      replace it with the claim it was standing in for — the clip. Raised by
+      D72.
+
 - [ ] D71. **The crowded corner has never met the narrow screen.** D68's
       picture is `03-confirm`: two plates, one of them capped. What D66's
       sweep was actually about is the CROWD — every plate at once, which
@@ -1795,7 +1822,7 @@ human-reviewed step.
       can make", and the honest answer may be no, in which case write that
       down next to `tst_fit.qml` and close it. Raised by D68.
 
-- [ ] D72. **The only DARK shot on the sheet is checked on three outputs of
+- [x] D72. **The only DARK shot on the sheet is checked on three outputs of
       four.** D70 closed the quiet claim for the idle probe — no frames at
       all, surface unmapped, and now the narrow output photographed for it.
       `01-quiet` is a different dark: frames ARRIVE and every plate decides
@@ -1812,6 +1839,39 @@ human-reviewed step.
       `check_corner` is vacuous at that width (`w - SURFACE_W - INSET` is
       -36) and only the left-inset half says anything — which is fine but
       should be said out loud rather than discovered. Raised by D70.
+      **Done (953b5a9).** The cheap shape, exactly as the item drew it: one
+      more 0.3 Mpx exposure in `check_capture`'s desk branch against the
+      desk's 33, sized, and the same `check_corner` over it with the shot's
+      own `lit`. No PNG — the sheet is still ten pictures — and the awkward
+      part is written into the code rather than left to be found.
+      With one correction to the item, which had it slightly wrong: at 280 px
+      `check_corner` loses the LEFT bound of its box and only that one.
+      `w - SURFACE_W - INSET` is -36 so `x0 < left` is true of nothing, but
+      `y1 > bottom` still holds the stack to 842 px, the right-hand gap still
+      holds it to the inset, and D66's clamp is what replaces the bound that
+      went. "The box half is vacuous" would have been a bigger hole than the
+      one that was there. Raised **D73** off the rest of that reading.
+      It is also now VISIBLE, which was not in the item. Every other probe in
+      that file logs its measurement and this one had no picture to point at,
+      so a green run said nothing about whether the fourth screen had been
+      looked at. It prints per shot, with the size the image came back as:
+      `HEADLESS-4 came back 280x1080 and is bare` under `01-quiet`, and
+      `draws in its corner` under `02-heard` and `03-confirm` — the two
+      verdicts are the whole claim, and a run where both said the same thing
+      would be one worth reading.
+      Three gates, graded by mutation before being trusted. The coverage one
+      is derived off `ALL_OUTPUTS` like D70's, so a fifth output photographed
+      by nobody goes red there. The second insists every image `check_capture`
+      turns into a verdict is one size check AND one corner verdict, asked
+      with `shot['lit']` rather than a literal — an exposure nobody reads is
+      a grim paid for to prove a sentence nobody said, and a hard-wired
+      `lit=True` would pass `01-quiet` with a plate on it. The third is a
+      REPLACEMENT: `test_the_two_whole_image_verdicts_size_check_before_they_
+      read` compared the first size check against the first read, and both
+      functions now take a second exposure of their own — under min-against-
+      min the second image's size check is optional, which is D70's vacuous
+      read arriving by a new door. It is now one size check per read in
+      source order. Four mutants, four reds, each in the gate that owns it.
 
 - [ ] D33. **Two copies of the HUD's box survive D16, and both are outside a
       shell.** The corner's width is one token now and both shells read it —

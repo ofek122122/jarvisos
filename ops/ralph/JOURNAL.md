@@ -14390,3 +14390,73 @@ is not worth chasing.)
   **D69**, **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**,
   **D55**, **D62**, **D71**, **D48**, **D45**. **D67** and **D65** still want
   a human.
+
+## 2026-09-26 — D72: the dark shot was a verdict about three screens of four
+
+- **built**: the second exposure `01-quiet` never had. `check_capture`'s desk
+  branch now takes a 0.3 Mpx grim of the 280 px output against the desk's 33,
+  sizes it, and runs the same `check_corner` over it with the shot's own
+  `lit` — no PNG, so the sheet is still ten pictures and one more assertion.
+- **why**: a shot's `captures` is the list of PICTURES it writes, and the
+  harness had been using it as the census of SCREENS the shot is a claim
+  about. `01-quiet` captures `["desk"]`, the desk is `sheet.OUTPUTS` in one
+  wide grim, and the narrow output sits to the right of it on purpose — so
+  `check_corner(lit=False)`, the one place in the harness where "nothing
+  drawn" is the PASS, had never run on the one screen where a plate drawing a
+  zero-height sliver or an empty rectangle of glass is most likely and least
+  visible. D70 closed the OTHER dark (no frames at all, nothing ever mapped,
+  through `check_desk_is_bare`'s own second exposure); this is the dark where
+  frames ARRIVE and every plate refuses them.
+- **the correction the item needed.** D72 was raised saying the box half of
+  `check_corner` is vacuous at that width. It is not: at 280 px the check
+  loses the LEFT bound of its box and only that one — `w - SURFACE_W - INSET`
+  is -36 so `x0 < left` is true of nothing, while `y1 > bottom` still holds
+  the stack to 842 px, the right-hand gap still holds it to the inset, and
+  D66's clamp is what replaces the bound that went. Writing "the box half is
+  vacuous" into the code would have described a bigger hole than the real one.
+  Counting the four terms honestly to say that turned up something the narrow
+  output has nothing to do with, and it is now **D73**: `x1 >= w` and
+  `y0 < 0` are bounds of the IMAGE, not of the surface, so `drawn_box` can
+  never return a box that trips either — two of the four terms in a condition
+  that looks like it fences a box on all four sides.
+- **it is also visible, which was not in the item.** Every other probe in that
+  file logs its measurement; this one has no picture to point at, so a green
+  run said nothing about whether the fourth screen had been looked at. It
+  prints per shot with the size the image came back as, and the two verdicts
+  are the whole claim: `HEADLESS-4 came back 280x1080 and is bare` under
+  `01-quiet`, `draws in its corner` under `02-heard` and `03-confirm`.
+- **three gates, and one of them a replacement.** The coverage gate is derived
+  off `ALL_OUTPUTS` the way D70's is, so a fifth output photographed by nobody
+  goes red there rather than passing quietly. The second insists every image
+  `check_capture` turns into a verdict is one size check AND one corner
+  verdict, asked with `shot['lit']` rather than a literal — an exposure nobody
+  reads is a grim paid for to prove a sentence nobody said, and a hard-wired
+  `lit=True` would pass `01-quiet` with a plate on it. The third is a rewrite
+  of `test_the_two_whole_image_verdicts_size_check_before_they_read`, which
+  compared the FIRST size check against the FIRST read: both of these
+  functions now take a second exposure of their own, so under min-against-min
+  that image's size check was optional — D70's vacuous read arriving by a new
+  door. It is now one size check per read in source order.
+- **tests**: `bash ops/ralph/verify.sh` **GREEN** — 2 gates over 4 paths,
+  130.8 s (runtests tools 62.3 s / 759 passed, hudshots 68.5 s / 16 shots
+  matching HEAD). The three gates were graded by mutation before being
+  trusted: the exposure deleted, the exposure taken and never read, its size
+  check moved after the read, and `lit` hard-wired True — four mutants, four
+  reds, each in the gate that owns the claim. Plus the gate `verify.sh` names
+  and does not run: `bash ops/ralph/hudscreens.sh` — **exit 0**, 197.0 s,
+  every probe green, all 10 shots matching HEAD (7 differing only by the
+  compositor's rounding and restored to the committed bytes), and the three
+  new narrow verdicts reading out of the log. So this commit carries no new
+  bytes in `docs/hud/screens`. The `checks` phase stayed at 1.5 s with three
+  more exposures in it, which is what 0.3 Mpx against 33 costs.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- **files**: tools/hudscreens/shoot.py, tools/hudscreens/sheet.py,
+  tools/tests/test_hudscreens.py, docs/hud/screens/README.md,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- **commit**: 953b5a9
+- next: **D73** (raised here, and the cheapest item on the board: two of
+  `check_corner`'s four box terms can never be true, and the third goes away
+  at 280 px), then **D71**, **B88**, **B95**, **D63**, **D61**, **D57**,
+  **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. **D67** and **D65**
+  still want a human.
