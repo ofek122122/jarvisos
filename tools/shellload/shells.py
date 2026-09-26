@@ -219,7 +219,7 @@ OUTPUTS = [
 # one thing the three above cannot: what the HUD does on an output SHORTER THAN
 # ITS OWN SURFACE.
 #
-# `shell/jv-hud/shell.qml` declares an 826 px corner, and D74 settled the
+# `shell/jv-hud/shell.qml` declares an 869 px corner, and D74 settled the
 # height question as a DECLARED FLOOR rather than as a clamp — on a screen
 # under the floor the compositor crops the bottom of the stack, every plate is
 # still drawn (a dropped plate is indistinguishable from a machine with nothing
@@ -684,7 +684,7 @@ def capabilities(out: str) -> list[str]:
 # whatever the state. Every plate, every state machine under it and every
 # binding that only runs on a real frame was outside this gate.
 #
-# A broker is milliseconds and eleven frames are bytes, so the whole of that is
+# A broker is milliseconds and twelve frames are bytes, so the whole of that is
 # bought for about a second of run time: `ops/ralph/shellload.sh` starts a real
 # `jarvisd` on this run's own socket, `tools/shellload/publish.py` puts the
 # frames below on it at 1 Hz, and the HUD's own read-only bridge — the one
@@ -698,16 +698,19 @@ def capabilities(out: str) -> list[str]:
 # coming here at all is the plates, so the frames are composed, which is also
 # what `tools/hudscreens/sheet.py` had to do for the same reason.
 #
-# AND THEY ARE THAT FILE'S FRAMES, restated. Eight of the eleven below are
+# AND THEY ARE THAT FILE'S FRAMES, restated. Eight of the twelve below are
 # byte-equal to a named frame in `sheet.py`, and
 # `test_the_frames_this_gate_publishes_are_the_screen_sheets_own` holds them
 # so — a third file reading both, which is what invariant 1 asks. Restated and
 # not imported for the reason `OUTPUTS` is: `sheet.py` is a declared read of a
 # 3-minute harness, and importing it would make every edit to that harness's
-# noise floor wake this gate. The three that are new are new because nothing
-# in this repo had ever composed them — jv-guard refusing a binary, jv-compat
-# failing an install, and jv-brain running out of room — so those three plates
-# had never been fed a real frame by anything.
+# noise floor wake this gate. Four are not, for two different reasons: three
+# are new because nothing in this repo had ever composed them — jv-guard
+# refusing a binary, jv-compat failing an install, and jv-brain running out
+# of room — and the fourth, jv-dictate's push-to-talk heartbeat (F5c), is
+# not because `hudscreens.sh`'s own sheet is a human-run gate this loop
+# cannot rebuild against — DictatePlate's picture is `ops/ralph/hudshots.sh`'s
+# shot 17, not this file's.
 
 # What is published, IN THIS ORDER, and the order is load-bearing in two
 # places. Both are the same shape: a plate that stops being shown when Jarvis
@@ -776,6 +779,20 @@ HUD_FRAMES = (
             },
             "notes": "microphone losing audio: jv-ears dropped 0.4s and 1 "
             "device overrun (length unknown) since start",
+        },
+    },
+    # jv-dictate, its push-to-talk key held (F5c) — a second process with
+    # the microphone open, on a well machine: this heartbeat says nothing
+    # about jv-ears above it, and DictatePlate never reads it either.
+    {
+        "topic": "sys.health",
+        "src": "jv-dictate",
+        "body": {
+            "service": "jv-dictate",
+            "state": "ok",
+            "uptime_s": 42.0,
+            "period_s": 5.0,
+            "metrics": {"recording": 1.0},
         },
     },
     # The mixer muted, from jv-context's 1 Hz snapshot. This is the frame the
@@ -942,6 +959,7 @@ HUD_PLATES_LIT = (
     "guard",
     "install",
     "mic",
+    "dictate",
     "health",
 )
 

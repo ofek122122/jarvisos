@@ -45,7 +45,7 @@ Item {
   // empty two-thirds is the point — §06's earned emptiness is a thing you
   // have to SEE to have an opinion about.
   width: 300
-  height: 826
+  height: 869
 
   // NOT the HUD. The real surface is `color: "transparent"` and floats
   // over whatever Niri has on screen; a PNG has to put something behind
@@ -732,6 +732,20 @@ Item {
       Bus.ingest('{"t":"link","up":false,"err":"connect /run/jarvis/bus.sock: No such file or directory"}');
     }
 
+    // The push-to-talk key held, off jv-dictate's own heartbeat (F5c) — and
+    // nothing else. The one shot this plate ever needs: unlike jv-ears'
+    // continuously-open device, jv-dictate's `recording` is a single number
+    // with nothing to degrade, so there is no second word for a picture to
+    // show. jv-ears' own microphone light is deliberately dark here — the
+    // two are separate processes, and a shot that lit both would look like
+    // one indicator derived from the other, which DictateState never does.
+    function shot_dictating() {
+      Bus.ingest('{"t":"link","up":true}');
+      suite.beat("jv-dictate", "ok", {
+        "recording": 1
+      });
+    }
+
     // --- the sheet ----------------------------------------------------
 
     // name -> builder, in reading order. The file names carry the order so
@@ -801,7 +815,12 @@ Item {
       // bus stated — a restart, which is only visible as an `uptime_s` that
       // went backwards. `mic` is up in the same corner because the device
       // really is open: the replacement process opened it.
-      { "file": "16-restarting.png", "build": suite.shot_restarts, "plates": ["mic", "health"] }
+      { "file": "16-restarting.png", "build": suite.shot_restarts, "plates": ["mic", "health"] },
+      // The second process that can open the microphone (F5c): the
+      // push-to-talk key, held, and nothing else on the bus. `dictate`
+      // alone and not `mic dictate` is the assertion — this shot is the one
+      // place the sheet proves the two indicators are not wired together.
+      { "file": "17-dictating.png", "build": suite.shot_dictating, "plates": ["dictate"] }
     ]
 
     function test_the_sheet() {

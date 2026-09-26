@@ -90,6 +90,10 @@ PlateStack {
     anchors.right: parent.right
   }
 
+  DictatePlate {
+    anchors.right: parent.right
+  }
+
   HealthPlate {
     anchors.right: parent.right
   }

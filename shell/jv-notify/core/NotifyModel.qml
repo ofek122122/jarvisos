@@ -54,7 +54,7 @@ QtObject {
   // AND THIS CAP IS THE FLOOR (PLAN D77) — the reason this shell declares no
   // minimum screen height and warns about no screen, where `jv-hud` does both.
   //
-  //   · The HUD asks the compositor for a FIXED 300x826 box, so a screen
+  //   · The HUD asks the compositor for a FIXED 300x869 box, so a screen
   //     shorter than that crops it. D74 settled that as a declared floor and a
   //     warn rather than a clamp, because the choice there is WHICH crop and
   //     not whether to have one.

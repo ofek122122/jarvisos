@@ -46,7 +46,7 @@ Item {
   // the sheet is a picture of the surface rather than of the stack sitting in
   // the middle of a canvas somebody chose.
   //
-  // That is the one structural difference from the HUD, whose 300x826 box is
+  // That is the one structural difference from the HUD, whose 300x869 box is
   // fixed and had to be MEASURED after a crowded corner turned out to be cut
   // in half (A63). A surface sized by its own content cannot crop its own
   // bottom plate — so there is no fit test here, and instead the shot asserts
@@ -221,7 +221,7 @@ Item {
     // THE TALLEST THIS CORNER CAN EVER BE (PLAN D77), which is a question the
     // HUD had to answer with a declared floor and this shell does not.
     //
-    // `jv-hud` asks the compositor for a FIXED 300x826 box, so on a screen
+    // `jv-hud` asks the compositor for a FIXED 300x869 box, so on a screen
     // shorter than that the corner is cropped and shell.qml says so in its log
     // (D74, and `tools/shellload/shells.py` puts a 768 px output under it to
     // hear the line). This surface is derived instead — `stack.implicitHeight

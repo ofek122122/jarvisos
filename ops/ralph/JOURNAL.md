@@ -16449,3 +16449,131 @@ backlog (Tracks F-K) is far from resolved — G through K are still entirely
   and the loop moves into Track G at G4. The comfort backlog is still far
   from resolved — H through K are entirely `[ ]` — so the loop keeps going
   per PROMPT.md STEP 5.
+
+## 2026-09-27 — dictation's HUD indicator: DictatePlate (PLAN F5c)
+
+F5c was the one item split out of F5b for scope: `jv-dictate` (F5b) already
+beats `metrics.recording` on `sys.health`, the same free-form extension
+point jv-ears' `mic_open` rides on, so nothing frozen needed to move — the
+work was entirely in `shell/jv-hud/`.
+
+- built: `shell/jv-hud/core/DictateState.qml`, mirroring `MicState.qml`'s
+  honesty rules one-for-one: "unknown" (no link, no heartbeat, a stale one,
+  or a jv-dictate too old to report the gauge) can never read as "not
+  recording". Simplified to three words instead of MicState's five —
+  `unknown`/`idle`/`recording` — because jv-dictate has one gauge and
+  nothing else to say: the key is either held or it is not, and
+  `PushToTalk.MAX_RECORDING_S` (services/jv-dictate) is what stops a stuck
+  key from becoming an open mic, not something this element has to detect.
+  `shell/jv-hud/DictatePlate.qml` mirrors `MicPlate.qml`: teal (this is YOUR
+  state, not Jarvis's — the same reasoning that keeps the mic light off
+  ember), no pulse, on screen only while `recording` is true. Wired into
+  `PlateStack` in `shell.qml` directly under `MicPlate` — a second, separate
+  standing fact about the room, never derived from the first, since
+  jv-ears' always-on VAD and jv-dictate's push-to-talk key are two
+  different processes that can each open the microphone for a different
+  reason. `tools/hudshots/scene/Corner.qml` (the copy `test_hudshots.py`
+  pins to `shell.qml`) got the same one line.
+  **Why no schema change:** `metrics` is free-form and service-local by
+  `schemas/sys.health.json` already.
+- fallout, all real and all fixed: adding an 11th plate touched five kinds
+  of cross-cutting assertion this repo carries specifically so that a new
+  plate cannot land half-wired:
+  1. `tools/gen_theme_qml.py`'s `COMPONENTS`/`CORE` tables are what
+     generates `shell/jv-hud/qmldir` and `core/qmldir` — a plate/element not
+     listed there is not a type at all to the engine or to qmllint, caught
+     immediately by `nix build .#jv-hud` failing with "DictatePlate.qml is
+     listed... but does not exist" the first time `shellload.sh` tried to
+     build it. Fixed: one line each in the two tables, then
+     `python tools/gen_theme_qml.py --shell jv-hud` to regenerate both
+     `qmldir` files.
+  2. `tools/hudshots/scene/tst_fit.qml` (PLAN A63's crowded-corner fit
+     check) measured the real growth: 794 -> 837 px. `shell.qml`'s declared
+     `implicitHeight` grew 826 -> 869 (two insets + the measured stack, per
+     D74) — not a guess, read off the test's own failure message the way
+     every growth before this one was. Propagated to
+     `tools/hudscreens/sheet.py`'s `SURFACE_H` (the real-compositor sheet's
+     own copy of the same box, held equal by
+     `test_the_surface_box_is_the_one_shell_qml_declares`) and to every
+     prose mention of the box that describes the CURRENT declaration
+     (`docs/hud/README.md`, `docs/notify/README.md`, comments in
+     `shell/jv-notify/**`, `tools/notifyshots/**`,
+     `tools/hudscreens/shoot.py`, `tools/shellload/shells.py`).
+     `docs/hud/screens/README.md` deliberately still says `300x826`: those
+     PNGs are read out of git history by `sheet.shot_surface_box()` and are
+     genuinely still 826px tall until a human re-runs
+     `ops/ralph/hudscreens.sh` — so its "pictures are older than the box"
+     notice (retired after B93, since the box and the pictures agreed) was
+     reinstated, in the exact shape
+     `test_the_readme_says_its_pictures_predate_the_box_it_quotes` requires,
+     naming F5c and DictatePlate as the reason.
+  3. `test_every_plate_in_the_shell_is_lit_in_some_shot` refuses a plate the
+     contact sheet never lights, so a new shot was needed:
+     `docs/hud/17-dictating.png` (`shot_dictating()` in
+     `tools/hudshots/scene/tst_shots.qml`) — one jv-dictate heartbeat and
+     nothing else, jv-ears' own mic light deliberately left dark, which is
+     the one picture that proves the two indicators are wired to nothing
+     but their own service.
+  4. `tools/tests/test_hudscreens.py::test_the_lossy_shot_lights_exactly_
+     the_two_plates_its_caption_names` pins the closed set of `core/*.qml`
+     elements that read `sys.health`, to prove a single jv-ears heartbeat
+     lights exactly the two plates its caption names and nothing else.
+     `DictateState` is now a sixth reader on that bus (of its OWN service,
+     `jv-dictate`, never `jv-ears`) — added to the pinned list and to the
+     per-element service check.
+  5. `tools/shellload/shells.py`'s `HUD_PLATES_LIT` gained `dictate`, and
+     `HUD_FRAMES` gained a jv-dictate heartbeat (`recording: 1.0`) so the
+     real-quickshell integration gate (`ops/ralph/shellload.sh`) actually
+     lights the 11th plate rather than merely tolerating its absence — the
+     comment counting "eight of eleven... byte-equal to sheet.py" became
+     "eight of twelve", with the fourth unmatched frame explained (it is
+     F5c's own shot 17 in the OTHER harness, not this one's to duplicate).
+- tests: `shell/jv-hud/tests/tst_dictatestate.qml` (19 cases, new — mirrors
+  `tst_micstate.qml`'s shape: nothing-known-is-unknown, the reading itself,
+  a heartbeat we cannot read is not an answer, heartbeats stop describing
+  the present). First run caught a real bug in the test itself, not the
+  element: `test_a_heartbeat_older_than_two_periods_is_not_a_reading` sent
+  an aged frame without first pinning `BusModel`'s clock offset with a
+  fresh one (`MicState`'s own test does this via `pinClock()`), so the age
+  computed was against an unpinned clock and the assertion failed — fixed
+  by adding the same `pinClock()` helper and calling it first.
+  `bash ops/ralph/qmltest.sh`: 755 passed (was 736). `bash
+  ops/ralph/runtests.sh tools`: 917 passed (was 913, after the qmldir and
+  lossy-shot fixes above — the other four then-failures were all
+  `test_hudsheet.py` comparing the dirty working tree's regenerated PNGs
+  against not-yet-committed git HEAD, which resolves by committing, per
+  the tool's own documented workflow: "look at them, commit them, and the
+  next run is green"). `bash ops/ralph/hudshots.sh`: 26/26 QML tests green,
+  wrote 17 shots (16 grew to 869px tall, 1 new), refreshed into `docs/hud/`.
+  `bash ops/ralph/notifytest.sh`/`notifyshots.sh`: green, unaffected (only
+  comment-level box mentions changed in that shell). `bash
+  ops/ralph/shellload.sh`: green — "the corner names 11 plates on every
+  screen" (was 10), and the short-screen line still names only
+  `HEADLESS-4` at the new 869px floor. `bash ops/ralph/runtests.sh
+  jv-compat`/`jv-hud-bridge`: green, unaffected (named only because they
+  read `tools/tests/test_gen_theme_qml.py`). `bash ops/ralph/nixtest.sh`:
+  51 passed, unaffected — F5c touches nothing declared in Nix.
+- build: `nixos-rebuild build --flake .#ares` → green (16 new derivations:
+  jv-hud's package and unit rebuilt for the new QML plus the system paths
+  that reference it). Never switched. No schema, no jv-act, no boot path,
+  no pins, no disko.nix touched.
+- files: shell/jv-hud/DictatePlate.qml (new),
+  shell/jv-hud/core/DictateState.qml (new),
+  shell/jv-hud/tests/tst_dictatestate.qml (new), shell/jv-hud/shell.qml,
+  shell/jv-hud/qmldir, shell/jv-hud/core/qmldir, tools/gen_theme_qml.py,
+  tools/hudshots/scene/Corner.qml, tools/hudshots/scene/tst_fit.qml,
+  tools/hudshots/scene/tst_sequence.qml, tools/hudshots/scene/tst_shots.qml,
+  tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  tools/shellload/shells.py, tools/tests/test_gen_theme_qml.py,
+  tools/tests/test_hudscreens.py, tools/tests/test_notifyshots.py,
+  tools/notifyshots/scene/tst_shots.qml, shell/jv-notify/shell.qml,
+  shell/jv-notify/core/NotifyModel.qml, docs/hud/README.md,
+  docs/hud/screens/README.md, docs/notify/README.md,
+  docs/hud/01-quiet.png..16-restarting.png (regenerated, 869px),
+  docs/hud/17-dictating.png (new), ops/ralph/HUMAN-VERIFY.md,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: Track F is now fully resolved (F1-F3 `[H]`, F4/F5 `[B]`, F5b/F5c
+  `[H]`). The loop moves into Track G at G4 (disk-space warning before the
+  Nix store fills the drive). The comfort backlog is still far from
+  resolved — H through K are entirely `[ ]` — so the loop keeps going per
+  PROMPT.md STEP 5.

@@ -2118,6 +2118,7 @@ def test_the_lossy_shot_lights_exactly_the_two_plates_its_caption_names():
             continue
         asks[path.stem] = set(re.findall(r'property string \w+: "([\w-]+)"', text))
     assert sorted(asks) == [
+        "DictateState",
         "DropState",
         "EarsBudgets",
         "HealthState",
@@ -2125,7 +2126,7 @@ def test_the_lossy_shot_lights_exactly_the_two_plates_its_caption_names():
         "OutputState",
     ], (
         f"{sorted(asks)} read sys.health now, and this shot was measured "
-        f"against five elements — a new reader may be drawing a plate the "
+        f"against six elements — a new reader may be drawing a plate the "
         "caption does not mention"
     )
     for name in ("MicState", "EarsBudgets"):
@@ -2133,7 +2134,11 @@ def test_the_lossy_shot_lights_exactly_the_two_plates_its_caption_names():
             f"core/{name}.qml no longer asks for jv-ears by name, so the "
             "beat this shot publishes may not be the one it reads"
         )
-    for name, whose in (("DropState", "jarvisd"), ("OutputState", "jv-voice")):
+    for name, whose in (
+        ("DropState", "jarvisd"),
+        ("OutputState", "jv-voice"),
+        ("DictateState", "jv-dictate"),
+    ):
         assert asks[name] == {whose} and "jv-ears" not in asks[name], (
             f"core/{name}.qml now reads a jv-ears heartbeat, so this frame "
             "lights a plate the caption does not name"

@@ -49,7 +49,11 @@
 // finish installing, which is the one thing on this bus that takes
 // minutes and the one the user walks away from; `MicPlate`
 // (A4) — whether the microphone is open, from
-// jv-ears' own capture counters; and `HealthPlate` (A6) — the services
+// jv-ears' own capture counters; `DictatePlate` (F5c) — whether jv-dictate's
+// push-to-talk key is held and its own recorder is capturing, a second and
+// deliberately separate claim from the microphone light above it, because
+// the two processes open the device for two different reasons; and
+// `HealthPlate` (A6) — the services
 // that are not well, the llm rung when the brain is on the CPU floor, and
 // (B40) how much VRAM is free under it, which is the one thing that tells
 // that rung apart from a fault.
@@ -173,11 +177,17 @@ ShellRoot {
       //
       // And again for the drop row (A75), which is not a new plate: it is
       // one 11 px row and its gap inside `HealthPlate`, so the crowd went
-      // 775 -> 794 and this is 826. Worth noting how the growth arrived,
+      // 775 -> 794 and this was 826. Worth noting how the growth arrived,
       // because it is the first one that did not come with a plate — a row
       // added to a plate that already exists costs the box exactly as much
       // per line as a plate would, and the suite is what said so rather
       // than a paragraph here guessing.
+      //
+      // And again for `DictatePlate` (F5c), which IS a new plate — the same
+      // shape as `MicPlate`, one row and one gap, and the crowd went 794 ->
+      // 837 for it, so this is 869. The suite measured it the same way: a
+      // number in a comment, checked by nothing, is exactly the state A63
+      // found this box in the first time.
       // THE WIDTH IS NOT THIS FILE'S ANY MORE (PLAN D16). It is
       // `geometry.hud_corner_px` in personality/theme.toml, because a
       // second process needs it: jv-bar leaves the top-right of its strip
@@ -192,7 +202,7 @@ ShellRoot {
       // the MEASURED total of the crowded stack above, owned by the suite
       // that measures it.
       implicitWidth: Theme.hudCornerPx
-      implicitHeight: 826
+      implicitHeight: 869
       color: "transparent"
       mask: Region {} // empty: input passes through, always
 
@@ -428,6 +438,16 @@ ShellRoot {
         // changes minute to minute, while the recording light is a
         // standing fact about the room and belongs where it can sit still.
         MicPlate {
+          anchors.right: parent.right
+        }
+
+        // Whether jv-dictate's push-to-talk key is held, from its own
+        // heartbeat (F5c). Directly under the microphone light for the same
+        // reason it sits beside it: both are standing facts about the room
+        // rather than about this moment, and this one is the SECOND process
+        // that can open the device, on a separate key rather than a wake
+        // word — never derived from MicPlate above it, and never fed by it.
+        DictatePlate {
           anchors.right: parent.right
         }
 

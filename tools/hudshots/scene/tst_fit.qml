@@ -2,7 +2,7 @@
 // widest thing it will ever draw, measured against the surface it has to fit
 // inside (PLAN A63).
 //
-// shell.qml's box is 300x826, and until this file every digit of that number
+// shell.qml's box is 300x869, and until this file every digit of that number
 // came out of an ARGUMENT about co-occurrence: LinkPlate "can never share the
 // surface, but a box sized by an argument about how other elements behave is
 // a box that clips"; ConfirmPlate and HeardPlate each wrap to three lines;
@@ -78,7 +78,7 @@ Item {
   // grew there and not here would leave this check asserting yesterday's
   // edge, which is the failure mode that makes a check worse than none.
   width: 300
-  height: 826
+  height: 869
 
   // The same corner shell.qml composes, in the same order, from the one file
   // both other drivers use.
@@ -100,7 +100,7 @@ Item {
     property int seq: 0
 
     // Every plate the shell can put up, in stack order.
-    readonly property var everyPlate: ["link", "confirm", "state", "output", "heard", "reply", "action", "guard", "install", "mic", "health"]
+    readonly property var everyPlate: ["link", "confirm", "state", "output", "heard", "reply", "action", "guard", "install", "mic", "dictate", "health"]
 
     // The one plate that excludes every other: each of the ten below gates
     // on `Bus.linkUp`, so a HUD that cannot see the bus draws this and
@@ -312,6 +312,13 @@ Item {
         "capture_stall_s": 2.0
       }, "partials behind");
 
+      // The push-to-talk key, held, off jv-dictate's own heartbeat (F5c) —
+      // a second process with the microphone open, on a well machine: a
+      // held key says nothing about whether anything else is wrong.
+      suite.beat("jv-dictate", "ok", {
+        "recording": 1
+      });
+
       // And everybody else complaining. jv-brain on the CPU floor adds the
       // two rows under the list: the rung, and the VRAM that explains it.
       suite.beat("jv-brain", "degraded", {
@@ -322,7 +329,7 @@ Item {
       for (let i = 0; i < suite.roster.length; i++) {
         const service = suite.roster[i];
         if (service === "jv-ears" || service === "jv-brain" || service === "jv-voice"
-            || service === "jarvisd" || service === "jv-act")
+            || service === "jarvisd" || service === "jv-act" || service === "jv-dictate")
           continue;
         suite.beat(service, "degraded", undefined, "impaired");
       }

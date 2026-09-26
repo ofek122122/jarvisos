@@ -38,7 +38,7 @@
 //
 // THE BOX IS DERIVED, NOT DECLARED. `implicitHeight` is the stack plus its
 // inset, so the surface is exactly as tall as what is in it. That is the one
-// structural difference from the HUD, whose fixed 300x826 box had to be
+// structural difference from the HUD, whose fixed 300x869 box had to be
 // MEASURED after a crowded corner turned out to be cut in half (A63) — a
 // surface sized by its own content cannot crop its own bottom plate, so there
 // is no equivalent of that failure here and no fit test needed to catch it.

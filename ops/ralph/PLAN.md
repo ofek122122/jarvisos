@@ -224,21 +224,78 @@ the top unchecked item unless it is blocked.
       No schema, no jv-act, no boot path, no pins, no disko.nix touched.
       `[H]` because the real key-hold-and-speak round trip needs a human at
       a keyboard and a microphone — see `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] F5c. **Dictation's HUD recording indicator**, split out of F5b for
-      scope: `sys.health`'s free-form `metrics.recording` (jv-dictate, F5b)
-      is ready to read, the same way `MicState.qml` already reads jv-ears'
-      `mic_open`, but wiring a NEW plate into `shell/jv-hud/` touches the
-      generic, exacting cross-plate conformance suite in
-      `tools/tests/test_gen_theme_qml.py` (1600+ lines, asserts things like
-      "every `*Plate.qml` declares `plateName`" and colour/motion rules
-      across every plate at once) — real work, deserving its own iteration
-      rather than a rushed addition riding in on F5b's much larger diff.
-      Gate: a new `core/DictateState.qml` + `DictatePlate.qml` pair mirroring
-      `MicState.qml`/`MicPlate.qml`'s honesty rules (unknown/stale heartbeat
-      never reads as "not recording"), a `tst_dictatestate.qml` test, wired
-      into `PlateStack` in `shell.qml` (which auto-discovers children — no
-      other file needs to change), plus whatever `test_gen_theme_qml.py`
-      and `tst_fit.qml`'s roster/floor checks then ask for.
+- [H] F5c. **Dictation's HUD recording indicator**, split out of F5b for
+      scope. DONE (this commit): `shell/jv-hud/core/DictateState.qml` reads
+      jv-dictate's `sys.health` heartbeat (`metrics.recording`, F5b) with the
+      exact honesty rules `MicState.qml` already follows for jv-ears —
+      "unknown" (no link, no heartbeat, a stale one, or a jv-dictate too old
+      to report the gauge) is never allowed to read as "not recording" —
+      simplified to three words instead of MicState's five, because
+      jv-dictate has nothing to distinguish beyond held/not-held (no stall,
+      no loss counters: the key either has audio flowing or it does not, and
+      `PushToTalk.MAX_RECORDING_S` is what stops a stuck key, not something
+      this element has to detect). `DictatePlate.qml` mirrors `MicPlate.qml`
+      one-for-one: teal (YOUR state, not Jarvis's), no pulse, on screen only
+      while `recording` is true — `idle` and `unknown` are both silence, the
+      same decision `MicPlate` makes for `off`/`unknown`. Wired into
+      `PlateStack` in `shell.qml`, directly under `MicPlate` (a second,
+      separate standing fact about the room, never derived from the first),
+      and into `tools/hudshots/scene/Corner.qml` the same way, one line each.
+      **No schema change**: `metrics` is free-form and service-local
+      already.
+      Tests: `shell/jv-hud/tests/tst_dictatestate.qml` (19 cases, mirroring
+      `tst_micstate.qml`'s shape: nothing-known-is-unknown, the reading
+      itself, a heartbeat we cannot read is not an answer, heartbeats stop
+      describing the present). `bash ops/ralph/qmltest.sh`: 755 passed (was
+      736). `tools/gen_theme_qml.py`'s `COMPONENTS`/`CORE` tables grew one
+      line each (a plate/element not registered in the generated `qmldir` is
+      not a type at all to the engine or qmllint — caught immediately by
+      `nix build .#jv-hud` failing with "DictatePlate.qml is listed... but
+      does not exist" until `python tools/gen_theme_qml.py --shell jv-hud`
+      was re-run). `tools/hudshots/scene/tst_fit.qml` (the crowded-corner fit
+      check, PLAN A63): adding an 11th plate grew the measured corner 794 ->
+      837 px, so `shell.qml`'s declared `implicitHeight` grew 826 -> 869 (two
+      insets + the measured stack, per D74) — propagated to
+      `tools/hudscreens/sheet.py`'s `SURFACE_H` (the real-compositor sheet's
+      own copy of the same box, cross-checked by
+      `test_the_surface_box_is_the_one_shell_qml_declares`) and to every
+      prose mention of `300x826` that describes the CURRENT box (`docs/hud/
+      README.md`, `docs/notify/README.md` and comments in
+      `shell/jv-notify/**`, `tools/notifyshots/**`, `tools/hudscreens/
+      shoot.py`) — `docs/hud/screens/README.md` deliberately still says
+      `300x826`, because those PNGs are last-rendered-by-git-history and
+      genuinely are still 826 tall until a human re-runs
+      `ops/ralph/hudscreens.sh` (a reinstated "pictures are older than the
+      box" notice, in the shape `test_the_readme_says_its_pictures_predate_
+      the_box_it_quotes` requires, says so). A new shot,
+      `docs/hud/17-dictating.png` (`shot_dictating()` in `tst_shots.qml`,
+      one jv-dictate heartbeat and nothing else — jv-ears' own mic light
+      deliberately dark, proving the two indicators are wired to nothing but
+      their own service), because `test_every_plate_in_the_shell_is_lit_in_
+      some_shot` refuses a plate the sheet never lights. `tools/tests/
+      test_hudscreens.py::test_the_lossy_shot_lights_exactly_the_two_plates_
+      its_caption_names` needed `DictateState` added to its pinned list of
+      "elements that read sys.health" (now six) and to the check that each
+      reads its OWN service by name, not jv-ears' — real, since
+      `DictateState.qml` is now a sixth reader on this bus, and this shot's
+      whole claim is that a single jv-ears heartbeat lights exactly two
+      plates and no others.
+      `bash ops/ralph/runtests.sh tools`: 917 passed (was 913). `bash
+      ops/ralph/hudshots.sh`: 26/26 QML tests green, 17 shots written (16
+      grew to 869px tall, 1 new); refreshed into `docs/hud/`.
+      `bash ops/ralph/shellload.sh`: green — "the corner names 11 plates on
+      every screen" (was 10); `tools/shellload/shells.py`'s `HUD_PLATES_LIT`
+      gained `dictate` and `HUD_FRAMES` a jv-dictate heartbeat (a 12th
+      frame, `recording: 1.0`, alongside the 8 byte-shared with
+      `hudscreens/sheet.py` and the 3 already-new ones). `bash
+      ops/ralph/nixtest.sh`: 51 passed, unaffected (F5c touches nothing
+      declared in Nix). `nixos-rebuild build --flake .#ares`: green (16 new
+      derivations, jv-hud's package rebuilt for the new QML). No schema, no
+      jv-act, no boot path, no pins touched.
+      `[H]` because seeing the plate actually light up needs a human holding
+      the real Pause key at a real machine — see `ops/ralph/HUMAN-VERIFY.md`.
+      Track F is now fully resolved (F1-F3 `[H]`, F4/F5 `[B]`, F5b/F5c
+      `[H]`); the loop moves to Track G at G4.
 
 ### Track G — system comfort
 - [H] G1. **Bluetooth.** DONE (this commit): `modules/bluetooth.nix` declares

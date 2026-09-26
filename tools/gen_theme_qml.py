@@ -137,6 +137,7 @@ SINGLETONS = (
 COMPONENTS = (
     ("StatePlate", "StatePlate.qml"),  # what Jarvis is doing, on screen (A3)
     ("MicPlate", "MicPlate.qml"),  # the live-microphone indicator (A4)
+    ("DictatePlate", "DictatePlate.qml"),  # push-to-talk dictation recording (F5c)
     ("HealthPlate", "HealthPlate.qml"),  # what is wrong, when anything is (A6)
     ("ConfirmPlate", "ConfirmPlate.qml"),  # the question awaiting a yes/no (A20)
     ("LinkPlate", "LinkPlate.qml"),  # the HUD saying it cannot see the bus (A23)
@@ -160,6 +161,7 @@ CORE = (
     ("BusModel", "BusModel.qml"),  # the bus state machine, minus Quickshell
     ("SpeechState", "SpeechState.qml"),  # what is Jarvis doing? (A3)
     ("MicState", "MicState.qml"),  # is the microphone open? (A4)
+    ("DictateState", "DictateState.qml"),  # is push-to-talk dictation recording? (F5c)
     ("HealthState", "HealthState.qml"),  # is anything wrong with Jarvis? (A6)
     ("ConfirmState", "ConfirmState.qml"),  # is Jarvis waiting on a yes/no? (A20)
     ("LinkState", "LinkState.qml"),  # can the HUD see the bus at all? (A23)

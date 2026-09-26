@@ -8,7 +8,7 @@ and commit the diff.
 
 This is the companion to [`../README.md`](../README.md), and the two
 answer opposite questions. That sheet renders the plates with a plain QML
-engine into the 300x826 rectangle the surface declares: the HUD's
+engine into the 300x869 rectangle the surface declares: the HUD's
 **content**, at a size you can read, and it has to disclaim everything a
 compositor owns. These are **screens** — the whole desktop, all three of
 them, with the HUD where it actually lands on it.
@@ -28,19 +28,26 @@ and `DP-1`/`DP-2`. Nothing here can tell you whether an 11 px label is
 comfortable from where you actually sit — only how much of the screen it
 takes and where.
 
-One thing that used to be not real here is **age**. The surface these
-plates are drawn into grew five times over five plates while the PNGs sat
-still, and for most of a hundred iterations a paragraph in this spot
-existed to say so, with both numbers derived rather than typed so that it
-could not itself go stale. It is gone because what it described is gone:
-every screen below is the HUD the harness photographs today, and the
-notice was written to be **retired** by that rather than updated.
+Also not real, and this one is about time rather than hardware: the
+pictures are **older than the box**. Every PNG here was photographed
+against a `300x826` surface, and `shell.qml` now declares `300x869` — the
+box grew once after these were taken, for `DictatePlate` (F5c), a plate
+that did not exist yet. Nothing in a shot is wrong; each was true of the
+HUD on the day it was taken, and the measurements below were made against
+the box of that day. But the HUD you would photograph today is taller
+than the one in these pictures, and the newest plate is in none of them.
+Re-shooting needs a compositor and therefore a human at ares (PLAN A73 —
+the same seat A47 and A55 are waiting for). Both numbers in this
+paragraph are derived by `tools/tests/test_hudscreens.py`: today's from
+`tools/hudscreens/sheet.py`, the pictures' from the commit that last
+wrote a PNG here. So this paragraph cannot itself go stale, and a
+re-shoot deletes it rather than updating it.
 
-What keeps it that way is not a promise. Every run re-takes all of these
-and compares each one against the bytes committed here, under the measured
-floor described below; a picture that had stopped being the HUD would end
-the run nonzero and name itself, rather than sitting in this directory
-looking as finished as the others (B74).
+What keeps the rest of this honest is not a promise. Every run re-takes
+all of these and compares each one against the bytes committed here,
+under the measured floor described below; a picture that had stopped
+being the HUD would end the run nonzero and name itself, rather than
+sitting in this directory looking as finished as the others (B74).
 
 The desktop behind the HUD is flat `#31353B`, deliberately **not** a
 `personality/theme.toml` colour, so the paper can never be mistaken for

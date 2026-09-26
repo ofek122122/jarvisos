@@ -11,6 +11,7 @@ MotionPolicy 1.0 MotionPolicy.qml
 BusModel 1.0 BusModel.qml
 SpeechState 1.0 SpeechState.qml
 MicState 1.0 MicState.qml
+DictateState 1.0 DictateState.qml
 HealthState 1.0 HealthState.qml
 ConfirmState 1.0 ConfirmState.qml
 LinkState 1.0 LinkState.qml

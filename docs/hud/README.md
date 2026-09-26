@@ -12,7 +12,7 @@ something to look at without sitting at the machine.
 
 ## What you are looking at
 
-Each PNG is **one HUD surface, at its real size** — 300 × 826 px, the box
+Each PNG is **one HUD surface, at its real size** — 300 × 869 px, the box
 `shell.qml` asks the compositor for, anchored top-right. The empty two thirds
 is not a crop artifact; it is §06's earned emptiness, and it is most of what
 this HUD looks like most of the time.
@@ -443,11 +443,12 @@ Adding `ReplyPlate` (shot 14, PLAN A71) moved the measurement again: the
 crowd was **775 px** and the surface **807**. Adding the drop row (PLAN A75)
 moved it once more, and this time without a plate: one 11 px row inside
 `HealthPlate`, saying that the bus threw frames away, makes the crowd **794
-px** and the surface **826**. That is worth reading alongside A70, which asks
-whether a corner that tall should exist at all — it is now well past half a
-1440p screen, and neither change answered the question. What the second one
-adds to it is that a row is not cheaper than a plate: per line, the box pays
-the same.
+px** and the surface **826**. Adding `DictatePlate` (shot 17, PLAN F5c) moved
+it again: the crowd is now **837 px** and the surface **869**. That is worth
+reading alongside A70, which asks whether a corner that tall should exist at
+all — it is now well past half a 1440p screen, and neither change answered
+the question. What the second one adds to it is that a row is not cheaper
+than a plate: per line, the box pays the same.
 
 **It is not the sequence A61 assumed, and finding that out is most of what
 this shot bought.** The obvious story is a refusal and a retry: jv-guard
@@ -698,6 +699,31 @@ running and answering, which is what `degraded` names, and a list three lines
 deep would otherwise push a jv-voice that cannot reach the speakers off the
 plate for a jv-ears that crashed once at boot. A service with something worse
 to say keeps its own word.
+
+### 17 — dictating
+
+![17-dictating.png](17-dictating.png)
+
+**On screen:** `dictate`
+
+`composed` — one `sys.health` heartbeat from jv-dictate (PLAN F5c) saying
+`metrics.recording: 1`, and nothing else. jv-ears' microphone light is
+deliberately dark here: push-to-talk dictation is a second process that can
+open the device, on its own key rather than a wake word, and this shot is
+the one place the sheet proves the two indicators are wired to nothing but
+their own service — `DictatePlate` never reads `MicPlate`'s state, and this
+picture would look identical if jv-ears were degraded, dead, or had never
+run at all.
+
+**Why there is only one shot.** `core/MicState.qml` decides between five
+words because a single continuously-open device can fail several ways;
+`core/DictateState.qml` decides between three, and only one of them
+(`recording`) ever reaches a screen — `idle` and `unknown` are both silence,
+the same decision `off` and `unknown` are for the microphone. There is no
+second word for a picture to show: the push-to-talk key is either held or it
+is not, and `services/jv-dictate/jv_dictate/ptt.py`'s own hard cap
+(`MAX_RECORDING_S`) is what stops a stuck key from becoming an open mic,
+not something this plate has to detect and draw.
 
 ## Regenerating
 

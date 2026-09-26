@@ -389,8 +389,8 @@ def test_the_plate_that_can_overflow_is_bound_and_the_sheet_asks_it_to():
 # The one question about this surface that the HUD had to answer the opposite
 # way, and the reason this shell has no declared floor and no warn.
 #
-# `jv-hud` asks the compositor for a FIXED 300x826 box, so a screen shorter
-# than 826 crops it; D74 declared that floor in shell.qml and made the shell
+# `jv-hud` asks the compositor for a FIXED 300x869 box, so a screen shorter
+# than 869 crops it; D74 declared that floor in shell.qml and made the shell
 # SAY SO in its log, and D75 put a 768 px output under `ops/ralph/shellload.sh`
 # to hear the line arrive. This shell's surface is DERIVED — shell.qml asks for
 # `stack.implicitHeight + inset*2` — so "does it fit" is not a property of the

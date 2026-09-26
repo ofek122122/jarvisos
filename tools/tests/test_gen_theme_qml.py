@@ -1391,7 +1391,7 @@ def test_the_hud_says_when_a_screen_is_shorter_than_the_corner_it_declares():
     expr = " ".join(short.group(1).split())
     assert "surface.modelData.height < surface.minScreenHeightPx" in expr, (
         "the comparison has to be the OUTPUT's height against the floor: this "
-        "surface is granted the 826 px it asks for on a 700 px screen exactly "
+        "surface is granted the 869 px it asks for on a 700 px screen exactly "
         f"as it is granted 300 px on a 256 px one, so its own is not the "
         f"question: {expr}"
     )

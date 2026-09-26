@@ -197,7 +197,7 @@ SHELL_ROOT = "shell/jv-hud"
 # silently stopped working, and it would look perfectly fine in a picture
 # nobody measured.
 SURFACE_W = 300
-SURFACE_H = 826
+SURFACE_H = 869
 INSET = 16
 
 

@@ -220,7 +220,7 @@ taller. The reading is the PNG's own **height, 470 px**.
 
 That number is the reason this shell declares no minimum screen height and
 warns about no screen, where `jv-hud` does both. The HUD asks the compositor
-for a *fixed* 300x826 box, so a screen shorter than 826 crops it, and
+for a *fixed* 300x869 box, so a screen shorter than 869 crops it, and
 `shell/jv-hud/shell.qml` says so in its log. This surface is *derived* —
 `stack.implicitHeight + inset·2` — so the question is not whether it fits a
 screen but how tall the stack can get, and that is bounded twice: by
