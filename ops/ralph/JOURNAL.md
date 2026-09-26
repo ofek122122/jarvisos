@@ -14049,3 +14049,105 @@ is not worth chasing.)
   **D55**, **D62**, **D48**, **D45**. **D65** is raised here too but wants a
   human: whether a bar that can never draw anything on an output should
   still take 31 px of it is a question about what a bar IS.
+
+## 2026-09-26 — D66: the corner had never been told what screen it was on
+
+- **what**: the HUD's six capped plates now narrow their text to the room the
+  surface really has, `core/PlateFit.qml` is the rule, and `tst_fit.qml` asks
+  the question at nine surface widths instead of one.
+- **why**: D35 did the BAR's side of a narrow output; the HUD is the other
+  process in that corner and nothing had ever asked. D66's own premise was off
+  by an inset — it read the corner as 300 px + `insetPx` against a 320 px
+  screen, but that inset is INSIDE the surface (shell.qml says so in as many
+  words) and the 316 belongs to the bar's reserve. At 320 px the HUD fits with
+  20 px to spare, so on the item's own numbers there was nothing to find.
+- **what was actually there was worse.** The plates did not care about the
+  surface at all. Measured with a throwaway probe at thirteen widths from 300
+  px down to 32, before any of this existed: `confirm=260` at EVERY width,
+  identical to the pixel. On a 32 px screen that is 228 px of a question
+  jv-act is waiting on an answer to, laid out where the screen is not. There
+  was no width at which the corner noticed, because nothing in the HUD had
+  ever been handed a number to compare itself against — every scene driver
+  renders into `hud_surface_box()`, which is the token and never a screen.
+- **the rule is a file, and the reason is D35's.** `PlateFit.textPx(declared,
+  room, pad)` is three lines, and it earns its own file because ZERO and
+  NOBODY-HAS-SAID must not be spelled the same: `Math.min(cap, room - pad*2)`
+  answers both with a negative, and one of them means draw nothing while the
+  other means draw everything (a plate that elided in the first frame of every
+  session, before its surface was configured, would be hiding the news to
+  protect a margin). `tests/tst_platefit.qml`, 12 checks, written red first
+  (`PlateFit is not a type`), including a 440-step sweep for "never below zero
+  and never above the cap" and a monotonicity check.
+- **and the surface got that wrong first, which the driver caught.** With a
+  bare subtraction the 1 px surface reported -31 px of room — read as
+  unmeasured — so the crowd went back to a 260 px confirmation plate and the
+  NARROWEST screen in the sweep drew the most. Exactly D35's bug, one process
+  over; `core/RowFit.qml` already says "the two must not be spelled the same,
+  which is why the surfaces clamp", and nothing had made the HUD read its own
+  neighbour. Both surfaces clamp now, and both keep zero distinct from
+  unconfigured (`surface.width > 0`).
+- **nothing is hidden, ever**, and that is the one place this diverges from
+  the bar. RowFit may DROP a workspace name because the row ranks them — the
+  desk you are on beats three you are not. A plate has no ranking, and the one
+  that would go is as likely to be the failed action as the recording light,
+  which is the precise bug `PlateStack` exists to kill. So the text elides to
+  the room and the plate keeps its label.
+- **the floor is 237 px and is measured, not chosen.** At 237 the widest thing
+  on the crowded corner is still a capped plate; at 236 it becomes
+  `HealthPlate` at 204.5 px, which has no `maxTextPx` at all because every row
+  on it is a real service name beside a word out of a frozen enum. 204.5
+  between two 16 px insets is 236.5, and a surface cannot have half a pixel.
+  `test_the_floor_is_the_widest_row_no_plate_can_narrow` pins it, so a row
+  added to that plate or a tenth service with a longer name moves a number
+  something is watching. What to DO below the floor is D67 and wants a human.
+- **three third-party gates, because the half that matters has no engine.**
+  `test_every_capped_plate_is_handed_the_room_it_has` (equality both ways,
+  over shell.qml AND Corner.qml — a plate that gains a cap and misses either
+  clips exactly as before, and the fit driver builds Corner.qml so it cannot
+  say so); `test_no_capped_plate_measures_its_text_against_the_cap_alone` (300
+  px is the width at which `maxTextPx` and `textPx` are equal, so a plate that
+  reverted would pass every existing check); and
+  `test_the_hud_surface_measures_the_room_its_plates_have`, a TEXT pin, added
+  only after a mutation removing shell.qml's clamp **survived every suite in
+  the repo** — shell.qml is the Quickshell half, nothing in this tree loads
+  it, and `mutate.sh` said so out loud ("the suite reads it — it never runs
+  it").
+- **the gate went red for a reason worth writing down**: `shellload.sh` failed
+  with `PlateFit.qml is listed as component in core/qmldir but does not
+  exist`. The file was written and the generator had registered it; it was
+  UNTRACKED, and a flake only sees what git does. Four suites over that same
+  tree were green — the one gate that builds a derivation was the one that
+  could tell.
+- **nothing moved at any width a real monitor has.** All 16 contact-sheet
+  shots byte-identical, and `hudscreens.sh` — named by the gate, run, 198.3 s
+  — came back with all 9 compositor screens matching HEAD on 2560x1440 and
+  1920x1080. That is the claim "this is a no-op on ares" being made by two
+  harnesses rather than by this paragraph.
+- 8 mutations, 8 caught: 3 on PlateFit via `mutate.sh --runner qml hud` (zero
+  re-spelled as the cap; the unmeasured branch folded into the clamp; the
+  padding paid once), 3 on the plates and the harness clamp via `--runner
+  shots hud` (a Text back on the declared cap; the bare subtraction; one
+  capped plate left out of the wiring), 2 on shell.qml's clamp via `--runner
+  tests tools` (the clamp removed; the output's width never asked).
+- tests: `bash ops/ralph/verify.sh` **GREEN** — 6 gates over 15 paths, 198.9
+  s: jv-compat, jv-hud-bridge, tools 747 pass, qmltest 734 pass, hudshots 26
+  driver assertions + 16 shots read back against HEAD, shellload 4 runs. Plus
+  `hudscreens.sh`, 9 screens, all matching. build: `nixos-rebuild build
+  --flake .#ares` green. No schema change, no jv-act, no boot path, no pins.
+  Never tested, never switched.
+- files: shell/jv-hud/core/PlateFit.qml, shell/jv-hud/core/qmldir,
+  shell/jv-hud/tests/tst_platefit.qml, shell/jv-hud/shell.qml,
+  shell/jv-hud/{Link,Confirm,Heard,Action,Guard,Install}Plate.qml,
+  tools/gen_theme_qml.py, tools/hudshots/scene/Corner.qml,
+  tools/hudshots/scene/tst_fit.qml, tools/tests/test_gen_theme_qml.py,
+  tools/tests/test_hudshots.py, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D68** (raised here — the same claim through a real compositor: a
+  third headless output of 280 px in `hudscreens/shoot.py`, which is the only
+  thing that has ever observed what wlroots really configures a too-wide
+  layer surface with; the awkward half is `sheet.py`'s `SURFACE_W`, read out
+  of git on purpose), then **B88** (the whole-repo reader census, measured 0
+  unread, a green test waiting to be written), then **B95**, **D63**,
+  **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D48**, **D45**.
+  **D67** is raised here too and wants a human, beside **D65**: both are
+  questions about what a surface owes a reader on a screen too small for it,
+  and D67's is specifically about the one plate that reports faults.
