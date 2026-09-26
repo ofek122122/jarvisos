@@ -197,18 +197,54 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       which now stops `nixos-rebuild build`.
       Raised by it: **E16** below.
 
-- [ ] E16. **`x` and `y` are integers by nobody's check.** `width` and
-      `height` have a named refusal in `pkgs/jarvis-wallpaper` (E10: a quoted
-      "1920" renders fine and then stops de-duplicating two identical panels),
-      and the position has none. Before E15 a quoted `x = "2560"` was invisible
-      — `toString` produced the same TSV row — and now it is an error, but the
-      wrong kind: Nix says "cannot add a string to an integer" from inside the
-      overlap arithmetic, naming no output and no file. The fix is the same
-      shape as the wallpaper's, in `pkgs/jarvis-doctor` where the position is
-      spent: one throw naming the entry, and a `nixtest.sh` probe. Note also
-      what is deliberately NOT checked: a layout may be DISCONNECTED (a monitor
-      declared at x=9000 with nothing beside it is legal and E15's gate accepts
-      it), because a desk is any arrangement of rectangles that do not collide.
+- [x] E16. **The row check 5 compares was typed by nobody** (45aebb3). Raised
+      as "`x` and `y` are integers by nobody's check", and the defect turned out
+      to be one column wider and one kind worse than a quoted string: the
+      expectation is a TSV of STRINGS and `toString 2560.0` is `2560.000000`, so
+      `x = 2560.0` — the RIGHT position, written as a float — passes E15's
+      overlap arithmetic (floats add and compare like ints), BUILDS, and makes
+      the doctor report a monitor that is exactly where it was declared as
+      misplaced on every boot. `name = ""` builds too and makes check 5 tell two
+      lies at once (no live output matches it, and the extra-outputs arm keys its
+      want-set on the empty string, so every live monitor becomes undeclared).
+      The quoted `x` and the unquoted `refresh` were already errors, of the wrong
+      kind: "cannot coerce an integer to a string: 1920", a number from another
+      field of another entry, naming no output and no file.
+      **So the refusal is over the ROW, not over the position**: six columns in
+      the order the row writes them, each with the kind of value it must be,
+      fired from inside `declared` and BEFORE the overlap check — a mangled
+      position must not be arithmetic somebody measures a desk with first. Every
+      faulted entry and every bad field of each, at once (a refusal that stops at
+      the first is a rebuild per typo), each value shown WITH its type, because
+      `"2560"`, `2560.0` and absent are three different typos. Deliberately NOT
+      refused: a value that is merely wrong. `x = 2561` is the disagreement check
+      5 exists to report, and a DISCONNECTED layout is still legal.
+      Third gate, third finding: `test_outputs.py`'s parser called `int()` on
+      every number, so a declaration carrying this defect killed TWELVE tests
+      across four suites with "invalid literal for int() with base 10: '2560.0'"
+      — including the one test written to catch it. It keeps floats as floats now
+      (rounding would report a declaration that is correct), refuses a value it
+      cannot read rather than falling through, and reads a NEGATIVE coordinate at
+      all: the monitor-above-the-primary layout E14 gave this file a `y` FOR was
+      a file this parser rejected as unreadable.
+      12 mutations, 12 caught; a float `x` now stops `nixos-rebuild build`.
+      Raised by it: **E17** below.
+
+- [ ] E17. **The declaration's schema is checked by the doctor alone, and one
+      consumer does not read it.** E16 typed the six columns in
+      `pkgs/jarvis-doctor` because that is where they are SPENT as strings, and
+      `pkgs/jarvis-wallpaper` types `width`/`height` for its own reason (E10:
+      de-duplication). Neither knows about the other, and the sheet's list
+      (`tools/wallshots/outputs.nix`) reaches only the wallpaper — so a canvas
+      declared `width = 2560.0` there is refused, but a canvas declared
+      `name = ""` or `refresh = 144.006` is not, because nothing composes with
+      those. That is defensible (an entry is typed by the package that spends the
+      field) and it is currently an accident rather than a decision: no file says
+      which fields are the DECLARATION's law and which are one consumer's. The
+      work is to write that down where both packages can be held to it, and to
+      decide whether a shared `lib/outputs.nix` is worth the import — a `let`
+      every consumer can bypass was refused in E15 for the file, and this would
+      be a function, which is not the same thing.
 
 - [x] E11. **Nothing in this repo read a pixel of the art** (774e7d1).
       `tools/artsample.py` + `tools/tests/test_artsample.py` (14 tests), called

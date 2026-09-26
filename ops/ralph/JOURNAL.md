@@ -15807,3 +15807,98 @@ is not worth chasing.)
   **D65**'s greeter half do too. Standing note: this branch is hand-driven in
   parallel, so check `git log` against the journal before assuming the tree is
   the one the last entry describes.
+
+## 2026-09-26 — E16: every field the doctor compares is a value niri could print
+
+- **what**: `pkgs/jarvis-doctor` now refuses a declaration whose row check 5
+  cannot compare (+110 lines: a six-column schema, `shown`, `named`, `faults`,
+  and a throw inside `declared` ahead of E15's overlap arm).
+  `ops/ralph/nixtest.sh` (+2 cases, 20) provokes it against the real flake by
+  overriding the package's `outputs`; `tools/tests/test_doctor.py` (+2, 26) asks
+  the ORDER and holds the column list to the row's own interpolations;
+  `tools/tests/test_outputs.py` (+2, and a fixed parser) reads a float as a
+  float; `hosts/ares/outputs.nix` says in prose where its own schema gate lives.
+  tools collects 900 (was 896).
+- **why, and it is one column wider and one kind worse than the item said**:
+  E16 was raised as "`x` and `y` are integers by nobody's check", expecting the
+  quoted `x = "2560"` E15 had turned into an opaque error. The real defect is
+  the FLOAT. Check 5's expectation is a TSV of STRINGS and `toString 2560.0` is
+  `2560.000000`, so `x = 2560.0` — the right position, typed with a decimal
+  point — passes the overlap arithmetic (floats add and compare like ints),
+  BUILDS, and ships a position no compositor will ever print. The doctor then
+  reports a monitor that is exactly where it was declared as misplaced, with its
+  name, on every boot: a check that accuses the machine of the flake's typo.
+  Verified end to end before the fix — built the doctor with `x = 2560.0` and
+  read `B\t1920\t1080\t60.000\t2560.000000\t0` out of the store.
+- **the other three, each with no message of its own**: a quoted `x = "2560"`
+  died inside E15's arithmetic with "cannot coerce an integer to a string: 1920"
+  — a number from another FIELD of another ENTRY, naming no output and no file.
+  An unquoted `refresh = 144.006` died in the interpolation. And `name = ""`
+  evaluated, built, and makes check 5 tell two lies at once: `awk '$1 == n'`
+  matches no live output (so the monitor is "declared and the session has no
+  such output") and the extra-outputs arm keys its want-set on the empty string
+  (so every live monitor becomes one this flake never declared).
+- **the shape decision — the ROW, not the position**: the columns are a list
+  with the same fields in the same order as the `writeText` row and as
+  doctor.sh's `read -r name w h hz x y`, so the thing being typed IS the thing
+  being protected, and `test_doctor.py` holds all three to each other. Ordering
+  is load-bearing and invisible to any single reader: the row check fires BEFORE
+  the overlap check, because a float position is arithmetic the desk rule does
+  silently and a string position kills it while blaming another entry's width.
+  `named` exists for the same reason — `box` takes the name straight off the
+  entry, so the one entry whose NAME is the fault would make the collision
+  message throw instead of print.
+- **what it deliberately does NOT refuse**: a value that is merely WRONG.
+  `x = 2561` and `refresh = "60.001"` are exactly the disagreements check 5
+  exists to report, and moving them up here would turn a finding about the
+  machine into an evaluation error about the flake. The line is "cannot be
+  right", not "is not right". Disconnected layouts stay legal (E16's own note).
+- **the third finding, in the suite that was supposed to catch the first**:
+  `declared_outputs()` called `int()` on every unquoted number, so ares
+  declaring `x = 2560.0` did not fail — it CRASHED twelve tests across four
+  suites with `invalid literal for int() with base 10: '2560.0'`, including
+  `test_every_declared_output_says_what_the_art_and_the_layout_both_need`, which
+  exists to assert exactly that field is an int and never got to run. Floats are
+  floats now (rounding would have been worse than the crash: the parser would
+  report a declaration that is correct), an unreadable value is refused instead
+  of falling through to its raw text, and the field pattern gained a `-?` —
+  without it, an entry declaring `y = -1080`, the monitor-above-the-primary
+  layout E14 gave this file a `y` FOR, matched no field and the whole file was
+  refused as unreadable. Nothing would have said so: the desk rule is fed dicts,
+  not this file.
+- **falsified**: 12 mutations, each caught by the claim it breaks — the refusal
+  deleted (both nix cases + the order test), an int column widened to accept
+  floats, the `x` column dropped from the schema, only the first bad field
+  reported, the value coerced with `toString` instead of shown with its type
+  (`"2560"` becomes indistinguishable from `2560`), the entry named straight off
+  `o.name`, the row check moved AFTER the overlap check (caught by the Python
+  order test alone — every nix probe still goes red, but for the wrong reason),
+  a column typed that the row does not write, the parser rounding a float,
+  losing the `-?`, and falling through to raw text. Then the real thing:
+  `x = 2560.0` in `hosts/ares/outputs.nix` stops `nixos-rebuild build --flake
+  .#ares`, naming DP-1 and the field. Mutations were made against copies in
+  `/tmp` and restored with `cp`, never `git checkout --` (E10's reason).
+- **tests**: `bash ops/ralph/verify.sh` — 2 gates over 5 paths, GREEN in 116.5 s
+  (tools 73.9, nixtest 42.5). tools 900 passed, nixtest 20 passed.
+  `nixos-rebuild build --flake .#ares` green. Never tested, never switched. No
+  schema, no jv-act, no boot path, no pins touched. Both Nix files are
+  nixfmt-clean (`--check`); there is still no formatting gate. `hudscreens.sh`
+  was not named by `verify.sh` and no picture could have moved.
+- **files**: pkgs/jarvis-doctor/default.nix, ops/ralph/nixtest.sh,
+  tools/tests/test_doctor.py, tools/tests/test_outputs.py,
+  hosts/ares/outputs.nix, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **E17** is what this raised and it is a DECISION more than code — the
+  six columns are law in `pkgs/jarvis-doctor` and `width`/`height` are law in
+  `pkgs/jarvis-wallpaper` for a different reason, so the sheet's list (which
+  only reaches the wallpaper) is typed on two fields and unchecked on four, and
+  no file says whether that is the design. Worth an hour, and it asks whether a
+  shared `lib/outputs.nix` FUNCTION is different enough from the `let` E15
+  refused. **E5** is still the item the position was declared for and still
+  wants **D4** (the niri config into the flake) under it, which is a human's
+  call about whether `/etc/niri/config.kdl` or the user's own file wins. Then
+  **D82**, **D79**, **D71**, **B88**, **B95**, **D63**, **D61**, **D57**,
+  **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. E6's remaining half is
+  the frame-count MEASUREMENT and wants a compositor. **D81** (the GUARDRAILS
+  wording exit 3 needs), **D67** and **D65**'s greeter half want a HUMAN.
+  Standing note: this branch is hand-driven in parallel, so check `git log`
+  against the journal before assuming the tree is the one this entry describes.
