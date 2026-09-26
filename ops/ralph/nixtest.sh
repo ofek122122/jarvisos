@@ -619,6 +619,29 @@ done
 if [ -z "$missing" ]; then ok "$t"
 else bad "$t" "missing:$missing — got: $(tr '\n' ' ' <<<"$driver_names")"; fi
 
+# ------------------------------------------------------ update notifier
+# PLAN G3. modules/update-notifier.nix wires pkgs/jv-update-notifier (whose
+# own shell logic tools/tests/test_update_notifier.py proves against a real
+# git repo, in a bare checkout with no nix) to run once per login. What only
+# an evaluation can see is whether it is actually the BUILT package that
+# runs, and whether it runs at the right trigger.
+
+t='jv-update-notifier is wired to run at login, once, as a user service'
+un_out=$(unit jv-update-notifier.service '')
+if ! is_unit "$un_out"; then bad "$t" "not a unit: $(tail -3 <<<"$un_out")"
+elif grep -q '^Type=oneshot$' <<<"$un_out" \
+  && grep -q '^WantedBy=graphical-session.target$' <<<"$un_out"; then
+  ok "$t"
+else bad "$t" "$(tail -6 <<<"$un_out")"; fi
+
+t='the unit runs the actual built jv-update-notifier package, out of the store'
+notifier=$(nix build --no-link --print-out-paths '.#jv-update-notifier' 2>&1 | tail -1)
+if [ ! -x "$notifier/bin/jv-update-notifier" ]; then
+  bad "$t" "\`nix build .#jv-update-notifier\` said: $notifier"
+elif grep -qF "ExecStart=$notifier/bin/jv-update-notifier" <<<"$un_out"; then
+  ok "$t"
+else bad "$t" "unit does not run the built package: $(grep ExecStart <<<"$un_out")"; fi
+
 # ------------------------------------------------------------- snapshots
 # PLAN F3. modules/snapshots.nix declares a snapper timeline over disko.nix's
 # @root and @home subvolumes plus the one gap snapper's own module leaves

@@ -19,6 +19,7 @@
     ../../modules/bluetooth.nix
     ../../modules/printing.nix
     ../../modules/snapshots.nix
+    ../../modules/update-notifier.nix
     ../../modules/windows-compat.nix
     ../../modules/jarvis-services.nix
     ../../modules/boot-grub.nix

@@ -139,6 +139,10 @@
         jv-snapshots-init = pkgs.callPackage ./pkgs/jv-snapshots-init {
           subvolumes = builtins.attrValues (import ./hosts/ares/subvolumes.nix);
         };
+        # jv-update-notifier — the login-time "you have updates" check (PLAN
+        # G3): a read-only `git fetch` plus a notification, never a rebuild
+        # (modules/update-notifier.nix wires it to run once per login).
+        jv-update-notifier = pkgs.callPackage ./pkgs/jv-update-notifier { };
         default = self.packages.${system}.jarvis-doctor;
       };
 

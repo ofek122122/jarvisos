@@ -230,8 +230,53 @@ the top unchecked item unless it is blocked.
       `[H]` because discovering a real printer over mDNS and printing an
       actual test page both need a physical printer and a human — see
       `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] G3. Update notifier at login: read-only `git fetch`, tell the user commits
-      exist, never auto-switch. (Designed weeks ago, never built.)
+- [H] G3. **Update notifier.** DONE (this commit): `modules/update-notifier.nix`
+      wires `pkgs/jv-update-notifier` — a `writeShellApplication` — to run
+      once per login as `systemd.user.services.jv-update-notifier`
+      (`Type = "oneshot"`, `wantedBy = [ "graphical-session.target" ]`).
+      The script's only git verbs are `fetch`, `rev-parse`, `rev-list` and
+      `log` — a whitelist a test enforces — because `fetch` is the one git
+      verb that can only move remote-tracking refs, never HEAD, the index
+      or a file in the working tree, matching CLAUDE.md's discipline that a
+      change only exists once reviewed and built deliberately. It fetches
+      the flake clone at `/home/ofek/jarvisos` (the same path
+      `modules/store.nix`'s jv-store rebuilds from; overridable by a first
+      argument for testing), and if the checked-out branch's upstream
+      (`@{u}`) is ahead, sends one `notify-send` naming the commit count and
+      the latest subject line — through jv-notify, this machine's real
+      `org.freedesktop.Notifications` daemon (`modules/theme.nix`). Every
+      path that cannot answer (no repo, no network/unreachable remote, no
+      upstream configured) exits 0 quietly rather than erroring past a
+      login. Never touches `nixos-rebuild` — checked by name.
+      Tests: `tools/tests/test_update_notifier.py` (12 cases) extracts the
+      shipped script straight out of `pkgs/jv-update-notifier/default.nix`'s
+      own `text` and runs it against REAL throwaway git repos in `tmp_path`
+      (a plain-file repo, unlike the btrfs subvolumes F3's tests could not
+      safely create/delete on ares' real disk) with a stubbed `notify-send`
+      capturing calls: silent when up to date, notifies with the right
+      count (singular "1 new commit" vs plural) and the real upstream
+      commit subject when behind, HEAD and the working tree provably
+      untouched afterwards, silent-and-clean-exit when the remote is
+      unreachable / there is no upstream / the path is not a repo at all,
+      plus the git-verb whitelist and the "never invokes nixos-rebuild"
+      regex checks. `ops/ralph/nixtest.sh` (+2 cases) reads the real
+      evaluation: the unit is `Type=oneshot` + `WantedBy=graphical-
+      session.target`, and its `ExecStart` runs the actual `nix build
+      .#jv-update-notifier` output, not a path assumed from the module.
+      `bash ops/ralph/verify.sh`: 3 gates over 6 paths (`flake.nix`,
+      `hosts/ares/default.nix`, `modules/update-notifier.nix`,
+      `ops/ralph/nixtest.sh`, `pkgs/jv-update-notifier/default.nix`,
+      `tools/tests/test_update_notifier.py`), GREEN in 196.9s (tools 926 —
+      914 prior + 12 new, nixtest 48 — 46 prior + 2 new, shellload
+      unaffected). `ops/ralph/hudscreens.sh` was run by hand because
+      `flake.nix` changed (a new package added, nothing HUD-visible): all
+      10 shots matched the sheet already committed at HEAD byte-for-byte,
+      so nothing new to commit under `docs/hud/screens`.
+      `nixos-rebuild build --flake .#ares` -> ok (5 new derivations: the
+      unit, user-units, etc, activate, the rebuilt toplevel). Never
+      switched. `[H]` because whether a real login actually shows the
+      notification, worded right, through the real jv-notify corner,
+      needs a human and a real session — see `ops/ralph/HUMAN-VERIFY.md`.
 - [ ] G4. Disk-space warning before the Nix store fills the drive.
 - [ ] G5. Temperature/fan + GPU (VRAM) readout available to the bar.
 - [ ] G6. `jarvis-doctor --repair`: diagnose common breakage and offer fixes.

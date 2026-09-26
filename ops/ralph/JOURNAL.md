@@ -16263,3 +16263,79 @@ backlog (Tracks F-K) is far from resolved — G through K are still entirely
   comfort backlog (Tracks F-K) is still far from resolved — F4/F5 need a
   human decision, G9/G10 are `[B]`, and H through K are entirely `[ ]` —
   so the loop keeps going per PROMPT.md STEP 5.
+
+## 2026-09-26 — update notifier declared: read-only fetch + notify, never rebuild (PLAN G3)
+- built: G3 (update notifier) was next in the comfort backlog's Track G.
+  New `pkgs/jv-update-notifier` (a `writeShellApplication`) and
+  `modules/update-notifier.nix`, imported by `hosts/ares/default.nix`, wire
+  it as `systemd.user.services.jv-update-notifier` — `Type = "oneshot"`,
+  `wantedBy = [ "graphical-session.target" ]` — so it runs once per login,
+  exactly the trigger the item asks for (not a recurring timer, which
+  would be scope this item did not ask for). The script's only git verbs
+  are `fetch`, `rev-parse`, `rev-list` and `log`: `fetch` is the one git
+  verb that can only move remote-tracking refs, never HEAD, the index or a
+  file in the working tree, which is what makes "read-only" true rather
+  than asserted. It fetches the flake clone at `/home/ofek/jarvisos` (the
+  same path `modules/store.nix`'s jv-store already rebuilds from;
+  overridable by a first CLI argument so it can be pointed at a throwaway
+  clone under test), and if the checked-out branch's upstream (`@{u}`) is
+  ahead, sends one `notify-send` through jv-notify (this machine's real
+  `org.freedesktop.Notifications` daemon, `modules/theme.nix`) naming the
+  commit count (singular/plural) and the latest commit's subject line.
+  Every path that cannot answer the question — no `.git` at the path, an
+  unreachable remote, no upstream branch configured — exits 0 quietly
+  rather than erroring past a login. It never touches `nixos-rebuild`.
+- tests: `tools/tests/test_update_notifier.py` (12 cases, new file) pulls
+  the shipped script straight out of `pkgs/jv-update-notifier/default.nix`'s
+  own `text` attribute via regex (so a change to the shipped script IS the
+  behaviour under test, not a hand-kept copy of it) and runs it as real
+  bash against REAL throwaway git repos under `tmp_path` with a stubbed
+  `notify-send` on `PATH` capturing its calls to a file. Unlike F3's btrfs
+  subvolumes, a plain git repo in `/tmp` has no `user_subvol_rm_allowed`
+  problem, so the real round trip is provable directly rather than parked
+  as `[H]`: silent when already up to date; notifies with the right count
+  and the real upstream commit subject when behind (singular "1 new
+  commit" checked distinctly from the plural "N new commits" case); HEAD
+  and `git status --porcelain` provably unchanged afterwards; silent
+  clean exit (return 0, no notification) when the remote is unreachable,
+  when there is no upstream tracking branch, and when the path is not a
+  git repo at all. Two static regression guards close the loop: every
+  `git -C "$repo" <verb>` in the script must be in the read-only whitelist
+  {fetch, rev-parse, rev-list, log}, and `nixos-rebuild switch/test/build/
+  boot` must never appear as an invocation (the notify-send message is
+  allowed to TALK about nixos-rebuild — it tells the user this never runs
+  it for them — so the check is for the subcommand pairing, not the bare
+  string). First draft of that second guard asserted the bare string
+  `"nixos-rebuild"` was absent entirely and failed on the script's own
+  notification text before being narrowed to the subcommand check, and was
+  fixed before commit. `ops/ralph/nixtest.sh` (+2 cases) proves what only
+  a real evaluation can: the generated unit text is actually
+  `Type=oneshot` + `WantedBy=graphical-session.target`, and its `ExecStart`
+  runs the output of `nix build .#jv-update-notifier` byte-for-byte, not a
+  store path assumed from reading the module. `bash ops/ralph/verify.sh`:
+  3 gates over 6 paths (`flake.nix`, `hosts/ares/default.nix`,
+  `modules/update-notifier.nix`, `ops/ralph/nixtest.sh`,
+  `pkgs/jv-update-notifier/default.nix`, `tools/tests/test_update_notifier.py`),
+  GREEN in 196.9s (tools 926 — 914 prior + 12 new; nixtest 48 — 46 prior +
+  2 new; shellload unaffected). First `verify.sh` run went red for an
+  unrelated reason — the new files were untracked, so the flake evaluation
+  (which reads the git tree, not the working tree) could not see
+  `modules/update-notifier.nix` at all; `git add`-ing the new paths before
+  re-running fixed it, nothing in the change itself was wrong.
+  `ops/ralph/hudscreens.sh` was run by hand (not skipped) because
+  `verify.sh` named it: `flake.nix` changed (one new package added), which
+  the gate reads unconditionally even though nothing about it is
+  HUD-visible. All 10 shots matched the sheet already committed at HEAD
+  byte-for-byte, so there was nothing new to commit under
+  `docs/hud/screens`.
+- build: `nixos-rebuild build --flake .#ares` -> ok (5 new derivations: the
+  unit, user-units, etc, activate, the rebuilt toplevel). Never switched.
+- files: pkgs/jv-update-notifier/default.nix, modules/update-notifier.nix,
+  flake.nix, hosts/ares/default.nix, ops/ralph/nixtest.sh,
+  tools/tests/test_update_notifier.py, ops/ralph/HUMAN-VERIFY.md,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: G4 (disk-space warning before the Nix store fills the drive) is
+  the next unchecked item in Track G. The comfort backlog (Tracks F-K) is
+  still far from resolved — F4/F5 need a human decision, G9/G10 are `[B]`,
+  and H through K are entirely `[ ]` — so the loop keeps going per
+  PROMPT.md STEP 5.
