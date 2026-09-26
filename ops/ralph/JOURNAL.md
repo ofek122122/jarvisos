@@ -15902,3 +15902,108 @@ is not worth chasing.)
   wording exit 3 needs), **D67** and **D65**'s greeter half want a HUMAN.
   Standing note: this branch is hand-driven in parallel, so check `git log`
   against the journal before assuming the tree is the one this entry describes.
+
+## 2026-09-26 — F1: the window-manager config, declared
+
+**what**: `~/.config/niri/config.kdl` carried every keybind Ofek actually uses
+(the F13/Super-menu tap, `Super+Alt+L` -> `jv-lock`, the ember focus ring) and
+named only ONE of ares' three monitors, with no position — undeclared, so a
+clean-clone rebuild reproduced neither the binds nor the desk. That was the one
+live violation of "if it isn't declared, it doesn't exist" left in the comfort
+backlog's top item, and Ofek's directive ranked it first of all of Tracks F-K.
+
+Fixing it needed no new mechanism: niri already ships a system-wide fallback
+slot for exactly this file. Its own wiki ("Configuration: Introduction" >
+Loading) and its own source (`system_config_path()` in `niri-26.04`'s
+`src/main.rs`, confirmed by pulling the real source out of the nixpkgs cache
+and reading it, not by trusting a remembered default) say: niri loads
+`$XDG_CONFIG_HOME/niri/config.kdl` or `~/.config/niri/config.kdl` first,
+falling back to `/etc/niri/config.kdl` only if neither exists. So this is not
+a new loading mechanism, only USING the one niri already has.
+
+`modules/niri.nix` writes that file, built from two things:
+- `modules/niri/config-base.kdl` — the whole original file minus its trailing
+  single-output stanza, `.text`'d in verbatim. `modules/niri/config-orig.kdl`
+  is a frozen, byte-exact copy of the file it replaces, kept ONLY so
+  `tools/tests/test_niri_config.py` can prove, in a bare checkout with no nix,
+  that config-base.kdl differs from it by nothing but that tail (and the four
+  colours below) — a rewrite that dropped a comment or reworded a bind would
+  still be syntactically valid niri config and would still pass every other
+  gate; only a byte comparison against the frozen original catches it.
+- one `output "NAME" { mode "..."; position x=.. y=..; }` stanza per monitor
+  in `hosts/ares/outputs.nix` — PLAN E10/E13's own declaration, so this is the
+  THIRD place that layout is spent and not a fourth place it is re-decided:
+  HDMI-A-1 2560x1440@144.006 at 0,0 (primary), DP-1 1920x1080@60 at 2560,0,
+  DP-2 1920x1080@60 at 4480,0.
+
+**the colour gate caught something real, first try.** The original file's
+`layout { focus-ring { ... } border { ... } }` carries four hex literals —
+`#F0714A` (the ember accent, already Ofek's own choice for the active ring),
+and three of niri's own STOCK DEFAULTS (`#505050` twice, `#ffc87f`, `#9b0000`,
+the last two inside a `border { off ... }` block that is disabled but still a
+literal). `tools/tests/test_gen_theme_qml.py`'s
+`test_no_nix_surface_carries_a_literal_colour_of_its_own` scans every file
+under `modules/` and `pkgs/` and failed on the very first `runtests.sh tools`
+run — correctly: invariant 9 says a colour is identity, named once in
+`personality/theme.toml`, and this module was about to become a second place
+one existed. Fixed by turning all four into `@@EMBER@@`/`@@LINE@@`/`@@WARN@@`/
+`@@RISK@@` markers in config-base.kdl and having `modules/niri.nix` spend
+`token "ember"`/`"line"`/`"warn"`/`"risk"` through the same `token` helper
+`modules/theme.nix`, `modules/fonts.nix` and `modules/super-menu.nix` already
+use — `line` for niri's own neutral grey (both inactive-color spots), `warn`
+for its stock gold, `risk` for its stock red on a window demanding attention.
+`config-orig.kdl` still carries the real literals — it is a frozen HISTORICAL
+fixture, never read by any module, so it got one line in `COLOUR_EXCEPTIONS`
+with the reason spelled out, the same shape as the boot-path (R9) exceptions.
+
+**tests**:
+- `tools/tests/test_niri_config.py` (7 cases, new): the frozen original ends
+  with the one stanza it ever declared; config-base.kdl is the original with
+  ONLY that tail removed and the four colours (counted — 2/1/1/1 — so an
+  accidental extra or missing occurrence fails rather than silently passing)
+  turned into markers; every non-comment bind line in the original's
+  `binds { }` survives into the base; the module reads config-base.kdl and
+  hosts/ares/outputs.nix and hardcodes no second monitor list; every marker is
+  spent from a real theme.toml token.
+- `ops/ralph/nixtest.sh` (+7 cases): the built `/etc/niri/config.kdl` text is
+  a real evaluation, not an error (captured with stderr kept SEPARATE from
+  stdout this time — the `unit()` helper's usual `2>&1` merge would have
+  written this branch's routine "Git tree is dirty" warning as line 1 of a
+  file handed to `niri validate`, reported as niri.nix's own syntax error);
+  no `@@` marker survives; the focus ring is painted in theme.toml's live
+  `ember` value, not a hardcoded one; the other three markers became the
+  tokens named above and only those; the built file's head, with those same
+  substitutions applied to config-base.kdl in bash, matches byte for byte;
+  all three of hosts/ares/outputs.nix's rows appear as positioned stanzas; and
+  `niri validate -c` on the built text — via `pkgs.niri` off
+  `.#nixosConfigurations.ares.pkgs`, the same nixpkgs pin the desktop gets —
+  says the config is valid.
+- `bash ops/ralph/verify.sh`: 4 gates over 8 paths, GREEN in 116.0 s — four
+  suites (jv-compat 49, jv-hud-bridge 26, tools 907, nixtest 27), all passed.
+  `nixos-rebuild build --flake .#ares` green. Never tested, never switched.
+  No schema, no jv-act, no boot path, no pins, no disko touched.
+
+**`[H]`, not `[x]`, and why**: niri only reads `/etc/niri/config.kdl` once
+NOBODY has a user config in the way, and this loop does not touch a file in
+Ofek's home directory to make that true — the same rule that keeps the store
+(`modules/store.nix`) out of imperative installs applies here in the other
+direction. `ops/ralph/HUMAN-VERIFY.md` has the row: rename
+`~/.config/niri/config.kdl` aside after a switch, reload, confirm every bind
+and all three monitors still work. Everything testable without a human is
+tested and green.
+
+**files**: modules/niri.nix, modules/niri/config-base.kdl,
+modules/niri/config-orig.kdl, hosts/ares/default.nix, modules/desktop.nix,
+ops/ralph/nixtest.sh, tools/tests/test_niri_config.py,
+tools/tests/test_gen_theme_qml.py, ops/ralph/PLAN.md,
+ops/ralph/HUMAN-VERIFY.md, ops/ralph/JOURNAL.md
+
+**next**: F2 (comfort basics batch: swayidle lock, firewall, XDG user dirs,
+wlsunset) is the next unchecked item in the comfort backlog's top track.
+Standing notes from E16 still apply: E17 (are the doctor's six columns and
+the wallpaper's two meant to diverge — a design question, not code), E5/D4
+(per-output niri RULES, not just outputs — wants this commit under it, and a
+human's call on whether `/etc/niri/config.kdl` or a user file wins, which F1
+just answered: `/etc` wins once the human clears the way), D82/D79/D71/B88/
+B95/D63/D61/D57/D56/D64/D55/D62/D48/D45 (unread this iteration), E6's
+frame-count measurement (wants a compositor), D81/D67/D65 (want a human).

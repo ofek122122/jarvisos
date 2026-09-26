@@ -2172,6 +2172,15 @@ COLOUR_EXCEPTIONS = {
     "modules/grub-theme/background.svg": "boot path — human review (R9)",
     "modules/grub-theme/default.nix": "boot path — human review (R9)",
     "modules/plymouth-theme/default.nix": "boot path — human review (R9)",
+    # modules/niri/config-orig.kdl (PLAN F1) is a frozen, byte-exact copy of
+    # the ~/.config/niri/config.kdl it replaces — kept only so
+    # tools/tests/test_niri_config.py can prove config-base.kdl (the file
+    # modules/niri.nix actually `.text`'s into the built system) is that same
+    # file with nothing but its trailing single-output stanza removed. It is
+    # never read by any module and ships nowhere; config-base.kdl carries the
+    # `@@EMBER@@`/`@@LINE@@`/`@@WARN@@`/`@@RISK@@` markers modules/niri.nix
+    # spends theme.toml's tokens through instead, and is clean on its own.
+    "modules/niri/config-orig.kdl": "frozen pre-F1 fixture, never built (PLAN F1)",
     # The wallpaper WAS here ("needs a rendered look first"): its colours are
     # gradient stops and hairline strokes, and whether a vignette still reads
     # as depth once its darkest stop becomes a token is a thing to LOOK at.

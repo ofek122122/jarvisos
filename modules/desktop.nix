@@ -43,7 +43,7 @@
     NIXOS_OZONE_WL = "1"; # Chromium/Electron on Wayland
   };
 
-  # Monitor layout (1440p144 primary + 2x 1080p60) is per-user Niri config,
-  # written on install day once connector names are known; jarvis-doctor
-  # verifies all three modes are actually achieved.
+  # Monitor layout (1440p144 primary + 2x 1080p60) and every keybind are
+  # declared in modules/niri.nix (PLAN F1), not written by hand on install
+  # day; jarvis-doctor verifies all three modes are actually achieved.
 }

@@ -36,15 +36,25 @@ the top unchecked item unless it is blocked.
 ---
 
 ### Track F — the five that matter most (do these first, in order)
-- [ ] F1. **niri config into the flake.** The whole window-manager config
-      (keybinds, the F13/Super-menu bind, outputs) currently lives undeclared in
-      `~/.config/niri/config.kdl` — a clean-clone rebuild does NOT reproduce
-      Ofek's desktop, which is the one live violation of "if it isn't declared,
-      it doesn't exist". Move it to a module generating `/etc/niri/config.kdl`,
-      preserving every existing bind byte-for-byte. Declare the three real
-      outputs: HDMI-A-1 2560x1440@144.006 at x=0, DP-1 1920x1080@60 at x=2560,
-      DP-2 1920x1080@60 at x=4480. Gate: a test that the generated config passes
-      `niri validate` and still contains every bind the old file had.
+- [H] F1. **niri config into the flake.** DONE (this commit): `modules/niri.nix`
+      declares `/etc/niri/config.kdl` — the file niri's own fallback search
+      already reads once no user config is in the way (its wiki, its own
+      `system_config_path()` in `src/main.rs`) — built from
+      `modules/niri/config-base.kdl` (Ofek's binds, `.text`'d verbatim apart
+      from four `@@TOKEN@@` colour markers, invariant 9) plus one
+      `output { }` stanza per monitor in `hosts/ares/outputs.nix`: HDMI-A-1
+      2560x1440@144.006 at x=0 (primary), DP-1 1920x1080@60 at x=2560, DP-2
+      1920x1080@60 at x=4480 — the SAME declaration E10/E13 already spend, not
+      a fourth copy of the layout. `modules/niri/config-orig.kdl` is a frozen
+      byte-exact copy of the file this replaces, so
+      `tools/tests/test_niri_config.py` can prove config-base.kdl differs from
+      it by nothing but the tail and the four colours, in a bare checkout with
+      no nix; `ops/ralph/nixtest.sh` (+7 cases) proves the real evaluation
+      spends real theme tokens, declares all three outputs positioned, and
+      that `niri validate` accepts the built file. `[H]` because the one step
+      left is Ofek's home directory: niri only reads `/etc/niri/config.kdl`
+      once `~/.config/niri/config.kdl` is out of the way, and nothing here
+      touches a file in `$HOME` for him — see `ops/ralph/HUMAN-VERIFY.md`.
 - [ ] F2. **Comfort basics batch** (one commit, four papercuts): auto-lock on
       idle via swayidle → `jv-lock` (plus lock-before-sleep), `networking.firewall.enable`,
       XDG user dirs, and night light (wlsunset, on a Jerusalem sunset schedule).

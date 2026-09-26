@@ -398,5 +398,104 @@ said=$(nix eval --raw '.#jarvis-doctor' --apply "$override"'[
 if grep -q "^$store/" <<<"$said"; then ok "$t"
 else bad "$t" "a desk with a gap in it was refused: $(tail -5 <<<"$said")"; fi
 
+# ------------------------------------------------------------- niri's config
+# PLAN F1. modules/niri.nix declares /etc/niri/config.kdl — the file niri's
+# own fallback search already looks for once nobody has a user config in the
+# way — from modules/niri/config-base.kdl (Ofek's binds, `.text`'d verbatim
+# apart from four colour markers) plus one `output { }` stanza per monitor in
+# hosts/ares/outputs.nix. tools/tests/test_niri_config.py already proved
+# config-base.kdl is the frozen original with only its tail and its colours
+# changed, in a bare checkout with no nix; what only an EVALUATION can ask is
+# whether the markers were actually spent with real tokens, whether the three
+# stanzas this evaluation produces are the ones ares' own declaration names,
+# and whether the result is config niri itself accepts — `niri validate`,
+# not a hand-rolled parser guessing at KDL.
+# stdout and stderr are kept APART for this one, unlike `unit()` above: the
+# text below gets written to a real file and handed to `niri validate`, and a
+# harmless "Git tree is dirty" warning on stderr — guaranteed on this branch,
+# since verify.sh always runs against an uncommitted tree — would land as
+# line 1 of that file and be reported as a syntax error that is really nix's,
+# not niri.nix's.
+niri_etc_err=$(mktemp)
+etc=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+  '(c: c.config.environment.etc."niri/config.kdl".text)' 2>"$niri_etc_err")
+etc_rc=$?
+
+t='the built /etc/niri/config.kdl is not a Nix evaluation error'
+if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then ok "$t"
+else bad "$t" "$(tail -5 "$niri_etc_err")"; fi
+rm -f "$niri_etc_err"
+
+if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
+  t='every colour marker was spent, and none was left behind'
+  if grep -q '@@' <<<"$etc"; then bad "$t" "$(grep -n '@@' <<<"$etc")"
+  else ok "$t"; fi
+
+  # The tokens themselves, read out of personality/theme.toml the same way
+  # modules/niri.nix does — impure only for this one read (PLAN F1's markers
+  # are the one place this file touches personality/), never for the
+  # evaluation of `.#nixosConfigurations.ares` itself above.
+  palette() {
+    nix eval --raw --impure --expr \
+      "(builtins.fromTOML (builtins.readFile ./personality/theme.toml)).palette.$1" 2>&1
+  }
+  ember=$(palette ember); line=$(palette line); warn=$(palette warn); risk=$(palette risk)
+
+  t='the focus ring is painted in the ember token, not a colour of its own'
+  if grep -qF "active-color \"$ember\"" <<<"$etc"; then ok "$t"
+  else bad "$t" "no active-color \"$ember\": $(grep -m1 'active-color' <<<"$etc")"; fi
+
+  t='the four markers became the tokens modules/niri.nix names, and only those'
+  spent=$(grep -cF "\"$line\"" <<<"$etc")
+  if [ "$spent" -eq 2 ] && grep -qF "active-color \"$warn\"" <<<"$etc" \
+     && grep -qF "urgent-color \"$risk\"" <<<"$etc"; then ok "$t"
+  else bad "$t" "line token seen $spent time(s) (want 2); warn/risk: $(grep -E 'active-color|urgent-color' <<<"$etc" | tail -2)"; fi
+
+  t='every bind config-base.kdl carries survives into the built /etc file'
+  # The base is `.text`'d in FIRST, verbatim except its four markers — so once
+  # the markers are known-good above, the built file must still START with
+  # the base's own text with those same substitutions applied. `base_len` is
+  # taken from the SUBSTITUTED copy: the markers and the tokens they become
+  # are different lengths, so slicing `$etc` by the raw file's length would
+  # compare against the wrong number of bytes.
+  substituted=$(sed "s/@@EMBER@@/$ember/;s/@@LINE@@/$line/g;s/@@WARN@@/$warn/;s/@@RISK@@/$risk/" \
+    modules/niri/config-base.kdl)
+  base_len=${#substituted}
+  if [ "$base_len" -gt 0 ] && [ "${etc:0:$base_len}" = "$substituted" ]; then
+    ok "$t"
+  else bad "$t" "the built file's own head does not match config-base.kdl with its markers spent"; fi
+
+  t='all three of hosts/ares/outputs.nix are declared, positioned, mode and all'
+  # A TSV, one row per declared monitor — the same shape the doctor's own
+  # cases above read outputs.nix as — so each expected STANZA is built here
+  # in bash and compared whole, rather than asking Nix to join multi-line
+  # stanzas on a delimiter this file would then have to re-split.
+  want=$(nix eval --raw --file hosts/ares/outputs.nix --apply \
+    'l: builtins.concatStringsSep "\n" (map (o: "${o.name}\t${toString o.width}\t${toString o.height}\t${o.refresh}\t${toString o.x}\t${toString o.y}") l)' 2>&1)
+  missing=""
+  rows=0
+  while IFS=$'\t' read -r oname ow oh ohz ox oy; do
+    [ -z "$oname" ] && continue
+    rows=$((rows + 1))
+    stanza=$(printf 'output "%s" {\n    mode "%sx%s@%s"\n    position x=%s y=%s\n}' \
+      "$oname" "$ow" "$oh" "$ohz" "$ox" "$oy")
+    grep -qF "$stanza" <<<"$etc" || missing="$missing $oname"
+  done <<<"$want"
+  if [ "$rows" -gt 0 ] && [ -z "$missing" ]; then ok "$t"
+  else bad "$t" "hosts/ares/outputs.nix names ${rows:-0} output(s); missing from /etc/niri/config.kdl:${missing:-<all>}"; fi
+
+  t='niri itself accepts the config this flake would install'
+  niri_bin=$(nix build --no-link --print-out-paths '.#nixosConfigurations.ares.pkgs.niri' 2>&1 | tail -1)
+  tmp=$(mktemp)
+  printf '%s' "$etc" > "$tmp"
+  validated=""
+  if [ -x "$niri_bin/bin/niri" ]; then
+    validated=$("$niri_bin/bin/niri" validate -c "$tmp" 2>&1)
+  fi
+  rm -f "$tmp"
+  if grep -q 'config is valid' <<<"$validated"; then ok "$t"
+  else bad "$t" "niri at ${niri_bin:-<not built>} said: $(tail -5 <<<"$validated")"; fi
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

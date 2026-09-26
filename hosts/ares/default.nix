@@ -7,6 +7,7 @@
     ./disko.nix
     ../../modules/gpu-nvidia.nix
     ../../modules/desktop.nix
+    ../../modules/niri.nix
     ../../modules/fonts.nix
     ../../modules/theme.nix
     ../../modules/apps.nix
