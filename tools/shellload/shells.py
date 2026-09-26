@@ -45,6 +45,8 @@ as coverage:
 """
 
 import dataclasses
+import pathlib
+import tomllib
 
 # The line quickshell's own logger writes once the root component is built and
 # every window it declares has been created. Waiting on it is what makes the
@@ -86,17 +88,31 @@ class Shell:
     `env` is the variable the script hands the realized binary over in, and
     `wake` is whether anything gives this shell something real to do once it
     has loaded. Only the notifier has one — see NOTIFY.
+
+    `reserves_top` is whether this surface takes a strip off the top of every
+    monitor, which only the bar does. It is what the mapping check below asks
+    the compositor about, and it is a per-shell property because the answer is
+    the opposite for the other two — the same IPC call is their assertion in
+    the other direction.
+
+    It is spelled as the fact rather than as `exclusionMode`, and that is
+    measured: the bar built with `ExclusionMode.Ignore` and its zone left
+    alone STILL reserved all 31 px. What decides the strip is `exclusiveZone`
+    (and the anchors); `exclusionMode` is about whose zones this surface is
+    positioned around. All three `shell.qml` say otherwise in a comment
+    (PLAN D45).
     """
 
     attr: str
     root: str
     env: str
     wake: bool = False
+    reserves_top: bool = False
 
 
 SHELLS = (
     Shell(attr="jv-hud", root="shell/jv-hud", env="JV_HUD_BIN"),
-    Shell(attr="jv-bar", root="shell/jv-bar", env="JV_BAR_BIN"),
+    Shell(attr="jv-bar", root="shell/jv-bar", env="JV_BAR_BIN", reserves_top=True),
     Shell(attr="jv-notify", root="shell/jv-notify", env="JV_NOTIFY_BIN", wake=True),
 )
 
@@ -144,6 +160,126 @@ def sway_config() -> str:
             f"pos {out['x']} 0"
         )
     return "\n".join(lines) + "\n"
+
+
+# ------------------------------------------------- did it MAP (PLAN D44)
+#
+# "It loaded" is not "it mapped", and until D44 nothing asked the second
+# question for two of the three shells. `READY` is quickshell saying the root
+# component built and its windows were created — a `PanelWindow` whose
+# layer-shell attached properties failed to ATTACH would still get that line,
+# and `hudscreens.sh` was the only thing in this repo that ever looked at a
+# surface (through `grim`, for the HUD alone).
+#
+# There is one verdict available here for the price of an IPC call, and it is
+# the exact check `tools/hudscreens/shoot.py` already makes in the other
+# direction. sway shrinks each workspace's rect by every layer surface's
+# exclusive zone, so `swaymsg -t get_workspaces` is a direct measurement of
+# what a shell reserved:
+#
+#   · jv-bar sets `exclusionMode: ExclusionMode.Normal` and `exclusiveZone:
+#     surface.implicitHeight` on a surface anchored top+left+right, so the
+#     usable area on EVERY output must be exactly `BAR_STRIP_PX` shorter than
+#     the monitor. That is a PROOF OF MAPPING: an unmapped surface reserves
+#     nothing, so this number cannot appear unless the strip is really there.
+#   · jv-hud and jv-notify take nothing, so the usable area must be the
+#     monitor, untouched. That is a REFUTATION and not a proof — see the two
+#     paragraphs below, because what it can refute is much narrower than it
+#     looks and reading it as coverage would be the whole mistake.
+#
+# Each shell is checked THREE times — before it starts, while it is up, and
+# after it is stopped — so the bar's verdict is full → shrunk → full. Two of
+# those are the control: a strip that was already missing before the bar
+# started was not the bar's, and one that never came back was never a layer
+# surface's zone at all.
+#
+# THE INSTRUMENT IS LIVE IN BOTH DIRECTIONS, by injection rather than by
+# reading the code:
+#   · `exclusiveZone: 0` on the bar — exit 1, naming all three monitors and
+#     both numbers, while every other thing about that run stayed green: the
+#     shell loaded in 0.40 s, `Configuration Loaded` arrived, and the D39 scan
+#     said nothing threw on any of the three logs. A bar that silently stopped
+#     reserving its strip is invisible to every other gate in this repo.
+#   · a 100 px zone on the notifier — exit 1, and the observed areas were
+#     2560x1340 and 1920x980, which is the zone taken off the BOTTOM edge it
+#     is anchored to. So "took nothing" is a sentence that can be false.
+#
+# AND THE LIMIT, WHICH IS THE SHARPEST THING MEASURED HERE AND IS NOT THE ONE
+# ANYBODY WOULD GUESS. That second injection only bit once the surface was
+# ALSO made `visible: true`. With the notifier's own `visible:
+# Notifications.anyLit` — false when the window is created, true a moment
+# later when the gate's notification arrives — the identical 100 px zone is
+# silently never published, and the compositor reports every monitor whole.
+# A conditionally-visible `PanelWindow` gets its exclusive zone at creation
+# and a zone declared while it was invisible does not reach the compositor.
+# Both of these shells are conditionally visible (`Notifications.anyLit`,
+# `selfTest || stack.anyLit`), and the HUD with no jarvisd is never lit at
+# all, so no surface of its is ever created in this gate.
+#
+# So, plainly: the bar's reading is a proof. The notifier's refutes a zone on
+# a surface that was mapped when it was born. The HUD's refutes nothing about
+# today's HUD — it is the line that notices the day the corner becomes
+# always-mapped and takes space, which is the future the bar already is. It is
+# kept for the same reason `tools/hudscreens/shoot.py` keeps its own version
+# of this check, and for one more: it is the CONTROL that makes the bar's
+# 31 px the bar's.
+
+
+def bar_strip_px(theme_toml: str) -> int:
+    """How many pixels of every monitor's top edge the bar takes.
+
+    A COPY of `shell/jv-bar/shell.qml`'s `implicitHeight: Theme.labelPx +
+    Theme.padPx * 2`, stated here in the tokens it is derived from, and held
+    equal to the QML by `test_the_strip_this_gate_expects_is_the_one_the_bar_
+    declares` — a third file that reads both, which is what invariant 1 asks
+    of every claim about a relation between two parts of this repo.
+
+    It is a copy for the same reason `OUTPUTS` is: the alternative is an
+    import, and there is nothing to import — the number the bar uses only
+    exists inside a running QML engine, out of a `Theme.qml` generated from
+    these two tokens. Asking the toml is asking the one file the generated
+    singleton is made from.
+
+    Derived rather than declared on BOTH sides, which is the part worth
+    keeping: the bar's height is "one label with §06's padding above and
+    below", so a gate that pinned the number 31 would go red on a change to
+    the type scale that the bar handled perfectly.
+    """
+    tokens = tomllib.loads(theme_toml)
+    return int(tokens["type"]["label_px"]) + int(tokens["geometry"]["pad_px"]) * 2
+
+
+def theme_toml_path() -> pathlib.Path:
+    """`personality/theme.toml`, the one file the tokens above come from.
+
+    This module is `tools/shellload/shells.py`, so the repository is two
+    directories up. A declared read of this gate already (`DECLARED_GATES` in
+    `tools/dependents.py`), because the generated `Theme.qml` in every shell is
+    checked against it at build time.
+    """
+    return pathlib.Path(__file__).resolve().parents[2] / "personality" / "theme.toml"
+
+
+def usable_areas(reserved_top_px: int) -> dict[str, tuple[int, int]]:
+    """What each output's usable area must be, given a strip taken off the top.
+
+    Keyed by output name and in the shape `swaymsg -t get_workspaces` reports,
+    so the comparison in `load.py` is one `==` between two dicts and a failure
+    can print both.
+    """
+    return {
+        out["name"]: (out["width"], out["height"] - reserved_top_px)
+        for out in OUTPUTS
+    }
+
+
+# How long the compositor is given to agree. A layer surface is configured
+# over the wayland protocol AFTER the client has drawn, and on the way down it
+# is unmapped after the process is gone — neither is synchronous with anything
+# this driver can see, so both directions are polled. Short: every one of these
+# waits is time added to a gate whose whole argument is that it costs seconds.
+MAPPED_TIMEOUT_S = 8.0
+MAPPED_POLL_S = 0.1
 
 
 # ---------------------------------------------------------- the private bus

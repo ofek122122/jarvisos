@@ -26,6 +26,16 @@
 # read as coverage:
 #   · Not a picture. Nothing here looks at a pixel. A surface that loaded
 #     cleanly and drew in the wrong corner passes this and fails hudscreens.
+#     It DOES now ask the compositor what each surface RESERVED, which is the
+#     strongest thing available without a picture (PLAN D44): sway shrinks
+#     every workspace rect by every exclusive zone, so the bar's strip has to
+#     be missing from all three monitors while it is up and back on all three
+#     once it is gone, and the other two have to leave every monitor whole.
+#     The bar's half is a proof of mapping — an unmapped surface reserves
+#     nothing, so 31 px cannot go missing unless the strip is really there.
+#     The other two are a refutation and a NARROW one; the measured reason is
+#     in the D44 section of tools/shellload/shells.py and is worth reading
+#     before anybody counts this as coverage of the HUD.
 #   · A shell with nothing to say evaluates almost none of its own QML. The
 #     HUD runs with no jarvisd (every plate unmapped, the bus blind) and the
 #     bar with no niri (`linkUp` false, no workspace delegates). What this
@@ -164,6 +174,10 @@ done
   exit 1
 }
 export WAYLAND_DISPLAY="$(basename "$sock")"
+# The IPC socket, which is a different socket from the wayland one and the only
+# way to ask what a surface reserved (PLAN D44). sway writes it beside the
+# other, in this run's own private runtime dir.
+export SWAYSOCK="$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock | head -1)"
 
 # Qt has to be told, or it picks xcb, fails to find a display, and the
 # layer-shell attached properties quietly fail to attach — which looks like a
@@ -175,6 +189,9 @@ export NO_COLOR=1
 
 export JV_SHELLLOAD_STAGE="$stage"
 export GDBUS_BIN="$glib/bin/gdbus"
+# The compositor's own IPC, which is the only thing here that can say whether a
+# surface MAPPED rather than merely loaded (PLAN D44).
+export SWAYMSG_BIN="$sway/bin/swaymsg"
 # Every shell, realized by the attribute tools/shellload/shells.py names, and
 # handed over in the variable it names. The loop is here rather than in the
 # driver because `nix build` is the one thing in this harness that is not a

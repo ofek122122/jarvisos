@@ -835,22 +835,77 @@ human-reviewed step.
       The bar's half has no cheap answer at all — `JV_BAR_NIRI` is `--set` into
       the wrapper, so it cannot be pointed at a fake stream without staging the
       shell, which is the one thing this gate refuses. Raised by D41.
+      **D44 raised the price of the HUD's half and lowered its optionality.**
+      The HUD with no jarvisd is not merely unlit — `visible: selfTest ||
+      stack.anyLit` means no wl_surface of its is ever CREATED, so the mapping
+      check D44 added reads a shell that is not there. A broker and one
+      `--instant` replay would turn that reading into a real one as well as
+      lighting the plate bindings, which is two questions for one second of
+      run time.
 
-- [ ] D44. **"It loaded" is not "it mapped", and nothing asks the second
-      question for two of the three shells.** `Configuration Loaded` is
-      quickshell saying the root component built; a `PanelWindow` whose
-      layer-shell attached properties failed to attach would still get that
-      line, and `hudscreens.sh` is the only thing that ever looks at a surface
-      (through `grim`, for the HUD alone). There is a cheap verdict available
-      for the bar specifically, and it is the exact inverse of the check
-      `shoot.py` already makes: the bar sets `exclusionMode: ExclusionMode.
-      Normal` and `exclusiveZone: implicitHeight`, so sway's usable area on
-      every output must be SHORTER than the monitor by exactly the strip's
-      height — one `swaymsg -t get_workspaces`, no screenshot. That is the
-      strongest thing anybody could assert about the bar without a picture, and
-      it would have caught a bar that silently stopped reserving its strip.
-      The notifier and the HUD both set `ExclusionMode.Ignore`, so the same IPC
-      call is their assertion too, in the other direction. Raised by D41.
+- [x] D44. **"It loaded" is not "it mapped", and nothing asked the second
+      question for two of the three shells.** (Done.) `shellload.sh` now puts
+      `swaymsg` in the driver's hands and asks the compositor two things no
+      log line can answer.
+      · **THE MONITORS, once, before any shell.** `WLR_HEADLESS_OUTPUTS=3` and
+        the `output` lines in the config were both REQUESTS and nothing read
+        the answer. All three shells build one surface per `Quickshell.screens`
+        entry, so a run that got one output would have loaded one delegate,
+        scanned one surface's worth of log and reported that every shell
+        loads. `shells.OUTPUTS` is now checked against `get_outputs`, and it
+        ends the run on its own rather than being counted with the shells.
+      · **WHAT EACH SURFACE RESERVED, per shell, three times** — before it
+        starts, while it is up, after it is stopped. sway shrinks every
+        workspace rect by every exclusive zone, so the bar's strip is
+        full → shrunk → full on all three monitors and the other two leave
+        every monitor whole. The two outer readings are the control that makes
+        the 31 missing pixels the BAR'S.
+      · **THE BAR'S HALF IS A PROOF OF MAPPING AND THE INSTRUMENT IS LIVE.**
+        `exclusiveZone: 0` injected into `shell/jv-bar/shell.qml` → exit 1,
+        naming all three monitors and both numbers, while everything else
+        about that run stayed green: loaded in 0.40 s, `Configuration Loaded`
+        arrived, and the D39 scan said nothing threw on any of the three logs.
+        A bar that silently stopped reserving its strip was invisible to every
+        gate in this repo.
+      · **AND THE LIMIT IS THE SHARPEST THING MEASURED, and not the one
+        anybody would have guessed.** A 100 px zone injected into the notifier
+        DID bite (2560x1340, 1920x980 — the zone off the bottom edge it is
+        anchored to) — but only once the surface was ALSO made `visible:
+        true`. With its own `visible: Notifications.anyLit`, false when the
+        window is created and true a moment later, the identical zone is
+        silently never published. **A conditionally-visible `PanelWindow` gets
+        its exclusive zone at creation, and a zone declared while it was
+        invisible does not reach the compositor.** Both of these shells are
+        conditionally visible, and the HUD with no jarvisd is never lit, so no
+        surface of its is created here at all. So: the bar's reading is a
+        proof, the notifier's refutes a zone on a surface that was mapped when
+        it was born, and the HUD's refutes nothing about today's HUD — it is
+        the line that notices the day the corner becomes always-mapped and
+        takes space, which is the future the bar already is. Written into
+        `shells.py`, the script header and the README, because every one of
+        these is a limit somebody would otherwise read as coverage.
+      · Free: 25.4 s before and 25.4 s after. `bar_strip_px()` derives the
+        strip from `type.label_px + geometry.pad_px * 2` and a test holds that
+        equal to `shell/jv-bar/shell.qml`'s own `implicitHeight` expression —
+        derived on both sides on purpose, so a change to the type scale the
+        bar handles perfectly does not go red.
+
+- [ ] D45. **All three `shell.qml` say `ExclusionMode.Ignore` means a zero
+      exclusive zone, and it does not.** Measured while proving D44's
+      instrument: the bar built with `exclusionMode: ExclusionMode.Ignore` and
+      its `exclusiveZone: surface.implicitHeight` left alone STILL reserved
+      all 31 px on all three monitors. What decides the strip is
+      `exclusiveZone` (and the anchors wlr-layer-shell will honour one for);
+      `exclusionMode` is about whose zones this surface is positioned AROUND.
+      So the HUD's "ExclusionMode.Ignore — zero exclusive zone, so no window
+      is ever resized", the notifier's copy of it, and the bar's
+      "exclusionMode is no longer Ignore (invariant 10)" failure message in
+      `tools/hudscreens/shoot.py` are all attributing an invariant-10
+      guarantee to the wrong property. Nothing is BROKEN — none of the three
+      sets a zone it does not mean — but a comment that names the wrong
+      guardrail is the one somebody edits away. Three comment-only edits, plus
+      one failure message, plus a rebuild of all three shells; worth its own
+      commit rather than riding on the gate that found it. Raised by D44.
 
 - [ ] D42. **`Proc` exists twice now.** `tools/hudscreens/shoot.py` and
       `tools/shellload/load.py` both hold a small class that starts a process,

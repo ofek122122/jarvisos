@@ -13016,3 +13016,86 @@ is not worth chasing.)
   `--set` into its wrapper. Then **D44** ("it loaded" is not "it mapped": the
   bar's exclusive zone is a verdict one `swaymsg -t get_workspaces` away, and
   nothing has ever asked it), and **D33** (the last copies of the HUD's box).
+
+## 2026-09-26 — iteration 130 — "it loaded" is not "it mapped" (PLAN D44)
+
+- **the hole.** `ops/ralph/shellload.sh` waited on quickshell's own
+  `Configuration Loaded` and called that a loaded shell. That line is the root
+  component built — a `PanelWindow` whose layer-shell attached properties
+  failed to ATTACH gets it too, and `hudscreens.sh` was the only thing in this
+  repo that had ever looked at a surface, through `grim`, for the HUD alone.
+  So the bar, the one surface on this machine that takes screen space away
+  from every window, could have stopped reserving its strip and every gate
+  here would have stayed green.
+- **two questions, both over sway's own IPC, both free.** `SWAYMSG_BIN` and
+  `SWAYSOCK` into the driver (the second cost a run: `swaymsg` without it is
+  `Unable to retrieve socket path`, and the IPC socket is not the wayland one).
+  · **THE MONITORS, once, before any shell.** `WLR_HEADLESS_OUTPUTS=3` and the
+    `output` lines in the config were both REQUESTS and nothing had ever read
+    the answer. Every shell builds one surface per `Quickshell.screens` entry,
+    so a run that got one output would have loaded one delegate, scanned one
+    surface's worth of log and reported that all three shells load. It ends
+    the run on its own rather than being counted with the shells: three more
+    failures underneath that one would only bury it.
+  · **WHAT EACH SURFACE RESERVED, per shell, three times** — before it starts,
+    while it is up, after it is stopped. sway shrinks every workspace rect by
+    every exclusive zone, so the bar's verdict is full → shrunk → full on all
+    three monitors. The two outer readings are the control: a strip already
+    missing before the bar started was not the bar's, and one that never came
+    back was never a layer surface's zone.
+- **THE BAR'S HALF IS A PROOF OF MAPPING, AND THE INSTRUMENT IS LIVE.**
+  `exclusiveZone: 0` injected into `shell/jv-bar/shell.qml` and the gate ends
+  1, naming all three monitors and both numbers — while **everything else
+  about that run was green**: loaded in 0.40 s, `Configuration Loaded`
+  arrived, and the D39 scan said nothing threw on any of the three logs. An
+  unmapped surface reserves nothing, so 31 px cannot go missing unless the
+  strip is really there.
+- **AND THE LIMIT IS THE SHARPEST THING HERE, and it is not the one anybody
+  would guess.** A 100 px zone injected into the notifier DID bite — observed
+  areas 2560x1340 and 1920x980, the zone off the bottom edge it is anchored to
+  — but only once the surface was ALSO made `visible: true`. With its own
+  `visible: Notifications.anyLit` — false when the window is created, true a
+  moment later when the gate's notification arrives — the identical zone is
+  silently never published and every monitor reads whole. **A
+  conditionally-visible `PanelWindow` gets its exclusive zone at creation, and
+  a zone declared while it was invisible does not reach the compositor.** Both
+  of those shells are conditionally visible, and the HUD with no jarvisd is
+  never lit at all, so no surface of its is created here. So, written into
+  `shells.py`, the script header and the README rather than left for a reader
+  to assume: the bar's reading is a proof; the notifier's refutes a zone on a
+  surface that was mapped when it was born; **the HUD's refutes nothing about
+  today's HUD** — it is the line that notices the day the corner becomes
+  always-mapped and takes space, which is the future the bar already is, and
+  it is the control that makes the bar's 31 px the bar's.
+- **a third thing fell out and is D45.** The bar built with `exclusionMode:
+  ExclusionMode.Ignore`, zone untouched, STILL reserved all 31 px. So
+  `exclusionMode` is not what decides a strip — `exclusiveZone` and the
+  anchors are — and all three `shell.qml` plus `shoot.py`'s failure message
+  attribute an invariant-10 guarantee to the wrong property. Nothing is
+  broken; a comment naming the wrong guardrail is the one somebody edits away.
+  Left as its own commit rather than ridden in on the gate that found it.
+- the strip the gate expects is DERIVED on both sides: `bar_strip_px()` reads
+  `type.label_px + geometry.pad_px * 2` out of `personality/theme.toml`, and
+  `test_the_strip_this_gate_expects_is_the_one_the_bar_declares` holds that
+  equal to the bar's own `implicitHeight` expression — the invariant-1 shape
+  `OUTPUTS` vs `sheet.OUTPUTS` already uses, and a third file reading both.
+  A gate that pinned 31 would go red on a change to the type scale the bar
+  handled perfectly.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths (tools **664
+  pass**, 10 of them new; `shellload.sh` 25.4 s, **the same 25.4 s it cost
+  before** — nine IPC calls are free against three quickshell startups). The
+  gate was additionally run five times with faults injected: two that ended 1
+  and named the right monitors, and three that did NOT bite and are the
+  measurement above. All injections reverted; `git status` clean of them
+  before the verify run. build: `nixos-rebuild build --flake .#ares` green.
+  No schema change, no jv-act, no boot path, no pins. Never tested, never
+  switched.
+- files: ops/ralph/shellload.sh, tools/shellload/shells.py,
+  tools/shellload/load.py, tools/tests/test_shellload.py, ops/ralph/README.md,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D43**, which D44 made both cheaper to justify and more clearly
+  needed — the HUD's surface is not merely unlit here, it is never created, so
+  the mapping reading and the plate bindings are one jarvisd and one
+  `--instant` replay away from both being real. Then **D45** (three comments
+  and one failure message that name the wrong property, found above), and
+  **D33** (the last copies of the HUD's box).

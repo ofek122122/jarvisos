@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from test_gen_theme_qml import ROOT
+from test_gen_theme_qml import ROOT, strip_qml_comments, theme_tokens
 
 sys.path.insert(0, str(ROOT / "tools" / "shellload"))
 import shells  # noqa: E402
@@ -387,6 +387,169 @@ def test_a_reply_that_is_not_an_id_is_refused_rather_than_read_as_zero(reply):
     facts, and only one of them is a bug in the shell."""
     with pytest.raises(ValueError):
         shells.notify_id(reply)
+
+
+# ------------------------------------------------ did it MAP (PLAN D44)
+#
+# `Configuration Loaded` is quickshell saying the root component built. A
+# `PanelWindow` whose layer-shell properties failed to attach gets that line
+# too, so the gate asks the compositor a second question: what did this
+# surface take off each monitor. These are the checks on the arithmetic and on
+# the declaration behind it — the measurement itself needs a compositor and is
+# the gate.
+
+
+def bar_declared_height() -> str:
+    """The expression `shell/jv-bar/shell.qml` sets its own height to.
+
+    Read out of the QML rather than trusted, the way `hud_surface_box()` reads
+    the HUD's box: a gate that pinned a number the shell no longer contains
+    would be pinning `None`.
+    """
+    bar = (ROOT / "shell" / "jv-bar" / "shell.qml").read_text("utf-8")
+    bar = strip_qml_comments(bar)
+    found = re.search(r"^\s*implicitHeight:\s*(.+?)\s*$", bar, re.M)
+    assert found, "shell/jv-bar/shell.qml no longer declares an implicitHeight"
+    return found.group(1)
+
+
+def test_the_strip_this_gate_expects_is_the_one_the_bar_declares():
+    """The copy, and the third file that holds both ends of it equal.
+
+    `shells.bar_strip_px()` states the bar's height in the tokens it is
+    derived from, because there is nothing to import: the number the bar uses
+    only exists inside a running QML engine, out of a `Theme.qml` generated
+    from exactly these two tokens. This is the invariant-1 shape the repo
+    already uses for `OUTPUTS` vs `sheet.OUTPUTS` — stated twice, held equal
+    by a suite that reads both.
+
+    Both ends are DERIVED, which is the part worth keeping: "one label with
+    §06's padding above and below" survives a change to the type scale, and a
+    gate that pinned 31 would not.
+    """
+    assert bar_declared_height() == "Theme.labelPx + Theme.padPx * 2", (
+        "the bar's height should read as one label plus §06's padding twice; "
+        f"shell.qml says {bar_declared_height()!r}, and "
+        "shells.bar_strip_px() no longer derives the same thing"
+    )
+    tokens = theme_tokens()
+    want = int(tokens["type"]["label_px"]) + int(tokens["geometry"]["pad_px"]) * 2
+    assert shells.bar_strip_px(shells.theme_toml_path().read_text("utf-8")) == want
+
+
+def test_the_strip_is_read_from_the_file_the_shells_theme_is_generated_from():
+    """`personality/theme.toml`, and it must be the real one.
+
+    A path that resolved to nothing would make `bar_strip_px` raise rather
+    than lie, which is the right failure — but a path that resolved to a
+    DIFFERENT theme file would hand the gate a plausible wrong number, and
+    the bar would be measured against a strip nobody ships.
+    """
+    assert shells.theme_toml_path() == ROOT / "personality" / "theme.toml"
+    assert shells.theme_toml_path().is_file()
+    gate = next(
+        g for g in dependents.DECLARED_GATES if g.script == "ops/ralph/shellload.sh"
+    )
+    assert "personality/theme.toml" in gate.reads
+
+
+def test_exactly_one_shell_takes_space_and_it_is_the_bar():
+    """The HUD and the notifier are never in anybody's way (invariant 10): a
+    surface that reserved a strip would resize every window on the monitor to
+    do it. The bar is the one surface that is supposed to, and it is a
+    property of what a bar IS rather than a relaxation."""
+    reserving = [s.attr for s in shells.SHELLS if s.reserves_top]
+    assert reserving == ["jv-bar"], reserving
+
+
+def test_the_usable_area_is_the_monitor_minus_the_strip_on_every_one():
+    """Every monitor, not the first. The bar builds one surface per
+    `Quickshell.screens` entry, so a strip reserved on one output and missing
+    from the other two is exactly the per-surface fault D32 and D37 both
+    were."""
+    whole = shells.usable_areas(0)
+    assert whole == {
+        out["name"]: (out["width"], out["height"]) for out in shells.OUTPUTS
+    }
+    strip = shells.usable_areas(31)
+    assert set(strip) == set(whole)
+    for name, (width, height) in strip.items():
+        assert (width, height) == (whole[name][0], whole[name][1] - 31), name
+
+
+def test_the_shell_that_reserves_nothing_is_asked_the_same_question():
+    """Zero is a real expectation and not a skip. The check the gate makes for
+    the HUD and the notifier is `usable_areas(0)` — the monitors, untouched —
+    so it has an answer that can be wrong, which is what makes it the control
+    that turns the bar's 31 missing pixels into the BAR'S."""
+    assert shells.usable_areas(0) != shells.usable_areas(
+        shells.bar_strip_px(shells.theme_toml_path().read_text("utf-8"))
+    )
+
+
+def test_the_compositor_is_asked_over_its_own_socket():
+    """`swaymsg` needs SWAYSOCK, which is a different socket from the wayland
+    one and does not exist until sway has started. Without it every IPC call
+    in the driver fails with "Unable to retrieve socket path" — observed, on
+    the first run of this check — and a gate whose only new question cannot
+    be asked is the failure this test is about."""
+    lines = executed_lines()
+    assert any("SWAYMSG_BIN=" in line for line in lines)
+    assert any("SWAYSOCK=" in line for line in lines)
+    # Out of the run's own private runtime dir, like the wayland socket above
+    # it: a gate that reached the user's live compositor would be asking a
+    # different session what this shell reserved.
+    sock = next(line for line in lines if "SWAYSOCK=" in line)
+    assert "$XDG_RUNTIME_DIR" in sock, sock
+
+
+def test_the_driver_cannot_change_what_the_compositor_reports():
+    """Read-only, and bluntly. `swaymsg` also EXECUTES commands — it is how
+    `tools/hudscreens/shoot.py` moves a cursor and focuses a window — and a
+    harness that could create a window could shrink a usable area itself. The
+    only calls here are `-t <tree>` queries.
+    """
+    text = DRIVER.read_text("utf-8")
+    calls = re.findall(r'swaymsg\(([^)]*)\)', text)
+    asked = [c for c in calls if c.strip() and "*args" not in c]
+    assert asked, "the driver no longer asks the compositor anything"
+    for call in asked:
+        assert call.strip().startswith('"-t"'), call
+
+
+def test_a_shell_is_read_before_during_and_after_it_runs():
+    """Three readings, and two of them are the control. A strip that was
+    already missing before the bar started was not the bar's, and one that
+    never came back was never a layer surface's zone at all — so a run that
+    only looked while the shell was up could report a reservation made by
+    something else in the session."""
+    text = DRIVER.read_text("utf-8")
+    whens = re.findall(r'check_zone\(shell, "(\w+)", up=(\w+)\)', text)
+    assert whens == [("before", "False"), ("while", "True"), ("after", "False")], whens
+
+
+def test_the_monitors_the_compositor_really_has_are_checked_before_any_shell():
+    """The floor under everything else. `WLR_HEADLESS_OUTPUTS=3` and the
+    `output` lines in the config are both REQUESTS; until D44 nothing read the
+    answer, and a run that got one output would have loaded one delegate per
+    shell, scanned one surface's worth of log and reported that all three
+    shells load.
+
+    Before any shell, because the alternative is three identical failures
+    underneath the one that explains them."""
+    text = DRIVER.read_text("utf-8")
+    assert text.index("check_outputs()") < text.index("for shell in shells.SHELLS")
+    assert '"-t", "get_outputs"' in text
+
+
+def test_the_gate_still_costs_seconds_and_not_minutes():
+    """The whole argument for this being a step rather than a named command.
+    The compositor is polled, and a poll with a generous timeout is how a 25 s
+    gate becomes a 3-minute one — so the ceiling is bounded and small, and the
+    worst case is one timeout per reading per shell."""
+    worst = shells.MAPPED_TIMEOUT_S * 3 * len(shells.SHELLS)
+    assert worst <= 90, worst
+    assert 0 < shells.MAPPED_POLL_S <= 0.25
 
 
 # ------------------------------------------------------------- the wiring

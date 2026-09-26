@@ -118,6 +118,21 @@ the HUD runs there with no jarvisd and the bar with no niri. The notifier is
 the exception and gets a real D-Bus client — which is also the first thing here
 ever to prove that name is claimed and answers.
 
+It also asks the compositor two things no log line can answer (D44). That sway
+really has all three declared monitors, once, before any shell — every shell
+builds one surface per screen, so a run that got one output would have loaded
+one delegate and called it a shell, and nothing read the answer. And what each
+surface RESERVED, per shell, three times: `swaymsg -t get_workspaces` is
+shrunk by every exclusive zone, so the bar's 31 px strip has to be missing
+from all three monitors while it is up and back on all three once it is gone.
+That one is a proof of mapping — an unmapped surface reserves nothing —
+and `Configuration Loaded` never was: it is the root component built, and a
+`PanelWindow` whose layer-shell properties failed to attach gets that line
+too. The HUD's and the notifier's readings are the other direction and a much
+narrower claim than they look; the measured reason is in the D44 section of
+`tools/shellload/shells.py`, and it is worth reading before counting either as
+coverage.
+
 ## Grading the tests themselves
 Every journal entry claims a number like "six mutations, six caught" — the
 loop's only evidence that the tests it just wrote have teeth. That claim is
