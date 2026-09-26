@@ -23,16 +23,21 @@ import subprocess
 import time
 from pathlib import Path
 
-# ares' monitors, as CLAUDE.md declares them: one 2560x1440 primary and
-# two 1920x1080 at its side. The refresh rates are real on ares and
-# meaningless here (a headless backend has no scanout), so they are not
-# claimed anywhere; what the sheet is asking is a question about SIZE —
-# whether an 11 px label docked to the corner of a 1440p panel reads the
-# same as on a 1080p one beside it.
+# ares' monitors, at the sizes and left edges `hosts/ares/outputs.nix`
+# declares them. This list is still written out rather than read from that
+# file: sheet.py runs in a bare checkout with no Nix, and a hand-rolled Nix
+# parser in the code that DRIVES a compositor is a worse trade than the
+# claim being made about it from outside. `test_the_monitors_are_ares_
+# monitors` in tools/tests/test_hudscreens.py holds the two equal — the
+# third-party shape PLAN E13 left behind everywhere else.
 #
-# The names are the headless backend's, not ares'. ares has HDMI-A-1 and
-# DP-1/DP-2, and nothing here should pretend otherwise: the compositor is
-# real, the monitors are not.
+# Two things are deliberately NOT ares': the connector names and the
+# refresh rates. The backend here is headless and has no scanout, so a
+# refresh rate would be a number about nothing, and the outputs are called
+# HEADLESS-1..3 precisely so nothing pretends the compositor is ares — it
+# is real, the monitors are not. What the sheet asks is a question about
+# SIZE: whether an 11 px label docked to the corner of a 1440p panel reads
+# the same as on the 1080p one beside it.
 OUTPUTS = [
     {"name": "HEADLESS-1", "role": "primary", "width": 2560, "height": 1440, "x": 0},
     {"name": "HEADLESS-2", "role": "side", "width": 1920, "height": 1080, "x": 2560},

@@ -5,15 +5,17 @@
 #   2. CUDA executes a trivial kernel (cuda-smoke)
 #   3. Lenovo 510 FHD enumerates RGB *and* IR nodes; a frame captures from each
 #   4. PipeWire sees the microphone and records audio
-#   5. All three monitors run at native resolution+refresh under Wayland
+#   5. Every monitor hosts/ares/outputs.nix declares is live at exactly the
+#      mode and left edge it declares, and no other output is connected
 #   6. Windows NVMe is NOT mounted and NOT in the bootloader
 #   7. The 2 TB data disk is not mounted (permanently off-limits)
 #
 # Exit code = number of failures. Run as your normal user inside a niri
 # session (check 5 talks to the compositor; check 3 needs `video` group).
 #
-# Invoked via writeShellApplication: set -euo pipefail is active and
-# $CUDA_SMOKE is provided by the wrapper.
+# Invoked via writeShellApplication: set -euo pipefail is active, and the
+# wrapper provides $CUDA_SMOKE and $JARVIS_OUTPUTS (check 5's expectation,
+# generated from the host's declaration — see pkgs/jarvis-doctor/default.nix).
 
 FAILURES=0
 pass() { printf 'PASS  %s\n' "$*"; }
@@ -93,22 +95,87 @@ rm -f "$rec"
 
 # ------------------------------------------------------------ 5. Monitors
 section "Monitors (Wayland, via niri)"
+# PLAN E13. This check used to be `grep -cE '2560x1440 @ 14[0-9]'` and
+# `grep -cE '1920x1080 @ (59|60)'` — ares' three monitors written a fourth
+# time, in a regex, in a shell script, where the primary's 144.006 had become a
+# character class. It asked "is this machine what somebody typed in August".
+# It asks "is this machine the machine this flake declares" now: the
+# expectation is GENERATED from hosts/ares/outputs.nix and interpolated into
+# the package as $JARVIS_OUTPUTS, one tab-separated row per declared output —
+#
+#     name <TAB> width <TAB> height <TAB> refresh <TAB> x
+#
+# and a monitor added there is checked here on the next rebuild with nobody
+# remembering to edit this file.
+#
+# BOTH DIRECTIONS, because they are different findings: a declared output that
+# is missing or running the wrong mode is a panel showing art and bars composed
+# for something else, and an UNDECLARED output is a monitor nothing in this
+# flake has ever heard of — no bespoke wallpaper, no niri rule, and no other
+# check that would ever mention it.
+#
+# What it deliberately does not claim: the VERTICAL position. The declaration
+# carries `x` and no `y`, and a check must not assert more than the thing it
+# reads.
+decl_file="${JARVIS_OUTPUTS:-}"
+declared=""
+if [ -n "$decl_file" ] && [ -r "$decl_file" ]; then
+  declared=$(grep -vE '^[[:space:]]*$' "$decl_file" || true)
+fi
 outputs=$(niri msg outputs 2>/dev/null || true)
-if [ -z "$outputs" ]; then
+if [ -z "$decl_file" ]; then
+  # Unset, unreadable and empty are three different findings and none of them
+  # may be reported as one of the others (the E12 lesson, one package along):
+  # each is a sentence about a file, and only one of them is about its contents.
+  fail "JARVIS_OUTPUTS is unset — this is the unwrapped doctor.sh, which carries no expectation to check the monitors against"
+elif [ ! -r "$decl_file" ]; then
+  fail "JARVIS_OUTPUTS points at $decl_file, which cannot be read — the declaration never reached the built package"
+elif [ -z "$declared" ]; then
+  fail "$decl_file declares no monitors, so this check would pass on any screen at all"
+elif [ -z "$outputs" ]; then
   fail "niri msg outputs failed — run inside the niri session"
 else
-  current=$(grep 'Current mode:' <<<"$outputs" || true)
-  n_primary=$(grep -cE '2560x1440 @ 14[0-9]' <<<"$current" || true)
-  n_secondary=$(grep -cE '1920x1080 @ (59|60)' <<<"$current" || true)
-  if [ "$n_primary" = 1 ]; then
-    pass "primary at 2560x1440@144"
+  # One `connector <TAB> WxH <TAB> refresh <TAB> x` row per live output, from
+  # niri's blocks:
+  #
+  #     Output "HP Inc. HP 27xq CNK038121B" (HDMI-A-1)
+  #       Current mode: 2560x1440 @ 144.006 Hz
+  #       Logical position: 0, 0
+  #
+  # A DISABLED output has a block and no `Current mode:`, so its fields keep
+  # the `?` the header set — which is a mismatch below, and not a skip.
+  live=$(awk '
+    function flush() { if (conn != "") printf "%s\t%s\t%s\t%s\n", conn, mode, hz, x }
+    /^Output /                       { flush(); conn = $NF; gsub(/[()]/, "", conn)
+                                       mode = "?"; hz = "?"; x = "?" }
+    /^[[:space:]]+Current mode:/     { mode = $3; hz = $5 }
+    /^[[:space:]]+Logical position:/ { x = $3; sub(/,$/, "", x) }
+    END { flush() }
+  ' <<<"$outputs")
+
+  # `while read` over a here-string runs in THIS shell, not a subshell, so the
+  # failures these arms count survive the loop.
+  while IFS=$'\t' read -r name w h hz x; do
+    [ -n "$name" ] || continue
+    want=$(printf '%s\t%sx%s\t%s\t%s' "$name" "$w" "$h" "$hz" "$x")
+    got=$(awk -F'\t' -v n="$name" '$1 == n { print; exit }' <<<"$live")
+    if [ -z "$got" ]; then
+      fail "$name is declared (${w}x${h} @ ${hz} Hz at x=${x}) and the session has no such output"
+    elif [ "$got" = "$want" ]; then
+      pass "$name at ${w}x${h} @ ${hz} Hz, ${x} px from the left"
+    else
+      fail "$name is declared as '$(tr '\t' ' ' <<<"$want")' and is live as '$(tr '\t' ' ' <<<"$got")'"
+    fi
+  done <<<"$declared"
+
+  extra=$(awk -F'\t' '
+    NR == FNR { want[$1] = 1; next }
+    !($1 in want) { printf " %s (%s @ %s Hz)", $1, $2, $3 }
+  ' "$decl_file" - <<<"$live")
+  if [ -z "$extra" ]; then
+    pass "the session has no output beyond the $(wc -l <<<"$declared") this flake declares"
   else
-    fail "expected one output at 2560x1440@144, found $n_primary"
-  fi
-  if [ "$n_secondary" = 2 ]; then
-    pass "both secondaries at 1920x1080@60"
-  else
-    fail "expected two outputs at 1920x1080@60, found $n_secondary"
+    fail "the session also has${extra} — hosts/ares/outputs.nix does not declare them, so nothing composed art or placed a bar for them"
   fi
 fi
 

@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 
 from test_gen_theme_qml import ROOT, hud_min_screen_height, hud_surface_box
+from test_outputs import ARES_OUTPUTS, declared_outputs
 
 sys.path.insert(0, str(ROOT / "tools" / "hudscreens"))
 import sheet  # noqa: E402
@@ -102,14 +103,30 @@ def test_the_harness_never_sets_the_self_test():
 
 
 def test_the_monitors_are_ares_monitors():
-    """CLAUDE.md: 2560x1440 primary plus two 1920x1080. If the sheet ever
-    quietly shrinks to one small screen, every corner measurement in
-    shoot.py still passes and the one question A13/A27 asked — what three
-    monitors look like — stops being asked.
+    """The sheet photographs the desktop ares has, so its panels are ares'
+    panels. If the sheet ever quietly shrinks to one small screen, every
+    corner measurement in shoot.py still passes and the one question A13/A27
+    asked — what three monitors look like — stops being asked.
+
+    Until PLAN E13 the expectation here was the literal
+    `[(1920, 1080), (1920, 1080), (2560, 1440)]`: CLAUDE.md's prose copied into
+    a test, a third place carrying the same three monitors, and the one that
+    would go on passing green after somebody changed the machine. It is the
+    declaration now — `hosts/ares/outputs.nix`, the same file the wallpaper is
+    composed from and the doctor checks the live session against.
+
+    What is NOT compared is the connector names or the refresh rates: the
+    backend is headless, it has no scanout, and sheet.py calls its outputs
+    HEADLESS-1..3 on purpose. The claim is about size and layout, which is what
+    the sheet is evidence about.
     """
-    sizes = sorted((o["width"], o["height"]) for o in sheet.OUTPUTS)
-    assert sizes == [(1920, 1080), (1920, 1080), (2560, 1440)], (
-        f"tools/hudscreens/sheet.py declares {sizes}, which is not ares"
+    ares = sorted(declared_outputs(ARES_OUTPUTS), key=lambda o: o["x"])
+    assert [(o["width"], o["height"], o["x"]) for o in sheet.OUTPUTS] == [
+        (o["width"], o["height"], o["x"]) for o in ares
+    ], (
+        f"tools/hudscreens/sheet.py lays out "
+        f"{[(o['width'], o['height'], o['x']) for o in sheet.OUTPUTS]} and ares "
+        f"declares {[(o['width'], o['height'], o['x']) for o in ares]}"
     )
     # Side by side, no overlap and no gap: the desk shot is one grim
     # capture across the whole layout, and an overlap would photograph one

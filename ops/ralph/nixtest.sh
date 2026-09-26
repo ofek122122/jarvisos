@@ -272,5 +272,38 @@ else
   bad "$t" "ares declares $(tr '\n' ' ' <<<"$want"); the art holds $(cd "$art_dir" && ls jarvisos-*.png | tr '\n' ' ')"
 fi
 
+# PLAN E13. The Phase 0 verifier's monitor check no longer carries ares'
+# monitors in a regex; it compares the live session against a TSV generated
+# from hosts/ares/outputs.nix and interpolated into the package. That is the
+# same hazard one package further along: a declaration that never reached the
+# BUILT doctor still evaluates, still builds, and leaves check 5 printing PASS
+# about a machine nobody declared — which is worse than the literal it
+# replaced, because a literal at least says what it believes.
+#
+# So this reads the expectation out of the built wrapper's bytes, and both
+# directions again: an output the doctor does not know about is a monitor it
+# will never complain is missing, and one it knows about that ares does not
+# declare is a FAIL on every healthy boot.
+t='the doctor checks for every output ares declares, and for none it does not'
+want=$(nix eval --raw --file hosts/ares/outputs.nix --apply \
+  'l: builtins.concatStringsSep "\n" (map (o: "${o.name}\t${toString o.width}\t${toString o.height}\t${o.refresh}\t${toString o.x}") l)' 2>&1)
+# Realized rather than evaluated (PLAN E12), and cheap: cuda-smoke and the
+# doctor are two small derivations, ~2 s warm.
+doc_said=$(nix build --no-link --print-out-paths '.#jarvis-doctor' 2>&1)
+doc=$(grep "^$store/" <<<"$doc_said" | tail -1)
+tsv=""
+[ -n "$doc" ] && [ -r "$doc/bin/jarvis-doctor" ] &&
+  tsv=$(grep -m1 '^JARVIS_OUTPUTS=' "$doc/bin/jarvis-doctor" | cut -d= -f2- | tr -d "'")
+row_re=$(printf '^[A-Za-z0-9_-]+\t[0-9]+\t[0-9]+\t[0-9]+\\.[0-9]+\t[0-9]+$')
+if ! grep -qE "$row_re" <<<"$want"; then
+  bad "$t" "hosts/ares/outputs.nix names no output the doctor could check; nix said: $(tail -3 <<<"$want")"
+elif [ -z "$tsv" ] || [ ! -r "$tsv" ]; then
+  bad "$t" "no readable declaration in ${doc:-.#jarvis-doctor}/bin/jarvis-doctor; \`nix build --no-link .#jarvis-doctor\` said: $(tail -3 <<<"$doc_said")"
+elif [ "$(sort -u "$tsv")" = "$(sort -u <<<"$want")" ]; then
+  ok "$t"
+else
+  bad "$t" "ares declares [$(tr '\t' ' ' <<<"$want" | tr '\n' '|')]; the doctor checks for [$(tr '\t' ' ' <"$tsv" | tr '\n' '|')]"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -121,7 +121,12 @@
           jarvis-wallpaper = self.packages.${system}.jarvis-wallpaper;
         };
         cuda-smoke = pkgs.callPackage ./pkgs/cuda-smoke { };
+        # jarvis-doctor — the Phase 0 verifier. Its monitor check is generated
+        # from the same declaration the wallpaper composes for (PLAN E13), so
+        # "the machine is the machine this flake declares" is one list checked
+        # two ways and not two lists that agree today.
         jarvis-doctor = pkgs.callPackage ./pkgs/jarvis-doctor {
+          outputs = import ./hosts/ares/outputs.nix;
           cuda-smoke = self.packages.${system}.cuda-smoke;
         };
         default = self.packages.${system}.jarvis-doctor;
