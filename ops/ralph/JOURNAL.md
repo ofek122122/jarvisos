@@ -14219,3 +14219,88 @@ is not worth chasing.)
   here), **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**,
   **D55**, **D62**, **D48**, **D45**. **D67** and **D65** still want a
   human.
+
+## 2026-09-26 — D68: the surface nobody had ever asked a compositor about
+
+- built: **the HUD photographed, and measured, on a screen narrower than
+  itself.** `shell.qml` asks every monitor for 300 px of corner, and since
+  D66 it clamps its plates with `min(surface.width, screen.width)` because
+  "a layer-shell surface anchored to one edge is granted the width it asks
+  for whether or not the output is that wide". That sentence is in three
+  comments in this repo and rests on a COMPOSITOR behaviour nobody had ever
+  observed: D66 measured the clamp in a QML engine, against a plain `Item`
+  whose `width` a test assigns, which is not a compositor configuring a
+  surface. So the screens harness gained a fourth output, 280 px wide.
+- **the answer: granted as asked, and it is not an argument any more.** All
+  four layer surfaces of a run are configured `300x826`, the narrow one
+  included, so the surface really does hang 36 px off the left of that
+  screen and `plateRoomPx` is the only thing between a plate and the part of
+  it that is on no screen. Read out of the HUD's own `WAYLAND_DEBUG` log by
+  `probe_surface_granted`, and the reason it is a PROBE and not a
+  photograph is the whole design: **pixels cannot answer it.** A surface
+  wlroots clamped to 280 and one granted 300 over a 280 px screen leave the
+  stack in exactly the same place — 16 px off the right edge, 248 px of
+  room — and make byte-identical pictures. The configure event is the only
+  witness there is.
+  The census is the control, and it is the same lesson A34 wrote down about
+  the frame counter: every way of breaking this probe (a regex that stopped
+  matching a new libwayland format, a shell that mapped nothing, a log
+  nobody wrote) returns an empty dict, and "no surface was configured
+  wrongly" is TRUE of an empty dict. So it insists on one configured surface
+  per output before it says anything, and prints the verbatim line it
+  matched — `zwlr_layer_surface_v1#42.configure(289, 300, 826)` — which is
+  where `tools/tests/test_hudscreens.py` got the real text its reader is
+  graded on, rather than a hand-idealised one.
+- **the awkward half went the other way from the way D68 predicted.** The
+  item expected `SURFACE_W = 300` — read out of git on purpose (D33), it is
+  what the committed PNGs were photographed against — to need a second
+  entry for a different box. It needed none: the narrow output was kept OUT
+  of `sheet.OUTPUTS` entirely. `OUTPUTS` is ares and three things hang off
+  it that must not move to answer a question about a fourth screen —
+  `DESK_WIDTH` (the grim geometry nine committed PNGs were taken at),
+  `check_desk_is_bare` (whose subject is the desktop this machine has), and
+  the sentence the sheet's README opens with. `sheet.NARROW` sits to the
+  RIGHT of the desk, so the desk capture cannot see it; `ALL_OUTPUTS` is
+  what the compositor config, the exclusive-zone check and the output census
+  read. Nine committed screens are byte-identical after this and the tenth
+  is new. `WLR_HEADLESS_OUTPUTS` is read from the sheet now instead of being
+  a literal in the driver, because a backend making three outputs against a
+  config naming four leaves the fourth at whatever size wlroots defaults to
+  — a real screen, drawn on, and not the one being asked about.
+- **and the picture, which is the half a measurement does not substitute
+  for.** `03-confirm-narrow.png`: jv-act's question, 248 px wide between two
+  16 px insets on the 280 px screen, against 260 px — `ConfirmPlate`'s own
+  cap — on the primary. Twelve pixels, and they are the entire difference
+  between a HUD that knows what screen it is on and one laying 36 px of a
+  question out where no screen is. Both wrap to the same two lines and both
+  are 136 px tall, which is worth saying because it means the clamp is
+  visible in the WIDTH and nowhere else.
+  `check_corner` now asserts on every output that nothing is drawn inside
+  the left inset. The box check it already had is **silently vacuous** on a
+  narrow screen and that is the interesting part: `left = w - SURFACE_W -
+  INSET` comes out at -36 on a 280 px output, so `x0 >= left` is true of
+  every pixel on the screen. A check written about the surface stops being a
+  check the moment the surface is bigger than the monitor.
+- cost and the ceiling: 1.8 s of a 196.6 s run, a thirteenth quickshell, and
+  one more engine on D58's bound (1593 s -> 1714 s of 1800). The B75 table
+  and the D39 scan's line counts in `hudscreens.sh` were re-measured rather
+  than left to drift, which is that paragraph's own standing lesson.
+- tests: `bash ops/ralph/verify.sh` **GREEN** — 2 gates over 6 paths, 129.8 s
+  (runtests tools 61.5 s / 755 passed, hudshots 68.3 s). Plus the gate
+  `verify.sh` names and does not run, twice: `bash ops/ralph/hudscreens.sh`
+  took the picture (196.6 s, every probe green, the new shot reported as one
+  the committed sheet had never seen), and then again after the commit —
+  **exit 0, all 10 shots match HEAD, clean tree**, so the sheet is idempotent
+  with the tenth screen in it and the granted-width answer reproduces.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: tools/hudscreens/sheet.py, tools/hudscreens/shoot.py,
+  tools/tests/test_hudscreens.py, ops/ralph/hudscreens.sh,
+  docs/hud/screens/README.md, docs/hud/screens/03-confirm-narrow.png,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- commit: 44788f8
+- next: **D70** (raised here, and the cheap half of it is one 0.3 Mpx grim:
+  earned emptiness is measured on three outputs and the narrow one is
+  outside every bareness check), then **D69**, **B88**, **B95**, **D63**,
+  **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D71**, **D48**,
+  **D45**. **D67** and **D65** still want a human.

@@ -1667,7 +1667,7 @@ human-reviewed step.
       about the one plate that reports faults. No monitor on this machine is
       within 1600 px of the floor. Raised by D66.
 
-- [ ] D68. **The HUD on a narrow output has still never been photographed.**
+- [x] D68. **The HUD on a narrow output has still never been photographed.**
       D66's expensive half, left undone deliberately: everything D66 asserts
       about a 237-to-300 px surface was measured in a QML engine, against
       `Corner.qml` and a plain `Item` whose `width` a test assigns. The real
@@ -1683,6 +1683,29 @@ human-reviewed step.
       PNGs were photographed against, read OUT OF GIT on purpose (D33), so a
       shot of a different box needs its own entry rather than a second
       meaning for that constant. Raised by D66.
+      **Done (44788f8).** Granted as asked, and now observed: all four layer
+      surfaces of a run configure `300x826`, the 280 px one included, so the
+      surface really does hang 36 px off the left of that screen. Read out of
+      the HUD's own WAYLAND_DEBUG log by `probe_surface_granted`, because
+      pixels cannot answer it — a surface wlroots clamped to 280 and one
+      granted 300 over a 280 px screen leave the stack in the same place and
+      make the same picture; the configure event is the only witness. The
+      census is the control (one configured surface per output, or the probe
+      says nothing), and the run prints the line it matched.
+      The awkward half went the other way from the way D68 guessed: rather
+      than giving `SURFACE_W` a second meaning, the narrow output was kept OUT
+      of `OUTPUTS` entirely. It is `sheet.NARROW`, to the right of the desk,
+      so `DESK_WIDTH` never moved and the nine committed screens were not
+      re-photographed to answer a question about a tenth. `ALL_OUTPUTS` is
+      what the compositor config, the exclusive-zone check and the output
+      census read; `OUTPUTS` stays ares.
+      The picture is `03-confirm-narrow.png`: the confirmation 248 px wide
+      between two 16 px insets, against 260 px (its own cap) on the primary.
+      `check_corner` now asserts on every output that nothing starts inside
+      the left inset — which was silently vacuous on the narrow one, since
+      `w - SURFACE_W - INSET` is -36 there.
+      Cost 1.8 s of a 196.6 s run and one engine on D58's ceiling (1593 ->
+      1714 s of 1800). Raised **D70** and **D71**.
 
 - [ ] D69. **The notifier's suite cannot tell a kept row from a rebuilt
       one, and the notifier is the shell that blinks.** Measured at D27: a
@@ -1713,6 +1736,35 @@ human-reviewed step.
       buying a second copy of a claim that has a picture — which is worth
       checking before building it, and is the same question **D31** asks
       about pointing `--runner shots` at that harness. Raised by D27.
+
+- [ ] D70. **Earned emptiness has never been measured on the narrow
+      output.** D68 put a 280 px screen under the HUD and photographed it
+      LIT. The other half of invariant 10 — that a HUD with nothing to say
+      leaves the screen pixel-identical to the bare desktop — is checked by
+      `check_desk_is_bare`, which walks `sheet.OUTPUTS` over a `grim` of the
+      DESK, and the narrow output is deliberately outside both. So a surface
+      that mapped on that screen when it had nothing to say would be caught by
+      nothing: `01-quiet` captures the desk alone, and the lit shots' corner
+      check only bounds the box that was drawn. Small and real. The cheap
+      shape is a second grim in `check_desk_is_bare` — `capture("narrow", …)`
+      and the same `drawn_box` over it — which is one exposure of a 280x1080
+      screen (the desk one is 33 Mpx; this is 0.3) and makes the quiet claim
+      cover every output the compositor has. The expensive shape is a tenth
+      PNG of an empty 280 px screen, which is a picture of nothing and would
+      be the second one on this sheet. Raised by D68.
+
+- [ ] D71. **The crowded corner has never met the narrow screen.** D68's
+      picture is `03-confirm`: two plates, one of them capped. What D66's
+      sweep was actually about is the CROWD — every plate at once, which
+      `tools/hudshots/scene/tst_fit.qml` measures at 713+ px tall and 300 px
+      wide in a QML engine, and which is the case where 248 px of room has
+      the most to take away. Nothing has ever put that stack on a real
+      compositor at any width, narrow or not: the screens sheet's tallest
+      shot is three plates. It is not obviously worth a tenth PNG — the fit
+      suite already owns the question and owns it at every width — so the
+      item is really "is there a claim about the crowd that only a compositor
+      can make", and the honest answer may be no, in which case write that
+      down next to `tst_fit.qml` and close it. Raised by D68.
 
 - [ ] D33. **Two copies of the HUD's box survive D16, and both are outside a
       shell.** The corner's width is one token now and both shells read it —
