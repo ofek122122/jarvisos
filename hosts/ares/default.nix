@@ -20,6 +20,7 @@
     ../../modules/printing.nix
     ../../modules/snapshots.nix
     ../../modules/update-notifier.nix
+    ../../modules/disk-space-warning.nix
     ../../modules/dictate.nix
     ../../modules/windows-compat.nix
     ../../modules/jarvis-services.nix

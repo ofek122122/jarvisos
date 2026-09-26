@@ -46,6 +46,10 @@ bad()  { fail=$((fail+1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
 # absent" check must first prove it is looking at a unit at all. Without this
 # the whole file passes on a flake that never declared the option.
 is_unit() { grep -q '^\[Service\]$' <<<"$1"; }
+# The same question for a TIMER unit, which has a [Timer] section instead of
+# a [Service] one — is_unit alone would read a real timer's text as "not a
+# unit" and pass a refused evaluation's error text right past it.
+is_timer_unit() { grep -q '^\[Timer\]$' <<<"$1"; }
 
 # Where the store is, asked of Nix rather than assumed (PLAN E12). The
 # lock-screen section below matches store paths out of unit text and out of a
@@ -641,6 +645,34 @@ if [ ! -x "$notifier/bin/jv-update-notifier" ]; then
 elif grep -qF "ExecStart=$notifier/bin/jv-update-notifier" <<<"$un_out"; then
   ok "$t"
 else bad "$t" "unit does not run the built package: $(grep ExecStart <<<"$un_out")"; fi
+
+# ------------------------------------------------------ disk-space warning
+# PLAN G4. modules/disk-space-warning.nix wires pkgs/jv-disk-space-warning
+# (whose own shell logic tools/tests/test_disk_space_warning.py proves
+# against stubbed df/notify-send) onto a periodic TIMER rather than a
+# login-only oneshot, because disk usage grows during a session and not just
+# between them. What only an evaluation can see: the timer actually fires
+# repeatedly under the session, and the service it triggers runs the real
+# built package.
+
+t='jv-disk-space-warning timer: fires periodically, tied to the graphical session'
+dt_out=$(unit jv-disk-space-warning.timer '')
+if ! is_timer_unit "$dt_out"; then bad "$t" "not a timer unit: $(tail -3 <<<"$dt_out")"
+elif grep -q '^WantedBy=graphical-session.target$' <<<"$dt_out" \
+  && grep -q '^OnUnitActiveSec=' <<<"$dt_out"; then
+  ok "$t"
+else bad "$t" "$(tail -6 <<<"$dt_out")"; fi
+
+t='jv-disk-space-warning service: Type=oneshot, runs the actual built package'
+dw_out=$(unit jv-disk-space-warning.service '')
+diskwarn=$(nix build --no-link --print-out-paths '.#jv-disk-space-warning' 2>&1 | tail -1)
+if ! is_unit "$dw_out"; then bad "$t" "not a unit: $(tail -3 <<<"$dw_out")"
+elif [ ! -x "$diskwarn/bin/jv-disk-space-warning" ]; then
+  bad "$t" "\`nix build .#jv-disk-space-warning\` said: $diskwarn"
+elif grep -q '^Type=oneshot$' <<<"$dw_out" \
+  && grep -qF "ExecStart=$diskwarn/bin/jv-disk-space-warning" <<<"$dw_out"; then
+  ok "$t"
+else bad "$t" "$(tail -6 <<<"$dw_out")"; fi
 
 # ------------------------------------------------------------- snapshots
 # PLAN F3. modules/snapshots.nix declares a snapper timeline over disko.nix's

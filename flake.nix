@@ -143,6 +143,10 @@
         # G3): a read-only `git fetch` plus a notification, never a rebuild
         # (modules/update-notifier.nix wires it to run once per login).
         jv-update-notifier = pkgs.callPackage ./pkgs/jv-update-notifier { };
+        # jv-disk-space-warning — PLAN G4: a `df`-on-a-timer check that warns
+        # once per crossing when the disk holding /nix/store gets full
+        # (modules/disk-space-warning.nix wires the timer).
+        jv-disk-space-warning = pkgs.callPackage ./pkgs/jv-disk-space-warning { };
         default = self.packages.${system}.jarvis-doctor;
       };
 

@@ -396,7 +396,42 @@ the top unchecked item unless it is blocked.
       switched. `[H]` because whether a real login actually shows the
       notification, worded right, through the real jv-notify corner,
       needs a human and a real session — see `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] G4. Disk-space warning before the Nix store fills the drive.
+- [H] G4. **Disk-space warning before the Nix store fills the drive.** DONE
+      (this commit): `modules/disk-space-warning.nix` wires
+      `pkgs/jv-disk-space-warning` (a `writeShellApplication`, the same
+      shape as G3's `jv-update-notifier`) onto a periodic
+      `systemd.user.timers.jv-disk-space-warning` (`OnStartupSec=5m`,
+      `OnUnitActiveSec=30m`, tied to `graphical-session.target` the same way
+      `jv-idle`/`jv-nightlight` already are — a timer rather than G3's
+      login-only oneshot, since disk usage grows DURING a session, not just
+      between them). The script reads `df --output=pcent /nix/store`
+      (overridable, like the update notifier's repo path, for tests) against
+      an 85%-default threshold (`JV_DISK_WARN_PCT`), and notifies through
+      jv-notify only ONCE PER CROSSING — a one-line state file
+      (`~/.local/state/jv-disk-space-warning/over-threshold`) is written the
+      first time usage crosses the line and removed the moment it drops back
+      under, so a 30-minute timer that finds the disk still full does not
+      nag every tick, and crossing again later notifies again. Never runs
+      `nix-collect-garbage`, `delete-generations` or `nixos-rebuild` —
+      freeing space is a human's decision (GUARDRAILS.md), so the only `rm`
+      in the script targets its own state file, never the disk.
+      Tests: `tools/tests/test_disk_space_warning.py` (8 cases) extracts
+      the shipped script straight out of `default.nix`'s own `text` (same
+      technique as `test_update_notifier.py`) and runs it with `df` and
+      `notify-send` both stubbed on PATH — quiet under threshold, notifies
+      once on crossing, silent while still over, silent-then-renotifies
+      across a drop-and-recross cycle, honours `JV_DISK_WARN_PCT`, exits 0
+      quietly if `df` itself fails, plus the static "never invokes gc /
+      delete-generations / nixos-rebuild, and the only `rm` names
+      `$statefile` not `$path`" checks. `ops/ralph/nixtest.sh` (+2 cases)
+      reads the real evaluation: the timer is `WantedBy=graphical-
+      session.target` with `OnUnitActiveSec` set, and the service is
+      `Type=oneshot` running the actual `nix build .#jv-disk-space-warning`
+      output. `nixos-rebuild build --flake .#ares` green. Never switched. No
+      schema, no jv-act, no boot path, no pins, no disko.nix touched.
+      `[H]` because seeing the real notification fire against the real
+      disk, and confirming the dedupe genuinely holds across a live timer,
+      needs a human — see `ops/ralph/HUMAN-VERIFY.md`.
 - [ ] G5. Temperature/fan + GPU (VRAM) readout available to the bar.
 - [ ] G6. `jarvis-doctor --repair`: diagnose common breakage and offer fixes.
 - [ ] G7. SSH agent + config, VPN support, Syncthing — each declared.

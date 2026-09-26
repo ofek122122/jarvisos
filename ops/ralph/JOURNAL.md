@@ -16577,3 +16577,49 @@ work was entirely in `shell/jv-hud/`.
   Nix store fills the drive). The comfort backlog is still far from
   resolved — H through K are entirely `[ ]` — so the loop keeps going per
   PROMPT.md STEP 5.
+
+## 2026-09-27 — disk-space warning before the store fills the drive (PLAN G4)
+- built: `modules/disk-space-warning.nix` + `pkgs/jv-disk-space-warning` — a
+  `df`-on-a-timer check (`systemd.user.timers.jv-disk-space-warning`,
+  `OnStartupSec=5m`/`OnUnitActiveSec=30m`, tied to `graphical-session.target`
+  the same way `jv-idle`/`jv-nightlight` already are) that notifies through
+  jv-notify once per crossing of an 85%-default threshold on `/nix/store`,
+  same shape as G3's `jv-update-notifier` (a `writeShellApplication`, both
+  path and threshold overridable for tests). A timer rather than G3's
+  login-only oneshot because disk usage grows DURING a session. Dedupe is a
+  one-line state file written on the first crossing and removed the moment
+  usage drops back under, so a 30-minute timer finding the disk still full
+  does not nag every tick. Never runs `nix-collect-garbage`,
+  `delete-generations` or `nixos-rebuild` (GUARDRAILS.md: freeing space is a
+  human's decision) — the only `rm` in the script targets its own state
+  file, never the disk.
+- tests: `tools/tests/test_disk_space_warning.py` (8 cases, new) extracts
+  the shipped script out of `default.nix`'s own `text` and runs it with
+  `df`/`notify-send` stubbed on PATH: quiet under threshold, notifies once
+  on crossing, silent while still over, clears state and renotifies across
+  a drop-and-recross cycle, honours `JV_DISK_WARN_PCT`, exits 0 quietly if
+  `df` itself fails, plus static checks that no gc/delete-generations/
+  nixos-rebuild is ever invoked and the only `rm` names `$statefile` not
+  `$path`. `ops/ralph/nixtest.sh` (+2 cases, one needed a new `is_timer_unit`
+  helper alongside the file's existing `is_unit` — a `.timer` unit has a
+  `[Timer]` section, not `[Service]`, so the existing helper read a real
+  timer's text as "not a unit") reads the real evaluation: the timer is
+  `WantedBy=graphical-session.target` with `OnUnitActiveSec` set, and the
+  service is `Type=oneshot` running the actual `nix build
+  .#jv-disk-space-warning` output. `bash ops/ralph/verify.sh`: 3 gates over
+  8 paths, GREEN in 210.1s (tools 934, nixtest 53, shellload unaffected —
+  named because `flake.nix` changed). `ops/ralph/hudscreens.sh` was run by
+  hand for the same reason: all 10 shots matched the sheet committed at HEAD
+  byte-for-byte (a new package with no HUD wiring changes nothing rendered).
+- build: `nixos-rebuild build --flake .#ares` -> ok (6 new derivations: the
+  service unit, the timer unit, user-units, etc, activate, the rebuilt
+  toplevel). Never switched. No schema, no jv-act, no boot path, no pins,
+  no disko.nix touched.
+- files: modules/disk-space-warning.nix (new),
+  pkgs/jv-disk-space-warning/default.nix (new),
+  tools/tests/test_disk_space_warning.py (new), flake.nix,
+  hosts/ares/default.nix, ops/ralph/nixtest.sh, ops/ralph/PLAN.md,
+  ops/ralph/HUMAN-VERIFY.md, ops/ralph/JOURNAL.md
+- next: Track G continues at G5 (temperature/fan + GPU/VRAM readout for the
+  bar). The comfort backlog is still far from resolved — H through K are
+  entirely `[ ]` — so the loop keeps going per PROMPT.md STEP 5.
