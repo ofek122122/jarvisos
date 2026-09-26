@@ -1957,7 +1957,7 @@ human-reviewed step.
       there, that gate stays green on all 773, and this one goes red naming all
       three monitors. 35.0 s, up from 32, and no pictures. Raised **D77**.
 
-- [ ] D76. **`tools/tests/test_gen_theme_qml.py` defines
+- [x] D76. **`tools/tests/test_gen_theme_qml.py` defines
       `strip_qml_comments` twice.** Lines 676 and 797, in one file: the first
       is `re.sub(r"//[^\n]*", "", text)`, the second is the line-preserving,
       string-literal-aware one with the docstring explaining why a `//` inside
@@ -1971,6 +1971,42 @@ human-reviewed step.
       up), and the verdict is the suite staying green. Small, and worth doing
       alone rather than smuggled into a change about something else. Raised by
       D74, which read both of them looking for the one it was calling.
+      **Done (3b9a014).** Naive one deleted; the survivor moved UP to the
+      module's helpers, beside `gen_from`, because the one name four other
+      suites import is not a detail of the A10 section it was hiding in (67
+      call sites across five suites). The item said the verdict is the suite
+      staying green — it is, and that is exactly the problem, so it was
+      MEASURED instead of accepted: the two functions agree on every line of
+      all 101 QML files in this tree, and with the naive one installed as the
+      real definition 774 of the suite's 776 tests still pass. So the contract
+      got two tests that do notice (a `//` inside a QML string survives;
+      stripping never moves a line or eats a brace) and one that catches the
+      SHAPE of the trap wherever it appears next: no module under `tools/`
+      defines a name twice — worst for a `test_*` name, where the shadowed copy
+      still looks collected and never runs. Eight mutants, eight reds,
+      including the walk pointed at a directory that does not exist (a scan
+      that reads nothing passes, so it says what it read) and the walk widened
+      to `ast.walk`, which is why it is `tree.body`: all four modules that
+      widening names are a legitimate `__init__` or a helper nested in two
+      tests. Raised **D78**.
+
+- [ ] D78. **The duplicate-definition scan D76 wrote stops at `tools/`, and
+      the trap is not a property of `tools/`.** There are 93 more Python
+      modules in this repo — `services/**`, `harness/`, `pkgs/` — and a second
+      module-level `def` of the same name is silently the last one in every one
+      of them, with the same worst case: a shadowed `test_*` that still looks
+      collected in the file and never runs. Measured before raising: today all
+      93 are clean, so this widening is green on arrival and its whole value is
+      the next one. The interesting half is NOT the scan, it is **which suite
+      may own it**. Put it where it is now and `tools` claims
+      `services/**`-wide, so `dependents.py` runs the 63-second tools suite on
+      every Python change anywhere in the repo — which may well be right (it
+      already reads jv-compat's installer, jv-guard's heuristics and jv-act's
+      tool table as source text) but is a cost to decide deliberately rather
+      than discover. The alternatives are a tiny suite of its own that names
+      every tree, or each service suite scanning only itself, which is the one
+      shape that cannot see a service nobody wrote a suite for. Decide, write
+      the reason down, then widen. Raised by D76.
 
 - [ ] D77. **The HUD is the only one of the three shells that declares a
       floor, and the notifier is the only other one for which that is a

@@ -14717,3 +14717,64 @@ is not worth chasing.)
   at all, and the short output now exists to ask), **D71**, **B88**, **B95**,
   **D63**, **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D48**,
   **D45**. **D67** and **D65** still want a human.
+
+## 2026-09-26 — D76: the stripper defined twice, and the two tests that can tell
+
+- **what**: `tools/tests/test_gen_theme_qml.py` carried `strip_qml_comments`
+  twice — a naive `re.sub(r"//[^\n]*", "", text)` at line 676 and, 120 lines
+  below, the string-literal-aware one whose docstring explains why a `//`
+  inside a quoted string is not a comment. Deleted the naive one and moved the
+  survivor UP to the module's helpers beside `gen_from`, then gave its contract
+  the tests it never had.
+- **why the deletion alone would have been worthless.** Python binds at call
+  time, so all 67 call sites — 24 here, plus 43 in the four suites that import
+  this name (`test_barshots`, `test_hudshots`, `test_notifyshots`,
+  `test_shellload`) — already got the careful one. There was no bug, which is
+  what let it sit long enough to become a trap, and it also means "the suite
+  stays green" is not evidence of anything. So the no-op was MEASURED: the two
+  functions agree on every line of all 101 QML files in this tree (no `//`
+  inside a string literal exists in any shell today), and with the naive one
+  installed as the *real* definition, **774 of the suite's 776 tests still
+  pass** — the only two that notice are the two this iteration wrote. Had the
+  careful one been the one deleted, every gate in this repo would have gone on
+  being green until the first QML string held a URL.
+- **so the change is one deletion and three tests.** Two pin the contract the
+  two definitions disagree about — a `//` inside a QML string survives, and
+  stripping never moves a line or eats a brace (both are properties
+  `window_bodies` and every `re.M` gate lean on without saying so). The third
+  catches the SHAPE of the trap rather than this instance of it: no module
+  under `tools/` may define a name twice. That one matters most for a `test_*`
+  name, where the shadowed copy still looks collected and covered in the file
+  and never runs at all.
+- **the narrowness of that third test is measured, not assumed.** It reads
+  `tree.body`, module level only. Widening it to `ast.walk` goes red naming
+  four modules, and every one is legitimate: `__init__` on two classes of one
+  file, and a helper nested inside two different tests. A `def` under
+  `try/except ImportError` is a deliberate fallback for the same reason and is
+  not a sibling in the module body either.
+- **tests**: `bash ops/ralph/verify.sh` **GREEN** — 3 gates over 1 path, 68.5 s
+  (`runtests.sh tools` 776 passed, up from 773; jv-compat; jv-hud-bridge).
+  Graded by mutation before being trusted, eight mutants and eight reds: the
+  naive regex restored; whole lines dropped instead of truncated; the stripper
+  made a no-op; the quote parity inverted; a duplicate helper injected into
+  `tools/dependents.py`; a duplicate `test_*` injected into
+  `test_qmlerrors.py`; the walk pointed at a directory that does not exist,
+  because a scan that reads nothing passes and so it now also says what it read
+  (this file, and ≥20 modules); and the walk widened to `ast.walk`.
+  build: `nixos-rebuild build --flake .#ares` green. No schema, no jv-act, no
+  boot path, no pins, and not one line of any shell — this is a test module
+  alone. Never tested, never switched.
+- **one thing the commit says wrong.** Its subject calls this "the stripper two
+  hundred gates call". The measured number is **67 call sites across five
+  suites**; nobody counted before writing the line. History is not rewritten
+  here (GUARDRAILS), so the correction lives in this entry, which is what the
+  next iteration reads anyway.
+- **files**: tools/tests/test_gen_theme_qml.py, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- commit: 3b9a014
+- next: **D77** (the notifier's floor — mostly arithmetic and a decision, and
+  the output D75 added is already under the load gate to ask it), then **D78**
+  (raised here: the duplicate scan stops at `tools/`, 93 modules outside it are
+  clean today, and the real question is which suite may own it), **D71**,
+  **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**, **D55**,
+  **D62**, **D48**, **D45**. **D67** and **D65** still want a human.
