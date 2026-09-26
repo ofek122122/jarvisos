@@ -125,18 +125,43 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       by pointing flake.nix at the sheet's list: red, naming both sets.
       Raised by it: **E13** below.
 
-- [ ] E13. **`jarvis-doctor` still carries ares' monitors as a literal**, and
-      it is now the last place that does: `pkgs/jarvis-doctor/doctor.sh` greps
-      niri's output for `2560x1440 @ 14[0-9]` and counts one, which is the same
-      three monitors E10 moved into `hosts/ares/outputs.nix` said a fourth time
-      — in a regex, in a shell script, where the primary's 144.006 is a
-      character class. Generate the expectations from the declaration (the
-      doctor is a package, so they interpolate in like the wallpaper's do) and
-      the live check becomes "the machine is the machine this flake declares"
-      rather than "the machine is what somebody typed in August".
-      `tools/hudscreens/sheet.py` and `tools/tests/test_hudscreens.py` carry the
-      same numbers from CLAUDE.md's prose and want the same treatment; E10's
-      `declared_outputs()` in `tools/tests/test_outputs.py` is the parser.
+- [x] E13. **`jarvis-doctor` carried ares' monitors as a literal** (bf36060).
+      Check 5 was `grep -cE '2560x1440 @ 14[0-9]'` + `grep -cE '1920x1080 @
+      (59|60)'` — the three monitors a fourth time, in a regex, where the
+      primary's 144.006 was a character class. `pkgs/jarvis-doctor` takes an
+      `outputs` argument now (no default, E10's reason), `writeText`s the
+      declaration as a TSV and exports its path as `$JARVIS_OUTPUTS` via
+      `runtimeEnv` — a FILE, E12's hop, so `nixtest.sh` can read what the BUILT
+      doctor compares against (new case, both directions; falsified by pointing
+      the attribute at the sheet's outputs).
+      The check counts nothing: it matches by connector NAME and compares mode
+      and left edge as strings. What the counts could not see and never failed
+      on — three monitors stacked at x=0, a swapped connector, a fourth panel
+      at a geometry neither grep matched, a DISABLED output — is now one
+      failure each, naming the monitor. Three arrival failures are three
+      sentences (unset / unreadable / empty), because only one of them is a
+      claim about a file's contents; the empty case is also a `throw`.
+      `tools/tests/test_doctor.py` (22 tests) LIFTS the section and RUNS it
+      against a fake `niri` and a fake declaration: everything the old greps
+      got wrong they got wrong silently, so a test that grepped the new check
+      for `JARVIS_OUTPUTS` would pass on a rewrite that compares nothing.
+      Other half done too: `test_hudscreens.py`'s `[(1920,1080),(1920,1080),
+      (2560,1440)]` is `declared_outputs(ARES_OUTPUTS)` now. `sheet.py` keeps
+      its own list (bare checkout, no Nix) and the test is the third party.
+      13 mutations, all caught. Raised by it: **E14** below.
+
+- [ ] E14. **`hosts/ares/outputs.nix` declares `x` and no `y`, and three
+      things now assume the answer is 0.** `jarvis-doctor` compares only the
+      left edge of `Logical position: X, Y` and says so in a comment;
+      `tools/hudscreens/sheet.py` lays its three headless outputs out in a row
+      at y=0; and the niri rules PLAN E5 will generate have to write a `y` the
+      declaration cannot supply. A monitor mounted above another is a legal
+      layout this repo currently cannot describe, and the failure is quiet in
+      the direction that matters — the doctor would pass. Add `y` to the
+      declaration (0 on all three of ares'), spend it in the doctor's compare
+      and the sheet's layout, and delete
+      `test_the_check_does_not_claim_a_vertical_position`, which exists to go
+      red the day this is done.
 
 - [x] E11. **Nothing in this repo read a pixel of the art** (774e7d1).
       `tools/artsample.py` + `tools/tests/test_artsample.py` (14 tests), called

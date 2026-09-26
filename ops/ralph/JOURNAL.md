@@ -15529,3 +15529,103 @@ is not worth chasing.)
   so it moves rules rather than re-deciding a layout. And the standing note
   holds — this branch is hand-driven in parallel, so check `git log` against
   the journal before assuming the tree is the one the last entry describes.
+
+## 2026-09-26 — E13: the doctor stopped describing a machine somebody typed
+
+- **what**: `jarvis-doctor`'s check 5 no longer carries ares' monitors. The
+  expectation is generated from `hosts/ares/outputs.nix` by the package and
+  handed to the script as `$JARVIS_OUTPUTS`; `tools/tests/test_doctor.py` (22
+  tests) runs the shipped check against a fake session; `ops/ralph/nixtest.sh`
+  gained a case that reads the TSV out of the BUILT doctor. E13's other half
+  landed too: `test_hudscreens.py`'s monitor literal became the declaration.
+- **why**: E10 moved ares' monitors into a declaration and E12 made the
+  wallpaper's arrival at the desktop checkable. `doctor.sh` was what was left:
+  `grep -cE '2560x1440 @ 14[0-9]'` and `grep -cE '1920x1080 @ (59|60)'` — the
+  same three monitors a fourth time, in a regex, where 144.006 was a character
+  class and 59.939 (a real mode on these panels, and not the declared one)
+  counted as 60. The doctor is a package, so the expectation interpolates in
+  exactly like the wallpaper's geometries do.
+- **what the old greps could not see, and none of it would have failed**:
+  they counted matching LINES. Three monitors stacked at x=0 — every bar, HUD
+  and wallpaper on one panel — passed. A connector swapped for another passed.
+  A fourth monitor at 2560x1440@60 matched neither count and passed. A DISABLED
+  output is a block with no `Current mode:` and simply did not count, so the
+  primary going dark read as "found 0" with no name in the message.
+  The new check matches by connector NAME and compares mode and left edge as
+  strings, so each of those is one failure that names the monitor.
+- **both directions**, for E10's reason: a declared output that is missing or
+  wrong is a panel showing art composed for something else; an UNDECLARED one
+  is a monitor nothing in this flake has ever heard of — no bespoke wallpaper,
+  no niri rule, and no other check that would ever mention it.
+- **the transport is a FILE, not a shell string** (E12's hop, one package
+  along): `writeText` puts the TSV in the store and `runtimeEnv` exports its
+  path, so `nixtest.sh` can read what the BUILT doctor will compare against.
+  A declaration that never reached the package still evaluates, still builds,
+  and leaves the Phase 0 verifier printing PASS about monitors nobody declared
+  — which is worse than the literal it replaced, because a literal at least
+  says what it believes. Three arrival failures, three different sentences:
+  unset (the unwrapped script), unreadable (the path is not in the store),
+  empty (a declaration with no rows, which would pass on any screen at all).
+  The empty case is also an evaluation-time `throw` in `default.nix`.
+- **what it deliberately does not claim**: the vertical position. The
+  declaration carries `x` and no `y`. `test_the_check_does_not_claim_a_vertical
+  _position` is the note that says so and goes red the day a `y` appears.
+- **why the suite RUNS the check instead of reading it**: everything the old
+  greps got wrong, they got wrong silently. A test that grepped the new check
+  for `JARVIS_OUTPUTS` would pass on a rewrite that reads the file and then
+  compares nothing. So the section is lifted out of `doctor.sh` — from the
+  `section` line to the banner that opens check 6 — and executed with `niri`
+  shadowed by a function. The fixture is not invented: `niri msg outputs` was
+  captured off ares today, `(preferred)` suffix and all.
+  The lift boundary is by BANNER and not by "the first unindented `fi`", which
+  is what `test_nixtest.py` uses: the guard that reads the declaration closes
+  with its own unindented `fi`, so the `fi` rule silently lifted 28 lines —
+  the comment and the read, no comparison — and every case ran to the end and
+  reported nothing. It now asserts the block ends in `fi` rather than assuming
+  where that is.
+- **the sheet half**: `tools/hudscreens/sheet.py` keeps its own OUTPUTS list
+  (it runs in a bare checkout with no Nix, and a hand-rolled Nix parser inside
+  the code that drives a compositor is the worse trade), but the literal
+  `[(1920,1080),(1920,1080),(2560,1440)]` in `test_hudscreens.py` is gone: the
+  test holds the sheet's sizes and left edges to `declared_outputs(ARES_OUTPUTS)`.
+  Names and refresh rates are deliberately NOT compared — the backend is
+  headless, it has no scanout, and the outputs are called HEADLESS-1..3 so that
+  nothing pretends the compositor is ares.
+- **falsified**: 13 mutations, each caught by the test whose claim it breaks —
+  the parser's `Logical position` line deleted, a disabled output skipped, the
+  unreadable arm folded into the empty one, the undeclared-output arm removed,
+  a geometry written back into the code, `outputs ? [ ]`, the empty-list throw
+  deleted, a sixth column nobody reads, the flake dropping the argument,
+  `runtimeEnv` removed, the summary line back to counting, the sheet shrunk to
+  one 1080p panel, and ares growing a monitor the sheet does not have. The
+  nixtest case was falsified by pointing `.#jarvis-doctor` at the sheet's
+  outputs: red, naming both sets. Every mutation was made against a `cp` in
+  `$TMPDIR` and restored with `cp` — never `git checkout --`, for E10's reason.
+- **measured**: the built doctor exports
+  `JARVIS_OUTPUTS=/nix/store/…-jarvis-declared-outputs.tsv`, three tab-
+  separated rows. Run on ares inside the session: check 5 prints four PASS
+  lines naming HDMI-A-1, DP-1, DP-2 and "no output beyond the 3 this flake
+  declares", and the whole doctor is `=== jarvis-doctor: ALL PASS ===`, exit 0.
+  `.#jarvis-doctor` builds in 2.2 s warm, so the nixtest case is cheap.
+- **tests**: `tools` 888 passed (was 866; +22 new). `bash ops/ralph/nixtest.sh`
+  16 passed (was 15). `bash ops/ralph/verify.sh` — 3 gates over 7 paths, GREEN
+  in 151.6 s (tools 73.5, nixtest 36.7, shellload 41.4).
+  `bash ops/ralph/hudscreens.sh`, named because flake.nix and sheet.py moved:
+  run, 196.4 s, all 10 shots match the sheet at HEAD — nothing to commit.
+  build: `nixos-rebuild build --flake .#ares` green. Never tested, never
+  switched. No schema, no jv-act, no boot path, no pins touched.
+- **files**: pkgs/jarvis-doctor/default.nix, pkgs/jarvis-doctor/doctor.sh,
+  flake.nix, ops/ralph/nixtest.sh, tools/tests/test_doctor.py (new),
+  tools/tests/test_hudscreens.py, tools/hudscreens/sheet.py,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **E14** (raised below — the declaration has no `y`, and three places
+  now assume one), then **E5** (cheaper than ever: `hosts/ares/outputs.nix` has
+  `name`, `refresh` and `x`, and the doctor now checks the live layout against
+  them, so a niri rule generated from the same list has a gate the day it
+  lands), then **D82**, **D79**, **D71**, **B88**, **B95**, **D63**, **D61**,
+  **D57**, **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. E6's remaining
+  half is still the frame-count MEASUREMENT and wants a compositor. **D81** is
+  the GUARDRAILS wording exit 3 needs and wants a HUMAN; **D67** and **D65**'s
+  greeter half do too. Standing note: this branch is hand-driven in parallel,
+  so check `git log` against the journal before assuming the tree is the one
+  the last entry describes.
