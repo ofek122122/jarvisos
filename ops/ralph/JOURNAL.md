@@ -13208,3 +13208,78 @@ is not worth chasing.)
   admits it is blind. Then **D48** (the 25,992 lines, which measure one of
   two things and nobody knows which), then **D45** (three comments and one
   failure message naming the wrong property) and **D33**.
+
+## 2026-09-26 — iteration 131 — the eleventh plate (PLAN D47)
+
+- built: **the HUD is loaded TWICE by `ops/ralph/shellload.sh` now**, and the
+  second run exists to light the one plate the first cannot. `LinkPlate` is on
+  screen exactly while the HUD CANNOT see the bus, so it is mutually exclusive
+  with D43's ten: lighting it means taking the broker away, and then there are
+  no frames for anything else. So a fourth quickshell runs the same shipped
+  binary with `JARVIS_BUS` pointed at a path that is not a socket, waits out
+  `core/LinkState.qml`'s grace, and the corner has to name **exactly `link`**
+  on all three monitors.
+- **why it is worth five seconds, and the second reason is the stronger one.**
+  Until now nothing anywhere had watched a real HUD admit it was blind: the
+  grace is the whole judgement in `LinkState.qml` — say nothing until the
+  outage has outlasted the bridge's own retry and `Bus.qml`'s respawn — and a
+  HUD that reported instantly, or never, passed every gate in this repo.
+  `shell/jv-hud/tests` drives `LinkState` against a BusModel it owns, which is
+  a claim about the ELEMENT; this is the shipped shell, the shipped bridge, and
+  a machine that really is not running underneath it. And the other ten plates
+  have to stay DARK, which nothing could check before: every state machine
+  under that corner is built to REFUSE rather than guess, a refusal and a calm
+  machine draw the same nothing, and no picture can tell them apart. A corner
+  naming exactly one plate can.
+- **the grace is READ out of the QML, not copied into the gate**, and that is
+  the opposite of what `bar_strip_px()` and `hud_corner_line()` do. The
+  difference is what each number is FOR: those two are expectations — the gate
+  states what the shell must do and goes red when it does not, and a third
+  file holds the copy equal. This one is a duration the gate has to OUTLAST,
+  so a stale copy would make the gate flaky rather than red. `link_grace_s()`
+  parses it, `HUD_BLIND_TIMEOUT_S` is checked against it, and the failure
+  message quotes it — which is why the 600 s injection below reports itself.
+- **the scan loop iterates ENGINES now, not shells** (`scan_targets()`). A
+  fourth quickshell writes a fourth log, and `qmlerrors.py` over a file nobody
+  reads grades nothing. Both HUD logs are reported under the HUD's root
+  because both are the same store path.
+- **three injections, and the third is the surprise.** A `graceS` of 600
+  injected into the QML ends the run 1 and the report quotes the 600 back
+  (`after 12s of a bus that is not there and the HUD's own 600s grace`).
+  `|| true` on `MicPlate`'s `shown` — a plate guessing from a bus it cannot
+  see — comes back as `showed [link mic], unexpected ['mic']` on all three
+  monitors. And `JSON.parse("{")` in `LinkPlate.qml`'s own `text:` binding was
+  reported by **BOTH** HUD logs, three times each: a plate's children are
+  constructed WITH the plate — `visible`/`opacity` decide what is DRAWN, not
+  what exists — so nearly every binding under a plate that never shows was
+  already in the D39 scan. **This run adds the STATE, not a fourth log's worth
+  of scan coverage**, and that is now written into `shells.py` where somebody
+  would otherwise read it as coverage. Two further injections could not be
+  built, and both are good news: `root.nothing.here` is a qmllint failure in
+  `pkgs/jv-hud`, and a throw inside `LinkState`'s `reason` fails four of the
+  HUD's own QML tests — the shape that survives a build is the D34/D39 one,
+  which is the shape this gate is for.
+- **no QML changed.** The whole slice is the harness: the shipped HUD already
+  did this, and nothing had ever asked it to.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths (tools **693
+  pass**, 10 of them new; `shellload.sh` **32.0 s**, against 26.5 s before —
+  5.4 s for the eleventh plate, against the 6 s D47 estimated). All three
+  injections above were run against the full gate and all three ended 1; every
+  one reverted, and `git status` was clean of them before the verify run.
+  `hudscreens.sh` was NOT named by the gate and did not need to be: no shell
+  QML is touched, so there are no pixels to re-photograph. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/load.py,
+  tools/shellload/shells.py, tools/tests/test_shellload.py, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- next: **D49** — the other half of the plate, and it is the more dangerous
+  half: nothing proves the HUD ever STOPS saying NO BUS. `LinkState`
+  deliberately does not clear `waited` on reconnect, a plate that latched
+  forever passes the new run exactly as it passes now, and a permanent NO BUS
+  over a healthy machine teaches the user to ignore the one plate that
+  qualifies all the others. The bridge retries forever, so a `jarvisd` started
+  on the very path the blind run was pointed at should take the corner from
+  `link` to `nothing` — about 2 s. Then **D50** (the ceiling test is 2 s from
+  its limit and the next wait breaks the arithmetic, not the gate), then
+  **D48**, then **D45**.

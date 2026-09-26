@@ -907,19 +907,41 @@ human-reviewed step.
       where somebody would otherwise read the bar's green as coverage — which
       is what `shells.py` and the script header do today. Raised by D43.
 
-- [ ] D47. **One plate cannot be lit by the run that lights the other ten,
-      and a second run would cost five seconds.** `LinkPlate` is on screen
-      exactly while the HUD CANNOT see the bus, so it is mutually exclusive
-      with every other plate: lighting it means taking the broker away, and
-      then there are no frames for anything else. `shell.qml` says the same
-      thing about its own box ("in practice it can never share the surface").
-      The shape is a second HUD start with `JARVIS_BUS` pointed at nothing,
-      held past `core/LinkState.qml`'s 5 s `graceS` — which is also why the
-      old no-broker version of this gate never lit it, at `HOLD_S` of 2 s —
-      and a corner that then names exactly `link`. That is one more quickshell
-      (0.4 s) plus the grace, so call it 6 s on a 27 s gate, and it would
-      close the last plate AND put the grace itself under test: today nothing
-      anywhere proves the HUD ever admits it is blind. Raised by D43.
+- [x] D47. **One plate cannot be lit by the run that lights the other ten,
+      and a second run costs five seconds.** (Done: `11d47c0`.) The HUD is
+      loaded twice — the same shipped binary, a fourth quickshell,
+      `JARVIS_BUS` pointed at a path that is not a socket, and a corner that
+      names exactly `link` on all three monitors. 26.5 s → 31.9 s.
+      · **TWO CLAIMS, and the second is the stronger one.** That the HUD says
+        it is blind at all: `core/LinkState.qml`'s grace is the whole
+        judgement in that file, and until now a HUD that reported instantly,
+        or never, passed every gate here. And that the other ten stay DARK —
+        every state machine under that corner is built to refuse rather than
+        guess, a refusal and a calm machine draw the same nothing, and a
+        corner naming exactly one plate is the only reading that tells them
+        apart. `|| true` on `MicPlate`'s `shown` is named as
+        `unexpected ['mic']` on all three monitors.
+      · **The grace is READ, not copied**, unlike `bar_strip_px()` and
+        `hud_corner_line()`, and the difference is what each number is for: a
+        copy is an expectation the shell must meet, this is a duration the
+        wait has to outlast, and a stale copy makes a gate flaky rather than
+        red. A 600 s grace injected into the QML ends the run 1 and the
+        report quotes the 600 back.
+      · **And it is NOT a fourth log's worth of scan coverage**, which is the
+        surprise. `JSON.parse("{")` injected into `LinkPlate.qml`'s own
+        `text:` binding was reported by BOTH HUD logs, three times each: a
+        plate's children are constructed WITH the plate — `visible` and
+        `opacity` decide what is drawn, not what exists — so nearly every
+        binding under a plate that never shows was already in the D39 scan.
+        What this run adds is the STATE. Written into `shells.py` where it
+        would otherwise be read as coverage. The fourth log is scanned all
+        the same, for the ordinary reason, which is why `scan_targets()`
+        iterates ENGINES rather than shells.
+      · Two injections could not be built, and both are good news:
+        `root.nothing.here` is a qmllint failure in `pkgs/jv-hud`, and a
+        throw inside `LinkState`'s `reason` fails four of the HUD's own QML
+        tests. The shape that survives a build is the D34/D39 one, which is
+        the shape this gate is for.
 
 - [ ] D48. **A lit corner threw 25,992 times in about two seconds and nobody
       knows which of two things that measures.** The D43 injection put a
@@ -935,6 +957,38 @@ human-reviewed step.
       re-evaluates without changing its value commits nothing. The cheap
       measurement is a counter in a `var` binding under the same lit corner,
       with the no-broker run as its control. Raised by D43.
+
+- [ ] D49. **The HUD is now proved to say it is blind, and nothing proves it
+      ever stops saying it.** `core/LinkState.qml` deliberately does NOT clear
+      `waited` when the link returns — `blind` goes false because `linked` went
+      true, and the next outage clears the flag when it starts — and that is
+      the one path D47 does not walk. A plate that latched on forever would
+      pass the new run exactly as it passes now, and it is the worst kind of
+      HUD fault there is: a permanent NO BUS over a healthy machine, which
+      teaches the user to ignore the one plate that qualifies all the others.
+      The shape is cheap and the bridge already does the work: it retries
+      forever, so `jarvisd` started on the very path the blind run was pointed
+      at should turn the corner from `link` to `nothing` within the retry
+      cadence. That is a second `Proc` in `load_blind`, a second
+      `corner_census` for the empty corner, and about 2 s. Note the census
+      would be reading a corner going DARK, which `hud_corner_plates` already
+      spells as `nothing` rather than as an absence — for exactly this. Raised
+      by D47.
+
+- [ ] D50. **The gate's worst-case ceiling is 2 s from its own limit, and the
+      next wait anybody adds breaks the test rather than the gate.**
+      `test_the_gate_still_costs_seconds_and_not_minutes` sums every timeout in
+      `shells.py` and asserts ≤ 150 s; D47 took it from 136 to 148 (four runs ×
+      three mapped readings, two HUD censuses, one blind wait), and
+      `HUD_BLIND_TIMEOUT_S` was set to 12 s rather than 15 partly to fit. The
+      MEASURED run is 32 s, so the ceiling is now about 4.6× the truth and the
+      next honest addition will read as a cost problem when it is an
+      arithmetic one. Two shapes: raise the number with the reason written
+      down (it is a bound on a pathological run, not a budget), or make the
+      ceiling per-ENGINE — the argument the test really wants to make is that
+      no single engine can hang this gate for minutes, and four engines each
+      bounded at 35 s is that argument stated where it stays true as runs are
+      added. Raised by D47.
 
 - [x] D44. **"It loaded" is not "it mapped", and nothing asked the second
       question for two of the three shells.** (Done.) `shellload.sh` now puts
