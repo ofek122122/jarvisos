@@ -14460,3 +14460,78 @@ is not worth chasing.)
   at 280 px), then **D71**, **B88**, **B95**, **D63**, **D61**, **D57**,
   **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. **D67** and **D65**
   still want a human.
+
+## 2026-09-26 — two of the four sides that fence the HUD were sides of the image
+
+- **the item**: **D73**, raised by D72 and the cheapest thing on the board.
+  `check_corner` is the only code in this repo that measures WHERE the HUD
+  landed on a real compositor, and its box condition was
+  `if x0 < left or x1 >= w or y0 < 0 or y1 > bottom` — four terms, reading as a
+  fence on all four sides of the drawn box. Two of them can never be true.
+  `drawn_box` is `np.nonzero` over an array the shape of the region it was
+  handed, so every number it returns is an INDEX into that region: `x1 >= w`
+  and `y0 < 0` are bounds of the IMAGE, not of the surface.
+- **the guess in the item was wrong, in the useful direction.** D73 allowed
+  that `x1 >= w` might be live in the desk branch, where `region` is a slice
+  cut out of a 6400 px image and an overflow could land in the neighbouring
+  monitor's pixels. It cannot, twice over: `drawn_box` is handed the SLICE, so
+  its numbers are indices into that one monitor; and a layer surface hanging
+  off its output's right edge cannot reach the neighbour's pixels at all,
+  because the compositor clips it to the output it is on and grim photographs
+  each output's own buffer. Dead in both callers, on every screen.
+- **why they went rather than being left as tautologies.** They read as "the
+  HUD did not draw off the right edge" and "not above the top edge", and no
+  photograph can make either claim: what is off the screen is not in the
+  picture. The observable form of drawing past an edge is content FLUSH to
+  that edge — that is what a clipped surface looks like from inside a ppm — so
+  `y0 < 0` was **replaced with the claim it stood in for**: `y0 < INSET - 2`,
+  the TOP inset, the §06 edge gap the top was the only side not to have.
+  `x1 >= w` needed no replacement; the right-hand gap window below it
+  (`INSET - 2 <= w - 1 - x1 <= INSET + 2`) is strictly stronger.
+- **the new bound is measured, not argued.** All ten committed pictures begin
+  at exactly y16, and so did every box the real compositor drew in this
+  iteration's run — including the 280 px output's `(205, 16, 263, 50)`. Every
+  plate hangs off `anchors.topMargin: Theme.insetPx` inside a surface anchored
+  to the top of the screen with no margin of its own, so the first drawn row
+  is the inset, with the same two pixels of anti-aliasing slack the other two
+  gaps get.
+- **three gates, and the first is about the SHAPE of the condition** rather
+  than about any one term: no bound `check_corner` draws may be vacuous over
+  the boxes `drawn_box` can return, on any output the compositor has. Polarity
+  is carried (the gap check is written under a `not`, so half its terms are
+  bounds only once negated — a gate that read them as written would have the
+  sense of half its terms backwards, which is how the first version of this
+  failed), chains are split so a dead half cannot hide behind a live one, and
+  `left`/`bottom`/`gap` are derived from the function's own source rather than
+  sampled, because `gap` is `w - 1 - x1` and the two cannot drift. The second
+  fences the four edges from the other direction: take a box the sheet really
+  measured, push it onto each edge of the screen in turn, insist something
+  refuses it — that is what grades the new top bound, and what would catch a
+  bound tightened past the HUD it measures. The third pins the first gate's
+  DOMAIN to `drawn_box`'s return, because a `drawn_box` that returned layout
+  coordinates is the one change that would make `x1 >= w` live, and it should
+  go red there rather than leave the vacuity gate quietly vacuous itself.
+  Plus D72's correction turned from a paragraph into a gate: the bounds that
+  are vacuous at 280 px are exactly `{x0 < left}`, by name.
+- **tests**: `bash ops/ralph/verify.sh` **GREEN** — 1 gate over 2 paths, 62.7 s
+  (runtests tools, 764 passed). Graded by mutation before being trusted: both
+  dead terms restored, the top-inset check deleted, the gap check deleted, the
+  left-inset clamp deleted, the bottom bound loosened to the image (`y1 >= h`),
+  the top inset moved off by a whole inset (`y0 < -2`), and `drawn_box`
+  returning `x1 + 1` — eight mutants, eight reds, each in the gate that owns
+  the claim. Plus the gate `verify.sh` names and does not run:
+  `bash ops/ralph/hudscreens.sh` — **exit 0**, 201 s, every probe green, all 10
+  shots matching HEAD (8 differing only by the compositor's rounding, worst
+  111 px inside a floor of 256, and restored to the committed bytes). So this
+  commit carries no new bytes in `docs/hud/screens`.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- **files**: tools/hudscreens/shoot.py, tools/tests/test_hudscreens.py,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- **commit**: b9681a0
+- next: **D74** (raised here — the bottom bound is a bound on the SURFACE, and
+  D66's clamp is width-only: nothing caps the stack's height by the screen's,
+  so on a 768 px panel the plate that gets clipped is the one that says what is
+  wrong; settle clamp-or-declare before building either), then **D71**,
+  **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**, **D55**,
+  **D62**, **D48**, **D45**. **D67** and **D65** still want a human.

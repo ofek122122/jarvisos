@@ -1782,7 +1782,7 @@ human-reviewed step.
       nothing, and the assertion is worth more than the photograph. Raised
       **D72**.
 
-- [ ] D73. **Two of `check_corner`'s four box bounds are bounds of the
+- [x] D73. **Two of `check_corner`'s four box bounds are bounds of the
       IMAGE, and so are vacuous on every output.** Counting them honestly for
       D72 turned up something the narrow output has nothing to do with. The
       box check is
@@ -1808,6 +1808,51 @@ human-reviewed step.
       the code, and if a term is dead everywhere then either delete it or
       replace it with the claim it was standing in for — the clip. Raised by
       D72.
+      **Done (b9681a0).** Settled, and the item's guess was wrong in the
+      useful direction: `x1 >= w` is dead in the desk branch TOO, twice over.
+      `drawn_box` is handed the region, not the image, so its numbers are
+      indices into that one monitor — and a layer surface hanging off its
+      output's right edge cannot reach the neighbour's pixels anyway, because
+      the compositor clips it to the output it is on and grim photographs each
+      output's own buffer. So both terms went, and `y0 < 0` was replaced with
+      the claim it was standing in for: `y0 < INSET - 2`, the TOP inset. That
+      is the observable form of "drew above the top edge" — a clipped surface
+      looks, from inside a ppm, like content flush to row 0 — and it is the
+      §06 edge gap the top was the only side not to have. Measured at exactly
+      16 on all ten committed pictures and on every box the real compositor
+      drew in this iteration's run, including the 280 px output's.
+      Three gates, all graded by mutation (8 mutants, 8 reds): no bound in
+      `check_corner` may be vacuous over the boxes `drawn_box` can return on
+      any output (polarity carried, chains split, `left`/`bottom`/`gap`
+      derived from the function's own source); the drawn box is fenced on all
+      FOUR edges, checked by pushing a box the sheet really measured onto each
+      edge in turn; and `drawn_box` still returns region indices, which is the
+      premise the first gate's domain rests on and the one change that would
+      make `x1 >= w` live. Plus D72's correction turned into a gate: the
+      bounds vacuous at 280 px are exactly `{x0 < left}`, by name.
+
+- [ ] D74. **D66's clamp is width-only, and the bottom bound is the one
+      that would notice.** Counting `check_corner`'s terms for D73 turned this
+      up from the other side. `y1 > bottom` bounds the drawn box by
+      `SURFACE_H + INSET` = 842, which is a bound on the SURFACE — so it goes
+      vacuous on any output shorter than 842 px, exactly as `x0 < left` goes
+      vacuous below 316 px wide (D72). This compositor's shortest screen is
+      1080, so it says something on all four today, and that is not the worry.
+      The worry is what it would be saying if it went quiet: `plateRoomPx` is
+      `min(surface.width, screen.width) - 2 x insetPx` — WIDTH only. Nothing
+      caps the stack's height by the screen's. On a 768 px panel the 826 px
+      surface hangs 58 px off the bottom, the compositor clips it, and the
+      plate that goes is `HealthPlate` — the thing that says what is wrong,
+      cropped exactly when everything is, which is the failure A63 measured
+      and fixed INSIDE the surface arriving from outside it. ares has no such
+      output and the harness has no such probe, so this is a real hole rather
+      than a broken test: the honest shape is either a height clamp beside
+      D66's width one (and a plate ordering that drops the bottom plate rather
+      than cutting it), or a written-down decision that this shell is for
+      screens at least 842 px tall, said in `shell.qml` next to the height and
+      graded by a fifth output in `sheet.ALL_OUTPUTS` that a `check_corner`
+      call actually reaches. Settle which before building either. Raised by
+      D73.
 
 - [ ] D71. **The crowded corner has never met the narrow screen.** D68's
       picture is `03-confirm`: two plates, one of them capped. What D66's
