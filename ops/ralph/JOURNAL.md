@@ -14626,3 +14626,94 @@ is not worth chasing.)
   duplicate `strip_qml_comments`, raised here), **B88**, **B95**, **D63**,
   **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D48**, **D45**.
   **D67** and **D65** still want a human.
+
+## 2026-09-26 — the shell's floor became a behaviour instead of a pattern
+- **built: a FOURTH output on the load gate, 768 px tall, and the three things
+  the HUD has to say about it** (PLAN D75). D74 settled the height question as
+  a declared floor rather than as a clamp — on a screen shorter than the 826 px
+  corner the compositor crops the bottom of the stack, every plate is still
+  drawn (a dropped plate is indistinguishable from a machine with nothing to
+  report; a cropped one is visibly cropped), and the shell SAYS SO in its log.
+  Everything in that sentence after the semicolon was graded by a regex over
+  `shell/jv-hud/shell.qml`, which is the best a suite with no compositor can do
+  with a file no QML engine in this repo loads — and which cannot tell a
+  binding that is evaluated from one that is not, or a handler that fires from
+  one that never runs.
+  `ops/ralph/shellload.sh` was already the gate that loads the shipped HUD
+  under a real quickshell on a real headless sway and already reads that HUD's
+  own log for what its corner says (D43). It is the one place where this is a
+  BEHAVIOUR: the warn either arrives naming that output or it does not.
+- **the output, and the care is where it is NOT.** `shells.SHORT` is outside
+  `OUTPUTS`, exactly as `sheet.py`'s narrow screen is outside its own, because
+  `OUTPUTS` is ares and three things in that file count it. 768 px because it
+  has to be under the floor (or it asks nothing at all) and tall enough that
+  the corner is really cropped rather than mostly absent; 1024 px WIDE because
+  it has to clear the HUD's 300 px surface — otherwise it is asking D68's width
+  question at the same time and a clipped sentence reads as a cropped stack.
+  `test_each_harness_fourth_output_asks_one_question_and_not_the_others` holds
+  that separation from both ends by reading the shell the two are about: this
+  one is wide enough not to be narrow, the screen sheet's is tall enough not to
+  be short. The two share the name HEADLESS-4, which is the backend's doing and
+  is asserted rather than left to be noticed.
+- **three readings, and the second two are the ones no regex can make.** That
+  it was said at all. That it names the OUTPUT's height — not the surface's,
+  which is granted whatever it asks for whatever the screen is, and which would
+  make either every screen short or none of them — under a floor above it. And
+  that the three monitors are LEFT OUT: a shell that called every screen too
+  short would pass the first two readings and teach whoever reads that log to
+  ignore it. The floor is read back out of the line rather than restated in the
+  harness, so shell.qml keeps the only copy of 826 and the reading still grades
+  the arithmetic.
+- **and the census now runs on four screens, which is the other half of D74's
+  decision rather than a repetition of it.** The claim on the short one is that
+  every plate is STILL DRAWN. A HUD that had quietly grown a height clamp —
+  dropping the health plate off the bottom of a screen too short for it, which
+  is the failure D74 refused — names nine plates there and ten everywhere else,
+  and nothing else in this repo would see that.
+- **asserted in the driver, not left to the scan, and this was measured rather
+  than assumed.** `tools/qmlerrors.py` requires a source location and one of
+  ECMAScript's error names, so a `console.warn` carrying prose reads clean
+  through it. `test_the_short_screen_warn_is_invisible_to_the_scan_that_reads_the_log`
+  runs the real scanner over the real line and asserts it sees nothing — if
+  that were ever false, every run of this gate would be red for a reason
+  nobody could find.
+- **the ripples, all counted before starting, as the item asked.**
+  `sway_config()` and `usable_areas()` are over `ALL_OUTPUTS` (a strip is a
+  property of the bar's surface, so the short screen is owed one too — 31 px
+  shorter than itself, arithmetic rather than a decision), `check_outputs` asks
+  the compositor for four, `WLR_HEADLESS_OUTPUTS` is `len(shells.ALL_OUTPUTS)`
+  instead of a literal, and `shells.OUTPUTS == sheet.OUTPUTS` needed no change
+  at all — putting the new output outside `OUTPUTS` is what kept that relation
+  intact. Every line the gate PRINTS about "every monitor" now says "every
+  screen", because one of them is not one.
+- **tests**: `bash ops/ralph/verify.sh` **GREEN** — 2 gates over 4 paths,
+  98.2 s (`runtests.sh tools`, 773 passed, and `shellload.sh`, 35.0 s, all 4
+  runs loaded and mapped on four outputs). Graded by mutation before being
+  trusted, nine mutants and nine reds: the warn suppressed (`said nothing`);
+  the floor doubled INSIDE the comparison, which keeps every substring the D74
+  regex demands — that gate stays green on all 773 and this one goes red naming
+  all three monitors, which is the measurement the whole item rests on; the
+  reported height off by one; the reported floor halved; a corner that drops
+  one plate on the short screen alone (red on HEADLESS-4, naming `health`, and
+  the blind run red with it); the fourth output raised to 1080; dropped from
+  `ALL_OUTPUTS`; narrowed to 280 px so it asks D68's question too; and the
+  script writing its own output count again.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins, and no change to any shell — this is the
+  harness alone. Never tested, never switched.
+- **the same self-inflicted lesson as last iteration, one file over.** D74's
+  entry says mutation must restore from a copy in /tmp and never from the
+  index. Every mutant here did — and then `git checkout --` on
+  `ops/ralph/shellload.sh` threw away that file's uncommitted D75 edits anyway,
+  because it was the one file being mutated that had NOT been copied first.
+  The rule is not "restore mutants from /tmp", it is **copy every file you are
+  about to touch before you touch the first one**.
+- **files**: ops/ralph/shellload.sh, tools/shellload/shells.py,
+  tools/shellload/load.py, tools/tests/test_shellload.py, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- commit: d82e70f
+- next: **D76** (the duplicate `strip_qml_comments`, small and worth doing
+  alone), then **D77** (raised here — the notifier and the bar declare no floor
+  at all, and the short output now exists to ask), **D71**, **B88**, **B95**,
+  **D63**, **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D48**,
+  **D45**. **D67** and **D65** still want a human.

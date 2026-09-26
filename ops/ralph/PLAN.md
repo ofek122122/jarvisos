@@ -1904,7 +1904,7 @@ human-reviewed step.
       deleted, the warn deleted, the warn stripped of its numbers, a 768 px
       output (the floor half), and an 840 px one (the bound half, alone).
 
-- [ ] D75. **The too-short line is graded by a regex, and `shellload.sh`
+- [x] D75. **The too-short line is graded by a regex, and `shellload.sh`
       could grade it by running it.** D74's declaration is read out of
       `shell.qml` by a source gate, because that file has no engine — but
       `ops/ralph/shellload.sh` DOES load the real quickshell HUD on a real
@@ -1930,6 +1930,32 @@ human-reviewed step.
       warnings, so a HUD that warns does not fail that scan — the new gate has
       to ASSERT the line, and assert its absence on the three tall outputs.
       Raised by D74.
+      **Done (d82e70f).** The fourth output is 1024x768 and OUTSIDE `OUTPUTS`,
+      which is what kept `shells.OUTPUTS == sheet.OUTPUTS` intact — the item
+      expected that relation to have to change and it did not; putting the new
+      screen outside the monitor list is the whole of it, and it is the shape
+      `sheet.NARROW` already had. 1024 WIDE on purpose: wide enough to clear
+      the HUD's 300 px surface, so this output asks the HEIGHT question and
+      only that one, and
+      `test_each_harness_fourth_output_asks_one_question_and_not_the_others`
+      holds both harnesses' fourth outputs to one question each by reading the
+      shell they are both about.
+      Three readings, and the second two are the ones the regex cannot make:
+      the warn arrived at all; it names the OUTPUT's height (not the surface's,
+      which is granted whatever it asks for) under a floor above it, with the
+      floor read back out of the line so shell.qml keeps the only copy of 826;
+      and the three monitors are left out of it. The corner census went to
+      `ALL_OUTPUTS` as well, which is not a repetition: the claim on the short
+      screen is that every plate is STILL DRAWN, so a HUD that had grown the
+      height clamp D74 refused names nine plates there and ten elsewhere.
+      The item's note about `qmlerrors` was right and is now measured rather
+      than assumed —
+      `test_the_short_screen_warn_is_invisible_to_the_scan_that_reads_the_log`
+      runs the real scanner over the real line.
+      Nine mutants, nine reds, the load-bearing one being the floor doubled
+      INSIDE the comparison: every substring the D74 regex demands is still
+      there, that gate stays green on all 773, and this one goes red naming all
+      three monitors. 35.0 s, up from 32, and no pictures. Raised **D77**.
 
 - [ ] D76. **`tools/tests/test_gen_theme_qml.py` defines
       `strip_qml_comments` twice.** Lines 676 and 797, in one file: the first
@@ -1945,6 +1971,39 @@ human-reviewed step.
       up), and the verdict is the suite staying green. Small, and worth doing
       alone rather than smuggled into a change about something else. Raised by
       D74, which read both of them looking for the one it was calling.
+
+- [ ] D77. **The HUD is the only one of the three shells that declares a
+      floor, and the notifier is the only other one for which that is a
+      question.** D74 gave `shell/jv-hud/shell.qml` a `minScreenHeightPx` and a
+      warn, and D75 put a 768 px output under the load gate to read it. Neither
+      of the other two says anything about the size of the screen it is on, and
+      the two cases are not alike — which is the first thing to write down,
+      because "do the same for the other shells" is the wrong shape:
+      · **jv-bar has no height question at all.** Its surface is a 31 px strip
+        anchored top+left+right, and 31 px fits on anything. What it has is a
+        WIDTH question — the workspaces row and the clock are laid out against
+        the monitor's width — and that is D65, already open, with the empty
+        strip on a narrow monitor as its own half.
+      · **jv-notify's is real but is not the HUD's.** Its surface is anchored
+        BOTTOM+right and `implicitHeight` is derived from the stack, so the
+        column grows UPWARD out of the corner: an overflowing stack is cropped
+        at the TOP, and the topmost element is the `+N EARLIER` line, which
+        exists precisely to say that something is being hidden. The thing that
+        reports the hiding is the first thing hidden, which is a sharper
+        version of the HealthPlate argument rather than a copy of it.
+        It is also already BOUNDED in a way the HUD's corner is not:
+        `NotifyModel.maxVisible` is 3, so the stack is three toasts plus that
+        line and not an unbounded column. So the question is arithmetic before
+        it is a decision — can three toasts and the counter exceed 768 px at
+        all? A `Toast` wraps its body, and if the answer is no under every
+        `maxVisible`-worth of text the fit suite already generates, then the
+        honest outcome is a sentence next to `maxVisible` saying the cap IS the
+        floor, and this item closes with no new code in any shell.
+      The cheap half is already paid either way: the output exists, all three
+      shells already load on it, and the gate already reads each shell's log.
+      Do not add a warn to either shell before deciding which failure is the
+      better one — D74's whole argument is that the question is WHICH crop, not
+      whether to report one. Raised by D75.
 
 - [ ] D71. **The crowded corner has never met the narrow screen.** D68's
       picture is `03-confirm`: two plates, one of them capped. What D66's
