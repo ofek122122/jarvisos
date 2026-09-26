@@ -263,15 +263,17 @@ def sway_config() -> str:
 #
 # AND THE LIMIT, WHICH IS THE SHARPEST THING MEASURED HERE AND IS NOT THE ONE
 # ANYBODY WOULD GUESS. That second injection only bit once the surface was
-# ALSO made `visible: true`. With the notifier's own `visible:
-# Notifications.anyLit` — false when the window is created, true a moment
-# later when the gate's notification arrives — the identical 100 px zone is
-# silently never published, and the compositor reports every monitor whole.
-# A conditionally-visible `PanelWindow` gets its exclusive zone at creation
-# and a zone declared while it was invisible does not reach the compositor.
-# Both of these shells are conditionally visible (`Notifications.anyLit`,
-# `selfTest || stack.anyLit`), and the HUD with no jarvisd is never lit at
-# all, so no surface of its is ever created in this gate.
+# ALSO made `visible: true`, AND once its anchors had been widened from the
+# corner to the bottom triplet — two conditions, not one, which is D59 below and
+# is the correction to what this paragraph said for two iterations. With the
+# notifier's own `visible: Notifications.anyLit` — false when the window is
+# created, true a moment later when the gate's notification arrives — the
+# identical 100 px zone is silently never published on ANY anchors, and the
+# compositor reports every monitor whole. A conditionally-visible `PanelWindow`
+# gets its exclusive zone at creation and a zone declared while it was invisible
+# does not reach the compositor. Both of these shells are conditionally visible
+# (`Notifications.anyLit`, `selfTest || stack.anyLit`), and the HUD with no
+# jarvisd is never lit at all, so no surface of its is ever created in this gate.
 #
 # AND LIGHTING THE CORNER DOES NOT REPAIR THAT, which is D54 and is why that
 # item is closed by measurement rather than built. D43 put real frames into this
@@ -298,28 +300,52 @@ def sway_config() -> str:
 # plus both perpendicular ones; this corner is top+right, which is neither, so
 # its zone is discarded whatever the value and whoever is looking.
 #
-# WHICH LEAVES ONE THING UNRESOLVED, and it is a real one rather than a caveat:
-# `jv-notify` is anchored bottom+right, also a bare corner, and the injection
-# above says its 100 px zone DID come off every monitor (2560x1340, 1920x980)
-# once the window was made unconditionally visible. Under the rule sway's code
-# states that should have been discarded too. So one of these two attributions
-# is incomplete — see PLAN D59, which is one re-run of the notifier injection.
+# AND THAT LEFT TWO HARNESSES GIVING TWO REASONS FOR ONE ZERO, which is what
+# D59 settled and it turns out BOTH were right about their own half. `jv-notify`
+# is anchored bottom+right, a bare corner like the HUD's, and the injection above
+# reported its 100 px zone coming off every monitor — which under the anchor rule
+# should have been discarded too. Three more runs of the real gate, all on the
+# notifier, all `ExclusionMode.Normal` + `exclusiveZone: 100`, complete the 2x2:
+#
+#   anchors            visible:               reserved
+#   bottom+right       true                   nothing           (run A, GREEN)
+#   bottom+left+right  true                   100 px, bottom    (run B, RED)
+#   bottom+left+right  Notifications.anyLit   nothing           (run C, GREEN)
+#   bottom+right       Notifications.anyLit   nothing      (what ships, GREEN)
+#
+# Run B reproduced the D44 numbers to the pixel — 2560x1340 and 1920x980 on all
+# three monitors — and the workspace rects came back `y: 0`, so the 100 px really
+# did come off the BOTTOM edge, not the top. Run A is the answer to D59's
+# question: the old notifier injection had widened the anchors and did not record
+# it. Run C is why the earlier paragraph is still true: conditional visibility
+# suppresses a zone the anchors WOULD have honoured.
+#
+# So a surface takes space off a monitor only when three things hold at once — it
+# declares a zone, it is mapped when it declares it, and its anchors are a shape
+# sway zones — and each of the three alone is enough to make the zero above.
+# Which is exactly why the reading is a control and not a proof for these two:
+# runs A and C are `exclusiveZone: 100` in a shipped shell with this whole gate
+# GREEN. `test_a_shell_whose_zero_is_only_a_control_asks_for_nothing` is what
+# covers the two conjuncts the compositor cannot show us, in the cheap gate, on
+# the commit that moves one.
 #
 # THE CONSEQUENCE, PLAINLY. The bar's reading is a proof, and it is the only one
-# here: its window is always mapped AND anchored to an edge plus both
-# perpendiculars, which is the one configuration in this repo whose zone has been
-# watched reaching the compositor. The notifier's reading and both of the HUD's
-# are the CONTROL that makes the bar's 31 px the bar's, and nothing more —
-# `test_the_only_shell_whose_zone_is_proven_is_configured_for_it` is what keeps
-# `reserves_top` and that configuration from drifting apart.
+# here: its window declares a zone, is always mapped AND is anchored to an edge
+# plus both perpendiculars, which is the one configuration in this repo whose
+# zone has been watched reaching the compositor. The notifier's reading and both
+# of the HUD's are the CONTROL that makes the bar's 31 px the bar's, and nothing
+# more — `test_the_only_shell_whose_zone_is_proven_is_configured_for_it` is what
+# keeps `reserves_top` and that configuration from drifting apart.
 #
-# AND INVARIANT 10 IS STILL HELD, by the anchor rather than by this gate: every
-# configuration in which this corner would really take space off a monitor is one
-# where sway honours the zone, and a zone sway honours is one this reading SEES.
-# The HUD that starts reserving a strip is the HUD that re-anchored to the top
-# edge — `shoot.py` measured that exact change taking 560 px — and both this
-# gate and that one go red on it. What cannot be caught here is a zone the
-# compositor itself ignores, which is a HUD that takes nothing.
+# AND INVARIANT 10 IS STILL HELD, by the configuration rather than by this gate:
+# every arrangement in which this corner would really take space off a monitor is
+# one where sway honours the zone, and a zone sway honours is one this reading
+# SEES. The HUD that starts reserving a strip is the HUD that re-anchored to the
+# top edge — `shoot.py` measured that exact change taking 560 px — and both this
+# gate and that one go red on it. What cannot be caught HERE is any of the three
+# conjuncts moving on its own, because the compositor's answer does not change
+# until the last of them does; that is the cheap gate's job (D59), and it is why
+# the two tests are worth having separately.
 
 
 def bar_strip_px(theme_toml: str) -> int:

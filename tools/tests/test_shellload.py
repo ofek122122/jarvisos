@@ -544,6 +544,33 @@ def window_always_mapped(shell: shells.Shell) -> bool:
     return gate is None or gate.strip() == "true"
 
 
+def window_zone(shell: shells.Shell) -> str | None:
+    """The `exclusiveZone:` binding on that window, or None if it has none.
+
+    Absent is the load-bearing case rather than an omission: `exclusiveZone`
+    defaults to 0, and 0 is layer-shell for "reserve nothing". Two of the three
+    shells say it that way, which is why this returns None rather than "0".
+    """
+    found = re.findall(
+        r"^      exclusiveZone: (.+?)(?: //.*)?$", window_body(shell), re.MULTILINE
+    )
+    assert len(found) <= 1, (shell.attr, found)
+    return found[0] if found else None
+
+
+def window_declares_a_zone(shell: shells.Shell) -> bool:
+    """Whether that window asks for any screen space at all.
+
+    Spelled as the ZONE rather than as `exclusionMode`, because the two are not
+    the same question and the difference is measured: the bar built with
+    `ExclusionMode.Ignore` and this binding left alone STILL reserved all 31 px
+    (PLAN D45). What a surface asks for is `exclusiveZone`; `exclusionMode` is
+    about whose zones it is positioned around.
+    """
+    zone = window_zone(shell)
+    return zone is not None and zone.strip() not in ("0", "-1")
+
+
 def window_anchors(shell: shells.Shell) -> set[str]:
     """Which screen edges that window is anchored to."""
     body = window_body(shell)
@@ -566,55 +593,62 @@ ZONED_ANCHORS = [
 
 def test_the_only_shell_whose_zone_is_proven_is_configured_for_it():
     """What the three zone readings are worth, as a rule rather than a
-    paragraph — and it is D54's measurement, which closed that item instead of
-    building it.
+    paragraph — and every conjunct of it is a run of the real gate.
 
-    The premise D54 was raised on was that lighting the corner made the HUD's
-    reading the HUD's: D43 gave this gate real frames and D47 lights `LinkPlate`
-    with no bus, so a wl_surface of the HUD's really is mapped when the
-    compositor is asked. Three injections through the real gate say otherwise.
-    `exclusiveZone: 100` with `ExclusionMode.Normal`, unconditional, from birth:
-    every engine green, every monitor whole, on both lit runs. The same zone made
-    to appear only on the surface D52 rebuilds: green again, with the HUD's own
-    log showing the latch fire — `lit, darkenings 1 zone 100` on all three
-    monitors — while sway went on reporting them whole. And the same zone with
-    `visible: true`: green again, which is the one that says why. Mapping was
-    never the missing ingredient.
+    A surface takes screen space off a monitor only when THREE things are true
+    at once, and D59 is the 2x2 that separated the last two. All four cells are
+    the notifier, through `ops/ralph/shellload.sh`, `ExclusionMode.Normal` and
+    `exclusiveZone: 100` throughout:
 
-    IT IS THE ANCHOR. sway honours an exclusive zone only for a surface anchored
-    to one edge or to an edge plus both perpendicular ones; this corner is
-    top+right, which is neither. `tools/hudscreens/shoot.py` found the same thing
-    from the other side and measured the opposite direction — the HUD re-anchored
-    left+right+top with `ExclusionMode.Auto` took HEADLESS-1 to 2560x880.
+      anchors           visible:                  reserved
+      bottom+right      true                      nothing          (D59 run A)
+      bottom+left+right true                      100 px, bottom   (D59 run B)
+      bottom+left+right Notifications.anyLit      nothing          (D59 run C)
+      bottom+right      Notifications.anyLit      nothing    (what ships today)
+
+    Only the cell with both bites, and it bit to the pixel — 2560x1340 and
+    1920x980 on all three monitors, workspace `y: 0`, so the 100 px really did
+    come off the BOTTOM edge it is anchored to.
+
+    SO THE TWO EARLIER ATTRIBUTIONS WERE EACH HALF RIGHT, which is what D59 was
+    raised to settle. D44 watched a 100 px zone come off the notifier and put it
+    down to conditional visibility; D54 watched the HUD's identical zone be
+    discarded with `visible: true` set and put it down to the corner anchor. Run
+    C says D44's mechanism is real (a `PanelWindow` publishes its zone at
+    creation, and one declared while the window was invisible never reaches the
+    compositor). Run A says D54's is real on the notifier too (a bare corner is
+    neither one edge nor an edge plus both perpendiculars, so `apply_exclusive`
+    drops the zone whatever its value). Neither harness was wrong about its own
+    cause; each had found only one of two, and the D44 record's own error was
+    narrower than either — that run had widened the anchors and did not say so,
+    which run B reproduces exactly.
 
     So `reserves_top` is a claim about a CONFIGURATION and not about a QML
-    property: this gate may call a reading a proof only for the shell whose
-    window is always mapped and whose anchors are a shape sway zones. The bar is
-    that shell. Both conjuncts are here because each was measured to matter for
-    one of these three — the anchor for the HUD, above; visibility for the
-    notifier, in D44 — and PLAN D59 is the one re-run that would separate them.
+    property: this gate may call a reading a proof only for a shell that asks
+    for a zone, is mapped when it asks, and is anchored in a shape sway zones.
+    The bar is that shell, and the other two miss on all three counts — which is
+    the point of `test_a_shell_whose_zero_is_only_a_control_asks_for_nothing`
+    below, because a zero reading cannot tell you which of the three saved it.
 
     What this refuses is a `reserves_top` that drifted from the QML: a corner
     told to reserve a strip would have its zone discarded by the compositor and
     this gate would report three whole monitors as a PROOF that it takes
     nothing."""
     for shell in shells.SHELLS:
-        zoned = window_anchors(shell) in ZONED_ANCHORS
-        proven = window_always_mapped(shell) and zoned
-        assert proven == shell.reserves_top, (
+        reserves = (
+            window_declares_a_zone(shell)
+            and window_always_mapped(shell)
+            and window_anchors(shell) in ZONED_ANCHORS
+        )
+        assert reserves == shell.reserves_top, (
             shell.attr,
+            window_zone(shell),
             window_visibility(shell),
             sorted(window_anchors(shell)),
         )
     # And it is the bar, alone — or the rule above is a tautology over a list
     # with one kind of entry in it.
     assert [s.attr for s in shells.SHELLS if s.reserves_top] == ["jv-bar"]
-    # The two that are only a control fail it for the two different reasons the
-    # D44 section states, so neither conjunct is carrying the whole rule.
-    hud = shells.hud_shell()
-    assert window_anchors(hud) == {"top", "right"}
-    assert window_anchors(hud) not in ZONED_ANCHORS
-    assert not window_always_mapped(hud)
     # The bar's strip is the one number this gate proves, so the QML that
     # publishes it has to be the QML that says so.
     bar = next(s for s in shells.SHELLS if s.reserves_top)
@@ -622,6 +656,57 @@ def test_the_only_shell_whose_zone_is_proven_is_configured_for_it():
     body = window_body(bar)
     assert "exclusionMode: ExclusionMode.Normal" in body
     assert "exclusiveZone: surface.implicitHeight" in body
+
+
+def test_a_shell_whose_zero_is_only_a_control_asks_for_nothing():
+    """The other two shells miss the rule above on ALL THREE counts, and that
+    is defence in depth rather than a description of today's QML.
+
+    The gate reads one number for each of them — every monitor whole, while the
+    shell is up — and D59's 2x2 is the measurement that says what that number
+    can and cannot see. Three separate things are keeping it at zero, the
+    reading cannot tell you which, and two of the three are invisible to it
+    entirely: run A and run C are both `exclusiveZone: 100` on a shipped shell
+    with the expensive gate GREEN. So a zone declared on the notifier's corner
+    today is a strip taken off every monitor the day somebody widens its anchors
+    for a full-width toast, or drops the `visible:` gate to stop the corner
+    rebuilding — and each of those is a reasonable-looking commit of its own, in
+    which the 35-second gate stays green and nothing names the combination.
+
+    Pinning all three closes that: every single-property step towards a surface
+    that reserves space is a red line in a 0.1-second test, on the commit that
+    takes it, and the author has to move `reserves_top` deliberately instead of
+    discovering it on a monitor. Invariant 10 is the reason it is worth a red
+    that a compositor would not give: the HUD and the notifier float over every
+    window on this machine and their whole license to do so is that they cannot
+    push one around.
+    """
+    for shell in shells.SHELLS:
+        if shell.reserves_top:
+            continue
+        # It asks for nothing. The one of the three the gate CAN see, and only
+        # while the other two also hold — which is why it is pinned here rather
+        # than left to the run.
+        assert not window_declares_a_zone(shell), (shell.attr, window_zone(shell))
+        # It is not mapped unless it has something to say, so a zone it grew
+        # would be published at a moment the compositor was not listening.
+        assert not window_always_mapped(shell), (shell.attr, window_visibility(shell))
+        # And it is anchored to a bare corner, which sway drops a zone for.
+        assert window_anchors(shell) not in ZONED_ANCHORS, sorted(
+            window_anchors(shell)
+        )
+        assert len(window_anchors(shell)) == 2, sorted(window_anchors(shell))
+    # Both of them, or the loop above is a rule about an empty list.
+    assert [s.attr for s in shells.SHELLS if not s.reserves_top] == [
+        "jv-hud",
+        "jv-notify",
+    ]
+    # The corners they are anchored to are the two §06 assigns them, and they
+    # are different corners: two surfaces in one corner is the one arrangement
+    # neither of them can detect (shell/jv-notify/shell.qml says so).
+    assert window_anchors(shells.hud_shell()) == {"top", "right"}
+    notify = next(s for s in shells.SHELLS if s.attr == "jv-notify")
+    assert window_anchors(notify) == {"bottom", "right"}
 
 
 def test_the_compositor_is_asked_over_its_own_socket():

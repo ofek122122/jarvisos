@@ -1155,23 +1155,71 @@ human-reviewed step.
         the hole D50 found in the load wait. The blind engine stays at 80 s of
         100; **D53's headroom is still unspent, and D58 is where to spend it.**
 
-- [ ] D59. **Two harnesses now give two different reasons for the same zero, and
-      one of them has to be wrong.** D44 recorded the notifier's injection biting
-      — `exclusiveZone: 100` came off every monitor, 2560x1340 and 1920x980 —
-      once its window was also made `visible: true`, and attributed the silent
-      case to the conditional visibility. D54 has just measured the HUD's zone
-      being discarded with `visible: true` set, and attributed it to the bare
-      corner anchor. But `jv-notify` is anchored **bottom+right**, which is a bare
-      corner too: under the rule sway's `apply_exclusive` states, its zone should
-      have been discarded exactly like the HUD's, visible or not. So either the
-      D44 notifier run changed something it did not record, or the anchor rule has
-      an exception these three runs have not found. It is one re-run to separate
-      them — the notifier, `visible: true`, `ExclusionMode.Normal`,
-      `exclusiveZone: 100`, anchors untouched — and the answer decides which
-      conjunct of `test_the_only_shell_whose_zone_is_proven_is_configured_for_it`
-      is load-bearing and which is belt to its braces. Cheap (one shellload run,
-      ~35 s plus a jv-notify rebuild) and it is the last unresolved thing about
-      what these three readings mean. Raised by D54.
+- [x] D59. **Two harnesses gave two reasons for one zero and BOTH were right.**
+      (Done — three runs of the real gate, and the answer is that neither
+      attribution was wrong, each had found one of two causes.) D44 recorded the
+      notifier's 100 px zone coming off every monitor once its window was
+      `visible: true` and blamed the conditional visibility; D54 measured the
+      HUD's identical zone discarded WITH `visible: true` and blamed the bare
+      corner anchor. The 2x2, all on the notifier, all `ExclusionMode.Normal` +
+      `exclusiveZone: 100`:
+      · bottom+right, `visible: true` → **nothing reserved** (run A, gate GREEN)
+      · bottom+left+right, `visible: true` → **100 px off the bottom** (run B,
+        RED; 2560x1340 and 1920x980, D44's numbers to the pixel, and the
+        workspace rects came back `y: 0` so the edge is settled too)
+      · bottom+left+right, `Notifications.anyLit` → nothing (run C, GREEN)
+      · bottom+right, `Notifications.anyLit` → nothing (what ships)
+      Run A answers the question as asked: the D44 notifier run had widened the
+      anchors and did not record it. Run C says its mechanism is real anyway — a
+      `PanelWindow` publishes its zone at creation, so a zone declared while the
+      window was invisible never reaches the compositor whatever the anchors say.
+      **So both conjuncts are load-bearing and neither is belt**: each alone is
+      enough to make the zero, and a surface reserves space only when a THIRD
+      thing holds as well — it declares a nonzero `exclusiveZone` at all.
+      What shipped is the third conjunct, which nothing had ever pinned:
+      `test_a_shell_whose_zero_is_only_a_control_asks_for_nothing` requires the
+      HUD and the notifier to miss the rule on all three counts, because runs A
+      and C are the measurement that the expensive gate stays GREEN over
+      `exclusiveZone: 100` in a shipped shell. Without it, a zone declared on a
+      corner today becomes a strip off every monitor the day somebody widens the
+      anchors for a full-width toast or drops the `visible:` gate — two ordinary
+      commits, neither caught. 10 mutations, 10 caught; an explicit
+      `exclusiveZone: 0`, the same zero spelled out, correctly stays green.
+      The D44 section in `tools/shellload/shells.py` now carries the 2x2, and
+      `tools/hudscreens/shoot.py` needed no correction — its
+      `check_no_space_reserved` had the anchor rule right from the start.
+
+- [ ] D60. **Six of the eight entries in `ZONED_ANCHORS` are believed and two
+      are measured.** The list in `tools/tests/test_shellload.py` is sway's
+      `apply_exclusive` rule written out by hand — one edge, or an edge plus both
+      perpendiculars, eight sets in total — and it is now the load-bearing
+      conjunct of two tests: a wrong entry is a `reserves_top` the biconditional
+      accepts, which is a gate calling a discarded zone a proof. What has
+      actually been through a compositor is `{top,left,right}` (the bar, every
+      run) and `{bottom,left,right}` (D59 run B), plus two corners refuted
+      (`{top,right}` on the HUD, `{bottom,right}` on the notifier in run A). The
+      four singular edges and the two left/right triplets have never been
+      exercised here at all. It is one shellload run per entry (~35 s + a
+      rebuild) and the cheap half is worth doing first: `{bottom}` alone on the
+      notifier is one run and covers the whole singular-anchor branch, since
+      `apply_exclusive` matches the four edges with the same two comparisons.
+      The alternative — deriving the list from sway's source — is not available:
+      the flake pins a binary, not a checkout. Raised by D59.
+
+- [ ] D61. **Two `visible:` bindings are now invariant-10 machinery and neither
+      file says so.** `shell/jv-hud/shell.qml` and `shell/jv-notify/shell.qml`
+      both explain their conditional visibility as earned emptiness and 0 fps
+      while idle (§06), which is why it was written. After D59 it is also one of
+      the three things keeping each surface from reserving screen space — run C
+      is the measurement — and `test_a_shell_whose_zero_is_only_a_control_asks_
+      for_nothing` will now go red if either is dropped. Somebody with a good
+      reason to make a surface unconditionally visible (D52's rebuild is exactly
+      such a reason) will meet that red without the QML ever having told them
+      what they were holding. One sentence in each file, pointing at the D44
+      section. NOT free: a comment in either file wakes `qmltest.sh`,
+      `notifytest.sh` and `hudscreens.sh` (3 m, and the shots want looking at),
+      so it belongs in an iteration that is touching a shell anyway. Raised by
+      D59.
 
 - [ ] D55. **A plate that came back LIT and EMPTY passes the new census.**
       `test_the_corner_names_the_plates_and_never_what_they_say` states the
@@ -1334,6 +1382,14 @@ human-reviewed step.
       guardrail is the one somebody edits away. Three comment-only edits, plus
       one failure message, plus a rebuild of all three shells; worth its own
       commit rather than riding on the gate that found it. Raised by D44.
+      **D59 adds the other direction**, so the property is now cornered from
+      both sides: runs A and C put `ExclusionMode.Normal` with a live
+      `exclusiveZone: 100` on the notifier and reserved NOTHING. So
+      `exclusionMode` is neither necessary (Ignore + a zone reserved 31 px) nor
+      sufficient (Normal + a zone reserved 0), and the tests that replaced those
+      comments' claim read `exclusiveZone`, the anchors and `visible:` instead —
+      `window_declares_a_zone` in `tools/tests/test_shellload.py` says why in as
+      many words. This item is now purely the three comments and the message.
 
 - [ ] D42. **`Proc` exists twice now.** `tools/hudscreens/shoot.py` and
       `tools/shellload/load.py` both hold a small class that starts a process,

@@ -13694,3 +13694,74 @@ is not worth chasing.)
   cold-Qt bound, six times over, in `tools/hudscreens/shoot.py`, and that harness
   still has no ceiling test at all — the bound first, the shrink second), then
   **D57**, **D56**, **D55**, **D48**, **D45**.
+
+## 2026-09-26 — D59: both harnesses were right, and the third conjunct shipped
+
+- **D59 asked which of two attributions was wrong and the answer is neither.**
+  D44 watched a 100 px zone come off every monitor of the notifier once its
+  window was `visible: true` and blamed the conditional visibility. D54 watched
+  the HUD's identical zone be discarded WITH `visible: true` set and blamed the
+  bare corner anchor. Both mechanisms are real; each harness had found one of
+  two. Three runs of the real gate, all on `jv-notify`, all
+  `ExclusionMode.Normal` + `exclusiveZone: 100`, complete the 2x2:
+  · `bottom+right`, `visible: true` → **nothing reserved**, gate GREEN (run A).
+    That is D59's question answered: a bare corner's zone is discarded on the
+    notifier exactly as on the HUD, so the **D44 run had widened the anchors and
+    did not record it**. The anchor rule has no exception.
+  · `bottom+left+right`, `visible: true` → **RED**, and it reproduced D44's
+    numbers to the pixel: 2560x1340 and 1920x980 on all three monitors (run B).
+    A temporary diagnostic printed the whole workspace rects, so the edge is
+    settled too — `y: 0` with the height short by 100, which is the BOTTOM edge
+    it is anchored to and not the top. D44 had inferred that from two numbers.
+  · `bottom+left+right`, the shipped `visible: Notifications.anyLit` → GREEN
+    (run C). So D44's mechanism is real anyway: a `PanelWindow` publishes its
+    exclusive zone at creation, and one declared while the window was invisible
+    never reaches the compositor whatever the anchors say.
+  **Both conjuncts are load-bearing and neither is belt** — the opposite of what
+  the item expected to find. `test_the_only_shell_whose_zone_is_proven_is_
+  configured_for_it` keeps both, and its docstring now carries the 2x2 instead of
+  the half-explanation it was written on.
+- **And the 2x2 exposed a THIRD conjunct nothing had ever pinned**, which is
+  what shipped. A surface takes space only when it declares a nonzero
+  `exclusiveZone` AND is mapped when it declares it AND is anchored in a shape
+  sway zones. Runs A and C are the measurement that says why that matters: they
+  are `exclusiveZone: 100` in a shipped shell with the whole 35-second gate
+  **GREEN**. So a zone declared on the notifier's corner today is a strip off
+  every monitor the day somebody widens its anchors for a full-width toast, or
+  drops the `visible:` gate to stop the corner rebuilding — two ordinary-looking
+  commits, in neither of which anything goes red.
+  `test_a_shell_whose_zero_is_only_a_control_asks_for_nothing` requires the HUD
+  and the notifier to miss the rule on **all three** counts, so every single
+  step towards a surface that reserves space is a red line in a 0.1 s test, on
+  the commit that takes it, rather than a discovery on a monitor.
+- **It also corrects a claim that was in the test**: the old comment said the two
+  control shells "fail it for the two different reasons the D44 section states".
+  They fail it for the same two reasons each — both are corner-anchored and both
+  are conditionally visible — and now for a third as well.
+- 10 mutations, 10 caught (each of the three conjuncts on the notifier and on
+  the HUD, all three at once — which reddens both tests — and three on the bar);
+  an explicit `exclusiveZone: 0`, the same zero spelled out, correctly stays
+  green. Every injection was reverted from a backup before the verify run and
+  the working tree was confirmed clean at `git status --porcelain`.
+- `tools/hudscreens/shoot.py` needed no correction and that is worth recording:
+  `check_no_space_reserved` had the anchor rule right, in as many words, from
+  the start. The disagreement was never between a right harness and a wrong one
+  — it was two correct partial causes read as one.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 2 paths (tools **733
+  pass**, one of them new; `shellload.sh` 34.9 s, unchanged). `hudscreens.sh`
+  was not named and did not need to be: no shell QML is in this commit. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: tools/tests/test_shellload.py, tools/shellload/shells.py,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D60** (raised here, and it is the direct debt of this commit): six of
+  the eight entries in `ZONED_ANCHORS` are believed and two are measured, and
+  that list is now the load-bearing conjunct of two tests — a wrong entry is a
+  discarded zone called a proof. The cheap half first: `{bottom}` alone on the
+  notifier is one run and covers the whole singular-anchor branch. Then **D58**
+  (the cold-Qt bound six times over in `tools/hudscreens/shoot.py`, which still
+  has no ceiling test at all — the bound first, the shrink second), then **D61**
+  (the two `visible:` bindings that are now invariant-10 machinery and say so
+  nowhere; it wants an iteration that is touching a shell anyway, because a
+  comment there costs `hudscreens.sh`), then **D57**, **D56**, **D55**, **D48**,
+  **D45**.
