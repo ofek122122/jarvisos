@@ -3550,6 +3550,135 @@ def test_the_compositor_is_given_the_narrow_output_too():
     )
 
 
+# ---------------------- the quiet half of the narrow output (D70)
+#
+# D68 photographed the 280 px screen LIT. The other half of invariant 10 is
+# that a HUD with nothing to say leaves the screen pixel-identical to the bare
+# desktop, and that claim is made by `check_desk_is_bare` — which walked
+# `sheet.OUTPUTS` over one wide `grim` of the DESK, and the narrow output is
+# deliberately outside the desk. So a surface that mapped on that screen while
+# it had nothing to say was caught by nothing at all: the quiet shot
+# photographs the desk alone, and the lit shots' corner check only bounds the
+# box that WAS drawn.
+#
+# These two gates are the shape of closing it. The first is the coverage
+# arithmetic — which outputs that function's exposures actually reach — and it
+# is written as a derivation off the sheet rather than as "there are two
+# captures", so an output added to `ALL_OUTPUTS` and to nothing else goes red
+# here. The second is the reason the fix is not just one more grim: the
+# sentence it proves is "nothing is drawn", and numpy hands that same sentence
+# to a caller whose capture came back too small.
+
+
+def units_of(name: str) -> list[ast.AST]:
+    """Every node of `shoot.py` charged to one definition."""
+    _, unit = _units(shoot_tree())
+    return [node for node, own in unit.items() if own == name]
+
+
+def calls_in(name: str, called: str) -> list[ast.Call]:
+    return [
+        node
+        for node in units_of(name)
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == called
+    ]
+
+
+def test_earned_emptiness_is_measured_on_every_output_the_compositor_has():
+    """The claim is invariant 10's, and it is about the SCREEN — every screen
+    there is, not every screen ares has. `check_desk_is_bare` is the only
+    place in this repo that makes it, so which outputs its exposures reach is
+    the whole scope of the claim, and it is derived here off `ALL_OUTPUTS`:
+    a fifth output declared and photographed by nobody goes red on this line
+    rather than passing quietly forever."""
+    targets = [ast.literal_eval(c.args[0]) for c in calls_in("check_desk_is_bare", "capture")]
+    assert targets, "check_desk_is_bare photographs nothing"
+    covered = set()
+    for target in targets:
+        if target == "desk":
+            covered |= {o["role"] for o in sheet.OUTPUTS}
+        else:
+            covered.add(target)
+    missing = {o["role"] for o in sheet.ALL_OUTPUTS} - covered
+    assert not missing, (
+        f"check_desk_is_bare captures {targets} and so never looks at "
+        f"{sorted(missing)} — a surface that mapped on that output with "
+        "nothing to say would be caught by nothing: the quiet shot is of the "
+        "desk, and a lit shot's corner check only bounds what was drawn"
+    )
+    # And every exposure it pays for is READ. A grim whose image nothing
+    # passes to `drawn_box` is a picture taken to prove a sentence nobody
+    # said.
+    reads = calls_in("check_desk_is_bare", "drawn_box")
+    assert len(reads) == len(targets), (
+        f"check_desk_is_bare takes {len(targets)} exposures and reads "
+        f"{len(reads)} of them"
+    )
+
+
+def test_a_capture_that_is_not_the_screen_is_refused():
+    """`sheet.capture_size_complaint`, exercised on the sizes that would make
+    the gate above vacuous. It lives in the sheet so that a test with no
+    compositor — and no numpy — can run the rule itself rather than assert
+    that some source line mentions it.
+
+    The failure it exists for: every check downstream reads pixels with
+    `img[0:h, x:x+w]` or reads the whole array, numpy slicing past the end of
+    an array returns a SMALLER array rather than raising, `drawn_box` of an
+    empty region is None, and None is spelt "the HUD drew nothing here".
+    """
+    narrow = sheet.output_by_role("narrow")
+    assert sheet.capture_size_complaint("x", (narrow["width"], narrow["height"]), narrow) is None
+    assert sheet.capture_size_complaint("x", (sheet.DESK_WIDTH, sheet.DESK_HEIGHT), sheet.DESK) is None
+
+    # A grim that came back with the desk when the narrow output was asked
+    # for, and one that came back with a monitor missing off the right of the
+    # desk. Both are the wrong screen and both would read as bare.
+    wrong = sheet.capture_size_complaint("narrow", (sheet.DESK_WIDTH, sheet.DESK_HEIGHT), narrow)
+    assert wrong and narrow["name"] in wrong and f"{narrow['width']}x{narrow['height']}" in wrong
+    short = sheet.capture_size_complaint(
+        "desk", (sheet.DESK_WIDTH - sheet.OUTPUTS[-1]["width"], sheet.DESK_HEIGHT), sheet.DESK
+    )
+    assert short, "the desk minus a monitor is accepted as the desk"
+
+    # Transposed and one-pixel: the two shapes a broken capture path actually
+    # produces. Transposed matters on its own — the narrow output is the one
+    # screen here whose two dimensions could be swapped without the numbers
+    # looking wrong.
+    assert sheet.capture_size_complaint("x", (narrow["height"], narrow["width"]), narrow)
+    assert sheet.capture_size_complaint("x", (1, 1), narrow)
+
+    assert sheet.DESK not in sheet.ALL_OUTPUTS, (
+        "the desk has joined the outputs — it is an IMAGE, not a screen, and "
+        "the compositor config and the output census both walk that list"
+    )
+
+
+def test_the_two_whole_image_verdicts_size_check_before_they_read():
+    """`check_capture` and `check_desk_is_bare` are the two places that turn a
+    whole image into a verdict, and a size check that runs AFTER the pixels
+    are read is not a check. The ordering is the assertion; the rule itself is
+    graded above."""
+    for name in ("check_capture", "check_desk_is_bare"):
+        sized = calls_in(name, "check_grim_size")
+        assert sized, f"{name} reads an image it never checked the size of"
+        readers = [
+            c
+            for c in units_of(name)
+            if isinstance(c, ast.Call) and ast.unparse(c.func) in ("drawn_box", "check_corner")
+        ]
+        assert readers, f"{name} checks a size and then reads nothing"
+        assert min(c.lineno for c in sized) < min(c.lineno for c in readers), (
+            f"{name} reads pixels at line {min(c.lineno for c in readers)} "
+            f"before checking the image is the screen at "
+            f"{min(c.lineno for c in sized)}"
+        )
+    assert "img.shape[:2] !=" not in shoot_text(), (
+        "shoot.py has a hand-rolled capture-size comparison again — the rule "
+        "is sheet.capture_size_complaint, which is the copy a test can run"
+    )
+
+
 # Verbatim from a real run of this harness: the four layer surfaces of one
 # jv-hud being configured, on a compositor with ares' three monitors and the
 # 280 px output. Kept as text for the reason the frame counter's sample is —

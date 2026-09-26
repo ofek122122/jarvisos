@@ -78,8 +78,10 @@ QML engine can answer:
   HUD running and again while the HUD is drawing, and must be identical.
   *Verified: `WlrKeyboardFocus.Exclusive` fails.*
 - **Earned emptiness is real emptiness.** The quiet shot must come back
-  pixel-identical to the bare desktop, on all three monitors. *Verified: a
-  health plate that shows a well machine fails.*
+  pixel-identical to the bare desktop, on all three monitors **and on the
+  narrow output** — which sits outside the desk capture, so it is looked at
+  through a second exposure of its own rather than through the wide one.
+  *Verified: a health plate that shows a well machine fails.*
 - **No space is reserved.** Each workspace's usable rect must still be the
   whole monitor. On today's corner-anchored surface this proves nothing —
   the protocol ignores an exclusive zone on a corner — and it is kept for

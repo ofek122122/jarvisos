@@ -89,6 +89,45 @@ NARROW = {
 # about all four.
 ALL_OUTPUTS = OUTPUTS + [NARROW]
 
+# The desk, as one thing that can be photographed: `OUTPUTS` side by side in
+# a single `grim -g`. It is not an output and is deliberately in no list of
+# them — it exists so that "the image I am about to read pixels out of" has
+# a declared width and height for the desk exactly as it does for a monitor.
+DESK = {
+    "name": "the desk (" + "+".join(o["name"] for o in OUTPUTS) + ")",
+    "width": DESK_WIDTH,
+    "height": DESK_HEIGHT,
+}
+
+
+def capture_size_complaint(label, got, want):
+    """What is wrong with the size of a capture, or None if nothing is.
+
+    `got` is (width, height) as the image came back; `want` is an output of
+    this sheet, or `DESK`.
+
+    This exists because of how the checks downstream FAIL. Every one of them
+    reads pixels out of a numpy array — `img[0:h, x:x+w]` for a monitor inside
+    the desk shot, the whole array for a single-output one — and numpy slicing
+    past the end of an array is not an error, it is a smaller array. So a grim
+    that returned the wrong screen, or a 1x1 placeholder, or the desk with one
+    monitor missing off the right, hands `drawn_box` a region that is empty or
+    is not the one the caller named. `drawn_box` of an empty region is None,
+    None is "the HUD drew nothing here", and "nothing is drawn" is the exact
+    sentence earned emptiness is proven with (D70). A check over an image that
+    is not the screen is vacuous, not green, and this is the only place in the
+    harness that can tell the two apart.
+    """
+    if tuple(got) == (want["width"], want["height"]):
+        return None
+    return (
+        f"{label}: grim returned {got[0]}x{got[1]}, not the "
+        f"{want['width']}x{want['height']} of {want['name']} — every check "
+        "that follows reads pixels out of that image, and one taken over an "
+        "image that is not the screen is vacuous rather than green"
+    )
+
+
 # The desktop behind the HUD. The real surface is `color: "transparent"`
 # and floats over whatever Niri has on screen, so a photograph has to put
 # SOMETHING behind it or `plate_opacity = 0.86` is invisible and the shot

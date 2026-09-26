@@ -25,7 +25,9 @@ asked things no QML engine knows:
     completely fine in a photograph nobody measured.
   · earned emptiness is REAL emptiness. The quiet shot must come back
     pixel-identical to the bare desktop — not "looks dark", but every
-    monitor untouched, which is what an unmapped surface means.
+    OUTPUT untouched, which is what an unmapped surface means. Every
+    output and not every monitor: the narrow one is outside the desk
+    capture, so it is looked at through a second exposure (D70).
   · a click over the HUD reaches the window UNDERNEATH it (A32). The
     empty input mask was the one invariant-10 claim left resting on a
     reading of shell.qml, because it cannot be measured without a second
@@ -434,18 +436,46 @@ def drawn_bands(region: np.ndarray, background: np.ndarray):
     return bands
 
 
+def check_grim_size(label: str, img: np.ndarray, want: dict) -> None:
+    """Refuse a capture that is not the screen it was asked for. The rule is
+    `sheet.capture_size_complaint`, which says at length why a wrongly-sized
+    image is worse here than a missing one."""
+    complaint = sheet.capture_size_complaint(label, (img.shape[1], img.shape[0]), want)
+    if complaint is not None:
+        raise Fail(complaint)
+
+
 def check_desk_is_bare(ppm: Path, background: np.ndarray, why: str) -> None:
-    """Photograph all three monitors and insist every one of them is the
-    flat backdrop and nothing else. Used for two different claims — the
-    desktop before the HUD exists, and the desktop a running HUD has
-    decided to leave alone — so the caller says which it is asking."""
+    """Photograph EVERY output the compositor has and insist every one of
+    them is the flat backdrop and nothing else. Used for two different
+    claims — the desktop before the HUD exists, and the desktop a running
+    HUD has decided to leave alone — so the caller says which it is asking.
+
+    Two exposures, because the desk is not every output (D70). `OUTPUTS` is
+    ares and comes back in one wide `grim -g`; the narrow output sits to the
+    right of the desk on purpose, so the desk capture cannot see it, and
+    until this took its own picture a surface that mapped on that screen with
+    nothing to say was caught by NOTHING: the quiet shot photographs the desk
+    alone, and the lit shots' corner check only bounds the box that was drawn.
+    The second exposure is 0.3 Mpx against the desk's 33.
+    """
     capture("desk", ppm)
     img = read_ppm(ppm)
+    check_grim_size(f"the desk shot for {ppm.name}", img, sheet.DESK)
     for out in sheet.OUTPUTS:
         region = img[0 : out["height"], out["x"] : out["x"] + out["width"]]
         box = drawn_box(region, background)
         if box is not None:
             raise Fail(f"{out['name']}: something is drawn at {box} — {why}")
+
+    narrow = sheet.output_by_role("narrow")
+    narrow_ppm = ppm.with_name(f"{ppm.stem}-narrow.ppm")
+    capture("narrow", narrow_ppm)
+    narrow_img = read_ppm(narrow_ppm)
+    check_grim_size(f"the narrow shot for {ppm.name}", narrow_img, narrow)
+    box = drawn_box(narrow_img, background)
+    if box is not None:
+        raise Fail(f"{narrow['name']}: something is drawn at {box} — {why}")
 
 
 def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: bool) -> None:
@@ -1812,16 +1842,13 @@ def check_capture(shot: dict, target: str, img: np.ndarray, background: np.ndarr
         # One monitor at a time: the desk shot's job is to answer whether
         # the same plate really is on all three, so it is checked as three
         # monitors rather than as one wide picture.
+        check_grim_size(f"{shot['file']} desk", img, sheet.DESK)
         for out in sheet.OUTPUTS:
             region = img[0 : out["height"], out["x"] : out["x"] + out["width"]]
             check_corner(f"{shot['file']} {out['name']}", region, background, shot["lit"])
     else:
         out = sheet.output_by_role(target)
-        if img.shape[:2] != (out["height"], out["width"]):
-            raise Fail(
-                f"{shot['file']} {target}: grim returned "
-                f"{img.shape[1]}x{img.shape[0]}, not {out['width']}x{out['height']}"
-            )
+        check_grim_size(f"{shot['file']} {target}", img, out)
         check_corner(f"{shot['file']} {out['name']}", img, background, shot["lit"])
 
 
