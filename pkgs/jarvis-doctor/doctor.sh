@@ -1,4 +1,6 @@
-# jarvis-doctor — Phase 0 exit-checklist verifier (BRIEF-phase0 task 3).
+# jarvis-doctor — Phase 0 exit-checklist verifier (BRIEF-phase0 task 3),
+# plus PLAN G6's `--repair` for the one class of breakage a doctor can fix
+# by itself: a Jarvis systemd --user unit that has crashed into `failed`.
 #
 # Checks, each printing PASS/FAIL:
 #   1. nvidia-smi sees the GTX 1660 SUPER
@@ -9,6 +11,10 @@
 #      mode and position it declares, and no other output is connected
 #   6. Windows NVMe is NOT mounted and NOT in the bootloader
 #   7. The 2 TB data disk is not mounted (permanently off-limits)
+#   8. Every jv-*/jarvis-* systemd --user unit is not in `failed` state; with
+#      `--repair`, a failed one is reset and restarted (never anything system-
+#      level, never jv-act's or jarvisd's own CODE — only the ordinary
+#      `systemctl --user restart` a human would run by hand).
 #
 # Exit code = number of failures. Run as your normal user inside a niri
 # session (check 5 talks to the compositor; check 3 needs `video` group).
@@ -16,6 +22,18 @@
 # Invoked via writeShellApplication: set -euo pipefail is active, and the
 # wrapper provides $CUDA_SMOKE and $JARVIS_OUTPUTS (check 5's expectation,
 # generated from the host's declaration — see pkgs/jarvis-doctor/default.nix).
+
+usage() {
+  printf 'usage: jarvis-doctor [--repair]\n' >&2
+  exit 2
+}
+
+REPAIR=0
+case "${1:-}" in
+  "") ;;
+  --repair) REPAIR=1 ;;
+  *) usage ;;
+esac
 
 FAILURES=0
 pass() { printf 'PASS  %s\n' "$*"; }
@@ -220,6 +238,43 @@ else
   else
     fail "2 TB disk is MOUNTED: $hdd_mounts — it is off-limits, JarvisOS must never mount it"
   fi
+fi
+
+# --------------------------------------- 8. Jarvis user services (systemd)
+section "Jarvis user services (systemd --user)"
+# Every unit this flake declares for Jarvis follows one of two prefixes
+# everywhere in modules/ — jv-* or jarvis-* (jarvis-wallpaper is the one
+# jarvis- name, and it is a real one: `grep -rn "systemd.user.services\."
+# modules/ hosts/` is what confirms it, not a guess). That naming convention
+# is the thing this check reads instead of a second, hand-kept list of unit
+# names — the same "declared once, generated everywhere" reason check 5's
+# monitor list stopped being typed a fourth time (PLAN E13): a unit is either
+# named like ours or it is not this doctor's to touch.
+units=$(systemctl --user list-units --all --plain --no-legend --type=service,timer 'jv-*' 'jarvis-*' 2>/dev/null || true)
+if [ -z "$units" ]; then
+  fail "systemctl --user lists no jv-*/jarvis-* units — this session has not switched this flake's generation, or this is not a real login session"
+else
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    unit=$(awk '{print $1}' <<<"$line")
+    active=$(awk '{print $3}' <<<"$line")
+    if [ "$active" != "failed" ]; then
+      pass "$unit ($active)"
+      continue
+    fi
+    if [ "$REPAIR" = 1 ]; then
+      systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
+      systemctl --user restart "$unit" >/dev/null 2>&1 || true
+      fixed=$(systemctl --user is-active "$unit" 2>/dev/null || true)
+      if [ "$fixed" = "failed" ] || [ -z "$fixed" ]; then
+        fail "$unit was FAILED and --repair could not bring it back (now '$fixed') — see: journalctl --user -u $unit"
+      else
+        pass "$unit was FAILED, --repair restarted it and it is now $fixed"
+      fi
+    else
+      fail "$unit has FAILED — re-run 'jarvis-doctor --repair' to restart it, or: systemctl --user restart $unit"
+    fi
+  done <<<"$units"
 fi
 
 # ------------------------------------------------------------- summary

@@ -515,7 +515,59 @@ the top unchecked item unless it is blocked.
       and the real HealthPlate line lighting up under real thermal load
       both need ares' own hardware and a human watching the corner — see
       `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] G6. `jarvis-doctor --repair`: diagnose common breakage and offer fixes.
+- [H] G6. `jarvis-doctor --repair`: diagnose common breakage and offer fixes.
+      DONE (this commit): a new check 8, "Jarvis user services", lists every
+      `jv-*`/`jarvis-*` `systemd --user` unit (`systemctl --user list-units
+      --all --type=service,timer 'jv-*' 'jarvis-*'`) — the naming convention
+      every module in `modules/` already follows (`grep -rn
+      "systemd.user.services\." modules/ hosts/` is what confirms it), read
+      directly off the live session rather than a second hand-kept list of
+      unit names (the same "declared once" reason check 5's monitor
+      expectation stopped being typed a fourth time, PLAN E13 — the
+      difference here is the convention itself is the declaration, so
+      nothing needed generating into the package). Any unit not in
+      `systemctl`'s own `failed` state is a PASS; one that IS failed is
+      "common breakage" — a crashed comfort service, exactly the class of
+      thing a login can hit and a human has no reason to know the
+      `systemctl` incantation for. Without `--repair` it is named and left
+      alone (`... has FAILED — re-run 'jarvis-doctor --repair' ...`); with
+      it, `doctor.sh` runs `systemctl --user reset-failed` then `restart` on
+      that unit alone and reports whether it actually came back
+      (`systemctl --user is-active`), never silently — an `is-active` that
+      itself cannot answer (unit gone, socket gone) reads as "still broken",
+      not as a fixed one. Deliberately narrow: no sudo, nothing system-level,
+      nothing that touches `jarvisd`/`jv-llm` (both `systemd.services.*`, not
+      `.user.*`, and privileged), and no line of `services/jv-act/**` or any
+      schema is touched — `--repair` runs the exact `systemctl --user
+      restart <unit>` a human would type by hand, on a unit this flake
+      already declares and already owns.
+      Tests: `tools/tests/test_doctor_repair.py` (16 cases, mirroring
+      `test_doctor.py`'s "lift the real check by line, run it against a
+      faked backend" technique for check 5's monitor block): the vacuous-
+      pass refusal (no units found — including `systemctl` itself failing
+      outright — is a FAILURE, not an empty success), every-unit-active is
+      every-unit-a-pass, a mixed batch flags only the failed one, `--repair`
+      absent leaves `restart`/`reset-failed` uncalled (asserted against a
+      call log the fake `systemctl` writes), `--repair` present that
+      recovers the unit is a PASS naming the new state, `--repair` present
+      that does NOT recover it is still a FAILURE naming
+      `journalctl --user -u <unit>`, and the same for `is-active` itself
+      failing outright post-restart. A second lifted block,
+      `arg_parsing()`, runs the REAL `usage()`/`case` head of `doctor.sh`
+      with real argv: no flag leaves `$REPAIR=0`, `--repair` sets it, and an
+      unrecognized flag exits 2 with a usage line on stderr rather than
+      being silently ignored. `bash ops/ralph/runtests.sh tools`: 946 passed
+      (was 934). `bash ops/ralph/nixtest.sh`: 53 passed, unaffected (no
+      `default.nix` change — check 8 needs no new runtime input; `systemd`
+      was already pulled in for `bootctl`). `bash ops/ralph/verify.sh`: 2
+      gates over 2 paths, GREEN in 156.5s (tools 79.3, nixtest 77.1).
+      `nixos-rebuild build --flake .#ares` -> ok (12 derivations: the
+      rebuilt `jarvis-doctor` package, `system-path`/`etc`/`user-units`/
+      toplevel). Never switched. No schema, no jv-act code, no boot path, no
+      pins, no disko.nix touched.
+      `[H]` because the one thing this cannot prove against a fake is
+      whether a REAL crashed unit on ares' own session actually comes back
+      under systemd's real supervision — see `ops/ralph/HUMAN-VERIFY.md`.
 - [ ] G7. SSH agent + config, VPN support, Syncthing — each declared.
 - [ ] G8. Sound theme: one quiet, on-brand notification sound.
 - [ ] G9. `[B]` **Narrowed automount** — removable USB only, with the Windows

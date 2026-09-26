@@ -16694,3 +16694,63 @@ work was entirely in `shell/jv-hud/`.
   (see HUMAN-VERIFY.md). Track G continues at G6 (`jarvis-doctor
   --repair`). The comfort backlog is still far from resolved — H through K
   are entirely `[ ]` — so the loop keeps going per PROMPT.md STEP 5.
+
+## 2026-09-27 — `jarvis-doctor --repair` (PLAN G6)
+- built: check 8, "Jarvis user services", in `pkgs/jarvis-doctor/doctor.sh`.
+  It lists every `jv-*`/`jarvis-*` `systemd --user` unit straight off the
+  live session (`systemctl --user list-units --all --type=service,timer
+  'jv-*' 'jarvis-*'`) rather than a second hand-kept list of unit names —
+  the naming convention every module in `modules/` already follows is what
+  this check reads, confirmed by `grep -rn "systemd.user.services\."
+  modules/ hosts/` rather than guessed. Any unit not in `failed` state is a
+  PASS; a `failed` one is exactly the "common breakage" G6 asks for — a
+  crashed comfort service a login can hit with no reason to know the
+  `systemctl` incantation for it. Without `--repair` (a new `usage()`/`case`
+  block, parsed once at the top of the file into `$REPAIR`, exit 2 on an
+  unrecognized flag rather than silently ignoring it) it is named and left
+  alone; with it, `doctor.sh` runs `systemctl --user reset-failed` then
+  `restart` on that unit alone and reports whether it actually came back
+  (`systemctl --user is-active`) — an `is-active` that itself cannot answer
+  (unit gone, socket gone) reads as "still broken", never as a silent fix.
+  Deliberately narrow, on purpose: no sudo, nothing system-level, nothing
+  touching `jarvisd`/`jv-llm` (both `systemd.services.*`, not `.user.*`, and
+  privileged — restarting either needs a decision this doctor does not make
+  for itself), and no line of `services/jv-act/**` or any schema touched —
+  `--repair` runs the exact `systemctl --user restart <unit>` a human would
+  type by hand, on a unit this flake already declares and already owns.
+- tests: `tools/tests/test_doctor_repair.py` (16 cases, new) — mirrors
+  `test_doctor.py`'s technique for check 5 (lift the real check out of
+  `doctor.sh` by line, run it against a faked backend, so a rewrite that
+  stops doing what this asks fails here even if it reads well). Two blocks
+  are lifted: `user_units_check()` (check 8 itself, against a fake
+  `systemctl` that logs every call it receives to a file so a test can
+  assert `restart`/`reset-failed` were or were not attempted, and against
+  which unit) and `arg_parsing()` (the real `usage()`/`case` head, against
+  real argv). Covered: the vacuous-pass refusal (no units found — including
+  `systemctl` itself failing outright — is a FAILURE, not an empty
+  success), every-unit-active is every-unit-a-pass, a mixed batch flags
+  only the failed one, `--repair` absent leaves `restart`/`reset-failed`
+  uncalled, `--repair` present that recovers the unit is a PASS naming the
+  new state, `--repair` present that does NOT recover it is still a FAILURE
+  naming `journalctl --user -u <unit>`, the same for `is-active` itself
+  failing outright post-restart, no-flag/`--repair`/an-unknown-flag against
+  the real argv head, and the header comment naming check 8. `bash
+  ops/ralph/runtests.sh tools`: 946 passed (was 934). `bash
+  ops/ralph/nixtest.sh`: 53 passed, unaffected — no `default.nix` change
+  (check 8 needs no new runtime input; `systemd` was already pulled in for
+  `bootctl`). `bash ops/ralph/verify.sh`: 2 gates over 2 paths
+  (`pkgs/jarvis-doctor/doctor.sh`, `tools/tests/test_doctor_repair.py`),
+  GREEN in 156.5s (tools 79.3, nixtest 77.1).
+- build: `nixos-rebuild build --flake .#ares` -> ok (12 derivations: the
+  rebuilt `jarvis-doctor` package, the rebuilt `system-path`/`etc`/
+  `user-units`/toplevel). Never switched. No schema, no jv-act code, no
+  boot path, no pins, no disko.nix touched.
+- files: pkgs/jarvis-doctor/doctor.sh, tools/tests/test_doctor_repair.py
+  (new), ops/ralph/PLAN.md, ops/ralph/HUMAN-VERIFY.md, ops/ralph/JOURNAL.md
+- next: `[H]` because only a real session can prove `systemctl --user
+  restart` genuinely revives a unit systemd itself marked `failed` under
+  real supervision — see HUMAN-VERIFY.md (kill `jv-nightlight` on purpose,
+  compare `jarvis-doctor` with and without `--repair`). Track G continues
+  at G7 (SSH agent + config, VPN support, Syncthing). The comfort backlog
+  is still far from resolved — H through K are entirely `[ ]` — so the loop
+  keeps going per PROMPT.md STEP 5.
