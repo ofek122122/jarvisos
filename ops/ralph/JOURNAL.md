@@ -15056,3 +15056,96 @@ is not worth chasing.)
   this branch is hand-driven in parallel — check `git log` against the journal
   before assuming the tree is the one the last entry describes, and if the gate
   is red, `--baseline` now answers the question that costs an iteration.
+
+## 2026-09-26 — E8: the fourth sheet, and the moment a wallpaper does not have
+
+- **what**: `jv-wall` now has a contact sheet — `docs/wall/`, seven shots,
+  612 KB — taken by a new gate `ops/ralph/wallshots.sh` over a new harness
+  `tools/wallshots/`, graded by a new suite `tools/tests/test_wallshots.py`.
+  `UNPHOTOGRAPHED` in `test_gen_theme_qml.py` is now empty: every shell this
+  repo draws has a picture of itself. The table stays, because the next shell
+  will arrive without one.
+- **why it was the last, and what had to be invented.** This shell had no QML
+  gate of ANY kind — `nix build .#jv-wall` lints it and `shellload.sh` proves
+  it loads, and between them they can say the files parse and the surface maps.
+  Where the comet is, which of `pkgs/jarvis-wallpaper`'s renders an output
+  resolves, whether the fallback has ever fired: nothing asked. It stayed that
+  way because it is the only one of the four surfaces whose subject is a PHASE
+  rather than a state. The HUD reaches "listening" and stays; the corner
+  reaches three plates and stays; the bar's teal settles and stops. A wallpaper
+  never arrives anywhere, and `wait(14000)` in a driver is a different picture
+  on every machine.
+- **the seam, which is the whole of the idea.** The shell was given ONE number
+  to move. `SequentialAnimation on opacity` and `RotationAnimation on rotation`
+  are gone; the glow and the comet are bindings on `phaseMs`, and a single
+  `NumberAnimation` drives it through a 672 s lap — `lcm(14 s, 96 s)`, so the
+  wrap from the end of a lap back to zero is a continuous instant in BOTH
+  cycles rather than a jump in one. Every shot is that number, SET. Nothing on
+  this sheet waits for an animation, which is why the same pixels come out of
+  it anywhere.
+- **the refactor is provably not a redesign.** `Easing.InOutSine` is
+  `(1-cos(πx))/2` and it is symmetric — `e(1-x) == 1-e(x)` — so a 0.25 → 1.0
+  rise over 7 s followed by a 1.0 → 0.25 fall over 7 s is, at every instant,
+  `0.625 - 0.375·cos(2π·t/14000)`. That is checked every millisecond of the
+  round trip in `test_the_breath_is_the_curve_it_replaced`, in PYTHON, and the
+  choice of language is the point: the deterministic way to compare two easing
+  curves is to compare the curves. Sampling a running animation would be
+  measuring this builder's frame timing, and a test that fails under load and
+  passes when idle is not evidence about a wallpaper.
+- **THE SHEET FOUND SOMETHING, which is what a sheet is for (raised as E9).**
+  `shell.qml` anchors the motion at 73.4% x 68.1% of the SURFACE with radius
+  `min(w,h)·0.39`, and says in prose that this puts it "inside the rings". That
+  is true only while the art is rasterized 1:1 at the output's aspect ratio.
+  Two shots show it not being true. On **2560x1080**, `resvg --width 2560
+  --height 1080` over a 2560x1440 drawing rasterizes at 1:1 and keeps the top
+  1080 rows: the art's instrument stays at y=980, the shell anchors at y=735,
+  they are 245 px apart, the comet rides a ring that is not the drawn one, and
+  the wordmark at y=1330 is not in the file at all. On **1280x1024**, which the
+  package does not render, `PreserveAspectCrop` scales and centres the primary
+  art and the moving head lands beside the painted one instead of on it. Both
+  are photographed and captioned rather than quietly fixed: ares' three
+  monitors are 16:9 and all fine, the fix has a package half and a shell half,
+  and `docs/wall` is now the gate that will prove either one.
+- **what the harness does NOT stand in for.** One stub, which is the smallest
+  stage of the four — this shell has no vocabulary of its own, so `Motion` is
+  the only file that imports Quickshell. And `Field.qml` asks the REAL
+  generated `Motion.animate` through that stand-in rather than taking a boolean
+  from the driver, so shot 01 is the §06 switch working. The first version did
+  take a boolean, and `test_dependents.py`'s sweep caught it: the stand-in was
+  staged, linted and never reached by any type, which is a stub that proves
+  nothing.
+- **the art is built, not assumed.** The gate runs `nix build .#jarvis-wallpaper`
+  and links the store path into the stage, and `dependents` lists
+  `pkgs/jarvis-wallpaper` in this gate's `also` — the one entry no other shot
+  harness has. A change to the SVG, or to a palette token both the art and the
+  ember over it spend, moves this sheet.
+- **one shared helper changed.** `stack_of` in `test_notifyshots.py` read
+  `NumberAnimation on phaseMs {` as a child element called `Ms`: the regex
+  `[A-Z]\w*$` matched inside an identifier. A lookbehind fixes it. It was
+  invisible until a shell animated a camelCase property.
+- **tests**: `tools` 830 passed (was 806); `bash ops/ralph/verify.sh --since
+  HEAD~1` **GREEN** — 5 gates over 22 paths, 139.8 s (jv-compat, jv-hud-bridge,
+  tools, wallshots, shellload). The gate was red before the commit for the one
+  reason a new sheet is always red at birth — `hudsheet.py` compares against
+  `HEAD:docs/wall`, which did not exist — and the commit is what fixes that;
+  everything else was green in the same run, and the verdict above is the
+  re-ask about what the commit actually took. build: `nixos-rebuild build
+  --flake .#ares` green. Never tested, never switched. No schema, no jv-act, no
+  boot path, no pins.
+- **files**: shell/jv-wall/shell.qml, ops/ralph/wallshots.sh,
+  tools/wallshots/{scene/Field.qml,scene/tst_shots.qml,scene/warnprobe.qml,stub/Motion.qml},
+  tools/tests/test_wallshots.py, tools/dependents.py, tools/gen_theme_qml.py,
+  tools/tests/{test_dependents,test_gen_theme_qml,test_notifyshots,test_qmlerrors,test_verify}.py,
+  docs/wall/{README.md,01..07*.png}, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- commit: f152e6c
+- next: **E9** (raised here, and measured rather than suspected — the package
+  half is an SVG `viewBox`, which is also E6's "render any geometry on demand",
+  and the shell half is anchoring to where the art landed instead of to a
+  percentage of the surface), then **D82**, **D79**, **D71**, **B88**, **B95**,
+  **D63**, **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D48**,
+  **D45**. E6's remaining half is still the frame-count MEASUREMENT, which
+  wants a compositor and not a sheet. **D81** is the GUARDRAILS wording exit 3
+  needs and it wants a HUMAN; **D67** and **D65**'s greeter half do too. NOTE
+  for whoever runs next: this branch is hand-driven in parallel — check `git
+  log` against the journal before assuming the tree is the one the last entry
+  describes.

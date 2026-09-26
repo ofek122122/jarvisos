@@ -39,19 +39,56 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       it had never been loaded once. Still open here: the <2 ms/frame and
       0-fps-when-idle MEASUREMENT (the idle probe has never been pointed at this
       surface), and rendering a geometry on demand instead of from a fixed list.
+      E8 changed what the first half costs and did not do it: both cycles are
+      now bindings on one `phaseMs` that one `NumberAnimation` drives, so "is
+      this surface still" is one property rather than two animations, and the
+      frame count is still a measurement only a compositor can take. The second
+      half is now half of **E9** as well — the fixed list is what makes a 21:9
+      output get a render composed for 16:9.
 
-- [ ] E8. **The wallpaper has no contact sheet, and it is the entry in
-      `UNPHOTOGRAPHED`.** 490d1ad turned `STANDINS == SHELLS` into a pair of
-      tables that must cover the four shells between them; `jv-wall` is in the
-      second one, and this item is what empties it. It is not a copy of
-      `barshots`/`notifyshots`, and the difference is the interesting part:
-      this shell's whole surface is a PNG rendered OUTSIDE QML by
-      `pkgs/jarvis-wallpaper`, so a sheet of it photographs the art and two
-      very slow animations (7 s half-cycle, 96 s lap) over the top. Which means
-      the harness needs a way to sample a moment of a cycle deterministically —
-      the other two sheets photograph states, not phases — and that is the real
-      design question. It is also what E6's remaining half wants: a frame count
-      over a known interval is the 0-fps-when-idle reading. Raised by 490d1ad.
+- [x] E8. **The wallpaper's contact sheet** (f152e6c). `docs/wall/` — seven
+      shots, 612 KB, plus `ops/ralph/wallshots.sh`, `tools/wallshots/` and
+      `tools/tests/test_wallshots.py`. `UNPHOTOGRAPHED` is empty: every shell
+      this repo draws now has a picture of itself, and `jv-wall` had had no QML
+      gate of any kind.
+      **The design question E8 raised, answered.** A sheet of this shell could
+      not photograph a state, because a wallpaper never arrives at one — so the
+      shell was given ONE number to move. The glow's `SequentialAnimation` and
+      the comet's `RotationAnimation` are now bindings on `phaseMs`, driven
+      through a 672 s lap (lcm of the 14 s breath and the 96 s drift, so the
+      wrap is continuous in both), and every shot is that number SET. Nothing
+      on screen changed and it is arithmetic rather than a claim: InOutSine is
+      symmetric, so the rise and the fall are one cosine — checked in Python
+      against a dense sample of the pair it replaced, because the deterministic
+      way to compare two easing curves is to compare the curves and not to
+      sample a running animation.
+      Raised by it: **E9** (below), which the sheet FOUND.
+
+- [ ] E9. **The motion's anchor and the art's instrument come apart on any
+      output the art is not composed for.** Found by E8's sheet, and
+      photographed in `docs/wall/06-ultrawide.png` and `07-fallback.png`.
+      `shell.qml` anchors the glow and the comet at 73.4% x 68.1% of the
+      SURFACE with a radius of `min(w,h) * 0.39`; that is the art's instrument
+      only while the art is rasterized 1:1 at this output's aspect ratio.
+      Measured, on the two geometries where it is not:
+      · **2560x1080** — `resvg --width 2560 --height 1080` over a drawing
+        composed at 2560x1440 rasterizes at 1:1 and keeps the TOP 1080 rows. So
+        the art's instrument stays at y=980 and the shell anchors at y=735:
+        245 px apart, and the comet rides a ring that is not the drawn one. The
+        wordmark, at y=1330, is not in the file at all.
+      · **1280x1024** (no bespoke render) — `PreserveAspectCrop` scales and
+        centres the primary art, and the moving head lands beside the painted
+        one instead of on it.
+      Two halves, and they are separable. The PACKAGE half is
+      `pkgs/jarvis-wallpaper`: an SVG with a `viewBox` and a deliberate
+      `preserveAspectRatio` renders any aspect without losing the wordmark, and
+      it is what E6's "render any geometry on demand" wants anyway. The SHELL
+      half is that the anchor should be derived from where the art actually
+      landed (the `PreserveAspectCrop` transform), not from a percentage of the
+      surface. ares' three monitors are all 16:9 and all fine, so this is
+      correctness for the machines this OS is not yet on — and `docs/wall` is
+      the gate that will prove either fix.
+
 - [ ] E7. **Creative — Jarvis-aware desktop**: let the desktop reflect the
       assistant. e.g. the wallpaper's ember reacting to speech.state, a
       "what Jarvis did today" panel from the act audit log, or workspace names
