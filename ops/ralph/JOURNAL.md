@@ -15231,3 +15231,96 @@ is not worth chasing.)
   whoever runs next: this branch is hand-driven in parallel — check `git log`
   against the journal before assuming the tree is the one the last entry
   describes.
+
+## 2026-09-26 — E11: the first gate that reads a pixel of the art
+
+- **what**: `tools/artsample.py` (+ `tools/tests/test_artsample.py`, 14 tests),
+  called from `pkgs/jarvis-wallpaper`'s builder over every PNG it writes. Six
+  pixels per render, decoded with `hudsheet.py`'s pure-Python decoder: the
+  reticle at `instrumentX` x `instrumentY` and the comet's head one
+  `instrumentR` above it must be exactly the ember, and the four corners must
+  still be cool and no brighter than the grid's own hairline.
+- **the hole, stated exactly.** Every gate this wallpaper had was a gate on the
+  SHELL over it. The jv-wall build lints its QML, `shellload.sh` loads it under
+  a real quickshell, `wallshots.sh` photographs the surface,
+  `test_wallshots.py` holds the shell's anchor to the art's three fractions —
+  and not one of them opens a PNG `pkgs/jarvis-wallpaper` wrote. All four are
+  green over a render with no drawing in it. E9 shipped exactly that for one
+  build: `-v sub=...` names a gawk builtin, gawk refused the whole program,
+  `eval ""` set nothing, every coordinate expanded to the empty string, and
+  resvg IGNORED each invalid attribute and exited 0 with the instrument
+  collapsed into the top-left corner. A human looking at a PNG is what caught
+  it, which is not a gate.
+- **why six pixels and not an image diff.** There is no expected raster to
+  compare against: the art is generated from `theme.toml` and composed per
+  geometry, so a committed golden PNG would have to be regenerated for every
+  canvas anybody adds (E10) and a palette change would read as a regression.
+  What is stable is the CONTRACT — the three fractions `test_wallshots.py`
+  already reads out of two languages. This is the third reader of them, and
+  the first that reads them in the RASTER.
+- **the one design decision that makes it work: the sample points come from the
+  contract and never from the image.** A checker that located the instrument and
+  then measured it would pass a wallpaper with the instrument anywhere at all,
+  which is precisely the picture E9 shipped. Because the points are arithmetic
+  on the fractions, a radius that rasterized to nothing leaves the head's point
+  on bare ground and a drawing that slid into a corner leaves ember where the
+  field should be — and `head` is the only thing in this repo that has ever
+  checked `instrumentR` against a pixel.
+- **two bounds on the corners, because neither does the job alone.** Ember is
+  caught by WARMTH (red over blue), and it is the only warm colour §06 has —
+  ground is -10 on that measure, `line` -19, `text` -10, teal -112 — so the
+  bound is neutral rather than a margin somebody picked. A wordmark that slid
+  into the corner is not warm at all, and what catches that is BRIGHTNESS,
+  against the brightest colour the field is allowed to be made of, which the
+  builder hands over as tokens (`ground`, `ground_deep`, `line`) rather than as
+  a number.
+- **measured, on the real renders.** All six: `centre` and `head` are #F0714A
+  EXACTLY, at 1366x768, 1920x1080, 2560x1080, 2560x1440, 3840x2160 and the
+  primary. That is why an exact match is honest here rather than brittle — the
+  two marks are `circle r="6"` and `circle r="9"` in ABSOLUTE px, so the sample
+  lands deep inside an opaque fill whatever the canvas is. Corners came out
+  #090D12 and #0A0E13. Decode cost ~1 µs/px → 22 s for all six, inside a
+  package that rebuilds only when the art or the theme moves.
+- **the negative case was RUN, not reasoned about.** Rebuilt the degenerate SVG
+  E9 shipped by hand — `translate( )`, `r=""`, `cy="-"` — and rasterized it with
+  the pinned resvg: seven warnings on stderr, **exit 0**, and `artsample` exits
+  1 naming all three findings (`centre` #0B1015, `head` #0B0F14, `top-left`
+  #F0714A "warmer than anything the empty field is made of ... by 166").
+- **what it deliberately cannot see**, said in the file because a gate whose
+  reach is unstated gets trusted for the whole picture: everything between those
+  points. The rings, the dashed tick, the teal, the grid's pitch, the wordmark's
+  face and the vignette are not read. `docs/wall/` is still the sheet a human
+  looks at; this is the thing that makes a build fail without one.
+- **A GATE THAT LIED ABOUT WHOSE FAULT IT WAS, raised as E12.** The first
+  `verify.sh` run came back red on `nixtest.sh`: "the lock screen shows art the
+  wallpaper unit would draw — /nix/store/...-jv-wall/bin/jv-wall sets no
+  JV_WALL_DIR". `--baseline` correctly said NEW, i.e. mine. It was not: that
+  check `grep`s the BUILT jv-wall wrapper, guarded by `[ -r "$wall_bin" ]`, and
+  my change moved the jarvis-wallpaper hash, so the new jv-wall derivation had
+  been evaluated and not yet realized on this machine. `nixos-rebuild build`
+  built it and the gate went green with nothing else changed. Any change to a
+  package jv-wall depends on reproduces this, and the message accuses the
+  wrapper of something that is not true.
+- **tests**: `tools` 848 passed (was 834; +14 new). `bash ops/ralph/verify.sh` —
+  3 gates over 3 paths, GREEN in 120.8 s (tools 71.7 s, wallshots 20.0 s,
+  nixtest 29.1 s). `wallshots` green against `HEAD:docs/wall` — the art's bytes
+  did not move, only the builder's, so the sheet is untouched.
+  build: `nixos-rebuild build --flake .#ares` green, and the build log now
+  carries six lines of evidence about the art. Never tested, never switched.
+  No schema, no jv-act, no boot path, no pins.
+- **files**: tools/artsample.py (new), tools/tests/test_artsample.py (new),
+  pkgs/jarvis-wallpaper/default.nix, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- commit: 774e7d1
+- next: **E12** (the `nixtest.sh` lock-screen check reads a store path that may
+  not be realized and blames the wrapper for it — a two-line fix, and it costs
+  an iteration a `--baseline` run every time a pkgs hash moves), then **E10**
+  (the geometry list as a package argument `hosts/ares` fills, which is now
+  covered by this gate the moment it lands), then **D82**, **D79**, **D71**,
+  **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**, **D55**,
+  **D62**, **D48**, **D45**. E6's remaining half is still the frame-count
+  MEASUREMENT, which wants a compositor. **D81** is the GUARDRAILS wording
+  exit 3 needs and it wants a HUMAN; **D67** and **D65**'s greeter half do too.
+  NOTE for whoever runs next: this branch is hand-driven in parallel — check
+  `git log` against the journal before assuming the tree is the one the last
+  entry describes. And run `nixos-rebuild build` BEFORE `verify.sh` if you
+  touched anything under `pkgs/`, until E12 lands.

@@ -103,21 +103,50 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       outputs (declarative, fits D4/E5, still a list but the RIGHT list), or
       rasterize on demand at runtime, which means jv-wall spawning resvg and
       wants a human on invariant 3 first. Prefer the first.
+      **E11 landed while this was open and it covers whatever the list becomes**:
+      the pixel gate is pointed at the output DIRECTORY, not at a list of names,
+      so a geometry `hosts/ares` adds is sampled at the three fractions the day
+      it appears, with nobody remembering to add it anywhere.
 
-- [ ] E11. **Nothing in this repo reads a pixel of the art.** E9 shipped with a
-      bug in it for one build, and the way it was caught was a human looking at
-      a PNG. `-v sub=...` names a gawk builtin, gawk refused the whole program on
-      stderr, `eval ""` set nothing, and every coordinate in the drawing expanded
-      to the empty string — `translate( )`, `r=""`, `y=""`. resvg ignores an
-      invalid attribute rather than failing, so it rendered a wallpaper with the
-      instrument collapsed into the top-left corner, exited 0, and the package
-      built. `compose()` now refuses empty coordinates, which closes THAT hole;
-      the general one is that `pkgs/jarvis-wallpaper` has no gate that looks at
-      its output at all. `tools/hudsheet.py` already decodes PNGs in pure Python,
-      so a test could sample each render at `instrumentX` x `instrumentY` and
-      assert it is warm, and at a corner and assert it is `ground` — which is
-      exactly what the degenerate render failed. It would also be the first thing
-      in this repo that checks the art rather than the shell over it.
+- [x] E11. **Nothing in this repo read a pixel of the art** (774e7d1).
+      `tools/artsample.py` + `tools/tests/test_artsample.py` (14 tests), called
+      from `pkgs/jarvis-wallpaper`'s builder over every PNG it writes. Six
+      pixels per render, decoded with `hudsheet.py`'s pure-Python decoder: the
+      reticle at `instrumentX` x `instrumentY` and the comet's head one
+      `instrumentR` above it must be EXACTLY the ember, and the four corners
+      must still be cool and no brighter than the grid's own hairline.
+      The one decision that makes it work: **the sample points come from the
+      contract and never from the image.** A checker that located the instrument
+      and then measured it would pass a wallpaper with the instrument anywhere at
+      all — which is precisely the picture E9 shipped — and because these points
+      are arithmetic on the three fractions, a radius that rasterized to nothing
+      leaves the head's point on bare ground. `head` is the first thing in this
+      repo that has ever checked `instrumentR` against a pixel.
+      Measured: all six renders come out #F0714A exactly at both warm samples
+      (the marks are absolute-radius opaque discs, so the sample is inside a
+      solid fill at every geometry) and #090D12/#0A0E13 at the corners; ~1 µs/px,
+      22 s for all six. The degenerate SVG E9 shipped was rebuilt by hand and
+      rasterized: resvg warns seven times and **exits 0**, `artsample` exits 1.
+      What it deliberately cannot see is everything BETWEEN those points — the
+      rings, the tick, the teal, the grid's pitch, the wordmark's face, the
+      vignette. `docs/wall/` is still the sheet a human looks at; this is what
+      makes a build fail without one.
+      Raised by it: **E12** below.
+
+- [ ] E12. **`nixtest.sh` blames the jv-wall wrapper for a derivation that was
+      never built.** Its lock-screen check reads `JV_WALL_DIR` out of the BUILT
+      wrapper — deliberately, so an interpolation that evaluated to the wrong
+      store path cannot look right in the source — behind `[ -r "$wall_bin" ]`,
+      and prints "sets no JV_WALL_DIR, so nothing says which art it draws" when
+      the file simply is not in the store yet. E11 moved the jarvis-wallpaper
+      hash, so the new jv-wall path had been evaluated and not realized: the gate
+      went red, `--baseline` said NEW (correctly — it IS caused by the change),
+      and `nixos-rebuild build` made it green with nothing else touched. Any
+      change under `pkgs/` that jv-wall depends on reproduces it, and it costs
+      the iteration a `--baseline` run and a false accusation. Fix: realize the
+      path (`nix build --no-link .#jv-wall`) or, if that is too much for a 30 s
+      gate, say "not built here — run nixos-rebuild build" instead of naming a
+      wrapper that is innocent. Two lines, and the message is the point.
 
 - [ ] E7. **Creative — Jarvis-aware desktop**: let the desktop reflect the
       assistant. e.g. the wallpaper's ember reacting to speech.state, a
