@@ -25,9 +25,33 @@ pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
       HDMI-A-1 2560x1440@144, DP-1 1920x1080@60 at x=2560, DP-2 1920x1080@60 at
       x=4480) moved into the flake with D4, so the layout is declarative; make
       the bar/HUD/notify placement per-output correct and test it.
-- [ ] E6. **Wallpaper polish**: honor prefers-reduced-motion (not just
+- [~] E6. **Wallpaper polish**: honor prefers-reduced-motion (not just
       JV_MOTION), verify <2ms/frame and 0fps-when-idle with the existing idle
       probe, and render any geometry on demand rather than a fixed list.
+      **The reduced-motion half is DONE (490d1ad)**, and it was a bigger hole
+      than "honour one more variable": the shell read a `JV_MOTION` of its own
+      and nothing else, so neither the versioned `reduced_motion` nor the
+      `JV_REDUCED_MOTION` every other shell obeys could stop it — while
+      modules/theme.nix's comment already said they could. Fixing it meant
+      registering `jv-wall` in `gen_theme_qml.SHELLS`, which is what hands a
+      shell the generated `Motion`; that also took the two hand-spelled `ember`
+      hex codes out of its QML (invariant 9) and put it in the load gate, where
+      it had never been loaded once. Still open here: the <2 ms/frame and
+      0-fps-when-idle MEASUREMENT (the idle probe has never been pointed at this
+      surface), and rendering a geometry on demand instead of from a fixed list.
+
+- [ ] E8. **The wallpaper has no contact sheet, and it is the entry in
+      `UNPHOTOGRAPHED`.** 490d1ad turned `STANDINS == SHELLS` into a pair of
+      tables that must cover the four shells between them; `jv-wall` is in the
+      second one, and this item is what empties it. It is not a copy of
+      `barshots`/`notifyshots`, and the difference is the interesting part:
+      this shell's whole surface is a PNG rendered OUTSIDE QML by
+      `pkgs/jarvis-wallpaper`, so a sheet of it photographs the art and two
+      very slow animations (7 s half-cycle, 96 s lap) over the top. Which means
+      the harness needs a way to sample a moment of a cycle deterministically —
+      the other two sheets photograph states, not phases — and that is the real
+      design question. It is also what E6's remaining half wants: a frame count
+      over a known interval is the 0-fps-when-idle reading. Raised by 490d1ad.
 - [ ] E7. **Creative — Jarvis-aware desktop**: let the desktop reflect the
       assistant. e.g. the wallpaper's ember reacting to speech.state, a
       "what Jarvis did today" panel from the act audit log, or workspace names
@@ -2019,6 +2043,33 @@ human-reviewed step.
       widening names are a legitimate `__init__` or a helper nested in two
       tests. Raised **D78**.
 
+- [ ] D80. **The verify gate cannot tell a failure it INHERITED from one the
+      working tree caused, and that cost a whole iteration's plan.** 490d1ad
+      opened on D78, built it, and then found the branch red from three gates
+      that had nothing to do with it — three commits had landed by hand while
+      the session ran. The structural half is the part worth fixing: `tools` is
+      the third suite to everything (Invariant 1), so `dependents.py` names it
+      for any Python, QML, nix or `pkgs/` change AND, measured, for
+      `ops/ralph/JOURNAL.md` and `PLAN.md`. So a red `tools` is a repo where
+      NOTHING is committable — including the journal entry STEP 3 asks for when
+      a gate is red and the work has to be reverted. There is no way to end such
+      an iteration except by fixing someone else's red, which is the "one
+      finished thing" rule breaking down under a shared branch.
+      The shape of the answer is a BASELINE, and the cheap version is honest:
+      `verify.sh --baseline` re-runs the same derived gate list against HEAD in
+      a `git worktree add` of it in a temp dir (so the working tree is never
+      touched and the shared stash stack is never used) and reports each failure
+      as INHERITED or NEW. The verdict can then be "RED, but every failure
+      predates you", which is a different instruction to the loop than "do not
+      commit" and the one that would have let D78 land on its own. Two things to
+      get right: it must never become a way to commit past a failure you DID
+      cause (NEW is always fatal, and the summary says how many of each), and it
+      doubles the gate's wall clock, so it belongs behind a flag the loop
+      reaches for when the first run is red rather than in every run. Note the
+      chicken-and-egg that made this iteration expensive: the mechanism lives in
+      `tools/verify.py`, so it can only be WRITTEN while `tools` is green.
+      Raised by 490d1ad.
+
 - [ ] D79. **The bar is the third shell and the only one nothing has ever
       measured against a screen.** D74 gave the HUD a declared floor and a
       warn; D77 measured the notifier's maximum and found the cap already is
@@ -2040,7 +2091,7 @@ human-reviewed step.
       holds them apart. Do D65 with that framing rather than as bar polish.
       Raised by D77.
 
-- [ ] D78. **The duplicate-definition scan D76 wrote stops at `tools/`, and
+- [x] D78. **The duplicate-definition scan D76 wrote stops at `tools/`, and
       the trap is not a property of `tools/`.** There are 93 more Python
       modules in this repo — `services/**`, `harness/`, `pkgs/` — and a second
       module-level `def` of the same name is silently the last one in every one
@@ -2057,6 +2108,34 @@ human-reviewed step.
       every tree, or each service suite scanning only itself, which is the one
       shape that cannot see a service nobody wrote a suite for. Decide, write
       the reason down, then widen. Raised by D76.
+      **Done (490d1ad).** `tools` owns it, for a reason and against a
+      measurement. The reason: Invariant 1 makes `tools` the third suite to
+      everything, and a repo-wide claim has no other honest home — per-service
+      copies are the one shape that cannot see a tree nobody wrote a suite for,
+      which is B87's failure mode restated, and a suite of its own buys a venv
+      and a `runtests.sh` target for one assertion and still needs the
+      completeness gate. The measurement kills the item's own cost worry:
+      `tools` ALREADY claims `services/**` wide, through
+      `(ROOT / "services").iterdir()` in `test_hudshots.py` — checked by asking
+      `dependents.py` about a `services/...` path that does not exist — so the
+      marginal price is `harness/` alone, ten modules. 121 modules, clean on
+      arrival, so the scan's value is entirely the next one; what carries value
+      TODAY is the pair of gates beside it. One walks the repo from the root and
+      fails if any Python file sits outside a scanned tree (`PY_TREES` is a
+      list, and a list falls behind the repo in silence — B86/B87 by a third
+      mechanism). The other, in `test_dependents.py`, asks whether
+      `dependents.py` can SEE the trees, because that is a property of how they
+      are SPELLED: the tidy `tuple(ROOT / n for n in (...))` is one computed
+      segment plus three bare words and is invisible to both `_chain` and
+      `_candidates`, and the suite would stop being named for a `harness/`
+      change with every other assertion green. Grading that found something NEW
+      about dependents.py, written into the test: a `#` comment is not in the
+      syntax tree but a DOCSTRING IS, so the prose explaining this item claims
+      `services/` and `harness/` by itself and the first version of the gate
+      passed on the strength of its own explanation. It now copies the
+      `PY_TREES` line into a file of its own and asks about that alone.
+      Widened to `services/` + `harness/`; `pkgs/` holds no Python at all
+      (measured, so it is not in the list). Raised **D80**.
 
 - [x] D77. **The HUD is the only one of the three shells that declares a
       floor, and the notifier is the only other one for which that is a

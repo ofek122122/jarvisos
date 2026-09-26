@@ -14854,3 +14854,113 @@ is not worth chasing.)
   strip before writing it a warn), **D71**, **B88**, **B95**, **D63**, **D61**,
   **D57**, **D56**, **D64**, **D55**, **D62**, **D48**, **D45**. **D67** and
   **D65**'s greeter half still want a human.
+
+## 2026-09-26 — the fourth shell, and a branch that was red before it started
+
+- **the iteration did not build what it set out to build, and the reason is
+  worth the first paragraph.** It opened on D78 (widen D76's
+  duplicate-definition scan past `tools/`), designed it, measured it and wrote
+  it — and then found the branch RED, from three gates, none of them D78's.
+  Three commits had landed by hand while this ran (`f17a7dd` apps/store/
+  wallpaper, `9096967` + `4d82791` the Super-tap menu), HEAD moved twice under
+  the session, and `shell/jv-wall` had arrived as a fourth Quickshell surface
+  that was not yet a shell of this repo's kind.
+- **the structural fact this surfaced, which matters more than either piece of
+  work: a red `tools` suite is a repo where nothing at all is committable.**
+  `tools` is the third suite to everything (Invariant 1), so `dependents.py`
+  names it for any Python, QML, nix or `pkgs/` change — and, measured,
+  for `ops/ralph/JOURNAL.md` and `PLAN.md` too. So "revert and journal the
+  dead-end", which is what STEP 3 asks for when a gate is red, could not even
+  commit the journal. There is no ending to an iteration that starts on a red
+  `tools` except fixing it. Raised **D80** for the one mechanism that would
+  have made this cheap: a verify gate that can tell a failure it INHERITED from
+  one the working tree caused.
+- **what was actually wrong with `shell/jv-wall`** — three failures, three
+  different things, and none of them cosmetic:
+  · it spelled `#F0714A` twice with an alpha on it. Invariant 9: colour is
+    identity and reaches QML only through the generated Theme singleton, and
+    the ember is the one accent that means "Jarvis is doing something", so a
+    fourth shell painting it by hand is exactly how that accent becomes a
+    lookalike of itself. Registered in `gen_theme_qml.SHELLS` now — six
+    generated files, and `pkgs/jv-wall` runs the `--check` drift gate in its
+    own build like the other three packages.
+  · it honoured prefers-reduced-motion NOWHERE (PLAN E6). It read a
+    `JV_MOTION` of its own and nothing else, so neither the versioned
+    `reduced_motion` nor the `JV_REDUCED_MOTION` every other shell obeys could
+    stop the glow breathing — while `modules/theme.nix` already said in a
+    comment that they could. `Motion.animate` is the gate now. That is also the
+    ANSWER to "why register a shell with no vocabulary": it has nothing to
+    generate except the switch, and the switch is the whole point.
+  · no gate had ever loaded it. It is in the load gate now: 0.40 s on all
+    three headless outputs, nothing in its log, no space off any screen.
+- **the one real design decision, and it is not a fix.** This is the first
+  surface that is neither a strip nor a corner, so two of the load gate's
+  claims about "a shell that reserves nothing" did not fit: it is always
+  mapped and anchored to all four edges, which for the HUD or the notifier is
+  the single-property step towards a reserved strip that D59 pinned three ways.
+  `fills_background` is that distinction, spelled as what the surface IS rather
+  than as an exemption. The conjunct both kinds share — no `exclusiveZone`, so
+  no window ever moves — is still asked of every non-reserving shell in the
+  same loop; the rest moved into a test that pins the wallpaper's own four
+  properties, `WlrLayer.Background` first, because on any other layer this is a
+  pane over the whole desktop rather than the desktop.
+- **`STANDINS` grew a complement instead of losing its check.** It was
+  `{standins} == set(SHELLS)`, three sheets for three shells. The wallpaper has
+  no contact sheet (raised **E8**), and the honest shape is the one
+  `COLOUR_EXCEPTIONS` already uses: two tables that must cover `SHELLS` between
+  them and must not overlap, so an excuse cannot outlive the gap it excuses.
+- **D78, the part that was actually in doubt.** Not the scan — 121 modules,
+  clean on arrival, so the widening is green the day it lands. WHICH SUITE
+  OWNS IT was the question, and the answer is `tools`, for a reason and against
+  a measurement: Invariant 1 makes `tools` the third suite to everything, and
+  the cost the item feared is ALREADY PAID — `test_hudshots.py` claims
+  `services/**` wide through `(ROOT / "services").iterdir()`, checked by asking
+  `dependents.py` about a `services/...` path that does not exist, so the
+  marginal price of the widening is `harness/` alone, ten modules. The two
+  rejected alternatives are written next to the scan: per-service copies are
+  the one shape that cannot see a tree nobody wrote a suite for (B87's failure
+  mode, restated), and a suite of its own buys a venv and a `runtests.sh`
+  target for one assertion and still needs the completeness gate.
+- **and the fact that came out of grading it, which is new about
+  `dependents.py`.** The first version of the ownership gate asked whether the
+  real `test_gen_theme_qml.py` names all three trees, and it passed even with
+  `PY_TREES` mutated to the computed form (`tuple(ROOT / n for n in (...))`)
+  that `_chain` and `_candidates` are both blind to. The reason: a `#` comment
+  is not in the syntax tree, but a DOCSTRING is a string constant — so the
+  prose explaining D78, which spells `services/` and `harness/`, claims those
+  paths itself. The test would have passed on the strength of its own
+  explanation. It now copies the `PY_TREES` line into a file of its own and
+  asks `dependents.names` about that alone, which is red on the mutant.
+- **tests**: `bash ops/ralph/verify.sh` GREEN — 5 gates over 18 paths, 141.4 s,
+  and `--since HEAD~1` green over the same 18 after committing. `tools` 792
+  passed, against **776 passed + 3 FAILED at HEAD** (the baseline is in the
+  transcript: `test_no_qml_file_carries_a_literal_colour`,
+  `test_no_nix_surface_names_a_font_family_of_its_own`,
+  `test_every_shell_in_the_repo_is_loaded`). `nixtest` 14/14, against 13/14 —
+  its one-image claim had gone stale in the same commit, because the unit used
+  to hand swaybg a PNG and now starts a shell that picks its own per output, so
+  the check follows one more hop into the built wrapper's `JV_WALL_DIR`.
+  `shellload` 5 runs loaded and mapped. build: `nixos-rebuild build --flake
+  .#ares` green. Never tested, never switched. No schema, no jv-act, no boot
+  path, no pins.
+- **one process note, the same shape as D77's.** HEAD moved twice mid-session,
+  so a baseline is not something to remember from the first run — it has to be
+  re-read. The clean way is what was used here: `git show HEAD:<file> >` a temp
+  copy, run the suite, restore from a `cp` backup. Never `git checkout --` to
+  get back, for D77's reason.
+- **files**: shell/jv-wall/{shell.qml,Theme.qml,Motion.qml,Ease.qml,qmldir,
+  core/MotionPolicy.qml,core/qmldir}, pkgs/jv-wall/default.nix,
+  modules/{super-menu.nix,theme.nix}, ops/ralph/{nixtest.sh,shellload.sh},
+  tools/{dependents.py,gen_theme_qml.py,shellload/shells.py},
+  tools/tests/{test_gen_theme_qml.py,test_dependents.py,test_shellload.py},
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- commit: 490d1ad
+- next: **D80** (the inherited-failure question above — it is the thing that
+  cost this iteration its plan, and it is in `tools/verify.py`, so it can only
+  be written while `tools` is green), then **E8** (the wallpaper's contact
+  sheet, which is what closes `UNPHOTOGRAPHED`), then **D79**, **D71**,
+  **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**, **D55**,
+  **D62**, **D48**, **D45**. **D67** and **D65**'s greeter half still want a
+  human. NOTE for whoever runs next: this branch is being hand-driven in
+  parallel — check `git log` against the journal before assuming the tree is
+  the one the last entry describes.
