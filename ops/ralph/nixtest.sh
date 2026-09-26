@@ -229,5 +229,48 @@ names=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
 if grep -qx 'jv-lock' <<<"$names"; then ok "$t"
 else bad "$t" "jv-lock is not in environment.systemPackages: $(tail -3 <<<"$names")"; fi
 
+# AND THE ART ITSELF HAS THE RIGHT RENDERS IN IT (PLAN E10). The geometries the
+# wallpaper composes for used to be a list inside pkgs/jarvis-wallpaper — five
+# sizes, three of which no output on this machine can display — and are now the
+# outputs hosts/ares/outputs.nix declares, handed in by flake.nix as a package
+# argument. That is a chain of four files, and nothing in the Python suites can
+# walk it: they read source text, and what a `${lib.concatStringsSep}` came out
+# to is an evaluation's answer.
+#
+# So this asks the DIRECTORY the running desktop draws from. `JV_WALL_DIR` out of
+# the built jv-wall wrapper, listed — the same file-not-string hop the lock
+# screen's case makes above and for the same E12 reason, one attribute further
+# along: a declaration that never reached the package still evaluates, still
+# builds, and leaves a monitor showing art composed for a different one. Both
+# directions are checked, because they are different mistakes: a MISSING render
+# is a panel that falls back to a scaled crop, and an EXTRA one is the defect
+# E10 removed, which no surface ever asks for and nothing would ever report.
+t='the wallpaper composes for every output ares declares, and for none it does not'
+want=$(nix eval --raw --file hosts/ares/outputs.nix --apply \
+  'l: builtins.concatStringsSep "\n" (map (o: "jarvisos-${toString o.width}x${toString o.height}.png") l)' 2>&1 \
+  | sort -u)
+# Realized rather than evaluated, for PLAN E12's reason: a store path an
+# evaluation printed is not one whose bytes can be read. Cheap here — the
+# expensive half (the renders themselves) was built for `.#jv-lock` above.
+# `--print-out-paths` shares stdout with whatever nix wants to say — on a dirty
+# worktree that is a warning ABOVE the path — so the path is taken as the line
+# that is one, and everything nix said is kept for the message.
+wall_said=$(nix build --no-link --print-out-paths '.#jv-wall' 2>&1)
+wall=$(grep "^$store/" <<<"$wall_said" | tail -1)
+art_dir=""
+[ -n "$wall" ] && [ -r "$wall/bin/jv-wall" ] &&
+  art_dir=$(grep -o "JV_WALL_DIR='[^']*'" "$wall/bin/jv-wall" | head -1 | cut -d"'" -f2)
+if ! grep -q '^jarvisos-[0-9]*x[0-9]*\.png$' <<<"$want"; then
+  bad "$t" "hosts/ares/outputs.nix names no geometry; nix said: $(tail -3 <<<"$want")"
+elif [ -z "$art_dir" ] || [ ! -d "$art_dir" ]; then
+  bad "$t" "no readable art directory in ${wall:-.#jv-wall}/bin/jv-wall; \`nix build --no-link .#jv-wall\` said: $(tail -3 <<<"$wall_said")"
+elif [ ! -r "$art_dir/jarvisos.png" ]; then
+  bad "$t" "$art_dir holds no jarvisos.png, which is what every undeclared output falls back to"
+elif [ "$(cd "$art_dir" && ls jarvisos-*.png | sort -u)" = "$want" ]; then
+  ok "$t"
+else
+  bad "$t" "ares declares $(tr '\n' ' ' <<<"$want"); the art holds $(cd "$art_dir" && ls jarvisos-*.png | tr '\n' ' ')"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

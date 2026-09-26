@@ -83,7 +83,19 @@ sans=$(nix build "$root#archivo" --no-link --print-out-paths)
 # personality/theme.toml the generated Theme comes from, so a palette change
 # moves the art and the ember over it together and this sheet is the only place
 # the two are ever seen in the same pixel.
-art=$(nix build "$root#jarvis-wallpaper" --no-link --print-out-paths)
+#
+# `-sheet` is the same package composed for THIS SHEET'S outputs rather than for
+# the machine's (PLAN E10). Until E10 those were the same thing by accident: the
+# geometry list lived inside the package and carried three sizes ares cannot
+# display, one of which — 2560x1080 — is what shot 06 is taken at. The list is
+# the host's declared outputs now, so the machine stopped rendering art for
+# monitors it does not have, and the sheet asks for the 21:9 canvas it
+# photographs by declaring it in tools/wallshots/outputs.nix (which imports
+# ares' own list, so every geometry this machine really has is still here).
+# Everything else about the art is identical — same SVG, same theme, same
+# composer — and tools/tests/test_wallshots.py holds each caption to the render
+# its geometry resolves against THAT list.
+art=$(nix build "$root#jarvis-wallpaper-sheet" --no-link --print-out-paths)
 
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT

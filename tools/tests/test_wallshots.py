@@ -29,6 +29,11 @@ from test_gen_theme_qml import ROOT, strip_qml_comments
 from test_hudshots import members
 from test_notifyshots import stack_of
 
+# The sheet's own outputs and the machine's, parsed from the two declarations
+# PLAN E10 put them in. Imported rather than re-parsed here for the usual
+# reason: two parsers for one file shape is one of them being wrong later.
+from test_outputs import ARES_OUTPUTS, SHEET_OUTPUTS, declared_outputs, geometries_of
+
 SHELL = ROOT / "shell" / "jv-wall"
 SHOTS = ROOT / "tools" / "wallshots"
 SHEET = ROOT / "docs" / "wall"
@@ -39,9 +44,27 @@ SCENE = SCENE_DIR / "tst_shots.qml"
 # without Quickshell can build it.
 FIELD = SCENE_DIR / "Field.qml"
 SCRIPT = ROOT / "ops" / "ralph" / "wallshots.sh"
-# The package that rasterizes the art every shot is mostly made of, and the one
-# list of geometries it renders.
+# The package that rasterizes the art every shot is mostly made of. Which
+# geometries it renders is no longer in it (PLAN E10): the list is an argument,
+# and for this sheet it comes from tools/wallshots/outputs.nix.
 ART = ROOT / "pkgs" / "jarvis-wallpaper" / "default.nix"
+
+
+def sheet_renders() -> set[str]:
+    """The files the art under this sheet actually contains: one bespoke render
+    per geometry the sheet declares, plus the primary art that an undeclared
+    output falls back to."""
+    names = {f"jarvisos-{g}.png" for g in geometries_of(declared_outputs(SHEET_OUTPUTS))}
+    return names | {"jarvisos.png"}
+
+
+def sheet_primary() -> tuple[int, int]:
+    """The geometry `jarvisos.png` is composed at — the output the sheet's
+    declaration marks primary, which is ares' own primary, because the sheet's
+    list is ares' list plus one unmarked entry."""
+    primary = [o for o in declared_outputs(SHEET_OUTPUTS) if o.get("primary")]
+    assert len(primary) == 1, f"the sheet's art has {len(primary)} primary outputs"
+    return primary[0]["width"], primary[0]["height"]
 
 
 def scene_text() -> str:
@@ -362,14 +385,19 @@ def test_the_art_is_composed_at_every_geometry_and_scaled_at_none():
             f"pkgs/jarvis-wallpaper passes {flag} again — that is one drawing "
             "rasterized at another size, which is the PLAN E9 defect"
         )
-    # And every geometry in the list goes through it, including the primary art
-    # that an unlisted output falls back to.
-    geoms = re.search(r"for geom in ([\d x]+); do", art)
-    assert geoms, "pkgs/jarvis-wallpaper no longer lists the geometries it renders"
+    # And every geometry the declaration asks for goes through it, including the
+    # primary art that an undeclared output falls back to. Since PLAN E10 the
+    # list is the `outputs` argument rather than five sizes written here, so what
+    # this asserts is that both renders still go through `compose` — which
+    # geometries that is, and that none of them is hand-written, is
+    # test_outputs.py's claim about the declaration.
+    assert re.search(r"for geom in \$\{lib\.concatStringsSep", art), (
+        "pkgs/jarvis-wallpaper no longer renders one composition per declared output"
+    )
     assert re.search(r'compose "\$w" "\$h"', art), (
         "the per-output loop no longer composes; it is rasterizing something else"
     )
-    assert re.search(r"compose (\d+) (\d+) wp\.svg", art), (
+    assert re.search(r"compose \$\{toString primary\.width\}", art), (
         "the primary art — which is also the fallback — is no longer composed"
     )
 
@@ -382,9 +410,7 @@ def test_the_fallback_shot_is_painted_where_a_cover_crop_puts_it():
     against Qt, and this asserts it against the primary art's real composed
     geometry. Two halves of one claim: without this, a caption could name any
     number and the sheet would agree with it as long as Qt did."""
-    primary = re.search(r"compose (\d+) (\d+) wp\.svg", art_text())
-    assert primary, "pkgs/jarvis-wallpaper no longer composes the primary art"
-    src = (int(primary.group(1)), int(primary.group(2)))
+    src = sheet_primary()
 
     fell_back = [s for s in sheet() if s["art"] == "jarvisos.png"]
     assert fell_back, "nothing on this sheet falls back to the primary art"
@@ -506,9 +532,17 @@ def test_the_art_under_the_sheet_is_the_package_the_desktop_runs():
     the harness, whatever this machine happens to have in /etc — would be a
     picture of that instead. So the script BUILDS the flake's own attribute and
     links the store path into the stage, and the driver resolves it relative to
-    its own file because a QML test cannot read an environment variable."""
+    its own file because a QML test cannot read an environment variable.
+
+    `-sheet` is the SAME package (one `callPackage ./pkgs/jarvis-wallpaper`, one
+    SVG, one theme) instantiated for this sheet's outputs rather than for the
+    machine's, which since PLAN E10 are not the same list: the desktop renders
+    only the geometries ares declares, and the sheet declares one more so that
+    shot 06 can be a composed 21:9 canvas instead of a second fallback. The
+    substitution is named here because it is exactly the kind a sheet must not
+    make quietly — tools/tests/test_outputs.py holds the two lists together."""
     script = SCRIPT.read_text("utf-8")
-    assert 'nix build "$root#jarvis-wallpaper"' in script, (
+    assert 'nix build "$root#jarvis-wallpaper-sheet"' in script, (
         "the harness no longer builds the art it photographs"
     )
     assert 'ln -s "$art/share/backgrounds" "$stage/art"' in script, (
@@ -629,11 +663,15 @@ def test_the_sheet_photographs_every_output_ares_really_has():
     """The wallpaper fills its output, so the GEOMETRY is the one thing about
     this surface a harness cannot choose for itself: it decides which of
     pkgs/jarvis-wallpaper's renders is used and where the instrument lands. ares
-    has two sizes and the sheet has to actually be taken at both."""
+    has two sizes and the sheet has to actually be taken at both — asked of
+    hosts/ares/outputs.nix since PLAN E10, because the sheet now builds art for
+    a geometry this machine does NOT have and the one thing that must not slip
+    is which of its shots are about a real monitor."""
     shapes = {tuple(s["screen"]) for s in sheet()}
-    assert {(2560, 1440), (1920, 1080)} <= shapes, (
-        f"the sheet is taken at {sorted(shapes)}; ares' own monitors are 2560x1440 "
-        "and 1920x1080"
+    real = {(o["width"], o["height"]) for o in declared_outputs(ARES_OUTPUTS)}
+    assert real <= shapes, (
+        f"the sheet is taken at {sorted(shapes)}; hosts/ares/outputs.nix declares "
+        f"{sorted(real)}"
     )
 
 
@@ -641,13 +679,10 @@ def test_every_render_a_shot_claims_is_one_the_package_makes():
     """The captions name a file in another package's output, and that is the one
     assertion on this sheet nothing on screen can check — a bespoke render and
     the primary art scaled are pictures of the same drawing. So the names are
-    held to pkgs/jarvis-wallpaper's own list: a shot claiming a geometry the
-    package stopped rendering would assert forever against a fallback."""
-    art = ART.read_text("utf-8")
-    geoms = re.search(r"for geom in ([\d x]+); do", art)
-    assert geoms, "pkgs/jarvis-wallpaper no longer lists the geometries it renders"
-    rendered = {f"jarvisos-{g}.png" for g in geoms.group(1).split()}
-    rendered.add("jarvisos.png")  # the primary art, which is also the fallback
+    held to the list the sheet's art is composed from —
+    tools/wallshots/outputs.nix (PLAN E10) — so a shot claiming a geometry
+    nothing renders would assert forever against a fallback."""
+    rendered = sheet_renders()
     for shot in sheet():
         assert shot["art"] in rendered, (
             f"{shot['file']} claims {shot['art']}, and pkgs/jarvis-wallpaper renders "

@@ -12,10 +12,26 @@
 # #05080B is darker than every colour the theme defines. Nothing failed,
 # because until D7 nothing was asking; a tools gate asks now.
 {
+  lib,
   runCommand,
   resvg,
   jetbrains-mono,
   python3,
+  # THE CANVASES THIS ART IS COMPOSED FOR (PLAN E10), and deliberately WITHOUT
+  # a default. It used to be a list of five geometries written in the builder
+  # below, three of which no monitor on this machine can display; it is now
+  # whoever instantiates this package saying which outputs exist —
+  # `hosts/ares/outputs.nix` for the desktop, `tools/wallshots/outputs.nix` for
+  # the contact sheet. A default here would be that guess again, one level up
+  # and harder to see: `callPackage` would supply it silently and the host's
+  # real monitors would never reach the art. Missing is an evaluation error,
+  # which is the outcome we want.
+  #
+  # Shape: a list of attrsets with at least `width` and `height` (ints) and a
+  # `name` for the messages, exactly one of which carries `primary = true`.
+  # Everything else on an entry (`refresh`, `x`) belongs to the layout and is
+  # none of this package's business.
+  outputs,
 }:
 let
   theme = builtins.fromTOML (builtins.readFile ../../personality/theme.toml);
@@ -122,6 +138,68 @@ let
   # and not a dependency: pure Python, and about a microsecond per pixel.
   sampler = ../../tools/artsample.py;
   decoder = ../../tools/hudsheet.py;
+
+  # --- AND WHICH CANVASES ARE COMPOSED, WHICH IS NOW ASKED (PLAN E10) -------
+  #
+  # Every geometry below comes out of the `outputs` argument. The three throws
+  # are the whole reason this is fifteen lines instead of one `map`: each of
+  # them is a way for a bad declaration to produce a wallpaper that BUILDS.
+  # `width = "2560"` (a string, easy to type in a file full of quoted refresh
+  # rates) interpolates to `2560` and renders correctly, and then `lib.unique`
+  # stops de-duplicating the two identical 1080p panels because 1920 and "1920"
+  # are different values. `width = 0` reaches resvg, which rasterizes a 0 px
+  # PNG and exits 0. And an empty list renders nothing but the primary art,
+  # which is a machine with no monitors.
+  named = o: o.name or "an unnamed entry";
+
+  geometry =
+    o:
+    if !(builtins.isInt (o.width or null)) || !(builtins.isInt (o.height or null)) then
+      throw ''
+        pkgs/jarvis-wallpaper was handed the output "${named o}" without an
+        integer width and height. A quoted "2560" renders the same PNG and then
+        compares unequal to the int 2560, so two identical panels stop being one
+        composition; write the pixels as numbers.''
+    else if o.width < 1 || o.height < 1 then
+      throw ''
+        pkgs/jarvis-wallpaper was handed the output "${named o}" at
+        ${toString o.width}x${toString o.height}. resvg rasterizes a zero-sized
+        canvas without complaining and the desktop would show nothing.''
+    else
+      "${toString o.width}x${toString o.height}";
+
+  # Emptiness is checked HERE, in the binding both of the two below go through,
+  # rather than beside either of them. An empty list has no primary either, so
+  # the `primary` throw would fire first and report "0 outputs with primary =
+  # true" about a declaration whose actual problem is that it declares nothing.
+  declared =
+    if outputs != [ ] then
+      outputs
+    else
+      throw ''
+        pkgs/jarvis-wallpaper was handed an empty `outputs` list. The art is
+        composed per output; with none declared there is nothing to compose for,
+        and the fallback art alone is a desktop that scales and crops on every
+        monitor.'';
+
+  geometries = lib.unique (map geometry declared);
+
+  # The PRIMARY output, whose geometry `jarvisos.png` is composed at — the art
+  # the lock screen shows (pkgs/jv-lock) and the art shell/jv-wall falls back to
+  # and crops on any geometry not in the list above. It is declared rather than
+  # inferred: "the biggest one" would silently move the lock screen's image the
+  # day a bigger panel is plugged in beside the one a human is looking at.
+  primaries = builtins.filter (o: o.primary or false) declared;
+  primary =
+    if builtins.length primaries == 1 then
+      builtins.head primaries
+    else
+      throw ''
+        pkgs/jarvis-wallpaper needs exactly one output with `primary = true`, and
+        was handed ${toString (builtins.length primaries)} of them
+        (${lib.concatMapStringsSep ", " named declared}). The primary's geometry
+        is what jarvisos.png is composed at, which is the lock screen's image and
+        every undeclared monitor's fallback.'';
 in
 runCommand "jarvis-wallpaper"
   { nativeBuildInputs = [ resvg python3 ]; }
@@ -230,23 +308,29 @@ runCommand "jarvis-wallpaper"
     SVG
     }
 
-    # THE PRIMARY ART, at ares' largest panel. It is also the FALLBACK: an
+    # THE PRIMARY ART, at the geometry of the output declared `primary = true`
+    # (${named primary}, ${geometry primary}). It is also the FALLBACK: an
     # output with no bespoke render below gets this file, and shell/jv-wall
     # crops it to fit — the one path where the art is scaled after all, which is
     # why that shell derives its anchor from where the crop actually put the
     # drawing rather than from a percentage of its own surface.
-    compose 2560 1440 wp.svg
+    compose ${toString primary.width} ${toString primary.height} wp.svg
     resvg --skip-system-fonts --use-fonts-dir "$fonts" \
       wp.svg "$out/share/backgrounds/jarvisos.png" 2>resvg.log
     cat resvg.log
 
     # PER-OUTPUT RENDERS (PLAN D10, composed rather than rasterized-and-cropped
-    # since E9). `swaybg -m fill` scaling one drawing onto ares' two 1080p panels
-    # cropped the instrument and the wordmark by an amount nobody chose; the
-    # first fix gave each connected geometry its own file, and this one makes
-    # each of those files its own COMPOSITION. jv-wall picks the file matching
-    # its screen.
-    for geom in 2560x1440 1920x1080 3840x2160 2560x1080 1366x768; do
+    # since E9, and one per DECLARED output since E10). `swaybg -m fill` scaling
+    # one drawing onto ares' two 1080p panels cropped the instrument and the
+    # wordmark by an amount nobody chose; the first fix gave each connected
+    # geometry its own file, and this one makes each of those files its own
+    # COMPOSITION. jv-wall picks the file matching its screen.
+    #
+    # The list is the `outputs` argument, de-duplicated — ares' two 1080p panels
+    # are one composition — so there is no geometry in this package that no
+    # surface asked for, and a monitor added to the declaration has bespoke art
+    # on the next rebuild.
+    for geom in ${lib.concatStringsSep " " geometries}; do
       w=''${geom%x*}; h=''${geom#*x}
       compose "$w" "$h" "$geom.svg"
       resvg --skip-system-fonts --use-fonts-dir "$fonts" \

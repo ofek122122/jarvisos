@@ -94,7 +94,27 @@
         # than carved out of google-fonts. modules/fonts.nix installs it —
         # this output exists so it can be built and checked on its own.
         archivo = pkgs.callPackage ./pkgs/archivo { };
-        jarvis-wallpaper = pkgs.callPackage ./pkgs/jarvis-wallpaper { };
+        # jarvis-wallpaper — the art, composed once per output THIS HOST
+        # declares (PLAN E10). The geometry list used to live inside the
+        # package: five sizes, three of which no monitor here can display, and
+        # a real one plugged in tomorrow would have got the primary art scaled.
+        # It is an argument now, and `hosts/ares/outputs.nix` is where the
+        # answer lives — the same file PLAN E5 will hand to niri, so the
+        # machine's layout is declared in one place and spent in several.
+        jarvis-wallpaper = pkgs.callPackage ./pkgs/jarvis-wallpaper {
+          outputs = import ./hosts/ares/outputs.nix;
+        };
+        # …and the same art composed for the contact sheet's own outputs, which
+        # are ares' plus one 21:9 canvas no panel here has: `ops/ralph/
+        # wallshots.sh` photographs a composed non-16:9 render, and that shot
+        # (docs/wall/06-ultrawide.png) is the only evidence in this repo that
+        # PLAN E9's composer works off 16:9. Building it here rather than
+        # keeping the geometry in the machine's own art is the difference
+        # between a desktop that carries renders for monitors it does not have
+        # and a documentation gate that asks for what it photographs.
+        jarvis-wallpaper-sheet = pkgs.callPackage ./pkgs/jarvis-wallpaper {
+          outputs = import ./tools/wallshots/outputs.nix;
+        };
         # jv-wall — the animated wallpaper; same pinned-launcher shape as
         # jv-hud/jv-bar, with the per-output renders pinned into its wrapper.
         jv-wall = pkgs.callPackage ./pkgs/jv-wall {
