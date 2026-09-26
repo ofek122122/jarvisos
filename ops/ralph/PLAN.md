@@ -1099,6 +1099,72 @@ human-reviewed step.
       measured cost and nothing anywhere bounds its pathological one — so the
       honest first half is `engine_ceilings()`' equivalent over that harness,
       and the shrink is second. Raised by D53.
+      · **The first half is BUILT and the number is 26.6 minutes.**
+        `stretch_ceilings()` in `tools/tests/test_hudscreens.py` walks
+        `shoot.py`'s AST and charges every wait it finds: 94 wait sites, 76 of
+        them charged (the other 18 are polls inside a bound already named, or
+        a helper's insides charged at its call sites instead). Twelve engines
+        — six shots, five idle windows, the click probe — worst one 238 s
+        (heard-and-confirm: four `wait_for_drawing`s and two engine starts)
+        against `STRETCH_CEILING_S = 300`, and 1593 s over the run against
+        `RUN_CEILING_S = 1800`. The measured pass is 199.6 s, so the ceiling
+        is 8x the run it bounds, which is what a ceiling is for.
+      · **Where the 1593 s goes, which is the answer the shrink needs:**
+        `READY_TIMEOUT_S` 688 s (43%, twenty-two waits of 30 s for a process
+        to say one line), `STOP_TIMEOUT_S` 416 s (26%, spent TWICE per
+        process — terminate, wait, kill, wait — over 26 stops),
+        `wait_for_drawing` 210 s (13%), everything else 278 s. The shrink is
+        the first two and nothing else is worth touching.
+      · Derived rather than written down, because at ninety sites a hand
+        list is stale within an iteration: a way of waiting nobody taught the
+        arithmetic is refused BY NAME (`test_every_way_this_harness_waits_is_
+        one_the_ceiling_knows_about` closes over the call graph, so a helper
+        three calls deep from a `time.sleep` is still one whose call sites
+        cost seconds), a loop around a wait that the ceiling cannot count is
+        refused, and a wait outside every stretch is refused. 10 mutations,
+        10 caught — including the two that motivated the shape: a sixth idle
+        window written without its `# ---` marker, and a wait in `main` just
+        after the shot loop, which an earlier text-sliced version charged six
+        times and called a ceiling.
+      · Three bounds in `shoot.py` were bare literals and are constants now,
+        because a number nobody named is a number nothing can add up:
+        `STOP_TIMEOUT_S` (8 s, spent twice), `CLIENT_WINDOW_TIMEOUT_S` (15 s,
+        the second Wayland client's window), `CLIENTS_GONE_S` (0.5 s) and
+        `PUBLISH_DRAIN_S` (0.1 s, the broker's fan-out). `test_every_bound_in_
+        this_harness_is_a_named_number` keeps them that way.
+      · **What this does NOT bound, stated where a reader meets it:** work.
+        `grim`, the PNG encode, the numpy compare and both binaries' own exec
+        are `subprocess.run` with no timeout. The claim is about every wait
+        this file CHOOSES to spend; a subprocess that never returns is
+        outside it. Raised as D64 rather than fixed here.
+
+- [ ] D63. **The shrink D58 measured: 69% of that ceiling is two constants.**
+      `READY_TIMEOUT_S` is 688 s of it and `STOP_TIMEOUT_S` 416 s. The first
+      is D53's repair in a second harness — a cold bound for whichever engine
+      touches Qt first and a DERIVED warm bound for the eleven after it — and
+      it needs `ReadyBudget`, which is D42's question of where a third copy
+      of `Proc`-and-its-bound should live rather than a fourth. The second is
+      cheaper and nobody has looked at it: eight seconds for a jarvisd or a
+      quickshell to answer SIGTERM, then eight more after SIGKILL, over 26
+      stops. A process that is going to exit on a TERM does it in
+      milliseconds; what the 8 s is really insuring against is a hung engine,
+      which is the run this ceiling already bounds. Measure one stop before
+      touching it — `Proc.stop` is the last thing that runs in a `finally`,
+      so a number that is too small there LEAKS a quickshell into the next
+      engine's compositor, and that failure looks like anything but a
+      timeout. Raised by D58.
+
+- [ ] D64. **The ceiling D58 built bounds waits and not work, and the biggest
+      thing it cannot see is `grim`.** Every `subprocess.run` in
+      `tools/hudscreens/shoot.py` — the compositor queries, the captures, the
+      two binaries' exec — has no `timeout=`, so a compositor that stops
+      answering hangs the gate forever with the ceiling still green. It is
+      honest in the docstring and that is not the same as bounded. The cheap
+      version is one `timeout=` on the `swaymsg`/`grim` helper with a
+      constant beside the others, and it would need a reading of what a
+      capture of 2560x1440 really costs on this machine (the B75 table says
+      the whole capture phase is 0.4 s over the sheet, so the bound is
+      generous by two orders of magnitude and still a bound). Raised by D58.
 
 - [x] D54. **The compositor is never asked about the surface that came
       BACK** — asked now, three ways, and the answer is that asking is worth

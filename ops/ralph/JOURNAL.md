@@ -13828,3 +13828,71 @@ is not worth chasing.)
   gate can only express a strip off the TOP, raised here and deliberately
   parked: it is a generality with one user until something reserves a side),
   **D48**, **D45**.
+
+## 2026-09-26 — D58: the harness that starts twelve quickshells had no ceiling at all
+
+- **`shellload.sh` has been bounded since D50 and `hudscreens.sh` never was.**
+  The other real-quickshell gate starts twelve engines in a pass — six shots,
+  five idle windows, the click probe — and every wait in it was a poll with a
+  generous timeout that nothing anywhere added up. 3m20s is its measured cost;
+  its pathological one was whatever you assumed. A quickshell that comes up and
+  then holds still forever has to end, be reported, and not take the afternoon.
+- **The answer is 26.6 minutes, and 69% of it is two constants.**
+  `stretch_ceilings()` walks `shoot.py`'s AST and charges every wait: 94 sites,
+  76 charged (the rest are polls inside a bound already named, or a helper's
+  insides charged at its call sites instead). Worst engine 238 s — the
+  heard-and-confirm window, four `wait_for_drawing`s and two engine starts —
+  against `STRETCH_CEILING_S = 300`; 1593 s over the run against
+  `RUN_CEILING_S = 1800`, which is 8x the run it bounds. Where it goes:
+  `READY_TIMEOUT_S` 688 s (43%, twenty-two waits of 30 s for a process to say
+  one line, and D53 measured a warm engine saying it in 0.40 s),
+  `STOP_TIMEOUT_S` 416 s (26%, spent TWICE per process over 26 stops),
+  `wait_for_drawing` 210 s (13%). That is the shrink D58 asked for, and it is
+  now a number rather than a hunch — raised as **D63**.
+- **Derived, not written down, because at ninety sites a hand list is stale
+  within an iteration.** D50's bug in the smaller gate was one wait the driver
+  spent and the arithmetic did not know about; at this size that is not a risk
+  but a certainty. So a way of waiting nobody taught the ceiling is refused BY
+  NAME — the census closes over the call graph, so a helper three calls deep
+  from a `time.sleep` is still one whose call sites cost seconds — a loop
+  around a wait the ceiling cannot count is refused, and a wait outside every
+  stretch is refused.
+- **Two mutations changed the design rather than confirming it.** A sixth idle
+  window written without its `# ---` marker put two quickshells in one stretch
+  and was charged once, so the engine count is pinned to the thing a window
+  cannot be written without — its own shell. And a `time.sleep` in `main` just
+  after the shot loop was charged SIX times by the first, text-sliced version,
+  which is a ceiling reporting a fiction; the shot and click stretches are cut
+  off the AST now, at the loop's own last line.
+- **Three bounds in `shoot.py` were bare literals and are named now**, because
+  a number nobody named is a number nothing can add up: `STOP_TIMEOUT_S` (8 s,
+  spent twice), `CLIENT_WINDOW_TIMEOUT_S` (15 s), `CLIENTS_GONE_S` (0.5 s), and
+  `PUBLISH_DRAIN_S` (0.1 s). A test keeps them named — a bound may be a module
+  constant or an argument the caller named, and nothing else.
+- **What it does not bound is stated where a reader meets it:** work. `grim`,
+  the encode, the numpy compare and both binaries' exec are `subprocess.run`
+  with no timeout, so a compositor that stops answering hangs this gate with
+  the ceiling still green. Honest in the docstring is not the same as bounded —
+  raised as **D64**.
+- 10 mutations, 10 caught (a wait in a function nobody charges; a deadline back
+  on a literal, twice; a slower `READY_TIMEOUT_S`; an unmarked sixth window; a
+  wait in a loop the ceiling cannot count; waits in `main` before and after the
+  shot loop; a new waiting helper called from a window; three more readings in
+  the widest window). Every injection was reverted from a backup and
+  `git status --porcelain` confirmed clean before the verify run.
+- tests: `bash ops/ralph/verify.sh` GREEN — 1 gate over 2 paths (tools **739
+  pass**, five of them new, 60.8 s). `hudscreens.sh` was NAMED by verify and
+  run here, because `shoot.py` changed: GREEN in 199.6 s, all 9 shots match the
+  sheet committed at HEAD (7 differed only by the compositor's rounding and
+  were restored), nothing threw in 7242 lines across 12 logs. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: tools/tests/test_hudscreens.py, tools/hudscreens/shoot.py,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D63** (the shrink this measured: `READY_TIMEOUT_S` first, since it is
+  43% and D53 already did the thinking in the other harness; `STOP_TIMEOUT_S`
+  second and only after one stop is measured, because too small a number there
+  leaks a quickshell into the next engine's compositor), then **D61** (the two
+  `visible:` bindings that are invariant-10 machinery and say so nowhere — it
+  wants an iteration already paying for `hudscreens.sh`, and this was one),
+  then **D57**, **D56**, **D64**, **D55**, **D62**, **D48**, **D45**.

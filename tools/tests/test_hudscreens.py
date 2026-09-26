@@ -19,6 +19,7 @@ the sheet is made. What IS here is everything that would make those checks
 run against the wrong machine, or not run at all.
 """
 
+import ast
 import json
 import re
 import subprocess
@@ -2898,4 +2899,543 @@ def test_every_shell_this_starts_is_one_this_heard_from():
     assert shells and shells == heard, (
         f"{shells} jv-hud processes are started and {heard} are waited for — a "
         "shell nobody heard from writes a log the D39 scan cannot speak for"
+    )
+
+
+# ------------------- the ceiling on a pathological run (D58)
+#
+# `shellload.sh` has had a per-engine ceiling since D50, and D53 then found
+# 90 s of un-payable cold-Qt wait inside it. This harness — the other gate
+# that runs real quickshells — had NO ceiling at all. 3m00s is its measured
+# cost (B75 books the phases); nothing anywhere bounded the run where a
+# quickshell comes up and then holds still forever, and that run has to end,
+# be reported, and not take the afternoon with it.
+#
+# What is bounded here is every stretch of `shoot.py` that WAITS: a timeout,
+# a settle, a poll loop with a deadline. What is NOT is work — `grim`, a PNG
+# encode, a numpy compare, and the two binaries' own exec. A subprocess that
+# never returns is outside this claim and stays outside it; the claim is that
+# no wait this file chooses to spend is unbounded or unaccounted.
+#
+# The arithmetic is D50's lesson applied to a bigger file: the waits are
+# COUNTED OFF THE SOURCE rather than written down, because a wait added to
+# the run and not to the ceiling is exactly the hole D50 found — and at this
+# size (about ninety wait sites) a hand-written list would be stale within an
+# iteration. So `wait_sites()` walks the AST, every site must land in a
+# stretch or in a helper whose call sites are charged, and a way of waiting
+# nobody taught this file is refused by name rather than ignored.
+
+SHOOT = ROOT / "tools" / "hudscreens" / "shoot.py"
+
+# A poll inside a bounded loop is free — it is spent INSIDE the deadline, not
+# on top of it. What it does cost is one last pass through the body, begun an
+# instant before the deadline and finished after it, and the widest body here
+# is `wait_for_drawing`'s one-second feed with a publish in it. That overrun
+# is charged to every bounded wait, and this is the cap a poll may have.
+POLL_CEILING_S = 1.0
+
+# What ONE engine of this harness may cost: a quickshell, its broker, and
+# every wait the run spends around them. Per engine rather than per run for
+# D50's reason — it is the claim that survives the next window somebody adds,
+# and a run ceiling alone breaks on an honest addition instead of on a cost
+# problem. The worst today is the heard-and-confirm window at 238 s, which is
+# four `wait_for_drawing`s and two engine starts; the room above it is for
+# about one more reading, and a window that wants two is a conversation.
+STRETCH_CEILING_S = 300.0
+
+# And what the whole pass can cost if every one of them goes pathological:
+# twelve engines, six of them the shot loop, 1593 s — 26.6 minutes against a
+# measured 3m20s. So this is a bound on the run that never happens and not a
+# budget for the one that does. Where it goes is the answer D58 was opened
+# for: 43% is `READY_TIMEOUT_S`, twenty-two waits of 30 s for a process to
+# say one line, and D53 measured that a warm engine here says it in 0.40 s.
+# Another 26% is `STOP_TIMEOUT_S`, spent twice per process over 26 stops.
+# Those two are the shrink, and this is the number it will be measured
+# against.
+RUN_CEILING_S = 1800.0
+
+# Every way this file waits, and what one occurrence of it costs the ceiling.
+# The helpers are charged at their CALL SITES and their insides skipped, so
+# `wait_for_blind_plate`'s own deadline is counted once per call rather than
+# once per definition.
+CHARGED_HELPERS = {
+    "Proc.wait_for",
+    "Proc.stop",
+    "publish_shot",
+    "feed_snapshots",
+    "settle",
+    "start_client",
+    "wait_for_blind_plate",
+    "wait_for_drawing",
+}
+
+# The three functions of `shoot.py` that spend waits of their own rather than
+# lending them to a caller. Every wait site in them has to fall inside one of
+# the stretches below.
+WAITING_CALLERS = {"main", "probe_idle_frames", "probe_click_through"}
+
+
+def shoot_text() -> str:
+    return SHOOT.read_text("utf-8")
+
+
+def shoot_tree() -> ast.Module:
+    return ast.parse(shoot_text())
+
+
+def shoot_constants() -> dict[str, float]:
+    """Every module-level number in `shoot.py`, read without importing it.
+
+    Without importing because this suite has no numpy and `shoot.py` does —
+    the same reason every other gate in this file reads the harness as text.
+    """
+    out: dict[str, float] = {}
+    for node in shoot_tree().body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        try:
+            value = ast.literal_eval(node.value)
+        except ValueError:
+            continue
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[target.id] = float(value)
+    return out
+
+
+def _units(tree: ast.Module):
+    """Every node of `shoot.py`, with its parent and the definition it is
+    charged to. A nested function is charged to the one it lives in, so
+    `publish_shot`'s async body belongs to `publish_shot` and a method to
+    `Proc.<name>`."""
+    parent: dict[ast.AST, ast.AST] = {}
+    unit: dict[ast.AST, str] = {}
+
+    def walk(node: ast.AST, own: str, cls: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            parent[child] = node
+            here, klass = own, cls
+            if isinstance(child, ast.ClassDef):
+                klass, here = child.name, ""
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and not own:
+                here = f"{cls}.{child.name}" if cls else child.name
+            unit[child] = here
+            walk(child, here, klass)
+
+    walk(tree, "", "")
+    return parent, unit
+
+
+def wait_sites() -> list[dict]:
+    """Every place `shoot.py` waits, with what it waits on.
+
+    A site is a sleep, a `time.monotonic()` deadline, or a call to one of the
+    helpers above. `poll` marks the ones spent inside a bounded loop, which
+    the ceiling gets for free; `unit` is the definition the site is charged
+    to, which is how a helper's insides are kept from being counted twice.
+    """
+    tree = shoot_tree()
+    parent, unit = _units(tree)
+
+    def ancestors(node: ast.AST):
+        out = []
+        while node in parent:
+            node = parent[node]
+            out.append(node)
+        return out
+
+    sites: list[dict] = []
+    for node in ast.walk(tree):
+        kind = None
+        if isinstance(node, ast.Call):
+            called = ast.unparse(node.func)
+            if called in ("time.sleep", "asyncio.sleep"):
+                kind = "sleep"
+            elif called.endswith(".wait_for"):
+                kind = "wait_for"
+            elif called.endswith(".stop"):
+                kind = "stop"
+            elif called == "self.p.wait":
+                kind = "procwait"
+            elif called in CHARGED_HELPERS:
+                kind = called
+        elif (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Add)
+            and isinstance(node.left, ast.Call)
+            and ast.unparse(node.left) == "time.monotonic()"
+        ):
+            kind = "deadline"
+        if kind is None:
+            continue
+        sites.append(
+            {
+                "kind": kind,
+                "node": node,
+                "line": node.lineno,
+                "unit": unit.get(node, ""),
+                "poll": any(
+                    isinstance(a, ast.While) and "time.monotonic" in ast.unparse(a.test)
+                    for a in ancestors(node)
+                ),
+                "loops": [a for a in ancestors(node) if isinstance(a, ast.For)],
+            }
+        )
+    return sites
+
+
+def stretches() -> dict[str, tuple[int, int, str]]:
+    """The engines, as line ranges of `shoot.py`: the body of the shot loop
+    (entered once per shot in the sheet), the five idle windows, and the click
+    probe. Sliced out of the source rather than listed, so a window renamed
+    is a window still covered and a window ADDED is one the census below
+    refuses to leave uncounted."""
+    text = shoot_text()
+
+    def line(idx: int) -> int:
+        return text.count("\n", 0, idx) + 1
+
+    idle = text.index("def probe_idle_frames"), text.index("def probe_click_through")
+    marks = [
+        idle[0] + m.start()
+        for m in re.finditer(r"^    # --- ", text[idle[0] : idle[1]], re.M)
+    ]
+    out: dict[str, tuple[int, int, str]] = {}
+    for i, start in enumerate(marks):
+        end = marks[i + 1] if i + 1 < len(marks) else idle[1]
+        title = re.match(r"    # --- ([A-Z][A-Z ]+)", text[start:]).group(1).strip()
+        out[title.lower()] = (line(start), line(end), text[start:end])
+    # These two off the AST rather than off the text, because their ends
+    # matter: a wait written just after the shot loop and just before the
+    # next phase is a wait spent ONCE, and a stretch that ran to the next
+    # landmark would charge it to all six shots and call that a ceiling.
+    tree = shoot_tree()
+    lines = text.splitlines(keepends=True)
+
+    def span(node) -> tuple[int, int, str]:
+        return node.lineno, node.end_lineno + 1, "".join(
+            lines[node.lineno - 1 : node.end_lineno]
+        )
+
+    out["shot"] = span(
+        next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.For) and ast.unparse(n.iter) == "sheet.SHOTS"
+        )
+    )
+    out["click"] = span(
+        next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "probe_click_through"
+        )
+    )
+    return out
+
+
+def publish_charge() -> float:
+    """What one `publish_shot` can hold the run for: the broker's drain, once
+    per frame, for the widest thing this harness publishes at once."""
+    consts = shoot_constants()
+    widest = max(len(s["frames"]) + len(s.get("hold", [])) for s in sheet.SHOTS)
+    return consts["PUBLISH_DRAIN_S"] * widest
+
+
+def site_charge(site: dict) -> float:
+    """What one occurrence of a site costs the ceiling.
+
+    Every bounded wait carries the overrun above: the loop tests its deadline
+    at the top, so the last pass through the body begins inside the bound and
+    ends outside it.
+    """
+    consts = shoot_constants()
+    publish = publish_charge()
+    overrun = POLL_CEILING_S + publish
+    node = site["node"]
+
+    def named(expr: ast.AST) -> float:
+        """The bound, which must be a constant `shoot.py` declares by name."""
+        assert isinstance(expr, ast.Name) and expr.id in consts, (
+            f"{SHOOT.name}:{site['line']} waits on {ast.unparse(expr)}, which "
+            "is not a module constant of that file — a bound nobody named is "
+            "a bound this ceiling cannot add up (PLAN D58)"
+        )
+        return consts[expr.id]
+
+    kind = site["kind"]
+    if kind == "sleep":
+        return named(node.args[0])
+    if kind == "deadline":
+        return named(node.right) + overrun
+    if kind == "wait_for":
+        explicit = [kw.value for kw in node.keywords if kw.arg == "timeout"]
+        bound = named(explicit[0]) if explicit else consts["READY_TIMEOUT_S"]
+        return bound + overrun
+    if kind in ("wait_for_blind_plate", "wait_for_drawing"):
+        return consts["BLIND_TIMEOUT_S"] + overrun
+    if kind == "start_client":
+        return consts["CLIENT_WINDOW_TIMEOUT_S"] + overrun
+    if kind == "stop":
+        # Terminate, wait, kill, wait: the timeout is spent twice.
+        return 2 * consts["STOP_TIMEOUT_S"]
+    if kind == "settle":
+        # It either sleeps its seconds or feeds them; the feed publishes.
+        return named(node.args[0]) + publish
+    if kind == "feed_snapshots":
+        return named(node.args[0]) + overrun
+    if kind == "publish_shot":
+        return publish
+    raise AssertionError(f"no charge for a {kind} site")
+
+
+def loop_factor(site: dict, source: str) -> int:
+    """How many times a stretch enters a site. Every loop around a wait has to
+    be one this file knows how to count — an unknown one is refused rather
+    than treated as one pass, because a wait inside a loop nobody counted is
+    the same hole as a wait nobody counted at all."""
+    times = 1
+    for loop in site["loops"]:
+        over = ast.unparse(loop.iter)
+        if isinstance(loop.iter, (ast.Tuple, ast.List)):
+            times *= len(loop.iter.elts)
+        elif over == "sheet.SHOTS":
+            times *= 1  # the stretch IS one shot; the run multiplies below
+        elif over == "shot['captures']":
+            times *= max(len(s["captures"]) for s in sheet.SHOTS)
+        elif over == "clients":
+            times *= source.count("start_client(")
+        else:
+            raise AssertionError(
+                f"{SHOOT.name}:{site['line']} waits inside `for … in {over}`, "
+                "which the ceiling does not know how to count (PLAN D58)"
+            )
+    return times
+
+
+def stretch_ceilings() -> dict[str, float]:
+    """The worst case of every wait each engine of this harness can spend."""
+    spans = stretches()
+    out = {name: 0.0 for name in spans}
+    for site in wait_sites():
+        if site["poll"] or site["unit"] in CHARGED_HELPERS:
+            continue
+        where = [n for n, (lo, hi, _) in spans.items() if lo <= site["line"] < hi]
+        assert len(where) == 1, (
+            f"{SHOOT.name}:{site['line']} is a {site['kind']} in "
+            f"{site['unit']!r} that belongs to {len(where)} engines — a wait "
+            "outside every stretch is a wait outside this ceiling (PLAN D58)"
+        )
+        name = where[0]
+        out[name] += site_charge(site) * loop_factor(site, spans[name][2])
+    return out
+
+
+def run_ceiling() -> float:
+    """And the whole pass: the shot stretch once per shot in the sheet, every
+    other engine once."""
+    ceilings = stretch_ceilings()
+    shots = len(sheet.SHOTS)
+    return ceilings["shot"] * shots + sum(
+        v for name, v in ceilings.items() if name != "shot"
+    )
+
+
+def test_no_engine_of_this_harness_can_hang_for_an_afternoon():
+    """The claim D58 opened for, and it is about the run that never happens:
+    a quickshell that comes up and holds still, a broker that binds nothing, a
+    plate that never arrives. Every one of those is a poll with a generous
+    timeout, and this is the arithmetic that says what they add up to."""
+    ceilings = stretch_ceilings()
+    for engine, worst in sorted(ceilings.items()):
+        assert worst <= STRETCH_CEILING_S, (engine, worst)
+    assert run_ceiling() <= RUN_CEILING_S, ceilings
+    # Twelve engines — six shots and six probes — so the run bound is not the
+    # sum of twelve stretch bounds. It is asserted below the product for the
+    # reason `shellload.sh`'s is: a reader who saw only the per-engine number
+    # would be reading a twelfth of the true worst case.
+    engines = len(sheet.SHOTS) + len(ceilings) - 1
+    assert RUN_CEILING_S <= STRETCH_CEILING_S * engines
+    # And the ceiling is a ceiling rather than a budget: the measured pass is
+    # three minutes, and a bound that had drifted down to it would fail the
+    # first slow machine this ever runs on.
+    assert run_ceiling() >= 4 * 180.0
+
+
+def test_every_way_this_harness_waits_is_one_the_ceiling_knows_about():
+    """The half of a ceiling that drifts silently, and the only reason this
+    one is derived instead of written down.
+
+    A wait is one line. `hudscreens.sh` has about ninety of them across twelve
+    engines, and D50's bug in the smaller gate was exactly a wait the driver
+    spent and the arithmetic did not know about. So the question is not
+    whether the sum is right today: it is whether a function that waits can
+    exist in that file without this test naming it."""
+    tree = shoot_tree()
+    _, unit = _units(tree)
+    primitive = {s["unit"] for s in wait_sites()}
+    # A definition that waits because it calls something that waits, to a
+    # fixed point: a helper three calls deep from a sleep is still a helper
+    # whose call sites cost seconds.
+    methods = {
+        f"{cls.name}.{fn.name}"
+        for cls in tree.body
+        if isinstance(cls, ast.ClassDef)
+        for fn in cls.body
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    calls: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = ast.unparse(node.func)
+        if "." in called:
+            tail = called.rsplit(".", 1)[1]
+            named = {m for m in methods if m.endswith(f".{tail}")}
+        else:
+            named = {called}
+        calls.setdefault(unit.get(node, ""), set()).update(named)
+    waiting = set(primitive)
+    while True:
+        grown = {
+            who
+            for who, called in calls.items()
+            if who and (called & waiting)
+        } | waiting
+        if grown == waiting:
+            break
+        waiting = grown
+    waiting.discard("")
+    assert waiting == CHARGED_HELPERS | WAITING_CALLERS, (
+        "these functions of shoot.py wait and the ceiling does not charge "
+        f"them: {sorted(waiting - (CHARGED_HELPERS | WAITING_CALLERS))}; and "
+        "these are charged and no longer wait: "
+        f"{sorted((CHARGED_HELPERS | WAITING_CALLERS) - waiting)}"
+    )
+
+
+def arguments_of_each_definition() -> dict[str, set[str]]:
+    """The parameter names of every definition in `shoot.py`, by the unit it
+    is charged to. A wait on an argument is a wait whose bound the CALLER
+    named, which is the shape every charged helper here has."""
+    tree = shoot_tree()
+    _, unit = _units(tree)
+    out: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = node.args
+            names = {
+                a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]
+            }
+            out.setdefault(unit.get(node, ""), set()).update(names)
+    return out
+
+
+def test_every_bound_in_this_harness_is_a_named_number():
+    """`start_client` waited 15 s on a bare literal and `Proc.stop` spent 8 s
+    twice on another, which is how a harness ends up with no ceiling: there
+    was nothing to add up. Every deadline and every settle is a constant at
+    the top of the file now, and `site_charge` refuses one that is not.
+
+    A POLL is the exception, and it is the only one: it is spent inside a
+    bound that was already named, so the literal is a cadence rather than a
+    ceiling — capped here so it stays one."""
+    consts = shoot_constants()
+    params = arguments_of_each_definition()
+    for site in wait_sites():
+        node = site["node"]
+        if site["poll"]:
+            numbers = [
+                n.value
+                for n in ast.walk(node)
+                if isinstance(n, ast.Constant) and isinstance(n.value, (int, float))
+            ]
+            assert all(n <= POLL_CEILING_S for n in numbers), (site["line"], numbers)
+            continue
+        if site["kind"] == "deadline":
+            bound = node.right
+        elif site["kind"] == "sleep":
+            bound = node.args[0]
+        elif site["kind"] == "procwait":
+            assert [kw.arg for kw in node.keywords] == ["timeout"], ast.unparse(node)
+            bound = node.keywords[0].value
+        else:
+            continue  # a call site: its bound is the helper's, checked below
+        # A name, and one of two kinds of name: a constant at the top of the
+        # file, or an argument — which is a bound the CALLER named, and every
+        # caller is charged for it above.
+        assert isinstance(bound, ast.Name), (
+            f"{SHOOT.name}:{site['line']} waits {ast.unparse(bound)}, which is "
+            "a number nobody named — the ceiling cannot add up a literal "
+            "(PLAN D58)"
+        )
+        assert bound.id in consts or bound.id in params[site["unit"]], (
+            f"{SHOOT.name}:{site['line']} waits on {bound.id}, which is "
+            f"neither a constant of {SHOOT.name} nor an argument of "
+            f"{site['unit']}"
+        )
+
+
+def test_the_helpers_wait_on_the_bound_the_ceiling_charges_for_them():
+    """The table above says `wait_for_blind_plate` costs `BLIND_TIMEOUT_S`.
+    Nothing but this test says it is true — the helper could be changed to
+    wait on something else entirely and every sum here would go on reading
+    the old number, which is the failure mode of every arithmetic written
+    beside the thing it measures rather than off it."""
+    tree = shoot_tree()
+    _, unit = _units(tree)
+    deadlines: dict[str, list[str]] = {}
+    for site in wait_sites():
+        if site["kind"] == "deadline":
+            deadlines.setdefault(site["unit"], []).append(
+                ast.unparse(site["node"].right)
+            )
+    assert deadlines["wait_for_blind_plate"] == ["BLIND_TIMEOUT_S"]
+    assert deadlines["wait_for_drawing"] == ["BLIND_TIMEOUT_S"]
+    assert deadlines["start_client"] == ["CLIENT_WINDOW_TIMEOUT_S"]
+    # `Proc.wait_for` waits on its argument, so what the ceiling charges is
+    # the DEFAULT — and every call site in this harness takes it.
+    assert deadlines["Proc.wait_for"] == ["timeout"]
+    waiter = next(
+        fn
+        for cls in tree.body
+        if isinstance(cls, ast.ClassDef)
+        for fn in cls.body
+        if isinstance(fn, ast.FunctionDef) and fn.name == "wait_for"
+    )
+    assert ast.unparse(waiter.args.defaults[-1]) == "READY_TIMEOUT_S"
+    assert not [
+        s for s in wait_sites() if s["kind"] == "wait_for" and s["node"].keywords
+    ], "a call site passes its own timeout; the ceiling charges the default"
+    # `settle` and `feed_snapshots` are charged their first argument, which
+    # only holds while that argument is the number of seconds they wait.
+    for name in ("settle", "feed_snapshots"):
+        fn = next(
+            f
+            for f in tree.body
+            if isinstance(f, ast.FunctionDef) and f.name == name
+        )
+        assert fn.args.args[0].arg == "seconds", name
+
+
+def test_the_ceiling_has_one_engine_for_every_shell_this_harness_starts():
+    """The stretches are sliced out of the source, and the one way that can
+    go quietly wrong is a SIXTH idle window written without the `# ---`
+    marker: its waits would land inside the window above it and be counted
+    once against a bound they no longer describe. So the count is pinned to
+    the thing a window cannot be written without — its own quickshell."""
+    spans = stretches()
+    for name, (_, _, source) in spans.items():
+        shells = source.count('"jv-hud",')
+        assert shells == 1, (
+            f"the {name} engine starts {shells} quickshells — an engine is "
+            "one shell, and a stretch holding two is a window whose waits "
+            "are charged to its neighbour (PLAN D58)"
+        )
+    started = shoot_text().count('"jv-hud",')
+    assert started == len(spans), (
+        f"{started} quickshells are started and the ceiling has {len(spans)} "
+        f"engines: {sorted(spans)}"
     )

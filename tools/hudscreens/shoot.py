@@ -70,6 +70,18 @@ sys.path.insert(0, str(ROOT / "harness"))
 SETTLE_S = 1.6
 READY_TIMEOUT_S = 30.0
 
+# How long a process gets to go away politely before it is killed, and then
+# to be reaped. Named rather than inlined because it is spent TWICE per
+# process, once per shot and once per idle window, and the ceiling in
+# tools/tests/test_hudscreens.py adds it up: every bound in this file is a
+# constant up here so that arithmetic reads the run rather than a guess at it
+# (PLAN D58).
+STOP_TIMEOUT_S = 8.0
+
+# The drain after a publish. The broker fans out from its own task, so the
+# socket is held open this long per frame — see `publish_shot`.
+PUBLISH_DRAIN_S = 0.1
+
 
 def log(msg: str) -> None:
     print(f"hudscreens: {msg}", flush=True)
@@ -189,10 +201,10 @@ class Proc:
         if self.p.poll() is None:
             self.p.terminate()
             try:
-                self.p.wait(timeout=8)
+                self.p.wait(timeout=STOP_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 self.p.kill()
-                self.p.wait(timeout=8)
+                self.p.wait(timeout=STOP_TIMEOUT_S)
         self._fh.close()
 
     def mark(self) -> int:
@@ -263,7 +275,7 @@ def publish_shot(shot: dict, bus_addr: str) -> None:
             )
             # The broker fans out from its own task; closing the socket the
             # instant after a write can drop the frame before it is read.
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(PUBLISH_DRAIN_S)
             await bus.close()
             log(f"  published {spec['topic']} as {spec['src']}")
 
@@ -474,6 +486,14 @@ def check_corner(name: str, region: np.ndarray, background: np.ndarray, lit: boo
 # with room to spare; the second is a compositor round trip.
 BLIND_TIMEOUT_S = 25.0
 CLICK_TIMEOUT_S = 3.0
+
+# How long a second Wayland client gets to map its window onto the monitor it
+# was told to open on, and how long the backdrop gets to be flat again once
+# those windows are gone. Both were bare literals until PLAN D58 asked what a
+# pathological run of this harness can cost and found two numbers nothing
+# could add up.
+CLIENT_WINDOW_TIMEOUT_S = 15.0
+CLIENTS_GONE_S = 0.5
 
 
 def click_at(x: int, y: int) -> None:
@@ -1557,7 +1577,7 @@ def probe_click_through(stage: Path, background: np.ndarray) -> None:
         for client in clients:
             client.stop()
         clients = []
-        time.sleep(0.5)
+        time.sleep(CLIENTS_GONE_S)
         capture("primary", lit)
         after = drawn_box(read_ppm(lit), background)
         if after != box:
@@ -1585,7 +1605,7 @@ def start_client(role: str, out: dict, stage: Path, clients: list) -> dict:
     clients.append(
         Proc(f"wev-{role}", [os.environ["WEV_BIN"]], stage / f"click-{role}.log", dict(os.environ))
     )
-    deadline = time.monotonic() + 15.0
+    deadline = time.monotonic() + CLIENT_WINDOW_TIMEOUT_S
     while time.monotonic() < deadline:
         fresh = [w for w in toplevels() if w["id"] not in before]
         if fresh:
