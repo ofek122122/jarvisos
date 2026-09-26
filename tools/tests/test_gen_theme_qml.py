@@ -1281,6 +1281,118 @@ def test_the_hud_surface_measures_the_room_its_plates_have():
     )
 
 
+def hud_min_screen_height() -> int:
+    """The shortest output shell.qml says its corner is for, in px (PLAN D74).
+
+    Resolved, because the declaration is deliberately NOT a number: it is
+    `surface.implicitHeight`, so the floor and the box are one fact and the
+    next plate that makes the corner taller raises the floor with it. The gate
+    below is what holds it to that expression; this is what hands the number to
+    the gates that need it, which are in `tools/tests/test_hudscreens.py` —
+    every output the screen harness photographs has to be one the declaration
+    covers, and that is a claim about two files neither of them can make alone.
+    """
+    hud = strip_qml_comments((ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8"))
+    floor = re.search(
+        r"^\s*readonly property int minScreenHeightPx:\s*(.+?)\s*$", hud, re.M
+    )
+    assert floor, (
+        "shell/jv-hud/shell.qml no longer declares the shortest screen its "
+        "corner is for — D74 settled the height question as a DECLARED floor "
+        "rather than as a clamp, and a declaration no gate can read is a "
+        "comment"
+    )
+    assert floor.group(1) == "surface.implicitHeight", (
+        "the floor has to BE this surface's own height rather than a copy of "
+        f"today's number, or it stays put the next time a plate makes the "
+        f"corner taller; shell.qml says {floor.group(1)!r}"
+    )
+    return hud_surface_box()[1]
+
+
+def test_the_hud_says_when_a_screen_is_shorter_than_the_corner_it_declares():
+    """D74 — `plateRoomPx`'s other axis, and the decision not to clamp it.
+
+    The clamp above bounds the plates by the narrower of the surface and the
+    SCREEN. Nothing bounds the stack's height by the screen's, so on an output
+    shorter than this surface the compositor crops the bottom of it, and the
+    bottom plate is `HealthPlate`: the thing that says what is wrong, cropped
+    exactly when everything is. That is A63's failure arriving from outside the
+    surface rather than from inside it.
+
+    D74 settled it as a declared floor rather than as a clamp, and the reason
+    is which failure each one leaves behind. Width elision shortens a SENTENCE
+    — `PlateFit` drops words off a line that is still there, under a label that
+    still says what the line is about. There is no vertical version of that: a
+    stack with less room than plates has to drop a whole PLATE, and a plate
+    that is not on screen is indistinguishable from a machine with nothing to
+    report, while a cropped one is visibly cropped. A clamp would trade a
+    visible crop for an invisible absence, on the one plate this HUD exists in
+    order not to lose.
+
+    So there is no clamp to measure and what there is to grade is the
+    declaration — and this is the only suite that can grade it, for the reason
+    the gate above gives: shell.qml is the Quickshell half, no QML engine in
+    this repo loads it, and no mutation of it is caught by anything else.
+
+    Three things, each of them the decision rather than a style:
+      · the floor is the surface's own height (the helper above);
+      · what it is compared against is the OUTPUT's height, because a
+        layer-shell surface is granted the height it asks for whatever the
+        screen is, exactly as it is granted its width (D66);
+      · and the shell SAYS SO, because a corner that goes on drawing past the
+        bottom of a screen without a word in the log is the same run as one
+        that never noticed.
+    """
+    floor = hud_min_screen_height()
+    hud = strip_qml_comments((ROOT / "shell" / "jv-hud" / "shell.qml").read_text("utf-8"))
+
+    short = re.search(r"property\s+bool\s+screenTooShort:(.*?)(?=\n\n)", hud, re.S)
+    assert short, (
+        "shell/jv-hud/shell.qml no longer notices a screen shorter than its "
+        "corner, so the floor it declares is a number nothing compares "
+        "anything with"
+    )
+    expr = " ".join(short.group(1).split())
+    assert "surface.modelData.height < surface.minScreenHeightPx" in expr, (
+        "the comparison has to be the OUTPUT's height against the floor: this "
+        "surface is granted the 826 px it asks for on a 700 px screen exactly "
+        f"as it is granted 300 px on a 256 px one, so its own is not the "
+        f"question: {expr}"
+    )
+    assert "surface.modelData.height > 0" in expr, (
+        "a screen whose height has not arrived yet is 0 and is not a short "
+        f"one — the same distinction `plateRoomPx` draws above: {expr}"
+    )
+    assert str(floor) not in expr, (
+        f"the condition types {floor} rather than reading the floor, so the "
+        f"two can drift: {expr}"
+    )
+
+    said = re.search(r"onScreenTooShortChanged:(.*?)(?=\n\n)", hud, re.S)
+    assert said and "console.warn" in said.group(1), (
+        "nothing says so. D74's decision is to declare the floor AND report a "
+        "screen under it: the plates are still all drawn, the compositor is "
+        "the thing doing the cropping, and the log is the only place that can "
+        "be said"
+    )
+    body = " ".join(said.group(1).split())
+    for named in (
+        "surface.modelData.name",
+        "surface.modelData.height",
+        "surface.minScreenHeightPx",
+    ):
+        assert named in body, (
+            f"the line has to name {named}: which screen, how tall it is and "
+            "how tall the corner needs it to be are the three things a reader "
+            f"of that log has no other way to get: {body}"
+        )
+    assert str(floor) not in body, (
+        f"the line types {floor} rather than reading the floor it reports: "
+        f"{body}"
+    )
+
+
 def test_the_bar_leaves_the_corner_the_hud_draws_in():
     """Two processes, two layers, one corner — and nothing can see the clash.
 

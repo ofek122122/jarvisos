@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from test_gen_theme_qml import ROOT, hud_surface_box
+from test_gen_theme_qml import ROOT, hud_min_screen_height, hud_surface_box
 
 sys.path.insert(0, str(ROOT / "tools" / "hudscreens"))
 import sheet  # noqa: E402
@@ -4222,3 +4222,72 @@ def test_the_corner_check_fences_the_drawn_box_on_all_four_edges():
                 "CLIPPED, and this is what the photograph of one looks like, "
                 f"so the {edge} edge of the HUD is bounded by nobody"
             )
+
+
+# --------- the axis with no clamp, and the floor that stands in for one (D74)
+#
+# `plateRoomPx` in shell.qml bounds the plates by the narrower of the surface
+# and the SCREEN (D66). Nothing bounds the stack's HEIGHT by the screen's, and
+# D74 settled that as a declared floor rather than as a clamp: a clamp would
+# have to drop a whole plate, the bottom plate is `HealthPlate`, and a plate
+# that is not on screen is indistinguishable from a machine with nothing to
+# report — where the compositor's crop at least leaves the cut plate visibly
+# cut. `tools/tests/test_gen_theme_qml.py` grades the declaration itself (the
+# floor is the surface's own height, the comparison is against the OUTPUT's,
+# and the shell says so in its log). What is left is the claim neither file can
+# make alone: every screen this harness puts the HUD on is one the declaration
+# covers.
+#
+# Two halves, and the second is the one that is easy to miss. `check_corner`'s
+# bottom bound is `y1 > SURFACE_H + INSET`, a bound on the SURFACE — and
+# `drawn_box` returns indices into the region it was handed (D73), so on a
+# screen no taller than that bound it is a bound on the IMAGE and can never
+# fail. The one check that would notice a cropped corner in a photograph goes
+# quiet INSET px ABOVE the floor the shell declares, which is the better news
+# than it sounds: an output between the two passes the shell's own declaration
+# and still takes the photograph's only bottom bound away, so this gate is what
+# goes red first, before anything is cropped.
+
+
+def test_every_screen_this_harness_has_clears_the_floor_the_shell_declares():
+    """No output the compositor is given may be shorter than the corner, and
+    none may be short enough to silence the bound that would notice.
+
+    The fifth output D74 asked about is deliberately NOT here, and that is the
+    other half of the decision: the narrow output (D68) exists because
+    `plateRoomPx` is real code whose behaviour only a compositor can confirm,
+    and the answer to the height question is that there is no such code. A
+    short output would photograph a screen the shell declares it is not for,
+    pass (every probe shot lights two or three plates, and only the crowd
+    overflows), and take the bottom bound away while doing it. So the grading
+    of a declaration is a gate that holds the outputs to it.
+    """
+    floor = hud_min_screen_height()
+    bounds = corner_bounds()
+    bottom = [b for b in bounds if "bottom" in b]
+    assert len(bottom) == 1, (
+        f"check_corner bounds the drawn box with {bottom} in terms of "
+        "`bottom` — this gate is about the one that holds the stack to the "
+        "surface's height, and it can no longer tell which that is"
+    )
+    for out in sheet.ALL_OUTPUTS:
+        assert out["height"] >= floor, (
+            f"{out['name']} is {out['height']}px tall and shell.qml's corner "
+            f"is {floor}px, so the compositor crops the bottom of it — and the "
+            "bottom plate is the health plate, cropped exactly when everything "
+            "is wrong. There is no height clamp and D74 settled that there "
+            "should not be one: a screen this short needs that decision "
+            "reopened (a clamp, and an ordering that drops a plate rather than "
+            "cutting it), not a harness that photographs it anyway"
+        )
+        seen = corner_verdicts(bounds, out["width"], out["height"])
+        assert True in seen[bottom[0]], (
+            f"on {out['name']} ({out['width']}x{out['height']}) "
+            f"`{bottom[0]}` can never fail: every number `drawn_box` returns "
+            "is an index into the region it was handed, so on a screen no "
+            f"taller than {sheet.SURFACE_H + sheet.INSET}px that bound is a "
+            "bound on the IMAGE. It is the only thing in this harness that "
+            "would see a cropped corner, and a screen can silence it while "
+            f"still clearing the {floor}px floor the shell declares — which is "
+            "what this half is here to catch"
+        )
