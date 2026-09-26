@@ -16007,3 +16007,85 @@ human's call on whether `/etc/niri/config.kdl` or a user file wins, which F1
 just answered: `/etc` wins once the human clears the way), D82/D79/D71/B88/
 B95/D63/D61/D57/D56/D64/D55/D62/D48/D45 (unread this iteration), E6's
 frame-count measurement (wants a compositor), D81/D67/D65 (want a human).
+
+## 2026-09-26 — F2: comfort basics batch — idle lock, night light, XDG dirs, firewall
+
+**what**: the comfort backlog's second Track-F item, four papercuts that were
+each an install-day gap: nothing locked the screen on idle or before sleep,
+nothing warmed the panels at night, `~/Desktop` et al. never existed, and the
+firewall's only "on" was nixpkgs' own default rather than anything this flake
+declared. New module `modules/comfort.nix`, imported by
+`hosts/ares/default.nix` right after `security.nix`.
+
+**why**: PLAN F2, next unchecked item in the comfort backlog's top track after
+F1. All four are small enough to be one commit and none earns its own module.
+
+**built**:
+- `systemd.user.services.jv-idle` — `swayidle -w timeout 300 jv-lock
+  before-sleep jv-lock`, part of `graphical-session.target` the same way
+  `jarvis-wallpaper`/`jv-bar`/`jv-notify` already are in `modules/theme.nix`.
+  `-w` makes swayidle wait for each command to exit, so `before-sleep`
+  actually blocks suspend until the lock screen is up rather than racing it.
+- `systemd.user.services.jv-nightlight` — `wlsunset -l 31.7683 -L 35.2137`
+  (Jerusalem), computing sunrise/sunset locally rather than fetching them —
+  invariant 7, nothing but a file hash leaves this machine, and a sunset
+  lookup would be a second thing that does.
+- `environment.systemPackages = [ pkgs.xdg-user-dirs ]` for `~/Desktop`,
+  `~/Downloads`, etc. There is no home-manager on this machine (G10 is `[B]`),
+  so the declared path is the package's own XDG-autostart `.desktop` entry:
+  `xdg.autostart` (nixpkgs default, on) links every package's
+  `etc/xdg/autostart/*.desktop` into `/etc/xdg/autostart`, niri's own unit
+  already `Wants=`/`Before=` `xdg-desktop-autostart.target`, and
+  `systemd-xdg-autostart-generator` turns the `.desktop` entry into a run of
+  `xdg-user-dirs-update` at every login — verified by reading niri's built
+  unit (`Wants=xdg-desktop-autostart.target`) and the `xdg-user-dirs`
+  derivation's own `etc/xdg/autostart/xdg-user-dirs.desktop` +
+  `share/systemd/user/xdg-user-dirs.service` (`WantedBy=graphical-session-
+  pre.target`) before writing the module, not assumed.
+- `networking.firewall.enable = true`, declared rather than inherited — it was
+  already nixpkgs' default, but CLAUDE.md's NixOS discipline is explicit:
+  undeclared doesn't exist, so a future nixpkgs default change would otherwise
+  change ares with nobody having decided it.
+
+**tests**:
+- `ops/ralph/nixtest.sh` (+5 cases, one file already covering module options
+  against the real evaluation): `jv-idle.service`'s built unit text names
+  `swayidle -w`, a `timeout 300` clause and a `before-sleep` clause each
+  raising the built `jv-lock` store path, and carries `WantedBy=`/`PartOf=
+  graphical-session.target`; `jv-nightlight.service`'s built unit runs
+  `wlsunset -l 31.7683 -L 35.2137`; `networking.firewall.enable` evaluates to
+  `true` (stderr kept separate from stdout via a tempfile — the same "Git
+  tree is dirty" warning D80 already flagged elsewhere would otherwise have
+  been read as the eval's own answer); `xdg-user-dirs` appears by name in
+  `environment.systemPackages`.
+- `bash ops/ralph/verify.sh`: 2 gates over 3 paths, GREEN in 120.5 s — tools
+  (907 cases) and nixtest (32 cases, all passing including the 5 new ones).
+  `nixos-rebuild build --flake .#ares` green: builds `unit-jv-idle.service`,
+  `unit-jv-nightlight.service`, fetches `swayidle-1.9.0` and `wlsunset-0.4.0`
+  from cache.nixos.org, produces a new system closure with no errors. Never
+  tested, never switched. No schema, no jv-act, no boot path, no pins, no
+  disko touched.
+
+**`[H]`, not `[x]`, and why**: three of the four papercuts only prove
+themselves on the real desktop — the screen actually locking after 5 idle
+minutes, the lock screen already being up on wake from suspend (not raced by
+it), and the panels visibly warming after Jerusalem's sunset — none of which
+this loop can see. `ops/ralph/HUMAN-VERIFY.md` has three rows: the idle/sleep/
+night-light trio (with the `systemctl --user status jv-idle jv-nightlight`
+check as the no-eyes-needed fallback), and XDG dirs existing after a fresh
+login. `networking.firewall.enable` and `xdg-user-dirs` shipping are both
+fully proven by the eval alone and would have been `[x]` split out on their
+own, but F2 is one PLAN item covering all four, so the harder three set its
+marker.
+
+**files**: modules/comfort.nix, hosts/ares/default.nix, ops/ralph/nixtest.sh,
+ops/ralph/PLAN.md, ops/ralph/HUMAN-VERIFY.md, ops/ralph/JOURNAL.md
+
+**next**: F3 (btrfs snapshots + rollback) is the next unchecked item in the
+comfort backlog's top track. Standing notes from E16/F1 still apply: E17
+(are the doctor's six columns and the wallpaper's two meant to diverge — a
+design question), E5/D4 (per-output niri RULES), D82/D79/D71/B88/B95/D63/D61/
+D57/D56/D64/D55/D62/D48/D45 (unread this iteration), E6's frame-count
+measurement (wants a compositor), D81/D67/D65 (want a human). The comfort
+backlog (Tracks F-K) is far from resolved — G through K are still entirely
+`[ ]` — so the loop keeps going per PROMPT.md STEP 5.

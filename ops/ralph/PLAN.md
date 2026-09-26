@@ -55,11 +55,30 @@ the top unchecked item unless it is blocked.
       left is Ofek's home directory: niri only reads `/etc/niri/config.kdl`
       once `~/.config/niri/config.kdl` is out of the way, and nothing here
       touches a file in `$HOME` for him — see `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] F2. **Comfort basics batch** (one commit, four papercuts): auto-lock on
-      idle via swayidle → `jv-lock` (plus lock-before-sleep), `networking.firewall.enable`,
-      XDG user dirs, and night light (wlsunset, on a Jerusalem sunset schedule).
-      Gate: nix eval assertions that each option/unit exists; `[H]` only for
-      "the screen actually locks after N minutes".
+- [H] F2. **Comfort basics batch.** DONE: `modules/comfort.nix` (new,
+      imported by `hosts/ares/default.nix`). Auto-lock on idle AND
+      lock-before-sleep — one `systemd.user.services.jv-idle` running
+      `swayidle -w timeout 300 jv-lock before-sleep jv-lock`, part of
+      `graphical-session.target` like every other desktop surface in
+      `modules/theme.nix`/`modules/jarvis-services.nix`; night light —
+      `systemd.user.services.jv-nightlight` running `wlsunset -l 31.7683
+      -L 35.2137` (Jerusalem's coordinates — sunrise/sunset computed
+      locally, no geoclue, no network, invariant 7); XDG user dirs —
+      `pkgs.xdg-user-dirs` in `environment.systemPackages`, which (with no
+      home-manager, G10 is `[B]`) reaches `~` through its own
+      XDG-autostart `.desktop` entry and nixpkgs' `systemd-xdg-autostart-
+      generator`, the same mechanism GNOME/Plasma use; `networking.
+      firewall.enable = true` declared explicitly rather than left an
+      inherited nixpkgs default (CLAUDE.md: undeclared doesn't exist).
+      Gate: `ops/ralph/nixtest.sh` (+5 cases) asserts `jv-idle.service` and
+      `jv-nightlight.service` exist with the right ExecStart, both are
+      wired into `graphical-session.target`, `networking.firewall.enable`
+      evaluates `true`, and `xdg-user-dirs` is in `environment.
+      systemPackages`. `bash ops/ralph/verify.sh`: 2 gates over 3 paths,
+      GREEN in 120.5 s (tools 907, nixtest 32). `nixos-rebuild build
+      --flake .#ares` green. `[H]` because the actual lock-after-idle,
+      lock-before-suspend, and warm-at-dusk behaviour can only be seen on
+      the real desktop — see `ops/ralph/HUMAN-VERIFY.md`.
 - [ ] F3. **btrfs snapshots + rollback.** Timed snapshots of `@root`/`@home`
       (snapper or btrbk), a retention policy that cannot fill the disk, and a
       documented one-command restore. Gate: a test that creates a file, snapshots,

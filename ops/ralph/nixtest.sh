@@ -497,5 +497,47 @@ if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
   else bad "$t" "niri at ${niri_bin:-<not built>} said: $(tail -5 <<<"$validated")"; fi
 fi
 
+# ---------------------------------------------------------- comfort basics
+# PLAN F2. modules/comfort.nix declares four papercuts that used to be either
+# an nixpkgs default nobody wrote down or a gap nobody filled: auto-lock on
+# idle (plus lock-before-sleep), a night light, XDG user directories, and the
+# firewall. Each is asked of the evaluation because each is an OPTION's
+# effect, not source text tools/tests can read in a bare checkout.
+
+t='idle auto-lock: the unit exists, waits for jv-lock to finish, and locks before sleep too'
+out=$(unit jv-idle.service '')
+if ! is_unit "$out"; then bad "$t" "not a unit: $(tail -3 <<<"$out")"
+elif ! grep -q "$store/[^ ]*/bin/swayidle -w" <<<"$out"; then
+  bad "$t" "does not run swayidle -w: $(grep ExecStart <<<"$out")"
+elif ! grep -q "timeout 300 '$store/[^ ]*/bin/jv-lock'" <<<"$out"; then
+  bad "$t" "no idle timeout raising jv-lock: $(grep -A2 ExecStart <<<"$out")"
+elif ! grep -q "before-sleep '$store/[^ ]*/bin/jv-lock'" <<<"$out"; then
+  bad "$t" "no before-sleep hook raising jv-lock: $(grep -A3 ExecStart <<<"$out")"
+else ok "$t"; fi
+
+t='idle auto-lock: part of the graphical session, not left to start on its own'
+if grep -q 'WantedBy=graphical-session.target' <<<"$out" && grep -q 'PartOf=graphical-session.target' <<<"$out"; then
+  ok "$t"
+else bad "$t" "missing WantedBy/PartOf graphical-session.target: $(tail -3 <<<"$out")"; fi
+
+t='night light: the unit exists and runs wlsunset at Jerusalem'"'"'s coordinates'
+out=$(unit jv-nightlight.service '')
+if ! is_unit "$out"; then bad "$t" "not a unit: $(tail -3 <<<"$out")"
+elif grep -q -- "$store/[^ ]*/bin/wlsunset -l 31.7683 -L 35.2137" <<<"$out"; then ok "$t"
+else bad "$t" "$(grep ExecStart <<<"$out")"; fi
+
+t='the firewall is declared on, not just defaulted on'
+firewall_err=$(mktemp)
+out=$(nix eval '.#nixosConfigurations.ares.config.networking.firewall.enable' 2>"$firewall_err")
+if [ "$out" = "true" ]; then ok "$t"
+else bad "$t" "$out $(cat "$firewall_err")"; fi
+rm -f "$firewall_err"
+
+t='xdg-user-dirs ships, so ~/Desktop et al. get created at login'
+names=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+  '(c: builtins.concatStringsSep "\n" (map (p: p.name) c.config.environment.systemPackages))' 2>&1)
+if grep -q '^xdg-user-dirs-' <<<"$names"; then ok "$t"
+else bad "$t" "xdg-user-dirs is not in environment.systemPackages: $(tail -3 <<<"$names")"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
