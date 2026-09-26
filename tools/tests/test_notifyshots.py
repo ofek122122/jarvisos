@@ -21,11 +21,20 @@ test in the repo was blind to.
 """
 
 import re
+import struct
+import sys
 from pathlib import Path
 
 # One parser for this repo's QML, not two.
 from test_gen_theme_qml import ROOT, strip_qml_comments
 from test_hudshots import members
+
+# The screens the three shells are really loaded on (PLAN D75/D77). Imported
+# rather than copied, because the whole content of the fit gate below is that
+# two independently-owned numbers are compared: the corner's own maximum, and
+# the shortest output any compositor in this repo hands a shell.
+sys.path.insert(0, str(ROOT / "tools" / "shellload"))
+import shells  # noqa: E402
 
 SHELL = ROOT / "shell" / "jv-notify"
 SHOTS = ROOT / "tools" / "notifyshots"
@@ -319,17 +328,28 @@ def earlier_of(name: str) -> str:
     return m.group(1)
 
 
+def model_text() -> str:
+    """The model, with its comments — the prose beside `maxVisible` is read as
+    well as the number (see the D77 section at the foot of this file)."""
+    return (SHELL / "core" / "NotifyModel.qml").read_text("utf-8")
+
+
+def model_cap() -> str:
+    """How many plates the corner shows at once, as the model declares it."""
+    cap = re.search(r"property int maxVisible:\s*(\d+)", model_text())
+    assert cap, "NotifyModel no longer declares maxVisible"
+    return cap.group(1)
+
+
 def test_the_cap_the_sheet_photographs_is_the_cap_the_model_keeps():
     """Three plates is `NotifyModel.maxVisible`, not a number the harness chose.
     A model that raised its cap and a sheet that kept photographing three would
     be a sheet of a corner nobody runs."""
-    model = (SHELL / "core" / "NotifyModel.qml").read_text("utf-8")
-    cap = re.search(r"property int maxVisible:\s*(\d+)", model)
-    assert cap, "NotifyModel no longer declares maxVisible"
+    cap = model_cap()
     most = max(len(plates) for _, plates in sheet())
-    assert most == int(cap.group(1)), (
+    assert most == int(cap), (
         f"the sheet's fullest corner holds {most} plates and the model caps at "
-        f"{cap.group(1)} — re-run bash ops/ralph/notifyshots.sh"
+        f"{cap} — re-run bash ops/ralph/notifyshots.sh"
     )
 
 
@@ -356,4 +376,129 @@ def test_the_plate_that_can_overflow_is_bound_and_the_sheet_asks_it_to():
     rep = re.search(r'suite\.rep\("([^" ]+)",\s*(\d+)\)\s*\+', scene_text())
     assert rep and len(rep.group(1)) * int(rep.group(2)) >= 100, (
         "no shot sends an app name long enough to need the binding above"
+    )
+
+
+# ------------------------------------- the corner's own maximum height (D77)
+#
+# The one question about this surface that the HUD had to answer the opposite
+# way, and the reason this shell has no declared floor and no warn.
+#
+# `jv-hud` asks the compositor for a FIXED 300x826 box, so a screen shorter
+# than 826 crops it; D74 declared that floor in shell.qml and made the shell
+# SAY SO in its log, and D75 put a 768 px output under `ops/ralph/shellload.sh`
+# to hear the line arrive. This shell's surface is DERIVED — shell.qml asks for
+# `stack.implicitHeight + inset*2` — so "does it fit" is not a property of the
+# screen, it is a property of how tall the stack can be made, and that is
+# bounded twice over: `NotifyModel.maxVisible` bounds the plates, and
+# `Toast`'s two-line summary and three-line body bound each plate.
+#
+# Which turns the whole question into one measurement, and the sheet is where a
+# measurement of this surface belongs: the tallest corner a sender can produce
+# is a PNG in docs/notify, and its HEIGHT is the reading.
+
+PNG_HEADER = 16  # 8-byte signature, then the IHDR length and tag
+
+
+def png_size(path: Path) -> tuple[int, int]:
+    """One shot's pixel size, straight out of its IHDR.
+
+    Read rather than trusted from the scene, because the scene declares what to
+    build and the PNG is what was actually drawn — with the real faces, at the
+    real token sizes. The driver already asserts that a shot's image is exactly
+    the surface's derived box (`img.height == root.height`), so this number is
+    the height the compositor would map and not a canvas the harness chose.
+    """
+    data = path.read_bytes()[PNG_HEADER : PNG_HEADER + 8]
+    assert len(data) == 8, f"{path.name} is not long enough to be a PNG"
+    return struct.unpack(">II", data)
+
+
+def shortest_screen() -> int:
+    """The shortest output any compositor in this repo hands a shell.
+
+    `tools/shellload/shells.py`, not a number typed here: it owns that list,
+    D75 added the short one to ask the HUD what it does under its own floor,
+    and a harness that changed it must move this gate with it.
+    """
+    return min(o["height"] for o in shells.ALL_OUTPUTS)
+
+
+def test_the_sheet_photographs_the_corner_at_its_own_maximum():
+    """A fit gate over a sheet that never photographs the worst case is a gate
+    over whatever happened to be on it. The tallest corner this shell can draw
+    is the cap-many plates EACH at its own maximum — both rows present and both
+    elided, which is the only evidence that a row really hit its line limit —
+    under the `+N EARLIER` line, which is drawn only once the cap is exceeded
+    and is itself another row of height. If no shot is all three of those at
+    once, the number the next test reads is not the maximum of anything.
+    """
+    cap = int(model_cap())
+    maxed = [
+        name
+        for name, plates in sheet()
+        if len(plates) == cap
+        and earlier_of(name)
+        and all("summary…" in p and "body…" in p for p in plates)
+    ]
+    assert maxed, (
+        f"no shot holds {cap} plates with both rows elided under an `+N EARLIER` "
+        "line, so nothing on this sheet is the tallest corner this shell can draw"
+    )
+
+
+def test_the_tallest_corner_this_shell_can_draw_fits_the_shortest_screen_it_loads_on():
+    """The whole of PLAN D77, as two numbers nobody typed together.
+
+    The corner's maximum is the tallest PNG on the sheet — the shot above
+    guarantees the worst case is among them, and taking the MAX rather than
+    that one shot's height means an unexpectedly tall picture (a font fallback
+    with a deeper line box, say) is caught rather than stepped around.
+
+    If this ever goes red the answer is NOT to clamp the stack. A cropped toast
+    is still a toast, but the first thing this upward-growing column loses is
+    the `+N EARLIER` line at its top — the one element whose whole job is to
+    say that something is hidden. The answer is to look at what grew.
+    """
+    shots = {p.name: png_size(p)[1] for p in SHEET.glob("*.png")}
+    assert shots, "docs/notify holds no shots at all"
+    tallest, height = max(shots.items(), key=lambda kv: (kv[1], kv[0]))
+    floor = shortest_screen()
+    assert height <= floor, (
+        f"{tallest} is {height} px and the shortest screen any shell in this "
+        f"repo is loaded on is {floor} px — the notification corner can now be "
+        "cropped, and the first thing it would lose is the `+N EARLIER` line"
+    )
+
+
+CAP_NOTE = re.compile(
+    r"`docs/notify/(?P<shot>[\w.\-]+)` is that corner,\s*//\s*"
+    r"and it is (?P<tall>\d+) px tall, against a shortest loaded screen of "
+    r"(?P<floor>\d+) px"
+)
+
+
+def test_the_note_beside_the_cap_carries_the_numbers_it_was_measured_from():
+    """The decision D77 reached lives next to `maxVisible`, because that cap is
+    what makes it true — and it quotes both measurements. A comment with a stale
+    number in it is worse than a comment with none: this one is the only place a
+    reader of the model learns why this shell has no floor and no warn while the
+    HUD has both, and it would go on saying so after the corner had outgrown the
+    screen. So the two numbers are read back, from the picture and from the
+    harness that owns the screen.
+    """
+    note = CAP_NOTE.search(model_text())
+    assert note, (
+        "NotifyModel no longer explains, beside `maxVisible`, why the cap is "
+        "the floor — see PLAN D77"
+    )
+    shot = SHEET / note.group("shot")
+    assert shot.exists(), f"the note names {note.group('shot')}, which is not on the sheet"
+    assert png_size(shot)[1] == int(note.group("tall")), (
+        f"the note says {note.group('shot')} is {note.group('tall')} px and it is "
+        f"{png_size(shot)[1]} px"
+    )
+    assert int(note.group("floor")) == shortest_screen(), (
+        f"the note's shortest screen is {note.group('floor')} px and "
+        f"tools/shellload/shells.py's shortest output is {shortest_screen()} px"
     )

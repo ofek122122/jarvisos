@@ -50,6 +50,33 @@ QtObject {
 
   // How many plates the corner may show at once. The rest are counted, not
   // forgotten.
+  //
+  // AND THIS CAP IS THE FLOOR (PLAN D77) — the reason this shell declares no
+  // minimum screen height and warns about no screen, where `jv-hud` does both.
+  //
+  //   · The HUD asks the compositor for a FIXED 300x826 box, so a screen
+  //     shorter than that crops it. D74 settled that as a declared floor and a
+  //     warn rather than a clamp, because the choice there is WHICH crop and
+  //     not whether to have one.
+  //   · This surface is derived instead (`stack.implicitHeight + inset*2` in
+  //     shell.qml), so the question is not whether it fits but how tall the
+  //     stack can get — and the answer is bounded HERE. A plate's own height
+  //     is bounded too: `Toast` gives the summary two lines and the body
+  //     three, then elides. So the tallest corner anything can produce is this
+  //     many plates at their own maximum, under the `+N EARLIER` line.
+  //   · MEASURED, not reasoned: `docs/notify/11-tallest.png` is that corner,
+  //     and it is 470 px tall, against a shortest loaded screen of 768 px
+  //     (`tools/shellload/shells.py`). `tools/tests/test_notifyshots.py`
+  //     holds those two numbers together, so a theme with a bigger body size,
+  //     a fourth line of body, or a raised cap all turn red here instead of
+  //     cropping a corner on somebody's screen. At today's rhythm this cap
+  //     could go to five and still fit; six is where it stops.
+  //
+  // So a warn in this shell would be a warn that cannot fire. If one is ever
+  // wanted, note that the crop it would report is the HUD's argument sharpened
+  // rather than repeated: this column grows UPWARD out of the bottom corner,
+  // so the first thing cut off is the topmost element — the `+N EARLIER` line,
+  // whose entire job is to say that something is being hidden.
   property int maxVisible: 3
 
   // The dwell a notification gets when it did not ask for one, by urgency.
