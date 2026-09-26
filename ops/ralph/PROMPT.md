@@ -45,6 +45,18 @@ alone. Never fake them green:
   `conf`, nothing blocks the bus, privacy is structural.
 
 ## STEP 3 — Verify (MANDATORY GATE — no commit without this)
+
+> **NEVER END YOUR TURN WAITING FOR ANYTHING.** You are `claude -p`: your turn
+> ending IS your process exiting. There is no completion notification, no
+> re-invocation, no "I'll pick this up when the build finishes" — the moment you
+> stop talking, you are gone, and anything you had not committed is left as a
+> dirty tree for a stranger. **Run every gate in the FOREGROUND and wait for its
+> exit code inside your own turn**, however many minutes that takes.
+> `verify.sh` legitimately runs for minutes; that is normal, and blocking on it
+> is correct. Do not background it, do not poll it, do not promise to check back.
+> (This is exactly how iteration 3 of this run died: it backgrounded
+> `nixtest.sh`, said "expect the completion notification shortly", ended its
+> turn, and vanished mid-F3 — no commit, no journal, work orphaned.)
 - Run **`bash ops/ralph/verify.sh`**. It is the whole test gate: it asks the
   worktree what you changed, derives every suite and gate that READS those
   paths (Python suites, the two QML gates, the Rust crates, the nix gate),
