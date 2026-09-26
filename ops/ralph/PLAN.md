@@ -1831,7 +1831,7 @@ human-reviewed step.
       make `x1 >= w` live. Plus D72's correction turned into a gate: the
       bounds vacuous at 280 px are exactly `{x0 < left}`, by name.
 
-- [ ] D74. **D66's clamp is width-only, and the bottom bound is the one
+- [x] D74. **D66's clamp is width-only, and the bottom bound is the one
       that would notice.** Counting `check_corner`'s terms for D73 turned this
       up from the other side. `y1 > bottom` bounds the drawn box by
       `SURFACE_H + INSET` = 842, which is a bound on the SURFACE — so it goes
@@ -1853,6 +1853,98 @@ human-reviewed step.
       graded by a fifth output in `sheet.ALL_OUTPUTS` that a `check_corner`
       call actually reaches. Settle which before building either. Raised by
       D73.
+      **Done (this commit): DECLARE the floor, and the reason is which
+      failure each shape leaves behind.** Width elision shortens a SENTENCE —
+      `PlateFit` drops words off a line that is still there, under a label
+      that still says what it is about. There is no vertical version of that:
+      a stack with less room than plates has to drop a whole PLATE, and a
+      plate that is not on screen is indistinguishable from a machine with
+      nothing to report, while a cropped one is visibly cropped. So the
+      compositor's crop is the BETTER of the two failures, and a clamp would
+      trade a visible crop for an invisible absence — on `HealthPlate`, the
+      plate this HUD exists in order not to lose. A clamp also has to answer
+      "which plate may go", and the honest answer for the bottom of this
+      stack is "none of them".
+      So `shell.qml` declares `minScreenHeightPx`, which is not a number: it
+      is `surface.implicitHeight`, so the floor and the box are one fact and
+      the next plate that makes the corner taller raises the floor with it.
+      `screenTooShort` compares the OUTPUT's height against it (the surface's
+      own is 826 on a 700 px screen exactly as its width is 300 on a 256 px
+      one), keeps D66's unmeasured-is-not-short distinction, and a
+      `console.warn` names the screen, its height and the floor — every plate
+      still drawn, the compositor still the thing doing the cropping, and the
+      log the only place that can be said. Not a plate: a plate saying the
+      bottom of the corner is off the screen would be drawn in the corner,
+      where the condition it reports is what crops it.
+      The item's fifth output was DECLINED on its own grounds, which is the
+      other half of the answer: the narrow output (D68) exists because
+      `plateRoomPx` is real code only a compositor can confirm, and the
+      content of this decision is that there is no such code for the other
+      axis. A short output would photograph a screen the shell declares it is
+      not for, PASS (every probe shot lights two or three plates; only the
+      crowd overflows), and take `y1 > bottom` away while doing it — the bound
+      is `SURFACE_H + INSET` and `drawn_box` returns indices, so on a screen
+      no taller than 842 px it is a bound on the IMAGE (D73). So the grading
+      of a declaration is a gate that holds the outputs to it, in the two
+      suites that can each see one half:
+      `test_the_hud_says_when_a_screen_is_shorter_than_the_corner_it_declares`
+      reads the declaration (shell.qml is the Quickshell half, so no engine
+      loads it and source-reading is the only grading there is — the same
+      reason D66's clamp is graded there), and
+      `test_every_screen_this_harness_has_clears_the_floor_the_shell_declares`
+      holds every output in `sheet.ALL_OUTPUTS` above the floor AND insists
+      the bottom bound still speaks on each of them. That second half is the
+      one worth keeping: the bound goes quiet at 843 px, which is 17 px ABOVE
+      the 826 px floor, so an output between the two clears the shell's own
+      declaration and silences the only check that would see a crop — the gate
+      goes red before anything is cropped.
+      Graded by mutation, seven mutants and seven reds, each in the gate that
+      owns the claim: the floor as a literal (both, via the shared helper),
+      the comparison against the surface's own height, the unmeasured guard
+      deleted, the warn deleted, the warn stripped of its numbers, a 768 px
+      output (the floor half), and an 840 px one (the bound half, alone).
+
+- [ ] D75. **The too-short line is graded by a regex, and `shellload.sh`
+      could grade it by running it.** D74's declaration is read out of
+      `shell.qml` by a source gate, because that file has no engine — but
+      `ops/ralph/shellload.sh` DOES load the real quickshell HUD on a real
+      headless sway (`tools/shellload/shells.py: OUTPUTS`, three of them, all
+      1080 or taller) and already reads the HUD's own log for what the corner
+      says (D43). A FOURTH output there, short on purpose, is the one place in
+      this repo where "the shell notices a screen under its floor and says so"
+      is a behaviour rather than a pattern in a file: the warn either arrives
+      naming that output, or it does not. Cheap in seconds (this gate is
+      49.7 s and takes no pictures), and it is the probe D74 declined for the
+      3-minute picture harness, where a photograph of a short screen would
+      have said nothing. The ripple is the whole cost and should be counted
+      before starting: `sway_config()` grows an output, `check_outputs`' census
+      and `expected_usable_areas` are per-output, the bar's strip verdict is
+      asserted on EVERY output (a short one is still 31 px shorter, so that
+      part is arithmetic rather than a decision), and
+      `test_the_monitors_are_the_ones_the_screen_sheet_uses` currently holds
+      `shells.OUTPUTS == sheet.OUTPUTS` — a deliberate invariant-1 relation
+      that would have to become "ares' three, plus each harness's own extra
+      outputs" (`sheet.py` already has `NARROW` outside `OUTPUTS` for exactly
+      this reason, which is the shape to copy). One more thing to check rather
+      than assume: `tools/qmlerrors.py` scans for JS error names, not for
+      warnings, so a HUD that warns does not fail that scan — the new gate has
+      to ASSERT the line, and assert its absence on the three tall outputs.
+      Raised by D74.
+
+- [ ] D76. **`tools/tests/test_gen_theme_qml.py` defines
+      `strip_qml_comments` twice.** Lines 676 and 797, in one file: the first
+      is `re.sub(r"//[^\n]*", "", text)`, the second is the line-preserving,
+      string-literal-aware one with the docstring explaining why a `//` inside
+      a quoted string is not a comment. Python binds at call time, so EVERY
+      caller — including the ones written above line 797 against the naive
+      version — gets the careful one, which means there is no bug today and
+      the naive definition is dead code. That is exactly what makes it a trap:
+      a reader anywhere in the first 800 lines reasons about the gates with
+      the wrong function, and the two differ on the case the second one was
+      written for. Delete the first, keep the second where it is (or move it
+      up), and the verdict is the suite staying green. Small, and worth doing
+      alone rather than smuggled into a change about something else. Raised by
+      D74, which read both of them looking for the one it was calling.
 
 - [ ] D71. **The crowded corner has never met the narrow screen.** D68's
       picture is `03-confirm`: two plates, one of them capped. What D66's

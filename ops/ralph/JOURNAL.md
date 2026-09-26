@@ -14535,3 +14535,94 @@ is not worth chasing.)
   wrong; settle clamp-or-declare before building either), then **D71**,
   **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**, **D55**,
   **D62**, **D48**, **D45**. **D67** and **D65** still want a human.
+
+## 2026-09-26 — the axis with no clamp, and why it is not getting one
+
+- **the item**: **D74**, raised by D73 and the only one on the board that asked
+  to be SETTLED before it was built. `plateRoomPx` (D66) bounds the HUD's
+  plates by `min(surface.width, screen.width) - 2 x insetPx` — WIDTH only.
+  Nothing bounds the stack's height by the screen's, so on an output shorter
+  than the 826 px surface the compositor crops the bottom of it, and the bottom
+  plate is `HealthPlate`: the thing that says what is wrong, cropped exactly
+  when everything is. That is A63's failure — measured and fixed INSIDE the
+  surface — arriving from outside it. The item offered two shapes, a height
+  clamp or a declared floor, and said to pick one first.
+- **picked: DECLARE, and the argument is which failure each shape leaves
+  behind.** Width elision shortens a SENTENCE — `PlateFit` drops words off a
+  line that is still there, under a label that still says what the line is
+  about. There is no vertical version of that. A stack with less room than
+  plates has to drop a whole PLATE, and a plate that is not on screen is
+  indistinguishable from a machine with nothing to report, where a cropped one
+  is visibly cropped. So the compositor's crop is the BETTER of the two
+  failures: it leaves the evidence on screen. A clamp would trade a visible
+  crop for an invisible absence, and it would have to answer "which plate may
+  go" — for the bottom of this stack the honest answer is none of them.
+- **so the floor is declared, and it is not a number.**
+  `minScreenHeightPx: surface.implicitHeight`, because a literal would stay put
+  the next time a plate makes the corner taller and the two are one fact said
+  twice. `screenTooShort` compares the OUTPUT's height against it — the surface
+  is granted the 826 px it asks for on a 700 px screen exactly as it is granted
+  300 px on a 256 px one (D68 read that configure event) — and keeps D66's
+  third case, that a screen whose height has not arrived yet is 0 and is not a
+  short one. A `console.warn` names the screen, its height and the floor; every
+  plate is still drawn, the compositor is still the thing doing the cropping,
+  and the log is the only place that can be said. NOT a plate: a plate saying
+  the bottom of this corner is off the screen would be drawn in the corner,
+  where the condition it reports is what crops it.
+- **the item's fifth output was declined, on the item's own grounds.** The
+  narrow output (D68) exists because `plateRoomPx` is real code whose behaviour
+  only a compositor can confirm; the content of this decision is that there is
+  no such code for the other axis. A short fifth output would photograph a
+  screen the shell declares it is not for, PASS — every probe shot lights two
+  or three plates, only the crowd overflows — and take `y1 > bottom` away while
+  doing it, because that bound is `SURFACE_H + INSET` and `drawn_box` returns
+  indices into its region (D73), so on a screen no taller than 842 px it is a
+  bound on the IMAGE. What grades a declaration is a gate that holds the
+  outputs to it.
+- **two gates, one per file that can see a half.**
+  `test_the_hud_says_when_a_screen_is_shorter_than_the_corner_it_declares`
+  reads the declaration out of shell.qml, which is where D66's clamp is graded
+  and for the same reason: shell.qml is the Quickshell half, no QML engine in
+  this repo loads it, and a mutation of it is caught by nothing else.
+  `test_every_screen_this_harness_has_clears_the_floor_the_shell_declares`
+  holds every output in `sheet.ALL_OUTPUTS` above the floor AND insists the
+  bottom bound still speaks on each one — derived by name from
+  `corner_bounds()`, so a rename goes red rather than quiet. That second half
+  is the one worth keeping: the bound goes vacuous at 843 px, 17 px ABOVE the
+  826 px floor, so an output between the two clears the shell's own declaration
+  and silences the only check that would ever see a crop. The gate goes red
+  before anything is cropped.
+- **tests**: `bash ops/ralph/verify.sh` **GREEN** — 4 gates over 3 paths,
+  116.7 s (runtests jv-compat, jv-hud-bridge, tools — 766 passed — and
+  `shellload.sh`, which loads this shell under a real quickshell on a real
+  sway: all 4 runs loaded and mapped, nothing threw, so the new bindings
+  evaluate on three real outputs). Graded by mutation before being trusted:
+  the floor as a literal (red in both gates, through the shared helper), the
+  comparison against `surface.height` instead of the output's, the
+  unmeasured-is-not-short guard deleted, the warn deleted, the warn stripped of
+  its numbers, a 768 px output in the sheet (the floor half), and an 840 px one
+  (the bound half, alone, naming `y1 > bottom` and the 826 px floor it clears)
+  — seven mutants, seven reds, each in the gate that owns the claim.
+  Plus the gate `verify.sh` names and does not run:
+  `bash ops/ralph/hudscreens.sh` — **exit 0**, 192.8 s, every probe green,
+  `qmlerrors` clean over 9996 lines of 13 shell logs, and all 10 shots matching
+  HEAD (6 differing only by the compositor's rounding, worst 102 px inside a
+  floor of 256, restored to the committed bytes). So this commit carries no new
+  bytes in `docs/hud/screens`.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- **a self-inflicted lesson worth writing down**: the mutation loop restored
+  each mutant with `git checkout -- shell/jv-hud/shell.qml`, which is also how
+  it deleted the iteration's own uncommitted implementation and then reported
+  seven reds for the wrong reason. Mutation runs in this loop must restore from
+  a copy (`cp` to /tmp and back), never from the index — the work being graded
+  is not in it yet.
+- **files**: shell/jv-hud/shell.qml, tools/tests/test_gen_theme_qml.py,
+  tools/tests/test_hudscreens.py, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D75** (raised here — the too-short line is graded by a regex, and
+  `shellload.sh` already runs this shell on a real sway with three outputs, so
+  a fourth SHORT one there would grade the behaviour for 49.7 s and no
+  pictures; the ripple list is in the item), then **D71**, **D76** (the
+  duplicate `strip_qml_comments`, raised here), **B88**, **B95**, **D63**,
+  **D61**, **D57**, **D56**, **D64**, **D55**, **D62**, **D48**, **D45**.
+  **D67** and **D65** still want a human.
