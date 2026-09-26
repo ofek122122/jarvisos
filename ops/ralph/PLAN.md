@@ -4,6 +4,158 @@ Priority ladder: **UI/UX first** (blueprint §06), then features/backlog, then
 creative additions. Mark items `[x]` done with the commit hash. Add follow-ups
 you discover. Keep items small enough to finish in one iteration.
 
+## THE COMFORT BACKLOG (Tracks F–K) — run these to completion, then STOP
+
+Ofek's directive (2026-09-26): build **every** item below, test each as far as a
+headless agent honestly can, and **stop the loop when the whole backlog is
+resolved** (see "Completion" at the end of this section). These tracks outrank
+Tracks A–E; inside them, work F → G → H → I → J → K, and within a track take
+the top unchecked item unless it is blocked.
+
+### Status markers — use these exactly
+- `[ ]` not started · `[x]` DONE (built + every gate green)
+- `[H]` **built, but final proof needs a human.** Use this when the last step is
+  physically impossible for you: pressing a key, looking at a screen, speaking,
+  pairing a device, printing, launching a game, waving at a sensor. Build it,
+  test everything testable, then mark `[H]` and append a line to
+  `ops/ralph/HUMAN-VERIFY.md` saying exactly what Ofek must do and what he
+  should see. **Never mark `[x]` for something you could not verify.**
+- `[B]` **blocked, needs a decision from Ofek.** Append the question to
+  `ops/ralph/NEEDS-DECISION.md` and move on. Never guess past a `[B]`.
+
+### Rules for this backlog
+- The guardrails are unchanged and absolute. In particular: **never switch an
+  untested login/greeter change** (a broken greetd locks Ofek out), never touch
+  `jv-act`/`schemas`/boot/disko/NVIDIA pins, never `nixos-rebuild switch`.
+- A feature is not done until it is DECLARED in the flake. Nothing lands as an
+  imperative tweak to a file in `$HOME`.
+- Every item gets whatever gate fits it: a nix eval/build assertion, a unit
+  test, a QML gate, a render/shot test, or `ops/ralph/verify.sh`. If an item
+  has no possible automated gate, say so in the journal — do not invent one.
+
+---
+
+### Track F — the five that matter most (do these first, in order)
+- [ ] F1. **niri config into the flake.** The whole window-manager config
+      (keybinds, the F13/Super-menu bind, outputs) currently lives undeclared in
+      `~/.config/niri/config.kdl` — a clean-clone rebuild does NOT reproduce
+      Ofek's desktop, which is the one live violation of "if it isn't declared,
+      it doesn't exist". Move it to a module generating `/etc/niri/config.kdl`,
+      preserving every existing bind byte-for-byte. Declare the three real
+      outputs: HDMI-A-1 2560x1440@144.006 at x=0, DP-1 1920x1080@60 at x=2560,
+      DP-2 1920x1080@60 at x=4480. Gate: a test that the generated config passes
+      `niri validate` and still contains every bind the old file had.
+- [ ] F2. **Comfort basics batch** (one commit, four papercuts): auto-lock on
+      idle via swayidle → `jv-lock` (plus lock-before-sleep), `networking.firewall.enable`,
+      XDG user dirs, and night light (wlsunset, on a Jerusalem sunset schedule).
+      Gate: nix eval assertions that each option/unit exists; `[H]` only for
+      "the screen actually locks after N minutes".
+- [ ] F3. **btrfs snapshots + rollback.** Timed snapshots of `@root`/`@home`
+      (snapper or btrbk), a retention policy that cannot fill the disk, and a
+      documented one-command restore. Gate: a test that creates a file, snapshots,
+      deletes, restores, and asserts the file is back.
+- [ ] F4. **Game-launch VRAM handoff.** The blueprint specifies "game launch →
+      brain unloads"; it was never built. Detect a game starting (gamemode's
+      D-Bus signal is the clean hook), have jv-brain release the model, and
+      reload when the game exits. This touches the VRAM ladder, so design it
+      bus-side and mark `[H]` for the real game test. Gate: unit tests against a
+      faked gamemode signal proving the unload/reload sequence and that a
+      failure to unload never wedges the brain.
+- [ ] F5. **Dictation anywhere.** Hold a key → speak → text is typed into the
+      focused window. Reuse jv-ears' existing Whisper path (do not add a second
+      ASR); inject via `wtype`/virtual keyboard. Must be push-to-talk, must show
+      a HUD indicator while recording (invariant 10: the mic state is never
+      fakeable). Gate: tests on a WAV fixture producing the right keystrokes
+      through a fake injector; `[H]` for speaking into it.
+
+### Track G — system comfort
+- [ ] G1. Bluetooth (`hardware.bluetooth` + a tray/GUI path). `[H]` to pair.
+- [ ] G2. Printing (CUPS + driver set + mDNS discovery). `[H]` to print.
+- [ ] G3. Update notifier at login: read-only `git fetch`, tell the user commits
+      exist, never auto-switch. (Designed weeks ago, never built.)
+- [ ] G4. Disk-space warning before the Nix store fills the drive.
+- [ ] G5. Temperature/fan + GPU (VRAM) readout available to the bar.
+- [ ] G6. `jarvis-doctor --repair`: diagnose common breakage and offer fixes.
+- [ ] G7. SSH agent + config, VPN support, Syncthing — each declared.
+- [ ] G8. Sound theme: one quiet, on-brand notification sound.
+- [ ] G9. `[B]` **Narrowed automount** — removable USB only, with the Windows
+      NVMe and the 2 TB disk hard-excluded by serial. gvfs force-enables
+      udisks2, which security.nix disables on purpose, so this needs Ofek's
+      explicit sign-off before any attempt. Ask, do not implement.
+- [ ] G10. `[B]` **home-manager** for declarative dotfiles — restructures where
+      user config lives; ask before adopting.
+
+### Track H — input, window and visual comfort
+- [ ] H1. Drop-down scratchpad terminal (one key down, same key away).
+- [ ] H2. Power menu (lock / suspend / reboot / shut down / boot Windows).
+- [ ] H3. Super-menu modes: clipboard history, emoji picker, calculator, unit
+      converter, recent files. One mode per iteration is fine.
+- [ ] H4. Quick-settings panel: wifi, bluetooth, volume, brightness, night
+      light, do-not-disturb.
+- [ ] H5. Window rules (per-app workspace/floating/size) — declared.
+- [ ] H6. Named workspaces, and the bar showing the names.
+- [ ] H7. Alt-Tab window switcher with thumbnails.
+- [ ] H8. Session restore: reopen apps/layout after a reboot.
+- [ ] H9. Volume/brightness OSD.
+- [ ] H10. System tray in the bar (apps that expect one have nowhere to live).
+- [ ] H11. MPRIS media controls in the bar.
+- [ ] H12. Screen magnifier, colour picker, screen-region OCR to clipboard.
+- [ ] H13. Per-workspace wallpaper tint (subtle; must stay §06-quiet).
+- [ ] H14. `[B]` Graphical login greeter (regreet, §06). **Do not switch the
+      greetd session command.** Build it, prove it in a nested/headless test,
+      and park it for a human-supervised switch with a TTY escape ready.
+- [ ] H15. Boot-to-desktop visual continuity check (GRUB → Plymouth → greeter →
+      desktop share the §06 tokens).
+
+### Track I — gaming & performance
+- [ ] I1. gamemode + gamescope + MangoHud, declared and wired.
+- [ ] I2. Steam / Lutris / Heroic configured properly (not just installable).
+- [ ] I3. Verify the primary really runs 2560x1440@144 and document VRR status.
+- [ ] I4. GPU/VRAM monitor surfaced in the bar (pairs with F4).
+
+### Track J — Jarvis-native comfort (the reason this OS exists)
+- [ ] J1. Voice window management ("move this to the right screen") via jv-act
+      tools. **The jv-act side is human-review-only**: propose the tool
+      definitions in `docs/optimization-backlog.md`, build everything else.
+- [ ] J2. Jarvis reads notifications aloud when the user is away; holds them
+      when focused.
+- [ ] J3. Focus/meeting mode: one command mutes notifications and dims the HUD.
+- [ ] J4. "What did I do today?" — a summary from the act audit log + window
+      history.
+- [ ] J5. Follow-up window: answer once without repeating the wake word.
+- [ ] J6. Jarvis announces long jobs finishing (rebuilds, renders).
+- [ ] J7. Proactive nudges within the proactivity budget (personality/).
+- [ ] J8. Voice clipboard ("copy that", "paste yesterday's").
+- [ ] J9. "What's on my screen?" — screen capture to the vision path. `[H]`.
+- [ ] J10. Leap Motion gestures — the hardware is owned and unused. `[H]`.
+
+### Track K — creative (design it, then build the best one)
+- [ ] K1. Wallpaper ember reacts to `speech.state` (Track E7 — finish it).
+- [ ] K2. Spoken one-line boot report at login.
+- [ ] K3. Desktop warms/quietens by time of day, automatically.
+- [ ] K4. Presence: Jarvis notices the user sit down (camera/IR) and greets. `[H]`.
+- [ ] K5. Voice macros ("work mode" opens a whole layout).
+- [ ] K6. Gentle focus/screen-time stats — never nagging.
+
+---
+
+### Completion — how this loop ENDS
+Ofek asked the loop to stop when the backlog is finished. After STEP 4 of each
+iteration, check Tracks F–K:
+
+**If every item is `[x]`, `[H]` or `[B]`** (nothing left as `[ ]`):
+1. Write `ops/ralph/FINAL-REPORT.md`: what was built, per track; the full
+   `HUMAN-VERIFY.md` list; the full `NEEDS-DECISION.md` list; anything you
+   deliberately did not do and why.
+2. Commit and push it.
+3. `touch .ralph-STOP` in the worktree root — `loop-run.sh` sees that file and
+   exits cleanly at the top of the next iteration.
+4. Say plainly in your final message that the backlog is complete and the loop
+   has stopped itself.
+
+Do NOT stop early, and do not stop because the work is hard or long. An item you
+cannot finish is `[H]` or `[B]` with a written reason — never a silent skip.
+
 ## Track E — a desktop you can live in — TOP PRIORITY (after D2/D3)
 The core landed by hand (2026-09-26): modules/apps.nix (~90 apps + portals,
 thumbnails, keyring, fonts), modules/store.nix (jv-store: DECLARATIVE

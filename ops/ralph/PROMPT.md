@@ -14,13 +14,27 @@ excellent, finish it completely, and never break the build.
 ## STEP 1 — Pick ONE task
 - Choose the single highest-value slice you can FINISH this iteration (aim under
   ~1 hour of work). **Priority ladder:**
-  1. UI/UX per `docs/blueprint.html` §06 (Quickshell/QML HUD + workspace, driven by
-     REAL bus data — e.g. `speech.state`, `audio.wake`, `sys.health`, `context.window`).
-  2. If UI is blocked, or you did UI the last 3 iterations, take a feature from
-     `PLAN.md` or a non-human-review item from `docs/optimization-backlog.md`.
-  3. Creative additions that fit the blueprint and invariants.
+  1. **THE COMFORT BACKLOG (Tracks F–K) at the top of `PLAN.md`.** This is a
+     standing directive from Ofek and it outranks everything below. Work
+     F → G → H → I → J → K; inside a track, the top item that is not `[B]`.
+  2. UI/UX per `docs/blueprint.html` §06 (Quickshell/QML, driven by REAL bus
+     data — `speech.state`, `audio.wake`, `sys.health`, `context.window`).
+  3. Anything else in `PLAN.md`, or a non-human-review item from
+     `docs/optimization-backlog.md`.
 - If the best task needs a forbidden area (see GUARDRAILS), DO NOT do it — append a
   clear proposal to `docs/optimization-backlog.md` and pick a different task.
+
+### Honesty markers — you WILL need these
+You have no eyes, no hands and no voice. Some items cannot be finished by you
+alone. Never fake them green:
+- **`[H]`** — built and auto-tested as far as possible, but the last proof needs
+  a human (press a key, look at a screen, speak, pair, print, launch a game).
+  Mark `[H]`, append a row to `ops/ralph/HUMAN-VERIFY.md` (what Ofek does / what
+  he should see), and move on. **`[x]` means YOU proved it. `[H]` means you
+  could not.**
+- **`[B]`** — needs a decision from Ofek (touches an invariant, the login path,
+  or restructures the system). Append the question to
+  `ops/ralph/NEEDS-DECISION.md` and do NOT attempt it.
 
 ## STEP 2 — Build it
 - Logic → **TDD**: write the failing test first, then minimal code to green.
@@ -66,3 +80,18 @@ excellent, finish it completely, and never break the build.
 - If `PLAN.md` has no doable items, brainstorm 3 high-value UI/UX or feature ideas
   (within blueprint + invariants), add them to `PLAN.md`, commit, then pick one.
 - When unsure whether something is safe, it isn't — write a proposal, move on.
+
+## STEP 5 — Is the comfort backlog finished? (check EVERY iteration)
+Ofek asked this loop to stop when Tracks F–K are resolved. After STEP 4, scan
+those tracks in `PLAN.md`:
+
+- **Any item still `[ ]`** → keep going. Do not stop. An item that is hard is
+  `[H]` or `[B]` WITH A WRITTEN REASON, never a silent skip and never a lie.
+- **Every item `[x]`, `[H]` or `[B]`** → finish the run:
+  1. Write `ops/ralph/FINAL-REPORT.md` — what was built per track, the whole
+     `HUMAN-VERIFY.md` list, the whole `NEEDS-DECISION.md` list, and anything
+     you deliberately did not do and why.
+  2. Commit and push it.
+  3. `touch .ralph-STOP` in the worktree root. `loop-run.sh` sees that file and
+     exits cleanly at the start of the next iteration.
+  4. State plainly that the backlog is complete and the loop has stopped itself.
