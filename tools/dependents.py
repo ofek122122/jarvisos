@@ -74,6 +74,7 @@ from __future__ import annotations
 import argparse
 import ast
 import dataclasses
+import os
 import posixpath
 import re
 import subprocess
@@ -197,14 +198,78 @@ def _resolve(root: Path, candidate: str) -> str | None:
 
 
 def _package_bases(root: Path) -> list[str]:
-    """Where a top-level importable name can live in this repo: beside the
-    suites (`tools/mutate.py`), in a service (`services/pylib/jarvis_bus`),
-    or at the root."""
-    bases = ["", "tools", "harness"]
-    services = root / "services"
-    if services.is_dir():
-        bases += sorted(f"services/{d.name}" for d in services.iterdir() if d.is_dir())
-    return bases
+    """Where a top-level importable name can live in this repo — DERIVED from
+    the two mechanisms that put a directory of this repo on `sys.path`, plus
+    the root.
+
+    It used to be `["", "tools", "harness"] + services/*`, which was right
+    only because all eight `pyproject.toml` in this repo happen to live under
+    `services/`. A ninth Python package anywhere else — `shell/jv-hud/tools/`,
+    a `bench/`, a second library beside `pylib` — would sit under no base, so
+    every `import` of it resolved to nothing and the closure walk stopped at
+    the first edge. That is B86's failure by a second mechanism (there the
+    FILE test was written down, here the SEARCH PATH was) and it fails the
+    same silent way, because a suite that is never named cannot report that it
+    was skipped (PLAN B87).
+
+    INSTALLED: a directory with a `pyproject.toml` in it. That file is what
+    makes the packages beside it importable at all — setuptools' discovery
+    defaults to every top-level package in the same directory, and the nix env
+    each suite runs under has them installed under those names.
+
+    RUN FROM: the parent of a suite. `runtests.sh` does `cd "$testdir"` before
+    `python -m pytest`, and `-m` puts the cwd first on `sys.path`, so a
+    suite's own directory is a search path whether or not anything in it is
+    installable. That is the whole reason `tools` and `harness` are here, and
+    neither has to be named for it.
+
+    AND THE ROOT, on the generous side: it costs one extra place to look and
+    it is where every tool in this repo is run from.
+
+    NARROWER than the list it replaces in exactly one place — `services/jarvisd`
+    and `services/jv-act` were bases for being children of `services/`, and
+    they are Rust crates that install no Python and run no suite. A test
+    checks that rather than leaving it assumed; if either grows Python, one of
+    the two rules above picks it up on its own.
+    """
+    bases = {""}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")
+        ]
+        if "pyproject.toml" in filenames:
+            bases.add(_rel(root, Path(dirpath)))
+    for tests, _pys in _suite_dirs(root):
+        bases.add(_rel(root, tests.parent))
+    return [""] + sorted(b for b in bases if b)
+
+
+def _rel(root: Path, p: Path) -> str:
+    """A repo path as this tool writes them: posix, and `""` for the root."""
+    rel = p.relative_to(root).as_posix()
+    return "" if rel == "." else rel
+
+
+def _suite_dirs(root: Path) -> list[tuple[Path, list[Path]]]:
+    """Every Python suite's `tests/` directory and the files in it.
+
+    Discovered, not listed: a `tests/` directory one or two levels down that
+    holds at least one `test_*.py`. That last clause is what drops
+    `services/jarvisd/tests` and `services/jv-act/tests`, which are Rust.
+
+    Separate from `suites()` because `_package_bases` needs the directories
+    before anything can be read out of them, and a suite's own directory is
+    one of the places its imports are searched for.
+    """
+    out: list[tuple[Path, list[Path]]] = []
+    for tests in sorted({*root.glob("*/tests"), *root.glob("*/*/tests")}):
+        if not tests.is_dir() or SKIP_DIRS & set(tests.parts):
+            continue
+        pys = [p for p in sorted(tests.rglob("*.py")) if not SKIP_DIRS & set(p.parts)]
+        if not any(p.name.startswith("test_") for p in pys):
+            continue
+        out.append((tests, pys))
+    return out
 
 
 def _module_path(root: Path, top: str, bases: Sequence[str]) -> str | None:
@@ -370,23 +435,14 @@ def names(
 def suites(root: Path, warn: Callable[[str], None] | None = None) -> list[Suite]:
     """Every Python suite `runtests.sh` can run, with what each one reads.
 
-    Discovered, not listed: a `tests/` directory one or two levels down that
-    holds at least one `test_*.py`. That last clause is what drops
-    `services/jarvisd/tests` and `services/jv-act/tests`, which are Rust.
+    Which directories those are is `_suite_dirs`, shared with
+    `_package_bases`: a suite is run from its own directory, so that directory
+    is also one of the places its imports resolve.
     """
     bases = _package_bases(root)
     cache: dict[str, frozenset[str]] = {}
     out: list[Suite] = []
-    for tests in sorted({*root.glob("*/tests"), *root.glob("*/*/tests")}):
-        if not tests.is_dir() or SKIP_DIRS & set(tests.parts):
-            continue
-        pys = [
-            p
-            for p in sorted(tests.rglob("*.py"))
-            if not SKIP_DIRS & set(p.parts)
-        ]
-        if not any(p.name.startswith("test_") for p in pys):
-            continue
+    for tests, pys in _suite_dirs(root):
         reads: set[str] = set()
         for p in pys:
             reads |= names(root, p, warn, bases=bases, cache=cache)

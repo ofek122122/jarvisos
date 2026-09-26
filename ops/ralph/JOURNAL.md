@@ -13896,3 +13896,71 @@ is not worth chasing.)
   `visible:` bindings that are invariant-10 machinery and say so nowhere — it
   wants an iteration already paying for `hudscreens.sh`, and this was one),
   then **D57**, **D56**, **D64**, **D55**, **D62**, **D48**, **D45**.
+
+## 2026-09-26 — B87: the gate's search path was a list, and the list was right by luck
+
+- **B86 fixed a written-down FILE test; the written-down SEARCH PATH was
+  still there.** `_package_bases` in `tools/dependents.py` returned `["",
+  "tools", "harness"] + services/*` — the places a bare `import` is looked
+  for when the verify gate derives who reads what you changed. That was
+  correct only because all eight `pyproject.toml` in this repo happen to sit
+  under `services/`. A ninth package anywhere else — `shell/jv-hud/tools/`,
+  a `bench/`, a second library beside `pylib` — would be under no base, so
+  every `import` of it resolved to nothing, the closure walk stopped at the
+  first edge, and the suite that runs it was never planned. B86's failure by
+  a second mechanism, and silent the same way: a suite nobody names cannot
+  report that it was skipped.
+- **Derived now, from the two things that actually put a directory of this
+  repo on `sys.path`.** INSTALLED: a directory holding a `pyproject.toml` —
+  that file is what makes the packages beside it importable, and the nix env
+  each suite runs under has them. RUN FROM: a suite's own parent, because
+  `runtests.sh` does `cd "$testdir"` and `python -m pytest` puts the cwd
+  first. The second rule is the whole reason `tools` and `harness` are on the
+  list, and neither has to be named for it — `harness` has no `__init__.py`
+  either, which makes it this repo's second namespace package. Plus the root,
+  on the generous side. `_suite_dirs` is factored out and shared with
+  `suites()`, so the set of suites and the search path they imply cannot
+  drift apart.
+- **The real repo's answer is UNCHANGED, which is the point.** All ten
+  suites' read sets are identical to the ones HEAD computes (compared
+  directly, set by set). The base list itself loses exactly two entries:
+  `services/jarvisd` and `services/jv-act`, which were bases for being
+  children of `services/` and are Rust crates that install no Python and run
+  no Python suite. That is the one place deriving is NARROWER than the list
+  it replaces, so it is a test rather than an assumption — it asserts both
+  crates hold no `*.py` outside `target/` and that neither is a base, and if
+  either grows Python one of the two rules picks it up unaided.
+- **The assertion B87 asked for reads the outcome, not the mechanism.**
+  `test_every_installable_package_resolves_to_its_own_source` walks the repo
+  for `pyproject.toml` itself (rather than asking `dependents` where they
+  are) and demands every top-level package beside one resolve to THAT
+  directory — not to nothing, which is a missed reader, and not to a namesake
+  under another base, which is a wrong one and worse. Eight packages, all
+  eight resolved.
+- **The synthetic repo grew the shape it was modelling.** `mkrepo`'s two
+  services now carry the `pyproject.toml` that makes their packages
+  importable, because under the derived rule that file is no longer
+  decoration; `svc-c` — the one service in it with no suite of its own — is
+  now the case where the pyproject is the ONLY reason anything searches it,
+  which is also true of the real `jv_ears` for every suite but its own.
+- 4 mutations, 4 caught: the pyproject rule removed (2 red), the suite-parent
+  rule removed (4 red, including the pre-existing precedence test), the root
+  dropped (1 red), and the whole old written-down list restored (3 red).
+  Every injection was reverted from a backup and `diff` against it confirmed
+  the file byte-identical before the verify run.
+- tests: `bash ops/ralph/verify.sh` GREEN — 1 gate over 2 paths (tools **744
+  pass**, five of them new, 60.3 s). `hudscreens.sh` was not named and not
+  needed: no QML and nothing under `tools/hudscreens/` is in this commit.
+  build: `nixos-rebuild build --flake .#ares` green. No schema change, no
+  jv-act, no boot path, no pins. Never tested, never switched.
+- files: tools/dependents.py, tools/tests/test_dependents.py,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **B88** (the whole-repo form — every `*.py` has at least one reader;
+  measured 0 unread, so it is a green test waiting to be written, and it
+  guards the edge B86/B87 do not: a file no gate covers AT ALL), then
+  **B95** (raised here: the base list is one list for ten suites, so a
+  cross-service import is modelled as working where the interpreter would
+  raise — generous, but confident in the wrong direction), then **D63** (the
+  shrink D58 measured: `READY_TIMEOUT_S` first, `STOP_TIMEOUT_S` only after
+  one stop is measured), then **D61**, **D57**, **D56**, **D64**, **D55**,
+  **D62**, **D48**, **D45**.

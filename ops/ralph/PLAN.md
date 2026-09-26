@@ -5203,24 +5203,50 @@ truthfully. Never fake a sensor/state indicator (invariant 10).
       `svc-a` on sorted bases even with the passes merged, and the depth of
       the Python-under-it rule had no test at all. Raised: B87, B88.)
 
-- [ ] B87. **The file test was written down and it was wrong (B86); the BASE
-      LIST is written down too.** `_package_bases` returns `["", "tools",
-      "harness"] + services/*`, which is right today only because all eight
-      `pyproject.toml` files in this repo live under `services/`. A ninth
-      Python package anywhere else — `shell/jv-hud/tools/`, a `bench/`, a
-      second library beside `pylib` — is a directory no base names, so every
-      `import` of it resolves to nothing and the closure walk stops at the
-      first edge again. That is B86's failure by a different mechanism: B86
-      was the FILE test being a written-down rule, this is the SEARCH PATH
-      being one, and both fail the same silent way, because a suite that is
-      never named cannot report being skipped. The derivation is sitting
-      there: a base is a directory with a `pyproject.toml` in it, plus the
-      repo root and the two package directories that have none (`tools`,
-      `harness` — and `harness/` has no `__init__.py` either, so it is this
-      repo's SECOND namespace package; nothing imports it by that name today,
-      which is the only reason B86 had one instance and not two). Wants a
-      `tools` test pinning that every pyproject directory is a base.
-      Discovered while fixing B86.
+- [x] B87. **The file test was written down and it was wrong (B86); the BASE
+      LIST was written down too.** `_package_bases` returned `["", "tools",
+      "harness"] + services/*`, right only because all eight
+      `pyproject.toml` in this repo happen to live under `services/` — a
+      ninth Python package anywhere else (`shell/jv-hud/tools/`, a `bench/`,
+      a second library beside `pylib`) was a directory no base named, so
+      every `import` of it resolved to nothing and the closure walk stopped
+      at the first edge. B86's failure by a second mechanism, silent the
+      same way. Derived now, from the two things that actually put a
+      directory of this repo on `sys.path`: a `pyproject.toml` beside a
+      package (that is what installs it), and a suite's own parent
+      (`runtests.sh` does `cd "$testdir"` and `-m` puts the cwd first) —
+      which is what puts `tools` and `harness` on the list without either
+      being named, and `harness` has no `__init__.py` either. Plus the root,
+      on the generous side. `_suite_dirs` is shared with `suites()` so the
+      discovery cannot drift from the search path it implies. The real
+      repo's answer is UNCHANGED: all ten suites' read sets are identical,
+      and the only difference is that `services/jarvisd` and
+      `services/jv-act` stop being bases — the one narrowing, with its own
+      test, since they hold no `*.py` at all and a rule picks either up if
+      it grows some. The assertion B87 asked for is
+      `test_every_installable_package_resolves_to_its_own_source`: it walks
+      for the pyprojects itself rather than asking where they are, and
+      demands each package resolve to its own directory (not to nothing, a
+      missed reader, and not to a namesake elsewhere, a wrong one).
+      4 mutations, 4 caught. — HEAD
+
+- [ ] B95. **The search path is one list for ten suites, and no interpreter
+      on this machine agrees with it.** `_package_bases` is computed once and
+      handed to every suite, so `services/jv-brain`'s tests are resolved
+      against `services/jv-guard` as well — a base that suite never has.
+      What `runtests.sh` really gives a suite is its OWN directory (the
+      `cd`), `services/pylib` (the exported PYTHONPATH) and whatever the nix
+      env installed; invariant 1 forbids one service importing another, so
+      the difference is invisible today. It errs generously (one suite too
+      many, the cheap direction) but it models a cross-service import as
+      WORKING when the interpreter would raise, and the first thing that
+      relies on that reading will be wrong in the confident direction. The
+      fix is small — bases per suite: `{"", suite dir, every pyproject dir}`
+      is already the right set, minus the other services — and the reason it
+      is not done here is that `names()` takes `bases` as one argument
+      shared through the whole closure cache, so per-suite bases means a
+      cache key per suite and a measurement that the walk is still 4 ms.
+      Discovered while fixing B87.
 
 - [ ] B88. **Every Python file in this repo is read by at least one suite —
       measured, 0 unread — and nothing asserts it.** What B86 landed is the

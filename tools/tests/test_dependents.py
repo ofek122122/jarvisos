@@ -47,14 +47,17 @@ RUNTESTS = ROOT / "ops" / "ralph" / "runtests.sh"
 
 
 def mkrepo(tmp_path: Path) -> Path:
-    """A repo with the shape this tool reads: two services with a package and
-    a suite each, a `tools` suite that is nobody's service, and a directory of
-    files that is not code at all."""
+    """A repo with the shape this tool reads: two services with a package, a
+    suite and the `pyproject.toml` that installs them, a `tools` suite that is
+    nobody's service and installs nothing, and a directory of files that is
+    not code at all."""
     root = tmp_path / "repo"
     for rel in (
+        "services/svc-a/pyproject.toml",
         "services/svc-a/pkg_a/__init__.py",
         "services/svc-a/pkg_a/thing.py",
         "services/svc-a/tests/test_a.py",
+        "services/svc-b/pyproject.toml",
         "services/svc-b/pkg_b/__init__.py",
         "services/svc-b/pkg_b/other.py",
         "services/svc-b/tests/test_b.py",
@@ -72,6 +75,22 @@ def mkrepo(tmp_path: Path) -> Path:
 def write(root: Path, rel: str, src: str) -> None:
     (root / rel).write_text(src, "utf-8")
 
+
+
+def _pyproject_dirs(root: Path) -> list[str]:
+    """Every directory in the repo holding a `pyproject.toml`, walked by hand
+    so the claim below is not the implementation asserting itself."""
+    out: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in dependents.SKIP_DIRS and not d.startswith(".")
+        ]
+        if "pyproject.toml" in filenames:
+            rel = Path(dirpath).relative_to(root).as_posix()
+            out.append("" if rel == "." else rel)
+    return sorted(out)
 
 def reads_of(root: Path, name: str) -> frozenset[str]:
     found = {s.name: s for s in dependents.suites(root)}
@@ -269,9 +288,15 @@ def test_a_package_with_no_init_is_still_importable(tmp_path):
     `[tool.setuptools.packages.find]` defaults to `namespaces = true`, so
     nothing anywhere complained. The closure walk just stopped at the first
     edge, silently, and the 136-test suite that executes that package was
-    never named for a change to it."""
+    never named for a change to it.
+
+    `svc-c` is the one service here with no suite of its own, so its
+    `pyproject.toml` is the whole reason anything searches it (B87) — which
+    is also true of the real `jv_ears`, whose suite is not what makes the six
+    OTHER suites able to name it."""
     root = mkrepo(tmp_path)
     (root / "services/svc-c/pkg_c").mkdir(parents=True)
+    write(root, "services/svc-c/pyproject.toml", '[project]\nname = "svc-c"\n')
     write(root, "services/svc-c/pkg_c/mod.py", "")
     write(root, "tools/tests/test_atool.py", "import pkg_c\n")
     assert reads_of(root, "tools") == frozenset({"services/svc-c/pkg_c"})
@@ -339,6 +364,105 @@ def test_a_directory_with_no_python_under_it_is_not_a_module(tmp_path):
     write(root2, "tools/helper", "#!/bin/sh\n")
     write(root2, "tools/tests/test_atool.py", "import helper\n")
     assert reads_of(root2, "tools") == frozenset()
+
+
+def test_a_python_package_that_is_no_services_child_is_still_importable(tmp_path):
+    """B87, the class, and it is B86 by a second mechanism. B86 was the FILE
+    test being a rule someone wrote down (`__init__.py` or nothing); this is
+    the SEARCH PATH being one. `_package_bases` returned `["", "tools",
+    "harness"] + services/*`, which was right only because all eight
+    `pyproject.toml` in this repo happen to live under `services/`. A ninth
+    Python package anywhere else — `shell/jv-hud/tools/`, a `bench/`, a second
+    library beside `pylib` — sits under no base, so `import benchlib` resolves
+    to nothing, the closure walk stops at the first edge, and the suite that
+    executes it is never named. Silent in the same worse direction: a suite
+    that is never planned cannot report being skipped.
+
+    A directory with a `pyproject.toml` in it is a base because that is what
+    installs the thing — setuptools' default discovery makes every top-level
+    package beside that file an importable name, and the nix env every suite
+    runs under has them all installed."""
+    root = mkrepo(tmp_path)
+    (root / "bench" / "benchlib").mkdir(parents=True)
+    write(root, "bench/pyproject.toml", '[project]\nname = "bench"\n')
+    write(root, "bench/benchlib/__init__.py", "")
+    write(root, "bench/benchlib/run.py", "")
+    write(root, "tools/tests/test_atool.py", "import benchlib\n")
+    assert reads_of(root, "tools") == frozenset({"bench/benchlib"})
+    got = dependents.readers(root, ["bench/benchlib/run.py"])
+    assert got == {"tools": ["bench/benchlib/run.py"]}, got
+
+
+def test_a_suite_is_run_from_its_own_directory_so_that_directory_is_a_base(tmp_path):
+    """The second mechanism, and the one that puts `tools` and `harness` on
+    the list without either being named. `runtests.sh` does `cd "$testdir"`
+    before `python -m pytest`, and `-m` puts the cwd first on `sys.path` — so
+    a suite's own parent directory is a search path for that suite whether or
+    not anything there is installable. `tools` and `harness` ship no
+    `pyproject.toml` and are importable exactly this way; a tenth suite
+    somewhere new is importable exactly this way too, and nothing should have
+    to be edited for it."""
+    root = mkrepo(tmp_path)
+    (root / "bench" / "benchlib").mkdir(parents=True)
+    (root / "bench" / "tests").mkdir(parents=True)
+    write(root, "bench/benchlib/__init__.py", "")
+    write(root, "bench/benchlib/run.py", "")
+    write(root, "bench/tests/test_bench.py", "import benchlib\n")
+    assert reads_of(root, "bench") == frozenset({"bench/benchlib"})
+
+
+def test_every_installable_package_resolves_to_its_own_source():
+    """B87, the instance. For each `pyproject.toml` in the repo, every
+    top-level package beside it is a name some suite may import, and it must
+    resolve to THAT directory — not to nothing (a missed reader) and not to a
+    namesake under some other base (a wrong one, which is worse). Computed by
+    walking for the pyprojects rather than by asking where they are."""
+    bases = dependents._package_bases(ROOT)
+    found = 0
+    for proj in _pyproject_dirs(ROOT):
+        for pkg in sorted((ROOT / proj).iterdir() if proj else ROOT.iterdir()):
+            if not pkg.is_dir() or pkg.name in ("tests", *dependents.SKIP_DIRS):
+                continue
+            if not any(pkg.rglob("*.py")):
+                continue
+            rel = pkg.relative_to(ROOT).as_posix()
+            assert dependents._module_path(ROOT, pkg.name, bases) == rel, (
+                f"`import {pkg.name}` does not resolve to {rel} — the suite "
+                "that runs it would never be named for a change to it"
+            )
+            found += 1
+    assert found >= 8, f"expected this repo's eight packages, found {found}"
+
+
+def test_the_two_suite_directories_that_install_nothing_are_bases_anyway():
+    """`tools` and `harness` carry no `pyproject.toml` — `harness` has no
+    `__init__.py` either, which makes it this repo's second namespace package
+    (B86 found the first). They are bases because a suite runs from them, and
+    that is the whole reason: the list may not name them."""
+    bases = dependents._package_bases(ROOT)
+    for d in ("tools", "harness"):
+        assert not (ROOT / d / "pyproject.toml").exists()
+        assert d in bases
+    assert "harness" in {s.name for s in dependents.suites(ROOT)}
+
+
+def test_a_crate_with_no_python_under_it_is_not_a_base():
+    """The one place deriving is NARROWER than the list it replaces, stated
+    so that it is checked rather than assumed. `services/jarvisd` and
+    `services/jv-act` were bases only because they are children of
+    `services/`; they are Rust, they install no Python and no suite runs from
+    them, so nothing on this machine ever searched them for a module. If
+    either grows Python, the rule above picks it up on its own."""
+    bases = dependents._package_bases(ROOT)
+    for crate in ("services/jarvisd", "services/jv-act"):
+        assert (ROOT / crate).is_dir()
+        stray = [
+            p.relative_to(ROOT).as_posix()
+            for p in (ROOT / crate).rglob("*.py")
+            if not dependents.SKIP_DIRS & set(p.parts)
+        ]
+        assert not stray, f"{crate} has Python in it now: {stray}"
+        assert crate not in bases
 
 
 def test_every_service_suite_reads_the_source_of_the_service_it_tests():
