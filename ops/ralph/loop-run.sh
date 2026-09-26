@@ -20,12 +20,18 @@ set -uo pipefail   # deliberately NOT -e: one failed iteration must not end the 
 WT="$HOME/jarvisos-ralph"
 CLAUDE="/run/current-system/sw/bin/claude"
 STOP="$WT/.ralph-STOP"
+# The loop's work is mechanical and repetitive — read PLAN, write the failing
+# test, write the code, run verify.sh, commit — across ~60 backlog items over
+# days. That volume, not any single iteration, is what this run costs, so the
+# model choice here dominates everything else. Sonnet does this class of work
+# well; override with RALPH_MODEL=opus for a stretch of genuinely hard items.
+MODEL="${RALPH_MODEL:-sonnet}"
 BOOTSTRAP='Read ops/ralph/PROMPT.md in full and follow it exactly for ONE iteration, then stop. Working directory is this repository, on branch ralph/auto. Obey ops/ralph/GUARDRAILS.md absolutely. The repo is your only memory between iterations.'
 
 cd "$WT" || { echo "ralph: worktree $WT missing — run the one-time setup"; exit 1; }
 [ -x "$CLAUDE" ] || { echo "ralph: claude not found"; exit 1; }
 
-echo "ralph: loop starting in $WT on $(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+echo "ralph: loop starting in $WT on $(git rev-parse --abbrev-ref HEAD 2>/dev/null) [model: $MODEL]"
 i=0
 while :; do
   if [ -f "$STOP" ]; then
@@ -36,7 +42,7 @@ while :; do
   echo "=========== ralph iteration $i @ $(date -u +%FT%TZ) ==========="
   # A fresh, autonomous, headless agent iteration. Its own verify gate + commit
   # + push live in PROMPT.md; guardrails keep it on ralph/auto and off the OS.
-  "$CLAUDE" -p --dangerously-skip-permissions "$BOOTSTRAP" 2>&1 | tail -50 || true
+  "$CLAUDE" -p --model "$MODEL" --dangerously-skip-permissions "$BOOTSTRAP" 2>&1 | tail -50 || true
   echo "=========== ralph iteration $i complete ==========="
   sleep 10   # a breather; also throttles a tight failure loop
 done
