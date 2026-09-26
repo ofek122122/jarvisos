@@ -819,29 +819,122 @@ human-reviewed step.
       halves equal — then `Notify` returns id 1. Nothing in this repo had ever
       proved that name was claimed or that it answered.)
 
-- [ ] D43. **The load probe evaluates almost none of the HUD's or the bar's
-      QML, and it is measured rather than feared.** `shellload.sh` runs the HUD
-      with no jarvisd (every plate unmapped, `Bus` blind) and the bar with no
-      niri (`linkUp` false, the workspaces row builds no delegates), so what it
-      covers for those two is the outermost file, the per-screen `Variants`
-      delegate, and every binding evaluated whatever the state — which is where
-      D34's and D39's faults both were, and is not the whole shell. The
-      notifier has a real client and is therefore the one shell whose PLATE is
-      covered; the proof is the third injection above. The HUD's half is cheap
-      and should be taken: `jarvisd` is a Rust binary that starts in
-      milliseconds and `harness/replay.py` already puts a recorded turn on a
-      bus, so one broker plus one `--instant` replay would light the plates and
-      bring every plate binding under the scan for a second or two of run time.
-      The bar's half has no cheap answer at all — `JV_BAR_NIRI` is `--set` into
-      the wrapper, so it cannot be pointed at a fake stream without staging the
-      shell, which is the one thing this gate refuses. Raised by D41.
-      **D44 raised the price of the HUD's half and lowered its optionality.**
-      The HUD with no jarvisd is not merely unlit — `visible: selfTest ||
-      stack.anyLit` means no wl_surface of its is ever CREATED, so the mapping
-      check D44 added reads a shell that is not there. A broker and one
-      `--instant` replay would turn that reading into a real one as well as
-      lighting the plate bindings, which is two questions for one second of
-      run time.
+- [x] D43. **The load probe evaluated almost none of the HUD's QML, and now
+      the HUD is the half of it that is covered.** (Done.) `shellload.sh`
+      starts a real `jarvisd` on the run's own socket, `tools/shellload/
+      publish.py` puts eleven composed frames on it at 1 Hz, and the HUD's own
+      read-only bridge — the child `pkgs/jv-hud` pins into the wrapper —
+      carries them into the plates. Ten of the HUD's eleven plates light, on
+      all three monitors, and it cost **1.8 s**: 25.4 s before, 27.2 s after.
+      · **THE COVERAGE IS MEASURED, and the file it reaches is the one whose
+        own header says no test can reach it.** `Bus.qml` — the Process, the
+        SplitParser, the respawn timer, the monotonic clock — says in its
+        first paragraph that "logic that lands in this file is logic no test
+        can reach". A `var`-typed throw injected into its `latest()` forwarder
+        (`model.latest(topic).body.nope.x`, the D34 shape qmllint cannot see)
+        ended the gate 1 with **25,992 thrown lines** naming
+        `shell/jv-hud/Bus.qml:48`. **And the control is the whole point: the
+        SAME fault with the HUD pointed at a socket no broker was on reported
+        `nothing threw in 8 lines`.** So the fault is not merely newly caught,
+        it was entirely invisible to this repo an hour ago — and 8 lines
+        versus 86 is how much of the HUD's own log existed before there was
+        anything on the bus to say.
+      · **THE CENSUS IS THE HUD'S OWN ACCOUNT, because nothing else could
+        answer.** The HUD reserves no space, takes no focus, and with
+        `ExclusionMode.Ignore` and no zone changes nothing a compositor
+        reports when it maps — so "did the frames reach the plates" had no
+        observable. `shell/jv-hud/shell.qml` now logs one line per surface
+        naming the plates on it (`jv-hud: corner on HEADLESS-1 shows confirm
+        state output heard reply action guard install mic health`), which is
+        also a thing the real machine wanted: the corner is unmapped most of
+        the time, so until now this machine kept no record of what it ever
+        showed. NAMES ONLY, structurally — `plateName` is one word per
+        element, so what reaches journald is WHICH readings were on screen and
+        never the words jv-ears took down or the question jv-act asked
+        (invariant 7).
+      · **Per monitor, and the report names the plate.** A `guard.verdict`
+        dropped from the frame list ends the gate 1 with `HEADLESS-1: showed
+        [confirm state output heard reply action install mic health], missing
+        ['guard']` on all three. A monitor that never wrote a line at all is
+        told apart from one that went dark, because those are different
+        repairs: a surface that was never built versus a plate that never lit.
+      · **COMPOSED FRAMES, not the `--instant` replay this item asked for,
+        and the reason is a measurement.** Every recorded session in
+        `harness/fixtures/sessions` carries exactly three topics — audio.vad,
+        audio.wake, audio.transcript — because they are recordings of a
+        MICROPHONE. Replaying one lights two plates. Eight of the eleven
+        frames are byte-equal to a named frame in `tools/hudscreens/sheet.py`
+        (restated, with a test reading both, on the same argument `OUTPUTS`
+        makes); the three that are new are `guard.verdict`, `compat.install`
+        and `brain.response`, because nothing in this repo had ever composed
+        one — which is why those three plates had never been fed a real frame
+        by anything.
+      · **The frame ORDER is load-bearing and is pinned.** `heard` goes dark
+        once `speech.state` is stamped after the words (HeardState latches
+        `answering`) and `action` goes the same way (ActionState's
+        `noteExplained`), so the speaking frame goes FIRST. What the corner
+        then shows is a barge-in mid-answer, which is a real state and not a
+        contrivance. Republishing the whole set in order keeps it true every
+        round: round 2's speaking frame latches `answering`, and round 2's
+        transcript changes `transcriptKey` and clears it again.
+      · **It republishes because one plate needs it to, and that is also how
+        the subscription race stops mattering.** `output` reads jv-context's
+        1 Hz snapshot and OutputState calls one older than 3 s stale. A bus
+        has no backlog, so a frame sent before the bridge subscribed is simply
+        gone and nothing this driver can ask would say when it landed.
+      · **The gate now reads the bus, which it deliberately did not.** The old
+        reason was good and is no longer true. `services/jarvisd`,
+        `services/pylib` and `services/jv-hud-bridge` are declared reads now —
+        the three paths a frame travels — so a Rust or bus-client edit pays
+        27 s to learn that ten plates still light. A `services/pylib` change
+        is now ten suites and this gate.
+
+- [ ] D46. **The bar is the only shell this gate still loads cold, and the
+      reason is its wrapper rather than a gap.** `JV_BAR_NIRI` is `--set` into
+      `pkgs/jv-bar`, so `niri msg --json event-stream` cannot be pointed at a
+      fake without staging the shell — which is the one thing this gate refuses
+      (`test_the_gate_loads_the_shipped_binaries_and_stages_nothing`). So
+      `linkUp` is false, the workspaces row builds no delegates, and what is
+      covered for the bar is the outermost file, the per-screen `Variants`
+      delegate and every binding evaluated whatever the state. The measured
+      price of NOT having this is exactly the D43 measurement in reverse: a
+      throw in the bar's equivalent of `Bus.qml` would report `nothing threw in
+      8 lines`. Two shapes worth considering, neither free: a `--set`-able
+      override the wrapper honours only when the pinned niri is absent (which
+      is a hole in the pinning rule, on purpose, and needs the argument written
+      down), or a tiny fake `niri` on PATH plus a wrapper that resolves it at
+      runtime (same hole, different door). A third: accept the limit and say so
+      where somebody would otherwise read the bar's green as coverage — which
+      is what `shells.py` and the script header do today. Raised by D43.
+
+- [ ] D47. **One plate cannot be lit by the run that lights the other ten,
+      and a second run would cost five seconds.** `LinkPlate` is on screen
+      exactly while the HUD CANNOT see the bus, so it is mutually exclusive
+      with every other plate: lighting it means taking the broker away, and
+      then there are no frames for anything else. `shell.qml` says the same
+      thing about its own box ("in practice it can never share the surface").
+      The shape is a second HUD start with `JARVIS_BUS` pointed at nothing,
+      held past `core/LinkState.qml`'s 5 s `graceS` — which is also why the
+      old no-broker version of this gate never lit it, at `HOLD_S` of 2 s —
+      and a corner that then names exactly `link`. That is one more quickshell
+      (0.4 s) plus the grace, so call it 6 s on a 27 s gate, and it would
+      close the last plate AND put the grace itself under test: today nothing
+      anywhere proves the HUD ever admits it is blind. Raised by D43.
+
+- [ ] D48. **A lit corner threw 25,992 times in about two seconds and nobody
+      knows which of two things that measures.** The D43 injection put a
+      throwing binding in `Bus.latest()` and the log came back with 25,992
+      faults over roughly 2.5 s of a lit HUD. Either the HUD evaluates
+      `latest()` some ten thousand times a second while holding still, or a
+      binding that throws re-evaluates in a loop until something changes —
+      and the difference matters: the first is a §06 problem (the corner is
+      supposed to cost nothing while nothing happens) and the second is a
+      property of the engine and nobody's bug. Nothing in this repo would
+      notice either: `hudscreens.sh`'s idle probe counts Wayland COMMITS on
+      the HUD's own side of the socket, which is frames, and a binding that
+      re-evaluates without changing its value commits nothing. The cheap
+      measurement is a counter in a `var` binding under the same lit corner,
+      with the no-broker run as its control. Raised by D43.
 
 - [x] D44. **"It loaded" is not "it mapped", and nothing asked the second
       question for two of the three shells.** (Done.) `shellload.sh` now puts

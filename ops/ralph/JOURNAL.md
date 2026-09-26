@@ -13099,3 +13099,112 @@ is not worth chasing.)
   `--instant` replay away from both being real. Then **D45** (three comments
   and one failure message that name the wrong property, found above), and
   **D33** (the last copies of the HUD's box).
+
+## 2026-09-26 — iteration 130 — the HUD had never been shown the bus by the gate that loads it (D43)
+
+- **what**: `ops/ralph/shellload.sh` starts a real `jarvisd`,
+  `tools/shellload/publish.py` puts eleven composed frames on it at 1 Hz, and
+  the HUD's own read-only bridge carries them into the plates. Ten of the
+  HUD's eleven plates light, on all three monitors, and `shell/jv-hud/
+  shell.qml` says which — one line per surface, naming the plates on it.
+- **why**: the gate's own header said it. The HUD here ran with no broker, so
+  `Bus` was blind, every plate refused to guess, and `visible: selfTest ||
+  stack.anyLit` was false — which means **no wl_surface of its was ever
+  created**. The mapping check D44 added was asking the compositor about a
+  shell that was not there, and every plate, every state machine under it and
+  every binding that only runs on a real frame was outside the gate that
+  loads the shipped HUD.
+- **THE COVERAGE IS MEASURED, and the file it reaches is the one whose own
+  header says no test can reach it.** `Bus.qml`'s first paragraph: "logic that
+  lands in this file is logic no test can reach" — the Process, the
+  SplitParser, the respawn timer, the monotonic clock. A `var`-typed throw
+  injected into its `latest()` forwarder (`model.latest(topic).body.nope.x` —
+  the D34 shape, and the FIRST attempt at this injection was caught by qmllint
+  at build time because `data.nope` is a member of a typed QString, which is
+  the layer below doing its job) ended the gate 1 with **25,992 thrown lines**
+  naming `shell/jv-hud/Bus.qml:48`.
+- **AND THE CONTROL IS THE WHOLE POINT.** The identical fault, with the HUD
+  pointed at a socket no broker was listening on, reports **`nothing threw in
+  8 lines of runner output`**. Not "newly caught" — *entirely invisible to
+  this repository an hour ago*. 8 lines versus 86 is also how much of the
+  HUD's own log existed before there was anything on the bus to talk about.
+- **the census had to be the HUD's own account, because nothing else can
+  answer.** The HUD reserves no space, takes no focus, and with
+  `ExclusionMode.Ignore` and no zone it changes nothing a compositor reports
+  when it maps — so "did the frames reach the plates" had no observable at
+  all, and a driver that graded itself on what it had just published would be
+  grading the bus. So the corner speaks: `jv-hud: corner on HEADLESS-1 shows
+  confirm state output heard reply action guard install mic health`. That is
+  also a thing the real machine wanted independently — the corner is unmapped
+  most of the time, so until now this machine kept no record of what it ever
+  showed, and "Jarvis never showed me the confirmation" and "Jarvis showed it
+  and I looked away" were the same empty screen afterwards.
+- **NAMES ONLY, and structurally rather than tidily** (invariant 7).
+  `plateName` is one word per element, so what reaches journald is WHICH
+  readings were on screen and never the words jv-ears took down, the question
+  jv-act asked or the file jv-guard refused. A test refuses a logged
+  expression that reaches for any of them.
+- **per monitor, and the report names the plate.** `Variants` builds one
+  surface per screen and each one's plates decide for themselves (D32's fault
+  was a row sized against the wrong monitor), so the census asks each monitor
+  by name. A `guard.verdict` dropped from the frame list ends the gate 1 with
+  `HEADLESS-1: showed [confirm state output heard reply action install mic
+  health], missing ['guard']` on all three — the first version of that message
+  printed the expected line back three times and left the reader to diff two
+  long strings, which is why the parser exists. A monitor that never wrote a
+  line at all is told apart from one that went dark: different repairs.
+- **composed frames, not the `--instant` replay D43 asked for, and the reason
+  is a measurement**: every recorded session in `harness/fixtures/sessions`
+  carries exactly three topics — audio.vad, audio.wake, audio.transcript —
+  because they are recordings of a MICROPHONE. Replaying one lights two
+  plates. Eight of the eleven are byte-equal to a named frame in
+  `tools/hudscreens/sheet.py` (restated with a test reading both, on the same
+  argument `OUTPUTS` makes for not importing it); the three that are new are
+  `guard.verdict`, `compat.install` and `brain.response`, because nothing in
+  this repo had ever composed one — which is exactly why those three plates
+  had never been fed a real frame by anything.
+- **the frame ORDER is load-bearing, and it is pinned.** `heard` goes dark
+  once `speech.state` is stamped after the words (HeardState latches
+  `answering`) and `action` goes the same way (ActionState's `noteExplained`),
+  so the speaking frame goes FIRST and everything else is newer than it. What
+  the corner then shows is a barge-in mid-answer — a real state, not a
+  contrivance. Republishing the whole set in order stays true every round:
+  round 2's speaking frame latches `answering`, then round 2's transcript
+  changes `transcriptKey` and clears it again.
+- **it republishes because one plate needs it to, and that is also how the
+  subscription race stops mattering.** `output` reads jv-context's 1 Hz
+  snapshot and OutputState calls one older than 3 s stale. A bus has no
+  backlog, so a frame sent before the bridge subscribed is simply gone and
+  nothing this driver can ask would say when it landed — republishing makes
+  the race stop mattering rather than trying to win it.
+- **the gate now reads the bus, which it deliberately did not.** The old
+  reason was good and is no longer true: `services/jarvisd`, `services/pylib`
+  and `services/jv-hud-bridge` are declared reads now — the three paths a
+  frame travels — so a `services/pylib` change is ten suites AND this gate,
+  which is the one test in `test_verify.py` whose number had to change.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 8 paths (tools **683
+  pass**, 12 of them new; `shellload.sh` **26.5 s**, against 25.4 s before —
+  a broker, eleven frames and ten lit plates for **1.8 s**). Additionally
+  `bash ops/ralph/hudscreens.sh` (named, 3m14s, run and looked at): all 9
+  shots match the sheet committed at HEAD — the new log line changes no
+  pixels, so there are no shots to commit — and `nothing threw in 7262 lines
+  across 12 logs`. The gate was run three times with faults injected: the
+  Bus.qml throw (ended 1, 25,992 lines), the same throw with no broker (the
+  control, `nothing threw in 8 lines`), and the dropped `guard.verdict`
+  (ended 1, naming the plate on all three monitors). All injections reverted;
+  `git status` clean of them before the verify run. build: `nixos-rebuild
+  build --flake .#ares` green. No schema change (the three new bodies are
+  checked against the frozen schemas by a test), no jv-act, no boot path, no
+  pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/publish.py,
+  tools/shellload/shells.py, tools/shellload/load.py,
+  shell/jv-hud/shell.qml, tools/dependents.py,
+  tools/tests/test_shellload.py, tools/tests/test_verify.py,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D47** — the eleventh plate, and it is the cheapest thing on this
+  list now: a second HUD start with `JARVIS_BUS` pointed at nothing, held
+  past LinkState's 5 s grace, and a corner that names exactly `link`. Six
+  seconds, and it would be the first thing anywhere to prove the HUD ever
+  admits it is blind. Then **D48** (the 25,992 lines, which measure one of
+  two things and nobody knows which), then **D45** (three comments and one
+  failure message naming the wrong property) and **D33**.
