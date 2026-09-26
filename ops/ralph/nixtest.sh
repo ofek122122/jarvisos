@@ -47,6 +47,14 @@ bad()  { fail=$((fail+1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
 # the whole file passes on a flake that never declared the option.
 is_unit() { grep -q '^\[Service\]$' <<<"$1"; }
 
+# Where the store is, asked of Nix rather than assumed (PLAN E12). The
+# lock-screen section below matches store paths out of unit text and out of a
+# built script, and a `grep -o` that matches nothing does not fail here — it
+# returns the empty string, which each of those checks reads as a confident
+# sentence about the flake ("the wallpaper unit does not start jv-wall"). On a
+# relocated store a hardcoded /nix/store makes the gate say all of them.
+store="${NIX_STORE_DIR:-/nix/store}"
+
 # unit <unit-name> <extra-module-nix> — the generated unit text, or "" + stderr
 # on an evaluation that refused to produce one.
 unit() {
@@ -153,7 +161,7 @@ if [ -x "$script" ]; then
   else ok "$t"; fi
 
   t='it is swaylock that runs, out of the store, not a name on $PATH'
-  if grep -qE '^exec /nix/store/[^ ]*swaylock' "$script"; then ok "$t"
+  if grep -qE "^exec $store/[^ ]*swaylock" "$script"; then ok "$t"
   else bad "$t" "$(grep -m1 exec "$script")"; fi
 
   # The one claim neither half of the test suite can make alone: two
@@ -173,12 +181,30 @@ if [ -x "$script" ]; then
   # evaluated to the wrong store path looks right in the source.
   t='the lock screen shows art the wallpaper unit would draw'
   wallpaper_unit=$(unit jarvis-wallpaper.service '')
-  wall_bin=$(grep -o '/nix/store/[^ ]*/bin/jv-wall' <<<"$wallpaper_unit" | head -1)
+  wall_bin=$(grep -o "$store/[^ ]*/bin/jv-wall" <<<"$wallpaper_unit" | head -1)
+  #
+  # AND A STORE PATH AN EVALUATION PRODUCED IS NOT ONE THAT WAS BUILT (PLAN
+  # E12). Every other case in this file reads text `nix eval` printed, and
+  # text is always there; this one has to open a file. Any change under
+  # `pkgs/` that jv-wall depends on moves this hash, and until something
+  # realizes it the wrapper is simply absent — which used to fall into the
+  # `-z "$art"` branch below and be reported as "sets no JV_WALL_DIR", an
+  # accusation about the contents of a file that does not exist. (E11 moved
+  # the jarvis-wallpaper hash and cost an iteration a `--baseline` run
+  # learning that.) So realize it, and say what happened if it is still not
+  # there. `.#jv-wall` is the same derivation modules/theme.nix installs, and
+  # its expensive half — jarvis-wallpaper's six rasterized renders — was
+  # already built for `.#jv-lock` above, so this costs a wrapper.
+  wall_built=""
+  if [ -n "$wall_bin" ] && [ ! -r "$wall_bin" ]; then
+    wall_built=$(nix build --no-link --print-out-paths '.#jv-wall' 2>&1 | tail -3)
+  fi
   art=""
   [ -r "$wall_bin" ] && art=$(grep -o "JV_WALL_DIR='[^']*'" "$wall_bin" | head -1 | cut -d"'" -f2)
-  lock_png=$(grep -o '/nix/store/[^ ]*\.png' "$script" | head -1)
+  lock_png=$(grep -o "$store/[^ ]*\.png" "$script" | head -1)
   if ! is_unit "$wallpaper_unit"; then bad "$t" "no wallpaper unit: $(tail -3 <<<"$wallpaper_unit")"
   elif [ -z "$wall_bin" ]; then bad "$t" "the wallpaper unit does not start jv-wall: $(grep ExecStart <<<"$wallpaper_unit")"
+  elif [ ! -r "$wall_bin" ]; then bad "$t" "$wall_bin is not in the store, so its bytes cannot be read; \`nix build --no-link .#jv-wall\` said: $wall_built"
   elif [ -z "$art" ]; then bad "$t" "$wall_bin sets no JV_WALL_DIR, so nothing says which art it draws"
   elif [ -z "$lock_png" ]; then bad "$t" "the lock screen names no png: $(grep -m1 -- --image "$script")"
   elif [ "$(dirname "$lock_png")" = "$art" ]; then ok "$t"
