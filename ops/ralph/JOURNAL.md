@@ -14151,3 +14151,71 @@ is not worth chasing.)
   **D67** is raised here too and wants a human, beside **D65**: both are
   questions about what a surface owes a reader on a screen too small for it,
   and D67's is specifically about the one plate that reports faults.
+
+## 2026-09-26 — D27: thirty-four mutations over two cores nobody had ever graded
+- built: **no new behaviour — evidence, and five tests that were missing.**
+  D11 taught `tools/mutate.py` the bar and the notifier; what it had graded
+  since was five lines across the two of them, and D27 is the sweep that
+  says what those two suites are actually worth. 34 mutations, 29 caught on
+  the first pass, and **all five survivors were real holes** — every one of
+  them a rule the source states in its own comment, asked for by nobody:
+  · **a duplicate workspace id.** `NiriModel.find` answers `null` when two
+    rows carry one id, on purpose, and `hit.length >= 1` survived. It is not
+    a pedantic case: `applyActivated` and `applyUrgency` then walk the list
+    by `w.id === id` and patch BOTH, so one delta lights an active pip on two
+    monitors at once — a state no desk can be in.
+  · **a workspace whose `output` is the empty string.** The refusal was
+    written and never asked for. It is not a monitor called "": the strip
+    asks `workspacesOn(<screen>)`, so that pip is on no strip at all while
+    still counting towards the desk the model reports.
+  · **the order inside `NotifyModel.sweep`.** `entries` is replaced BEFORE
+    any handle is touched, because `expire()` is what makes the server emit
+    `closed` and the server may do anything on the way back. It really may,
+    and the test that catches it is the one that does something: a sender
+    that posts its NEXT notification while being closed had that plate
+    dropped by the sweep — computed before it spoke, written after — with
+    the reversed order green in every existing test. The re-entrant `drop()`
+    the comment names is NOT the case that discriminates; both orders end in
+    the same list. Worth writing down, because that is the case anybody
+    would write first.
+  · **the 1 ms floor in `arm`.** A deadline already past — the machine slept,
+    or a push and not a sweep is what re-armed — computes a negative
+    interval, which is not an interval a Timer can honour.
+  · **`KeyedRows`' search window.** The scan for a surviving row starts at
+    `i`, not at 0, because everything before `i` was claimed this pass. From
+    0, two rows with one key swap delegates and draw the same word twice.
+  All five closed with a test in the suite that should have had it, all five
+  re-graded, all five caught. The 34 are over six files, not one:
+  `NiriModel` (10), `NotifyModel` (12), `RowFit` (6), `KeyedRows` (4+2),
+  `WallClock` (2).
+- **and one survivor that is not a hole, measured instead of argued.** The
+  NOTIFIER's `KeyedRows` can be made to destroy and rebuild a row it should
+  have kept — the exact D37 blink — with `notifytest.sh` still green, because
+  that suite reads `onScreen` as values and has no `Repeater` under it. The
+  body is generated into both shells from one renderer, so the honest owner
+  of that claim is the tools suite: graded with `--runner tests tools` it is
+  CAUGHT, and the harness names the relation in B55's own words — "the suite
+  reads shell/jv-notify/core/KeyedRows.qml — it never runs it". The grading
+  of the body is the bar's `tst_keyedrows.qml` (a real Repeater, delegate
+  identity, a colour sampled mid-move); the equality of the two copies is
+  `test_the_shells_that_share_a_core_type_share_it_byte_for_byte` plus
+  `--check`. That cost 5m05s of `runtests.sh tools` to establish and it is
+  the only reason the survivor is not a sixth hole. Raised as **D69**.
+- tests: `bash ops/ralph/verify.sh` **GREEN** — 4 gates over 3 paths, 107.2 s:
+  runtests tools 60.0 s, bartest 63 pass, notifytest 29 pass, shellload 4
+  runs. Plus the 34 gradings themselves (~40 suite runs; `bartest.sh` and
+  `notifytest.sh` are 4.5 s and 3.5 s, which is what made this the cheapest
+  evidence in the repo, exactly as D27 predicted). build: `nixos-rebuild
+  build --flake .#ares` green — which is also what lints these three files at
+  -W 0. No schema change, no jv-act, no boot path, no pins. Never tested,
+  never switched.
+- files: shell/jv-bar/tests/tst_nirimodel.qml,
+  shell/jv-bar/tests/tst_keyedrows.qml,
+  shell/jv-notify/tests/tst_notifymodel.qml, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- commit: 507f7c9
+- next: **D68** (the narrow-output HUD photographed through a real
+  compositor — still the expensive half D66 left), then **D69** (raised
+  here), **B88**, **B95**, **D63**, **D61**, **D57**, **D56**, **D64**,
+  **D55**, **D62**, **D48**, **D45**. **D67** and **D65** still want a
+  human.

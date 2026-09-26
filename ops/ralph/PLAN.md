@@ -461,7 +461,7 @@ human-reviewed step.
       `{ token; face; num; }` from one `fromTOML` would be read by all three;
       the gate that discovers painters (`_bearing_files`) already works by
       finding `token "x"` calls, so it would keep working unchanged.
-- [ ] D27. **The bar's and the notifier's `core/` have never had a mutation
+- [x] D27. **The bar's and the notifier's `core/` have never had a mutation
       sweep, and now they can.** D11 graded four lines of `NiriModel.qml` and
       one of `NotifyModel.qml` — five of perhaps forty — and one of the five
       found a real hole on the first try. Everything either model does
@@ -470,6 +470,31 @@ human-reviewed step.
       nobody so far. ~15 mutations over the two is ~20 suite runs at ~14 s, so
       under five minutes — the cheapest evidence in the repo, and the only
       kind that says what these two suites are worth.
+      (DONE, iteration 126, commit 507f7c9. **34 mutations over six files**
+      — `NiriModel` 10, `NotifyModel` 12, `RowFit` 6, `KeyedRows` 4+2,
+      `WallClock` 2 — **29 caught first pass, and all 5 survivors were real
+      holes.** The estimate was right about the price and low about the
+      yield: the two suites are 4.5 s and 3.5 s, so the whole sweep plus
+      every re-grade was ~40 suite runs in a few minutes. What the five were:
+      · **a duplicate workspace id.** `find` answers `null` for one on
+        purpose and `hit.length >= 1` survived. `applyActivated` and
+        `applyUrgency` then walk the list by `w.id === id` and patch BOTH —
+        one delta lighting an active pip on two monitors at once.
+      · **a workspace whose `output` is the empty string.** The refusal was
+        written and asked for by nobody. It is not a monitor called "": the
+        strip asks `workspacesOn(<screen>)`, so that pip is on no strip while
+        still counting towards the desk the model reports.
+      · **the order inside `NotifyModel.sweep`.** `entries` is replaced
+        BEFORE any handle is told. The re-entrant `drop()` the comment names
+        is NOT the case that discriminates — both orders end in the same
+        list — and the one that does is a sender POSTING while being closed:
+        its new plate was computed away by a sweep that had already decided.
+      · **the 1 ms floor in `arm`.** A deadline already past computes a
+        negative interval, which is not one a Timer can honour.
+      · **`KeyedRows`' search window.** The scan starts at `i`, not 0; from
+        0, two rows with one key swap delegates and draw the same word twice.
+      All five closed with a test and re-graded caught. One survivor was NOT
+      a hole and cost 5m05s to prove so — see **D69**.)
 - [x] D29. **`tools/hudshots/stub/Motion.qml` is now a hand copy of a
       GENERATED file.** The stub exists for one real reason — the shots
       harness cannot import Quickshell, so `Quickshell.env` has to go — and
@@ -1658,6 +1683,36 @@ human-reviewed step.
       PNGs were photographed against, read OUT OF GIT on purpose (D33), so a
       shot of a different box needs its own entry rather than a second
       meaning for that constant. Raised by D66.
+
+- [ ] D69. **The notifier's suite cannot tell a kept row from a rebuilt
+      one, and the notifier is the shell that blinks.** Measured at D27: a
+      mutation making `shell/jv-notify/core/KeyedRows.qml` `remove`+`insert`
+      a row it should have `move`+`set` — the exact D37 bug, every plate in
+      the corner announcing itself as new whenever any of them changes —
+      SURVIVES `notifytest.sh`. That suite reads `onScreen` as values
+      (`get(i).summary`), and destroy-and-rebuild produces the same values;
+      only a `Repeater` under it can tell, which is what the bar's
+      `tst_keyedrows.qml` has and the notifier has nothing of. It is not a
+      hole today, and that took a 5-minute measurement rather than an
+      argument: the body is generated into both shells from one renderer, so
+      the mutation IS caught by `runtests.sh tools` (via
+      `test_the_shells_that_share_a_core_type_share_it_byte_for_byte` and
+      `--check`), and the harness says so in B55's words — "the suite reads
+      it, it never runs it". So the coverage is real and it is THIRD-PARTY:
+      the bar grades the body, the generator holds the copies equal, and the
+      notifier's own suite is a bystander to the one property its corner was
+      rebuilt around. Two readings, and the item is which one is right.
+      (a) That is exactly invariant 1's shape and nothing is missing — write
+      it down in `tst_notifymodel.qml` so the next author does not re-derive
+      it. (b) The notifier should have its own `tst_keyedrows.qml` with a
+      real `Repeater` and a fading `Toast`-shaped delegate, because what the
+      corner does with a kept delegate is not what the strip does with one
+      (a fade from zero, not a colour easing) and the generator's equality
+      says nothing about the CALLER. Note `tools/notifyshots/scene/
+      tst_settle.qml` already samples the real toast mid-fade, so (b) may be
+      buying a second copy of a claim that has a picture — which is worth
+      checking before building it, and is the same question **D31** asks
+      about pointing `--runner shots` at that harness. Raised by D27.
 
 - [ ] D33. **Two copies of the HUD's box survive D16, and both are outside a
       shell.** The corner's width is one token now and both shells read it —
