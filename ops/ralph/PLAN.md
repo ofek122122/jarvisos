@@ -4,6 +4,35 @@ Priority ladder: **UI/UX first** (blueprint §06), then features/backlog, then
 creative additions. Mark items `[x]` done with the commit hash. Add follow-ups
 you discover. Keep items small enough to finish in one iteration.
 
+## Track E — a desktop you can live in — TOP PRIORITY (after D2/D3)
+The core landed by hand (2026-09-26): modules/apps.nix (~90 apps + portals,
+thumbnails, keyring, fonts), modules/store.nix (jv-store: DECLARATIVE
+click-to-install — a pick is appended to selected.nix, read by
+jarvis.apps.extra, then a rebuild; never `nix profile install`), and
+pkgs/jv-wall (animated per-output wallpaper replacing swaybg). Extend it:
+
+- [ ] E1. **A real store UI** (Quickshell): replace the fuzzel front-end of
+      jv-store with a §06 window — search, categories, screenshots/icons,
+      Install/Remove, and a live rebuild progress view. The MECHANISM must stay
+      declarative (append to selected.nix + rebuild); only the front-end changes.
+- [ ] E2. **Remove/uninstall in the store** — the catalog only adds today.
+- [ ] E3. **Grow the catalog** in /etc/jarvis/store-catalog.tsv, with a test
+      that every attr in it actually resolves in nixpkgs (a typo must fail the
+      build, not the user's click).
+- [ ] E4. **An app launcher/grid with icons** (Quickshell), replacing themed
+      fuzzel: search by name, real .desktop icons, keyboard-first.
+- [ ] E5. **Multi-monitor**: per-output niri rules (the three outputs are
+      HDMI-A-1 2560x1440@144, DP-1 1920x1080@60 at x=2560, DP-2 1920x1080@60 at
+      x=4480) moved into the flake with D4, so the layout is declarative; make
+      the bar/HUD/notify placement per-output correct and test it.
+- [ ] E6. **Wallpaper polish**: honor prefers-reduced-motion (not just
+      JV_MOTION), verify <2ms/frame and 0fps-when-idle with the existing idle
+      probe, and render any geometry on demand rather than a fixed list.
+- [ ] E7. **Creative — Jarvis-aware desktop**: let the desktop reflect the
+      assistant. e.g. the wallpaper's ember reacting to speech.state, a
+      "what Jarvis did today" panel from the act audit log, or workspace names
+      Jarvis can set. Must stay §06-honest: real signals only, never decoration.
+
 ## Track D — JarvisOS desktop identity — NEW TOP PRIORITY
 Full-desktop redesign so the OS *looks* like JarvisOS. Spec:
 `docs/superpowers/specs/2026-09-25-jarvisos-desktop-identity-design.md`.
