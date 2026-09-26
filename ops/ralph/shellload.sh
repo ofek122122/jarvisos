@@ -57,6 +57,15 @@
 #     was), and the corner says which plates it is showing so this gate can
 #     tell a HUD that received the frames from one that ignored them
 #     (PLAN D43).
+#   · AND THE HUD IS LOADED TWICE, because its eleventh plate is on screen
+#     exactly while the other ten cannot be. `LinkPlate` says this HUD cannot
+#     SEE the bus, so a fourth quickshell runs the same shipped binary with
+#     `JARVIS_BUS` pointed at nothing, waits out `core/LinkState.qml`'s grace,
+#     and the corner has to name exactly `link` (PLAN D47). That is the first
+#     thing anywhere to prove the HUD ever admits it is blind — and the only
+#     reading that can tell a plate REFUSING (every state machine under this
+#     corner is built to, and a refusal draws the same nothing a calm machine
+#     does) from a plate with nothing to say.
 #
 # TWO THINGS THE ENVIRONMENT MUST DO, both measured, neither optional:
 #   1. DBUS_SESSION_BUS_ADDRESS is REPLACED, not inherited. Run without that,
@@ -274,17 +283,23 @@ load_status=0
 #
 # The statuses are collected rather than allowed to end the run, so a second
 # shell's faults are not hidden behind the first one's.
+#
+# One per ENGINE rather than one per shell, which is why the pairs come out of
+# `scan_targets()`: the HUD is started twice — once with a broker and once with
+# `JARVIS_BUS` pointed at nothing (PLAN D47) — and a loop over the three shells
+# would have left the blind run's log unread. Both of its logs are reported
+# under the HUD's root, because both are the same store path.
 scan_status=0
-while IFS=$'\t' read -r attr shellroot; do
-  "$py/bin/python" "$root/tools/qmlerrors.py" "$stage/$attr.log" \
+while IFS=$'\t' read -r logname shellroot; do
+  "$py/bin/python" "$root/tools/qmlerrors.py" "$stage/$logname.log" \
     --prefix "$shellroot" --rerun "bash ops/ralph/shellload.sh" || scan_status=$?
 done < <("$py/bin/python" - "$tool" <<'EOF'
 import sys
 sys.path.insert(0, sys.argv[1])
 import shells
 
-for shell in shells.SHELLS:
-    print(f"{shell.attr}\t{shell.root}")
+for logname, root in shells.scan_targets():
+    print(f"{logname}\t{root}")
 EOF
 )
 

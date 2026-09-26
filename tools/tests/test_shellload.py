@@ -159,10 +159,12 @@ def test_every_shell_is_waited_for_before_anything_is_scanned():
     on a syntax error are both a non-zero exit before the scan."""
     text = DRIVER.read_text("utf-8")
     assert "wait_for(shells.READY" in text
-    # And the wait is not optional for any shell: one `load` per shell, one
-    # wait inside it.
+    # And the wait is not optional for any engine: one `load` for the three
+    # shells, one `load_blind` for the HUD's second run (PLAN D47), and one
+    # wait on READY inside each.
     assert text.count("def load(") == 1
-    assert text.count("proc.wait_for(") == 1
+    assert text.count("def load_blind(") == 1
+    assert text.count("proc.wait_for(shells.READY") == 2
 
 
 def test_a_shell_that_never_loads_is_a_failure_and_not_a_skip():
@@ -546,7 +548,11 @@ def test_a_shell_is_read_before_during_and_after_it_runs():
     something else in the session."""
     text = DRIVER.read_text("utf-8")
     whens = re.findall(r'check_zone\(shell, "(\w+)", up=(\w+)\)', text)
-    assert whens == [("before", "False"), ("while", "True"), ("after", "False")], whens
+    triple = [("before", "False"), ("while", "True"), ("after", "False")]
+    # Twice, once per run: the blind HUD (PLAN D47) is a fourth engine on the
+    # same compositor, and its readings need the same two controls — more so,
+    # because it is the run in which the HUD's surface really is mapped.
+    assert whens == triple * 2, whens
 
 
 def test_the_monitors_the_compositor_really_has_are_checked_before_any_shell():
@@ -568,8 +574,10 @@ def test_the_gate_still_costs_seconds_and_not_minutes():
     Everything here is polled, and a poll with a generous timeout is how a 25 s
     gate becomes a 3-minute one — so every ceiling is bounded and small, and
     the worst case is one timeout per reading per shell plus the HUD's two."""
-    worst = shells.MAPPED_TIMEOUT_S * 3 * len(shells.SHELLS)
+    runs = len(shells.SHELLS) + 1  # the blind HUD is a fourth (PLAN D47)
+    worst = shells.MAPPED_TIMEOUT_S * 3 * runs
     worst += shells.HUD_LIT_TIMEOUT_S * 2
+    worst += shells.HUD_BLIND_TIMEOUT_S
     assert worst <= 150, worst
     assert 0 < shells.MAPPED_POLL_S <= 0.25
     # And the frames go out faster than the plate that needs them goes stale,
@@ -680,11 +688,13 @@ def test_every_plate_the_hud_stacks_is_lit_by_this_gate_or_named_as_dark():
 
 
 def test_the_plate_that_cannot_be_lit_here_is_the_one_about_the_bus_itself():
-    """And it is not an omission. `LinkPlate` is on screen exactly while the
-    HUD cannot SEE the bus, so lighting it would mean taking the broker away —
-    and then there would be no frames for anything else. `shell.qml` makes the
-    same observation about its own box: in practice it can never share the
-    surface."""
+    """And it is not an omission — it is a second run (PLAN D47). `LinkPlate`
+    is on screen exactly while the HUD cannot SEE the bus, so lighting it in
+    the run above would mean taking the broker away, and then there would be
+    no frames for anything else. `shell.qml` makes the same observation about
+    its own box: in practice it can never share the surface. So this tuple is
+    both the plate the frames run must NOT light and the whole of what the
+    blind run's corner must show."""
     assert shells.HUD_PLATES_DARK == ("link",)
     link = strip_qml_comments(
         (ROOT / "shell" / "jv-hud" / "LinkPlate.qml").read_text("utf-8")
@@ -979,3 +989,148 @@ def test_the_broker_is_killed_with_everything_else():
     trap = text[text.index("cleanup()") : text.index("trap cleanup EXIT")]
     assert "buspid" in trap
     assert "buspid=$!" in text
+
+
+# ------------------------------------------- the blind HUD (PLAN D47)
+#
+# The eleventh plate, and the run that exists only to light it. Everything
+# above is a HUD with a broker under it; `LinkPlate` is on screen exactly while
+# there is none. These are the checks on that second run that do not need a
+# compositor — the measurement itself is the gate.
+
+
+def test_the_blind_run_loads_the_same_shipped_hud_as_the_frames_run():
+    """A second binary would be a second shell, and this claim is about THIS
+    one. The driver takes it out of `SHELLS` by `wake`, so the shell list stays
+    the only place that decides which of the three is the HUD — and it arrives
+    in the same `env` variable the script exported for the first run."""
+    text = DRIVER.read_text("utf-8")
+    blind = text[text.index("def load_blind("):text.index("def main(")]
+    assert "shells.hud_shell()" in blind
+    assert "need(shell.env)" in blind
+    assert "nix build" not in blind
+    hud = shells.hud_shell()
+    assert hud.attr == "jv-hud" and hud.root == "shell/jv-hud"
+
+
+def test_exactly_one_shell_is_the_one_this_second_run_is_about():
+    """`hud_shell()` picks by `wake`, and two shells woken by frames would
+    mean the blind run silently chose one of them."""
+    assert [s.attr for s in shells.SHELLS if s.wake == "hud"] == ["jv-hud"]
+    saved = shells.SHELLS
+    shells.SHELLS = saved + (saved[0],)
+    try:
+        with pytest.raises(ValueError):
+            shells.hud_shell()
+    finally:
+        shells.SHELLS = saved
+
+
+def test_the_only_thing_changed_about_the_blind_run_is_the_bus():
+    """The whole point. The compositor, the private session bus, the pinned
+    bridge in the wrapper and the theme all have to be identical to the run
+    that lit ten plates, or what this measures is not "the bus is gone". So
+    the environment is this process's own with exactly one key replaced."""
+    text = DRIVER.read_text("utf-8")
+    blind = text[text.index("def load_blind("):text.index("def main(")]
+    found = re.search(r"env = dict\(os\.environ, (\w+)=([^)]+)\)", blind)
+    assert found, blind
+    assert found.group(1) == "JARVIS_BUS"
+    assert "shells.HUD_BLIND_BUS" in found.group(2)
+
+
+def test_the_bus_the_blind_run_is_given_is_one_nothing_creates():
+    """A path rather than an empty string, and a path under the run's own
+    stage. `jv-hud-bridge` falls back to its own default when `--bus` and
+    `$JARVIS_BUS` are both empty, so a blank would be a HUD that quietly found
+    the machine's real socket — and this gate would have blinded nothing."""
+    assert shells.HUD_BLIND_BUS
+    assert not shells.HUD_BLIND_BUS.startswith("/")
+    # Not the socket the script really starts jarvisd on, which is the one
+    # thing it could collide with.
+    real = next(line for line in executed_lines() if "JARVIS_BUS=" in line)
+    assert shells.HUD_BLIND_BUS not in real, real
+    # And nothing creates it: it is named by the constant in both places that
+    # mention it, and the name itself appears nowhere a file is made.
+    both = "\n".join(executed_lines()) + "\n" + DRIVER.read_text("utf-8")
+    assert shells.HUD_BLIND_BUS not in both, shells.HUD_BLIND_BUS
+
+
+def test_the_blind_corner_must_name_the_dark_plate_and_nothing_else():
+    """The stronger half of what this run proves. Every state machine under
+    this corner is built to REFUSE rather than guess from a bus it cannot see,
+    and a refusal draws the same nothing a calm machine does — so no picture
+    can tell them apart. A corner naming exactly `link` can: a plate that had
+    started guessing would be named beside it."""
+    text = DRIVER.read_text("utf-8")
+    blind = text[text.index("def load_blind("):text.index("def main(")]
+    assert "list(shells.HUD_PLATES_DARK)" in blind
+    assert "HUD_PLATES_LIT" not in blind
+    # The two lists cannot overlap, or the expectation is unsatisfiable in one
+    # of the two runs.
+    assert not set(shells.HUD_PLATES_LIT) & set(shells.HUD_PLATES_DARK)
+
+
+def test_both_hud_runs_read_the_corner_the_same_way():
+    """One census, two callers. The way a corner is READ — newest line per
+    monitor, every monitor, exact order — is the same question whether there
+    are ten plates on it or one, and two copies of it would be two answers."""
+    text = DRIVER.read_text("utf-8")
+    assert text.count("def corner_census(") == 1
+    assert text.count("corner_census(") == 3  # the definition and two callers
+
+
+def test_the_blind_run_outlasts_the_grace_it_is_about():
+    """The wait is mostly a real wait rather than a ceiling: `LinkState` says
+    nothing for `graceS` seconds on purpose, so a timeout at or under it would
+    fail a HUD that behaved perfectly. Headroom on top for a cold Qt."""
+    grace = shells.link_grace_s(shells.link_state_path().read_text("utf-8"))
+    assert grace > 0
+    assert shells.HUD_BLIND_TIMEOUT_S >= grace + 5, (grace, shells.HUD_BLIND_TIMEOUT_S)
+
+
+def test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate():
+    """Unlike `bar_strip_px()` and `hud_corner_line()`, which are copies held
+    equal by a third file. Those two are EXPECTATIONS — the gate states what
+    the shell must do and goes red when it does not. This one is a duration
+    the gate has to outlast, and a stale copy of it would make the gate flaky
+    rather than red. So it is read, and it fails loudly when there is nothing
+    to read."""
+    assert shells.link_state_path().is_file()
+    grace = shells.link_grace_s(shells.link_state_path().read_text("utf-8"))
+    # Read where it is USED, not once into a constant: the gate's own numbers
+    # are copies held equal by a test, and this one has no fixed value at all.
+    assert "shells.link_grace_s(" in DRIVER.read_text("utf-8")
+    assert grace not in [
+        v for v in vars(shells).values() if isinstance(v, float)
+    ], grace
+    # And a QML that stopped declaring it is a loud failure rather than a
+    # default nobody chose.
+    with pytest.raises(ValueError):
+        shells.link_grace_s("QtObject { property real somethingElse: 5.0 }")
+
+
+def test_the_blind_runs_log_is_scanned_like_every_other_engines():
+    """The D39 failure, one run further out: a blind HUD that reached
+    `Configuration Loaded` and threw on every screen is exactly what this gate
+    was written for, and a log nobody scanned reports nothing. The scan loop
+    iterates engines rather than shells for that reason, and the blind log is
+    read under the HUD's root because it is the same store path."""
+    targets = shells.scan_targets()
+    assert len(targets) == len(shells.SHELLS) + 1
+    assert (shells.HUD_BLIND_LOG, shells.hud_shell().root) in targets
+    names = [name for name, _ in targets]
+    assert len(set(names)) == len(names), names
+    # Its own file, or the two HUD runs' corners would be read out of one log.
+    assert shells.HUD_BLIND_LOG not in [s.attr for s in shells.SHELLS]
+    assert "shells.scan_targets()" in script_text()
+    assert "$stage/$logname.log" in script_text()
+
+
+def test_the_blind_run_is_counted_in_the_verdict_and_not_only_logged():
+    """`load_blind` raising has to be a non-zero exit, like any shell that
+    did not load — a run that reported its failure and returned 0 is the shape
+    of a gate that quietly stopped asking half its question."""
+    text = DRIVER.read_text("utf-8")
+    after = text[text.index("load_blind(stage)", text.index("def main(")):]
+    assert "bad += 1" in after[: after.index("if bad:")]

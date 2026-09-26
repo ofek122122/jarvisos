@@ -22,6 +22,14 @@ them into the plates. Before that the HUD here had nothing to say, so no
 wl_surface of its was ever created and every plate, every state machine under
 it and every binding that only runs on a real frame was outside this gate.
 
+AND THE HUD IS LOADED TWICE, because one of its plates is only ever on screen
+when the other ten cannot be (PLAN D47). `LinkPlate` reports that the HUD
+cannot SEE the bus, so a fourth quickshell runs the same shipped binary with
+`JARVIS_BUS` pointed at nothing and waits out `core/LinkState.qml`'s grace.
+The corner then has to name exactly `link` — which is both the first proof
+anywhere that this HUD ever admits it is blind, and the only reading that can
+tell a plate REFUSING from a plate with nothing to say.
+
 THE COMPOSITOR IS ASKED TWO THINGS, and both are here because a log line
 cannot answer either (PLAN D44). First, ONCE, that sway really has the three
 monitors `shells.OUTPUTS` declares — every shell builds one surface per
@@ -81,12 +89,18 @@ class Proc:
     coincidence; a third would be the time to extract one (PLAN D42).
     """
 
-    def __init__(self, name: str, argv: list[str], logpath: Path):
+    def __init__(
+        self,
+        name: str,
+        argv: list[str],
+        logpath: Path,
+        env: dict[str, str] | None = None,
+    ):
         self.name = name
         self.logpath = logpath
         self._fh = logpath.open("wb")
         self.p = subprocess.Popen(
-            argv, stdout=self._fh, stderr=subprocess.STDOUT
+            argv, stdout=self._fh, stderr=subprocess.STDOUT, env=env
         )
 
     def stop(self) -> None:
@@ -319,52 +333,83 @@ def wake_hud(stage: Path) -> Proc:
         # One whole round out before anything is expected of the corner: until
         # then a HUD that named nothing is a HUD nobody has told anything.
         pub.wait_for("round 1", shells.HUD_LIT_TIMEOUT_S)
-        want = list(shells.HUD_PLATES_LIT)
-        hudlog = stage / "jv-hud.log"
-        deadline = time.monotonic() + shells.HUD_LIT_TIMEOUT_S
-        got: dict[str, list[str] | None] = {}
-        while time.monotonic() < deadline:
-            if pub.p.poll() is not None:
-                raise Fail(
-                    f"the publisher exited with {pub.p.returncode}:\n{pub.tail()}"
-                )
-            said = hudlog.read_text("utf-8", "replace")
-            got = {
-                out["name"]: shells.hud_corner_plates(said, out["name"])
-                for out in shells.OUTPUTS
-            }
-            if all(plates == want for plates in got.values()):
-                log(f"  jv-hud: the corner names {len(want)} plates on every monitor")
-                return pub
-            time.sleep(shells.MAPPED_POLL_S)
-        # Named per monitor and per plate, because the two ways this fails are
-        # different repairs: a monitor that never wrote a line at all is a
-        # surface that was never built, and one naming nine plates is one plate
-        # that never lit.
-        report = []
-        for name, plates in got.items():
-            if plates == want:
-                continue
-            if plates is None:
-                report.append(f"{name}: never said anything about its corner")
-                continue
-            short = [p for p in want if p not in plates]
-            extra = [p for p in plates if p not in want]
-            report.append(
-                f"{name}: showed [{' '.join(plates) or 'nothing'}]"
-                + (f", missing {short}" if short else "")
-                + (f", unexpected {extra}" if extra else "")
-                + ("" if short or extra else " — in the wrong order")
-            )
-        raise Fail(
-            f"after {shells.HUD_LIT_TIMEOUT_S:.0f}s of "
-            f"{len(shells.HUD_FRAMES)} frames at {1 / shells.HUD_ROUND_S:.0f} Hz, "
-            f"the corner should have been showing [{' '.join(want)}] on every "
-            "monitor. " + "; ".join(report)
+        corner_census(
+            shells.hud_shell().attr,
+            stage / "jv-hud.log",
+            list(shells.HUD_PLATES_LIT),
+            shells.HUD_LIT_TIMEOUT_S,
+            because=(
+                f"{len(shells.HUD_FRAMES)} frames at "
+                f"{1 / shells.HUD_ROUND_S:.0f} Hz"
+            ),
+            alive=pub,
         )
+        return pub
     except Exception:
         pub.stop()
         raise
+
+
+def corner_census(
+    name: str,
+    hudlog: Path,
+    want: list[str],
+    timeout: float,
+    *,
+    because: str,
+    alive: Proc | None = None,
+) -> None:
+    """Wait until every monitor's corner names exactly `want`.
+
+    Shared by the two HUD runs, which is the only reason it is a function:
+    one has a broker and ten lit plates, the other has none and exactly one
+    (PLAN D47), and the way a corner is READ is the same question both times.
+    `name` is which of the two runs is being read, because both write the
+    same line and a report that did not say which would send a reader to the
+    wrong log. `because` is what the caller did to deserve an answer, for the
+    failure message; `alive` is a process whose death means the wait is
+    pointless.
+    """
+    deadline = time.monotonic() + timeout
+    got: dict[str, list[str] | None] = {}
+    while time.monotonic() < deadline:
+        if alive is not None and alive.p.poll() is not None:
+            raise Fail(f"{alive.name} exited with {alive.p.returncode}:\n{alive.tail()}")
+        said = hudlog.read_text("utf-8", "replace")
+        got = {
+            out["name"]: shells.hud_corner_plates(said, out["name"])
+            for out in shells.OUTPUTS
+        }
+        if all(plates == want for plates in got.values()):
+            log(
+                f"  {name}: the corner names {len(want)} "
+                f"plate{'' if len(want) == 1 else 's'} on every monitor"
+            )
+            return
+        time.sleep(shells.MAPPED_POLL_S)
+    # Named per monitor and per plate, because the two ways this fails are
+    # different repairs: a monitor that never wrote a line at all is a
+    # surface that was never built, and one naming nine plates is one plate
+    # that never lit.
+    report = []
+    for name, plates in got.items():
+        if plates == want:
+            continue
+        if plates is None:
+            report.append(f"{name}: never said anything about its corner")
+            continue
+        short = [p for p in want if p not in plates]
+        extra = [p for p in plates if p not in want]
+        report.append(
+            f"{name}: showed [{' '.join(plates) or 'nothing'}]"
+            + (f", missing {short}" if short else "")
+            + (f", unexpected {extra}" if extra else "")
+            + ("" if short or extra else " — in the wrong order")
+        )
+    raise Fail(
+        f"{name}: after {timeout:.0f}s of {because}, the corner should have been "
+        f"showing [{' '.join(want)}] on every monitor. " + "; ".join(report)
+    )
 
 
 # ----------------------------------------------------------------- the run
@@ -422,6 +467,65 @@ def load(shell: shells.Shell, stage: Path) -> None:
     check_zone(shell, "after", up=False)
 
 
+def load_blind(stage: Path) -> None:
+    """The same HUD again, with no bus at all, until it says so (PLAN D47).
+
+    `LinkPlate` is the one plate the run above cannot light: it is on screen
+    exactly while the HUD CANNOT see the bus, so lighting it means taking the
+    broker away — and then there are no frames for anything else. Hence a
+    second quickshell, the same shipped binary, with `JARVIS_BUS` pointed at a
+    path that is not a socket.
+
+    TWO CLAIMS, and the second is the stronger one. That the HUD admits it is
+    blind — nothing in this repo had ever watched a real one do that, and
+    `core/LinkState.qml`'s grace, the whole judgement in that file, had no gate
+    over it at all. And that the other ten stay DARK: every state machine under
+    this corner is built to refuse rather than guess, a refusal and a calm
+    machine draw the same nothing, and a corner naming exactly `link` is the
+    one reading that can tell them apart.
+
+    The environment is this process's own with one variable replaced, which is
+    deliberate: everything else about the run — the compositor, the private
+    session bus, the pinned bridge in the wrapper — has to be identical, or
+    what fails here is not the bus being gone.
+    """
+    shell = shells.hud_shell()
+    binary = need(shell.env)
+    # The control, as for every other shell: the screens are whole before it.
+    check_zone(shell, "before", up=False)
+    env = dict(os.environ, JARVIS_BUS=str(stage / shells.HUD_BLIND_BUS))
+    proc = Proc(
+        shells.HUD_BLIND_LOG,
+        [binary],
+        stage / f"{shells.HUD_BLIND_LOG}.log",
+        env=env,
+    )
+    try:
+        took = proc.wait_for(shells.READY, shells.READY_TIMEOUT_S)
+        log(f"  {shells.HUD_BLIND_LOG}: loaded in {took:.2f} s, with no bus")
+        corner_census(
+            shells.HUD_BLIND_LOG,
+            proc.logpath,
+            list(shells.HUD_PLATES_DARK),
+            shells.HUD_BLIND_TIMEOUT_S,
+            because=(
+                f"a bus that is not there and the HUD's own "
+                f"{shells.link_grace_s(shells.link_state_path().read_text('utf-8')):.0f}s "
+                "grace"
+            ),
+        )
+        # And this surface really is mapped while it says it — the plate lit,
+        # so `visible: selfTest || stack.anyLit` is true and a wl_surface
+        # exists — which makes "took no space" the HUD's own reading here
+        # rather than a sentence about a window that was never created (the
+        # D44 section in `shells.py`).
+        check_zone(shell, "while", up=True)
+        log(f"  {shells.HUD_BLIND_LOG}: took no space off any monitor")
+    finally:
+        proc.stop()
+    check_zone(shell, "after", up=False)
+
+
 def main() -> int:
     stage = Path(need("JV_SHELLLOAD_STAGE"))
     # Asked first and ends the run on its own rather than being counted with
@@ -442,10 +546,20 @@ def main() -> int:
         except Fail as exc:
             log(f"  FAILED: {exc}")
             bad += 1
+    # And the HUD once more with nothing under it, which is a run rather than
+    # a shell: the same binary, the same wait, a bus that is not there. Counted
+    # with the shells because it fails the same way and for the same reader.
+    log(f"shellload: {shells.HUD_BLIND_LOG}")
+    runs = len(shells.SHELLS) + 1
+    try:
+        load_blind(stage)
+    except Fail as exc:
+        log(f"  FAILED: {exc}")
+        bad += 1
     if bad:
-        log(f"\nshellload: {bad} of {len(shells.SHELLS)} shells did not load.")
+        log(f"\nshellload: {bad} of {runs} runs did not load.")
         return 1
-    log(f"\nshellload: all {len(shells.SHELLS)} shells loaded and mapped.")
+    log(f"\nshellload: all {runs} runs loaded and mapped.")
     return 0
 
 

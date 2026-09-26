@@ -48,6 +48,7 @@ as coverage:
 
 import dataclasses
 import pathlib
+import re
 import tomllib
 
 # The line quickshell's own logger writes once the root component is built and
@@ -723,14 +724,16 @@ HUD_PLATES_LIT = (
     "health",
 )
 
-# And the one that cannot be here, which is not an omission but the shape of
-# what it reports. `LinkPlate` is on screen exactly while the HUD CANNOT see
-# the bus, so it is mutually exclusive with every plate above: lighting it
-# would mean taking the broker away, and then there would be no frames.
-# `shell/jv-hud/shell.qml` says the same thing about its own box — "in
-# practice it can never share the surface". It is covered instead by the
-# no-broker state this gate used to be entirely made of: see D43's entry in
-# `ops/ralph/PLAN.md` for why that is a separate run and not a longer one.
+# And the one that cannot be lit by THAT run, which is not an omission but
+# the shape of what it reports. `LinkPlate` is on screen exactly while the HUD
+# CANNOT see the bus, so it is mutually exclusive with every plate above:
+# lighting it means taking the broker away, and then there are no frames for
+# anything else. `shell/jv-hud/shell.qml` says the same thing about its own
+# box — "in practice it can never share the surface".
+#
+# So it gets its own run, and this tuple is that run's whole expectation: the
+# blind HUD's corner must show exactly these and nothing else. See the D47
+# section at the foot of this file.
 HUD_PLATES_DARK = ("link",)
 
 # How long the corner is given to name them all. Generous against a cold Qt
@@ -773,3 +776,126 @@ def hud_corner_plates(said: str, monitor: str) -> list[str] | None:
         return None
     names = found[-1].split(prefix, 1)[1].strip()
     return [] if names == "nothing" else names.split(" ")
+
+
+# ------------------------------------------- the blind HUD (PLAN D47)
+#
+# THE ELEVENTH PLATE, and the only run that can light it. Everything above is
+# a HUD with a broker under it; `LinkPlate` is on screen exactly while there
+# is none, so it needs its own quickshell — the same shipped binary, started
+# after the three, with `JARVIS_BUS` pointed at a path that is not a socket
+# and nothing else changed.
+#
+# WHAT IT PROVES, and it is two things rather than one:
+#
+#   · The HUD admits it is blind. Nothing anywhere in this repo had ever
+#     watched a real HUD do that. `shell/jv-hud/tests` drives `LinkState`
+#     against a BusModel it owns, which is a claim about the element; this is
+#     the shipped shell, the shipped bridge, and a machine that really is not
+#     running underneath it.
+#   · And the ten plates above it stay dark, which is the stronger half. Every
+#     state machine in `shell/jv-hud/core` is built to REFUSE rather than
+#     guess — MicState will not call a mic it cannot see "off", SpeechState
+#     will not call an invisible bus "idle" — and a refusal and a calm machine
+#     draw the same nothing, so no picture can tell them apart. The corner
+#     naming exactly `link` is the one reading that can: a plate that had
+#     started guessing from a bus it cannot see would appear beside it.
+#
+# It also puts `core/LinkState.qml`'s grace under test for the first time. The
+# grace is the whole judgement in that file — say nothing until the outage has
+# outlasted the bridge's own retry and Bus.qml's respawn — and a HUD that
+# reported instantly, or never, would have passed every gate in this repo. A
+# grace of 600 s injected into the QML ends this run 1, and the report quotes
+# the 600 back, because the message derives the number from the same file.
+#
+# WHAT IT IS NOT, and it is not what it looks like. This is NOT a fourth log's
+# worth of scan coverage. Measured, by injecting `JSON.parse("{")` into
+# `LinkPlate.qml`'s own `text:` binding: BOTH HUD logs reported it, three times
+# each. A plate's children are constructed with the plate — `visible` and
+# `opacity` decide what is drawn, not what exists — so nearly every binding
+# under a plate that never shows is evaluated anyway, and the D39 scan already
+# had them. What this run adds is the STATE: `blind` true, `shown` true, the
+# surface mapped because of it, and a corner naming which plates that produced.
+# The fourth log is scanned all the same, and for the ordinary reason — a log
+# nobody reads grades clean — which is why `scan_targets()` iterates engines.
+
+# Where the blind HUD's log goes, as a basename under the stage. Its own,
+# because the frames run's log is the other half of the HUD's coverage and a
+# single file would make the census below read the wrong corner. Named here
+# rather than in the script because the SCAN has to find it too: a blind HUD
+# that threw on every screen is exactly this gate's D39 failure, and a log
+# nobody scanned reports nothing.
+HUD_BLIND_LOG = "jv-hud-blind"
+
+# The bus that is not there, as a name under the stage. A path rather than an
+# empty string: `jv-hud-bridge` falls back to its own default when `--bus` and
+# `$JARVIS_BUS` are both empty, and a bridge that quietly found the machine's
+# real socket would be a HUD this gate never blinded. Nothing creates it.
+HUD_BLIND_BUS = "no-bus.sock"
+
+# How long the blind corner is given to name `link`. It is the one wait here
+# that is mostly a real wait rather than a ceiling — the grace below is 5 s of
+# it by design — and the headroom on top is held by
+# `test_the_blind_run_outlasts_the_grace_it_is_about`.
+HUD_BLIND_TIMEOUT_S = 12.0
+
+
+def hud_shell() -> Shell:
+    """The one shell this second run is about, out of `SHELLS`.
+
+    Asked by `wake` rather than by `attr`, for the same reason `load.py`
+    dispatches on it: the list of shells stays the only place that decides
+    which of them is the HUD. Exactly one, or this raises — two would mean the
+    blind run silently picked one of them.
+    """
+    found = [s for s in SHELLS if s.wake == "hud"]
+    if len(found) != 1:
+        raise ValueError(f"expected exactly one shell woken by frames, got {found}")
+    return found[0]
+
+
+def link_state_path() -> pathlib.Path:
+    """`shell/jv-hud/core/LinkState.qml`, the file that decides the grace."""
+    return (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "shell"
+        / "jv-hud"
+        / "core"
+        / "LinkState.qml"
+    )
+
+
+def link_grace_s(link_state_qml: str) -> float:
+    """How long the HUD stays quiet about its own blindness, per the QML.
+
+    READ rather than copied, unlike `bar_strip_px()` and `hud_corner_line()`,
+    and the difference is what each number is for. Those two are expectations —
+    the gate states what the shell must do and fails when it does not. This one
+    is a DURATION THE GATE HAS TO OUTLAST: it decides how long to wait, and a
+    stale copy of it would make the gate flaky rather than red. So the timeout
+    above is checked against this, and this is checked against nothing —
+    whatever the HUD's grace becomes, the wait covers it or the ceiling test
+    says so.
+    """
+    found = re.search(
+        r"^\s*property\s+real\s+graceS:\s*([0-9.]+)\s*$", link_state_qml, re.M
+    )
+    if not found:
+        raise ValueError(
+            "shell/jv-hud/core/LinkState.qml no longer declares `property real "
+            "graceS: <number>` — the blind run's wait is derived from it"
+        )
+    return float(found.group(1))
+
+
+def scan_targets() -> list[tuple[str, str]]:
+    """Every log this run produces, with the repo root its paths are under.
+
+    One per quickshell rather than one per shell, which is the whole reason
+    this exists: the blind HUD is a fourth engine writing a fourth log, and
+    a scan that iterated `SHELLS` would have left it unread. Its root is the
+    HUD's — it is the same store path, loaded twice.
+    """
+    return [(s.attr, s.root) for s in SHELLS] + [
+        (HUD_BLIND_LOG, hud_shell().root)
+    ]
