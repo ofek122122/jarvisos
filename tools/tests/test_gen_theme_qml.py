@@ -10,6 +10,8 @@ is in sync with the toml, they check the toml still agrees with the blueprint's
 
 from __future__ import annotations
 
+import ast
+import collections
 import dataclasses
 import html
 import json
@@ -49,6 +51,33 @@ hud_corner_px = 300
 
 def gen_from(text: str) -> str:
     return gen.render_theme_qml(gen.load_tokens(text))
+
+
+# The comment stripper every gate in this file reads a QML file through,
+# and the one thing in this module four OTHER suites import by name
+# (test_barshots, test_hudshots, test_notifyshots, test_shellload). It sits
+# up here with the other module-level helper for that reason: it was
+# defined twice for a while — once naively, 120 lines above this careful
+# one — and a reader of either version could not tell which one the gates
+# below were actually calling (PLAN D76).
+def strip_qml_comments(text: str) -> str:
+    """Drop `//` comments, leaving braces and code intact.
+
+    A `//` inside a string literal is not a comment, so only one with an even
+    number of quotes before it on its line counts. (`/* */` is not handled
+    because the HUD does not use it; a file that grows one will show up as a
+    parse the gates disagree about, not as a silent pass.)
+    """
+    out = []
+    for line in text.splitlines():
+        i = line.find("//")
+        while i != -1:
+            if line.count('"', 0, i) % 2 == 0:
+                line = line[:i]
+                break
+            i = line.find("//", i + 2)
+        out.append(line)
+    return "\n".join(out)
 
 
 # --- generator shape -------------------------------------------------------
@@ -673,10 +702,6 @@ def names_word(text: str, word: str) -> bool:
     return f"`{word}`" in text or f'"{word}"' in text
 
 
-def strip_qml_comments(text: str) -> str:
-    return re.sub(r"//[^\n]*", "", text)
-
-
 def state_words(element: str) -> set[str]:
     """Every word `readonly property string state` can hand a plate."""
     found = STATE_BLOCK.search(element)
@@ -792,26 +817,6 @@ SAFE_SURFACE = {
     # plate has something to say.
     "color": '"transparent"',
 }
-
-
-def strip_qml_comments(text: str) -> str:
-    """Drop `//` comments, leaving braces and code intact.
-
-    A `//` inside a string literal is not a comment, so only one with an even
-    number of quotes before it on its line counts. (`/* */` is not handled
-    because the HUD does not use it; a file that grows one will show up as a
-    parse the gates disagree about, not as a silent pass.)
-    """
-    out = []
-    for line in text.splitlines():
-        i = line.find("//")
-        while i != -1:
-            if line.count('"', 0, i) % 2 == 0:
-                line = line[:i]
-                break
-            i = line.find("//", i + 2)
-        out.append(line)
-    return "\n".join(out)
 
 
 def window_bodies(text: str) -> list[tuple[str, str]]:
@@ -2322,3 +2327,102 @@ def test_every_face_a_nix_surface_asks_for_is_a_role_theme_toml_names():
             f"{path} sets type; it must ask theme.toml for the family through "
             f'`face "<role>"` rather than spelling one'
         )
+
+
+# --- D76: the helper's own contract, since no file in the tree exercises it ---
+#
+# `strip_qml_comments` was defined twice in this module for several iterations:
+# the careful version above, and a naive `re.sub(r"//[^\n]*", "", text)`. Python
+# binds at call time, so every caller in every suite got the careful one and
+# nothing was ever wrong — the naive one was dead the moment it was written,
+# which is exactly why it survived long enough to become a trap. What it cost
+# was reading: a gate in the first 800 lines of this file was reasoning about a
+# function that was not the one it called, and the two differ on precisely the
+# case the survivor's docstring is about.
+#
+# Deleting it is therefore a change with no verdict of its own, and that was
+# measured, not assumed. Run over all 101 QML files in this tree the two
+# functions agree on every single line — there is no `//` inside a string
+# literal anywhere in the shells today — and with the naive one installed as
+# the real definition, 774 of this suite's 776 tests still pass: the only two
+# that notice are the two below. Had the careful one been the one deleted, the
+# gate would have gone on being green for as long as no QML string held a URL.
+# So the contract needs a test that names its case outright rather than hoping
+# a shell file happens to contain it, and this is that test: the first QML
+# string to hold a URL (or a regex with `//` in it) must not lose half its
+# line.
+
+
+def test_a_slash_slash_inside_a_qml_string_is_not_a_comment():
+    stripped = strip_qml_comments(
+        'property string docs: "https://example/x" // the real comment\n'
+        'property string re: "a//b"\n'
+    )
+    assert stripped.splitlines() == [
+        'property string docs: "https://example/x" ',
+        'property string re: "a//b"',
+    ]
+    # The naive definition this replaced would have cut both lines at the first
+    # `//`, leaving `property string docs: ` and an unterminated quote — every
+    # gate that matches a quoted value would then read the file as not having
+    # said the thing it says.
+    assert '"https://example/x"' in stripped and '"a//b"' in stripped
+
+
+def test_stripping_comments_never_moves_a_line_or_drops_a_brace():
+    """Two properties the gates above depend on without ever saying so:
+    `window_bodies` counts `{` and `}` to track depth, and several gates report
+    a line number or use `re.M` against a line-anchored pattern. A stripper
+    that joined lines, or that ate a brace inside a commented-out block, would
+    make those read the wrong element and say so convincingly."""
+    text = (
+        "Item {\n"
+        "    // a whole-line comment\n"
+        '    color: "#000" // and a trailing one { with a brace in it }\n'
+        "\n"
+        "}\n"
+    )
+    stripped = strip_qml_comments(text)
+    assert len(stripped.splitlines()) == len(text.splitlines())
+    assert stripped.count("{") == 1 and stripped.count("}") == 1
+    assert stripped.splitlines()[1].strip() == ""
+
+
+def test_no_module_under_tools_defines_the_same_name_twice():
+    """The shape of the D76 trap, wherever it appears next.
+
+    A second module-level `def` or `class` of a name silently replaces the
+    first, and nothing — not pytest, not a linter this repo runs — says a word.
+    In a helper module (this one is imported by four other suites) the cost is
+    a reader believing the wrong definition; in a `test_*` name the cost is
+    worse, because the shadowed test still LOOKS collected and covered in the
+    file and never runs at all.
+
+    Module level only, on purpose, and that narrowness was measured rather
+    than assumed: widening the walk to every node in the tree (`ast.walk`)
+    reports four modules here, and every one of them is legitimate — `__init__`
+    on two classes of the same file, and a helper nested inside two different
+    tests. A `def` under `try`/`except ImportError` or `if TYPE_CHECKING` is a
+    deliberate fallback for the same reason, and none of them are siblings in
+    the module body.
+    """
+    duplicates: dict[str, list[str]] = {}
+    scanned = []
+    for path in sorted((ROOT / "tools").rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        scanned.append(str(path.relative_to(ROOT)))
+        defined: collections.Counter[str] = collections.Counter()
+        for node in ast.parse(path.read_text("utf-8")).body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined[node.name] += 1
+        again = sorted(name for name, count in defined.items() if count > 1)
+        if again:
+            duplicates[str(path.relative_to(ROOT))] = again
+    # A scan that reads nothing passes, so say what it read: this very file has
+    # to be in it, and a tools/ that suddenly holds three modules means the walk
+    # broke rather than that the trap is gone.
+    assert "tools/tests/test_gen_theme_qml.py" in scanned and len(scanned) >= 20, scanned
+    assert not duplicates, "each of these names is defined twice; the first is dead:\n" + "\n".join(
+        f"{path}: {', '.join(names)}" for path, names in sorted(duplicates.items())
+    )
