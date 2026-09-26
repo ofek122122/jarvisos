@@ -19,8 +19,8 @@ One suite at a time, warm venvs, on ares' hardware:
     pylib          1.6 s      jv-guard       3.9 s      jv-voice      23.0 s
     jv-hud-bridge  1.6 s      jv-context    11.4 s      jv-brain      36.3 s
     jv-compat      2.7 s      tools         12.2 s      jv-ears      145.8 s
-    harness        3.4 s                               ----------------------
-                                                        all ten      241.7 s
+    harness        3.4 s      jv-dictate     4.3 s      ----------------------
+                                                        all eleven    246.0 s
 
 Four minutes, once, for the worst change in the repo (`services/pylib/`, which
 every service imports), and 60% of that is jv-ears alone. A service change is
@@ -56,9 +56,9 @@ read by none: they are HOW a suite runs — the venv and the PYTHONPATH for one,
 the nix dev shell and the vendored registry for the other. Nothing derived
 could reach either, so a change to `runtests.sh` used to plan `tools` alone
 (which reads it as text) and a change to `cargotest.sh` planned exactly that
-too. Each is now every suite it can run: ten Python suites, both crates. That
-is the 241.7 s case above, and it is the same argument — nobody can guess
-which of the ten a change to the runner moved.
+too. Each is now every suite it can run: eleven Python suites, both crates.
+That is the 246.0 s case above, and it is the same argument — nobody can
+guess which of the eleven a change to the runner moved.
 
 WHAT THIS IS NOT. It is not the whole verify gate. `nixos-rebuild build
 --flake .#ares` is, and so is `nix build .#jarvisd`. Those are named in

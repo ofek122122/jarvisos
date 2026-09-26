@@ -1280,7 +1280,7 @@ def test_a_declared_path_does_not_claim_the_sibling_beside_it():
 def test_editing_the_python_runner_names_every_suite_it_can_run():
     """The change is rare and it is total: `runtests.sh` once started putting
     `services/pylib` on PYTHONPATH, and that one line changed which copy of
-    `jarvis_bus` all ten suites import. Before this it named `tools` alone,
+    `jarvis_bus` all eleven suites import. Before this it named `tools` alone,
     which reads the script as TEXT to check the service list in its header —
     a real reader, and not the one at risk."""
     got = dependents.readers(ROOT, ["ops/ralph/runtests.sh"])

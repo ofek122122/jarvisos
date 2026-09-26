@@ -111,7 +111,7 @@ Item {
     // The services on this machine, by directory name under services/ minus
     // the library. A roster this long is not a prediction — it is the worst
     // case the health plate has to survive, and every name in it is real.
-    readonly property var roster: ["jarvisd", "jv-act", "jv-brain", "jv-compat", "jv-context", "jv-ears", "jv-guard", "jv-hud-bridge", "jv-voice"]
+    readonly property var roster: ["jarvisd", "jv-act", "jv-brain", "jv-compat", "jv-context", "jv-dictate", "jv-ears", "jv-guard", "jv-hud-bridge", "jv-voice"]
 
     // The surface the shell declares, which is what `width` above is a copy
     // of. Named here because the narrow checks put it back after moving it.

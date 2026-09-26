@@ -59,7 +59,7 @@ one change most likely to break a gate — a change to the gate — was the one
 change it could not see. Both are implicit reads now, the way `DECLARED_GATES`
 already had it: a QML gate reads its own script, and `runtests.sh` is read by
 every suite it can run, because it picks the interpreter, layers the venv and
-sets the PYTHONPATH that decides which `jarvis_bus` all ten of them import.
+sets the PYTHONPATH that decides which `jarvis_bus` all eleven of them import.
 `cargotest.sh` is the same rule for Rust and lives in `tools/verify.py`, with
 the rest of the Rust half.
 
@@ -494,7 +494,7 @@ def readers(
 
     Every suite also reads `runtests.sh`, which is not a path any of them
     NAMES — a suite cannot import the script that runs it — and is the one
-    thing all ten have in common (PLAN B73). It picks the interpreter, layers
+    thing all eleven have in common (PLAN B73). It picks the interpreter, layers
     the venv, and sets the PYTHONPATH that decides which copy of `jarvis_bus`
     gets imported; that last line, when it was added, changed the answer every
     suite in this repo gives. Before this, a change to it named `tools` alone,

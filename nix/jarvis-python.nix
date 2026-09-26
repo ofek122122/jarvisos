@@ -119,6 +119,21 @@ let
 
   jv-compat = mkLocal "jv-compat" ../services/jv-compat [ jarvis-bus ];
 
+  # Push-to-talk dictation (PLAN F5b). Its own small faster-whisper wrapper
+  # (services/jv-dictate/jv_dictate/asr.py) points at the SAME
+  # JARVIS_MODELS_DIR jv-ears reads — one set of weights, invariant 1
+  # forbidding a direct import between the two services rather than a
+  # second model. `evdev` reads the raw key events; nothing here needs
+  # uinput — the injector is a fake Sink until PLAN F5's jv-act tool exists.
+  jv-dictate = mkLocal "jv-dictate" ../services/jv-dictate (with py.pkgs; [
+    jarvis-bus
+    numpy
+    faster-whisper
+    soundfile
+    sounddevice
+    evdev
+  ]);
+
   # The HUD's read-only window onto the bus: QML cannot open a Unix socket
   # or unpack MessagePack, so this child process does it and writes JSON
   # lines. jarvis-bus is its only dependency — it subscribes and nothing
@@ -132,6 +147,7 @@ in
   contextEnv = py.withPackages (_: [ jv-context ]);
   guardEnv = py.withPackages (_: [ jv-guard ]);
   compatEnv = py.withPackages (_: [ jv-compat ]);
+  dictateEnv = py.withPackages (_: [ jv-dictate ]);
   hudBridgeEnv = py.withPackages (_: [ jv-hud-bridge ]);
   # NOTE: jv-act (Rust) is intentionally NOT built into any service env
   # here and NOT given a systemd unit — REVIEW-REQUIRED (invariant 3).

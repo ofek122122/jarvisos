@@ -13,11 +13,11 @@ measured now, on this machine, warm venvs, one suite at a time:
     pylib          1.6 s      jv-guard       3.9 s      jv-voice      23.0 s
     jv-hud-bridge  1.6 s      jv-context    11.4 s      jv-brain      36.3 s
     jv-compat      2.7 s      tools         12.2 s      jv-ears      145.8 s
-    harness        3.4 s                               ----------------------
-                                                        all ten      241.7 s
+    harness        3.4 s      jv-dictate     4.3 s      ----------------------
+                                                        all eleven    246.0 s
 
 The worst case in the whole repo is a change to `services/pylib/jarvis_bus/`,
-which every service imports: ten suites, four minutes, and 60% of it is
+which every service imports: eleven suites, four minutes, and 60% of it is
 jv-ears alone. Everything else is far cheaper — a service change is that
 service plus `tools` (seconds), a HUD change is `tools` + the two QML gates
 (~80 s). Against that: a red commit has twice stood for two days.
@@ -459,30 +459,31 @@ def test_listing_the_plan_runs_nothing(tmp_path):
 # ------------------------------------------------------- against the real repo
 
 
-def test_the_expensive_case_is_the_bus_library_and_it_is_ten_suites_and_a_shell():
+def test_the_expensive_case_is_the_bus_library_and_it_is_eleven_suites_and_a_shell():
     """The number B70 was arguing about, asserted rather than remembered — and
-    it grew by one that is not a Python suite (PLAN D43).
+    it grew by one that is not a Python suite (PLAN D43), and by one more
+    Python suite again when jv-dictate started importing jarvis_bus (PLAN F5b).
 
     `ops/ralph/shellload.sh` now starts a real broker and publishes real frames
     to light the HUD's plates, so `services/pylib` is the client library that
-    carries them and a change to it can turn ten lit plates into none. Ten
-    suites plus that one gate; the ten are still the bulk of the price.
+    carries them and a change to it can turn ten lit plates into none. Eleven
+    suites plus that one gate; the eleven are still the bulk of the price.
     """
     steps = verify.plan(ROOT, ["services/pylib/jarvis_bus/client.py"])
     suites = [s for s in steps if s.command.startswith("bash ops/ralph/runtests.sh")]
-    assert len(suites) == 10
+    assert len(suites) == 11
     assert [s.command for s in steps if s not in suites] == [
         "bash ops/ralph/shellload.sh"
     ]
 
 
 def test_editing_a_runner_is_the_expensive_case_too():
-    """The real repo, both halves of B73's argued case. Ten suites is the
-    price of `services/pylib/` (241.7 s in the table above) and it is the
+    """The real repo, both halves of B73's argued case. Eleven suites is the
+    price of `services/pylib/` (246.0 s in the table above) and it is the
     price of the script that runs them, for the same reason: nobody could
-    have guessed which of the ten a change there moved."""
+    have guessed which of the eleven a change there moved."""
     py = [s.command for s in verify.plan(ROOT, ["ops/ralph/runtests.sh"])]
-    assert len([c for c in py if c.startswith("bash ops/ralph/runtests.sh ")]) == 10
+    assert len([c for c in py if c.startswith("bash ops/ralph/runtests.sh ")]) == 11
     rs = [s.command for s in verify.plan(ROOT, ["ops/ralph/cargotest.sh"])]
     assert "bash ops/ralph/cargotest.sh jarvisd" in rs
     assert "bash ops/ralph/cargotest.sh jv-act" in rs

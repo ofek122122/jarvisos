@@ -1,0 +1,29 @@
+[project]
+name = "jv-dictate"
+version = "0.1.0"
+description = "JarvisOS push-to-talk dictation: hold a key, speak, get text (PLAN F5b)"
+requires-python = ">=3.10"
+dependencies = [
+  "jarvis-bus",
+  "numpy",
+  "faster-whisper>=1.0",
+  "soundfile",
+]
+
+[project.optional-dependencies]
+# Real hardware only — never imported at module load time (see main.py),
+# so a checkout with neither installed can still run the unit tests.
+live = ["sounddevice", "evdev"]
+
+[project.scripts]
+jv-dictate = "jv_dictate.main:cli"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["jv_dictate*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

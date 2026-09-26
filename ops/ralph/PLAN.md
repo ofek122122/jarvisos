@@ -166,17 +166,79 @@ the top unchecked item unless it is blocked.
       autonomously.** The push-to-talk/Whisper/HUD-indicator half is still
       open for a future iteration, gated on a fake injector — split out as F5b
       so the `[B]` on the injector does not block the buildable three quarters.
-- [ ] F5b. **Dictation anywhere — everything except the injector.** The half
-      F5's own review found buildable today: push-to-talk key detection (a
-      `keyd`/niri bind, the mechanism `modules/super-menu.nix` already uses for
-      the Super tap), reuse of jv-ears' existing Whisper path (NO second ASR),
-      and a HUD recording indicator driven by a real mic-open bus fact —
-      invariant 10, never fakeable. Everything downstream terminates in a
-      **fake injector**, the same shape PLAN J1 prescribes for jv-act-adjacent
-      work, so adopting the real `input.type_text` tool later is a one-call
-      change. Gate: tests on a WAV fixture asserting the right keystrokes reach
-      the fake sink, plus the indicator following the real mic fact. Do NOT
-      create anything under `services/jv-act/` — that is F5, and it is `[B]`.
+- [H] F5b. **Dictation anywhere — everything except the injector, and except
+      the HUD indicator (split into F5c below).** DONE (this commit): new
+      service `services/jv-dictate` — push-to-talk key detection (raw evdev,
+      the Pause key: not bound anywhere in `modules/niri/config-base.kdl`,
+      checked by grep first), its own small faster-whisper wrapper
+      (`jv_dictate/asr.py`) pointed at the SAME `JARVIS_MODELS_DIR` jv-ears
+      already reads — one set of weights on the WD Green, invariant 1
+      forbidding the direct cross-service import that would otherwise share
+      jv-ears' own wrapper — and a **fake injector** (`jv_dictate/injector.py`:
+      `LogSink` prints "would type: ...", `FakeSink` is what the tests use),
+      the exact shape PLAN J1 and R11 already prescribe for jv-act-adjacent
+      work, so adopting the real `input.type_text` tool later (once F5's
+      review lands) is a one-call change in `main.py` and nothing else moves.
+      `jv_dictate/ptt.py` is the push-to-talk state machine (dumb, like
+      dialog.ListenWindow: only the key going up/down ends a recording, plus
+      a hard 60 s safety cap mirroring `dialog.listen`'s own `window_s <= 60`
+      — a stuck key must not become an open mic). `jv_dictate/service.py` is
+      the whole start -> record -> transcribe -> sink -> heartbeat path,
+      built to be driven by fakes so `main.py` (the real evdev + sounddevice
+      + bus wiring, imported lazily so the package still imports on a machine
+      that has not built/switched this service) stays thin.
+      **No schema change, and no `dialog.listen` reason added:** the key IS
+      the gate, so this never asks jv-ears for a no-wake window at all — the
+      one fact worth telling the HUD (a recording is in progress) already
+      has a home on `sys.health`'s free-form, service-local `metrics`
+      (`recording: 1.0/0.0`), the exact extension point jv-ears' own
+      `mic_open` already rides on. That is what makes this buildable without
+      the schemas/** human-review step F4/F5 both hit.
+      Tests: `services/jv-dictate/tests/` (28 cases) — `test_ptt.py` (the
+      state machine against a fake clock: autorepeat, a stray release, the
+      hard cap, force-stop), `test_audio.py` (the recording buffer against a
+      fake PortAudio-shaped stream), `test_injector.py`, `test_pipeline.py`
+      (a stub transcriber — empty text sends nothing), `test_service.py` (the
+      whole path against a `FakeBus` + fake recorder/transcriber/sink, incl.
+      `HealthBeat`'s "beat every period, and immediately on state change"
+      rule), and `test_asr_fixture.py` — the REAL faster-whisper engine on
+      `harness/fixtures/speech-no-wake.wav` (real speech naming no wake word:
+      jv-ears' own fixture test proves that file is never transcribed there,
+      which is exactly the sentence push-to-talk dictation exists for). This
+      ran for REAL in this iteration (ares already has the model weights
+      jv-ears uses) rather than skipping. `bash ops/ralph/verify.sh`: 13
+      gates over 26 paths, GREEN in 469.0 s — touching `ops/ralph/runtests.sh`
+      (the services list comment) and `tools/hudshots/scene/tst_fit.qml` (the
+      health-plate roster, which enumerates every real service directory)
+      pulled in every Python suite plus `hudshots.sh`; the roster/count
+      updates needed by those two files are `tools/tests/test_dependents.py`,
+      `tools/tests/test_hudshots.py`, `tools/tests/test_verify.py` (a pinned
+      "ten suites, 241.7s" cost table now reads eleven, 246.0s — a real
+      re-measurement, not a guess) and matching prose in `tools/verify.py`/
+      `tools/dependents.py`. `ops/ralph/hudshots.sh` ran clean: all 16 shots
+      matched the sheet committed at HEAD byte-for-byte (jv-dictate is not
+      wired into the HUD yet — see F5c — so nothing should have moved, and
+      nothing did). `nixos-rebuild build --flake .#ares` → ok (17 new
+      derivations: `jv-dictate`'s package, its python env, its unit, the
+      rebuilt `system-path`/`etc`/`user-units`/toplevel). Never switched.
+      No schema, no jv-act, no boot path, no pins, no disko.nix touched.
+      `[H]` because the real key-hold-and-speak round trip needs a human at
+      a keyboard and a microphone — see `ops/ralph/HUMAN-VERIFY.md`.
+- [ ] F5c. **Dictation's HUD recording indicator**, split out of F5b for
+      scope: `sys.health`'s free-form `metrics.recording` (jv-dictate, F5b)
+      is ready to read, the same way `MicState.qml` already reads jv-ears'
+      `mic_open`, but wiring a NEW plate into `shell/jv-hud/` touches the
+      generic, exacting cross-plate conformance suite in
+      `tools/tests/test_gen_theme_qml.py` (1600+ lines, asserts things like
+      "every `*Plate.qml` declares `plateName`" and colour/motion rules
+      across every plate at once) — real work, deserving its own iteration
+      rather than a rushed addition riding in on F5b's much larger diff.
+      Gate: a new `core/DictateState.qml` + `DictatePlate.qml` pair mirroring
+      `MicState.qml`/`MicPlate.qml`'s honesty rules (unknown/stale heartbeat
+      never reads as "not recording"), a `tst_dictatestate.qml` test, wired
+      into `PlateStack` in `shell.qml` (which auto-discovers children — no
+      other file needs to change), plus whatever `test_gen_theme_qml.py`
+      and `tst_fit.qml`'s roster/floor checks then ask for.
 
 ### Track G — system comfort
 - [H] G1. **Bluetooth.** DONE (this commit): `modules/bluetooth.nix` declares

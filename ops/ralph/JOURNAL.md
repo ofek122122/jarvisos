@@ -16339,3 +16339,113 @@ backlog (Tracks F-K) is far from resolved — G through K are still entirely
   still far from resolved — F4/F5 need a human decision, G9/G10 are `[B]`,
   and H through K are entirely `[ ]` — so the loop keeps going per
   PROMPT.md STEP 5.
+
+## 2026-09-27 — push-to-talk dictation, minus the injector and the HUD plate (PLAN F5b)
+- built: F5b was the top unchecked item in Track F (F4/F5 are `[B]`; F5b was
+  carved out of F5 as the three buildable quarters, but two prior iterations
+  jumped past it straight to Track G — an oversight this iteration caught by
+  reading Track F top-to-bottom per PROMPT.md's own ladder). New service
+  `services/jv-dictate`: hold the Pause key, speak, release, and the
+  transcript goes to a Sink. `jv_dictate/ptt.py` is the push-to-talk state
+  machine — dumb on purpose, the same shape as jv-ears' `dialog.ListenWindow`:
+  only the key coming back up ends a recording, plus a hard 60 s safety cap
+  mirroring `dialog.listen`'s own `window_s <= 60` (a stuck key must not
+  become an open mic). `jv_dictate/asr.py` is a small faster-whisper wrapper
+  pointed at the SAME `JARVIS_MODELS_DIR` jv-ears already reads — one set of
+  weights on the WD Green, not a second ASR; invariant 1 forbids importing
+  jv-ears' own wrapper directly, so this is a second small file rather than a
+  cross-service import (the sanctioned alternative, `services/pylib`, was
+  considered and skipped for now — reaching into jv-ears' own package felt
+  riskier than a 30-line duplicate of a stable wrapper, for one iteration).
+  `jv_dictate/injector.py` is the fake-injector seam PLAN J1 and
+  `docs/optimization-backlog.md` R11 already prescribe for jv-act-adjacent
+  work: `LogSink` (production default — prints "would type: ...", types
+  nothing, anywhere) and `FakeSink` (what the tests use). Swapping in the
+  real `input.type_text` tool once F5's own review lands is a one-call change
+  in `main.py`; nothing else moves. `jv_dictate/service.py` is the whole
+  start -> record -> transcribe -> sink -> heartbeat path, using
+  `jarvis_bus.HealthBeat` (the same "beat every period, and immediately on
+  state change" rule jv-guard already follows) rather than reinventing
+  jv-ears' own pump_health by hand; `main.py` is thin real-hardware wiring
+  (evdev key events across every device that can report the trigger key,
+  mirroring keyd's own `ids = ["*"]` wildcard; a real `sounddevice` capture
+  stream) with `evdev`/`sounddevice` imported lazily, the same discipline
+  `jv_ears.audio` follows, so the package still imports cleanly on a machine
+  that has not built/switched this service yet.
+  **Why no schema change, unlike F4/F5's own R10/R11 findings:** the key IS
+  the gate here, so this never asks jv-ears for a `dialog.listen` no-wake
+  window (which would have meant extending its frozen `reason` enum — a
+  guarded `schemas/**` change) and never needs a brand-new topic for a HUD
+  indicator either. `schemas/sys.health.json` already declares `metrics`
+  free-form and service-local, the exact extension point jv-ears' own
+  `mic_open` rides on, so jv-dictate reporting `metrics.recording: 1.0/0.0`
+  on its own heartbeat costs nothing frozen. That is the one design decision
+  that made F5b buildable at all instead of joining F4/F5 as a third `[B]`.
+  Split out **F5c** (the HUD plate that reads `recording`) rather than
+  building it in the same diff: `tools/tests/test_gen_theme_qml.py` is a
+  1600+ line generic conformance suite over every `*Plate.qml` at once, and
+  wiring a new plate through it properly is real work deserving its own
+  iteration rather than a rushed addition riding in on an already-large diff.
+- tests: `services/jv-dictate/tests/` (28 cases, new): `test_ptt.py` (the
+  state machine — autorepeat while held is a no-op, a stray release is
+  ignored, other keys never reach it, the hard cap fires at exactly
+  `MAX_RECORDING_S`, `force_stop` clears cleanly); `test_audio.py` (the
+  recording buffer against a fake PortAudio-shaped stream — ordering,
+  multi-channel input keeps only column 0, a second recording starts from an
+  empty buffer); `test_injector.py`; `test_pipeline.py` (a stub transcriber:
+  empty text sends nothing to the sink, non-empty text does); `test_service.py`
+  (a `FakeBus` + the fake recorder/transcriber/sink + a synchronous stand-in
+  for the executor — the whole path: start beats once with `recording: 0`,
+  pressing the key beats `recording: 1` and arms the recorder, releasing it
+  transcribes and beats `recording: 0` again, expiry force-stops and still
+  transcribes what was captured, `HealthBeat`'s period-vs-state-change rule);
+  and `test_asr_fixture.py` — the REAL faster-whisper engine (not a stub) on
+  `harness/fixtures/speech-no-wake.wav`, real speech that jv-ears' own
+  fixture test proves is never transcribed there for lack of a wake word —
+  exactly the sentence dictation exists for. This machine already has the
+  model weights jv-ears uses (`/var/lib/jarvis/models`), so this ran for
+  REAL rather than skipping; a first draft of `jv_dictate/config.py` copied
+  jv-ears' `default_models_dir()` incompletely and always fell back to a
+  repo-local `models-cache` path even on Linux, which the fixture test
+  caught immediately (skipped with "model missing" against a real,
+  present model) — fixed to match jv-ears' own platform check before this
+  was committed. `bash ops/ralph/runtests.sh jv-dictate`: 28 passed.
+  `bash ops/ralph/verify.sh`: 13 gates over 26 paths, GREEN in 469.0 s.
+  Touching `ops/ralph/runtests.sh` (its own "Services:" comment) planned
+  every Python suite (B73's rule: nobody can guess which suite a runner
+  change moved), and touching `tools/hudshots/scene/tst_fit.qml` (the health
+  plate's roster, which must equal every real `services/*` directory) pulled
+  in `ops/ralph/hudshots.sh`. Both ends were real, pre-existing cross-cutting
+  assertions catching a real gap, not flaky tests: fixed by adding
+  `jv-dictate` to `runtests.sh`'s service list, to the `tst_fit.qml` roster
+  (sorted, between `jv-context` and `jv-ears` — floor width unaffected,
+  "jv-hud-bridge" stays the longest name), and by updating a pinned
+  suite-count table in `tools/tests/test_verify.py` (`services/pylib/`'s
+  worst case grew from ten Python suites/241.7 s to eleven/246.0 s — a real
+  re-measurement of the new `jv-dictate` suite's own 4.3 s, not an assumed
+  round number) with matching prose fixes in `tools/verify.py` and
+  `tools/dependents.py`. `ops/ralph/hudshots.sh` ran clean: 26/26 QML tests
+  passed and all 16 rendered shots matched the sheet committed at HEAD
+  byte-for-byte — jv-dictate touches nothing the HUD draws yet (F5c), so
+  nothing should have moved, and nothing did. `ops/ralph/nixtest.sh`: 51
+  passed (3 new cases — the unit exists and orders after PipeWire like
+  jv-ears, it points at the SAME `JARVIS_MODELS_DIR` jv-ears does rather
+  than a second copy, and it runs the actual built binary out of the store).
+- build: `nixos-rebuild build --flake .#ares` → ok (17 new derivations:
+  jv-dictate's package, its python env with the new `evdev` dependency, its
+  unit, the rebuilt `system-path`/`etc`/`user-units`/toplevel). Never
+  switched.
+- files: services/jv-dictate/** (new), modules/dictate.nix (new),
+  nix/jarvis-python.nix, hosts/ares/default.nix, ops/ralph/runtests.sh,
+  ops/ralph/nixtest.sh, tools/hudshots/scene/tst_fit.qml,
+  tools/tests/test_dependents.py, tools/tests/test_hudshots.py (unchanged —
+  read to confirm the roster rule, not edited), tools/tests/test_verify.py,
+  tools/verify.py, tools/dependents.py, ops/ralph/HUMAN-VERIFY.md,
+  ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: F5c (the HUD recording-indicator plate for jv-dictate) is the next
+  unchecked item in Track F — buildable today, no guardrail conflict, scoped
+  out only because `tools/tests/test_gen_theme_qml.py` deserves its own pass.
+  After that, Track F is fully resolved (F1-F3 `[H]`, F4/F5 `[B]`, F5b `[H]`)
+  and the loop moves into Track G at G4. The comfort backlog is still far
+  from resolved — H through K are entirely `[ ]` — so the loop keeps going
+  per PROMPT.md STEP 5.

@@ -710,5 +710,37 @@ names=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
 if grep -q '^jv-snapshot-restore$' <<<"$names"; then ok "$t"
 else bad "$t" "jv-snapshot-restore is not in environment.systemPackages: $(tail -3 <<<"$names")"; fi
 
+
+# ------------------------------------------------------------ dictation
+# PLAN F5b. modules/dictate.nix wires jv-dictate (push-to-talk key -> the
+# SAME faster-whisper weights jv-ears already uses -> a fake Sink until
+# PLAN F5's jv-act tool exists, R11) as a user service. What only an
+# evaluation can see: the unit actually exists, orders after PipeWire the
+# same way jv-ears does (both open a capture stream), and points
+# JARVIS_MODELS_DIR at the SAME directory jv-ears reads rather than a
+# second copy of the weights (invariant 1 forbids the direct import that
+# would otherwise prove this without asking the evaluation at all).
+
+t='jv-dictate is wired as a user service, ordered after PipeWire like jv-ears'
+dictate_out=$(unit jv-dictate.service '')
+if ! is_unit "$dictate_out"; then bad "$t" "not a unit: $(tail -3 <<<"$dictate_out")"
+elif grep -q '^ConditionUser=ofek$' <<<"$dictate_out" \
+  && grep -q '^WantedBy=default.target$' <<<"$dictate_out" \
+  && grep -q '^After=.*pipewire.service' <<<"$dictate_out" \
+  && grep -q '^Wants=.*pipewire.service' <<<"$dictate_out"; then
+  ok "$t"
+else bad "$t" "$(tail -10 <<<"$dictate_out")"; fi
+
+t='jv-dictate points at the SAME model directory jv-ears reads, not a second copy'
+ears_out=$(unit jv-ears.service '')
+ears_dir=$(grep -oP 'JARVIS_MODELS_DIR=\K[^"]*' <<<"$ears_out")
+dictate_dir=$(grep -oP 'JARVIS_MODELS_DIR=\K[^"]*' <<<"$dictate_out")
+if [ -n "$ears_dir" ] && [ "$ears_dir" = "$dictate_dir" ]; then ok "$t"
+else bad "$t" "jv-ears=$ears_dir jv-dictate=$dictate_dir"; fi
+
+t='jv-dictate runs the built jv-dictate binary, out of the store'
+if grep -qE "ExecStart=$store/[^\"]*-env/bin/jv-dictate\$" <<<"$dictate_out"; then ok "$t"
+else bad "$t" "$(grep ExecStart <<<"$dictate_out")"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

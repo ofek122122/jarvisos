@@ -7,7 +7,7 @@
 #
 # Usage:  bash ops/ralph/runtests.sh jv-brain
 #         bash ops/ralph/runtests.sh jv-voice
-# Services: jv-brain jv-ears jv-voice jv-context jv-guard jv-compat
+# Services: jv-brain jv-ears jv-voice jv-context jv-guard jv-compat jv-dictate
 #           jv-hud-bridge pylib tools harness
 #
 # `--origin <module> <service>` runs no tests: it prints the FILE this
