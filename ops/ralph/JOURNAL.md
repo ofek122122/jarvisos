@@ -16754,3 +16754,55 @@ work was entirely in `shell/jv-hud/`.
   at G7 (SSH agent + config, VPN support, Syncthing). The comfort backlog
   is still far from resolved — H through K are entirely `[ ]` — so the loop
   keeps going per PROMPT.md STEP 5.
+
+## 2026-09-27 — SSH agent + client config (PLAN G7a)
+- built: `modules/ssh.nix`, imported by `hosts/ares/default.nix` right after
+  `disk-space-warning.nix`. G7 bundled SSH/VPN/Syncthing as one item; split it
+  into G7a/G7b/G7c the same way F5 was split, and took the smallest, purely-
+  client slice first. Tried `programs.ssh.startAgent = true` first (the
+  obvious reading of "SSH agent") and `nixos-rebuild build` refused outright:
+  `modules/apps.nix`'s `services.gnome.gnome-keyring.enable = true` (there so
+  apps can store secrets) makes nixpkgs' `gcr-ssh-agent` module default ITS
+  `enable` to that same flag, and that module's own assertion is "only one
+  SSH agent can be installed at a time" — ares already runs a per-session
+  agent, just not the one the obvious option name suggests. Read `gcr-ssh-
+  agent.nix` and `programs/ssh.nix` in the nixpkgs source (`/nix/store/*-
+  source/nixos/modules/...`) to confirm: gcr-ssh-agent is a real systemd-user
+  socket/service (`%t/gcr/ssh`), its own socket unit runs `systemctl --user
+  set-environment SSH_AUTH_SOCK=...` on first connection, and it is backed by
+  the keyring rather than a bare `ssh-agent` — arguably the more comfortable
+  of the two (unlock once per login via the keyring prompt, not once per
+  key). So `modules/ssh.nix` leaves `startAgent` off on purpose and does the
+  one thing that was actually missing: `programs.ssh.extraConfig` appends
+  `AddKeysToAgent yes` / `ServerAliveInterval 60` / `ServerAliveCountMax 3` to
+  the system-wide `/etc/ssh/ssh_config` — agent-agnostic, applies to every
+  user, no dotfile in $HOME.
+- tests: `ops/ralph/nixtest.sh` (+3 cases) — `programs.ssh.startAgent`
+  evaluates `false` (pins the conflict so it can't silently come back),
+  `gcr-ssh-agent.socket`/`.service` are wanted by `sockets.target`/
+  `default.target` (the real agent this machine uses, read off the live
+  evaluation rather than assumed from the nixpkgs source), and the built
+  `/etc/ssh/ssh_config` carries all three `extraConfig` lines. Two of the
+  three new checks initially failed on a working-tree `warning: Git tree is
+  dirty` line nix prints on stderr getting caught by an exact `[ "$out" =
+  "false" ]` string match — switched to `grep -qx` the same way every other
+  check in this file already reads multi-line `nix eval ... 2>&1` output,
+  rather than adding a second way of comparing. `bash ops/ralph/runtests.sh
+  tools`: 946 passed, unaffected (no Python touched). `bash
+  ops/ralph/nixtest.sh`: 56 passed (was 53). `bash ops/ralph/verify.sh`: 2
+  gates over 3 paths (`hosts/ares/default.nix`, `modules/ssh.nix`,
+  `ops/ralph/nixtest.sh`), GREEN in 161.4s (tools 80.0, nixtest 81.3).
+- build: `nixos-rebuild build --flake .#ares` -> ok (4 derivations: the built
+  `/etc/ssh/ssh_config`, `etc`, `activate`, the rebuilt toplevel) — after
+  first catching and reverting the `startAgent` conflict above. Never
+  switched. No schema, no jv-act, no boot path, no pins, no disko.nix
+  touched.
+- files: modules/ssh.nix (new), hosts/ares/default.nix, ops/ralph/nixtest.sh,
+  ops/ralph/PLAN.md, ops/ralph/HUMAN-VERIFY.md, ops/ralph/JOURNAL.md
+- next: `[H]` because whether `SSH_AUTH_SOCK` actually reaches a real login
+  shell and a real key stays loaded across terminals needs a human session —
+  see HUMAN-VERIFY.md. Track G continues at G7b (VPN support — NetworkManager
+  plugins declared, a real peer config is Ofek's own) and G7c (Syncthing —
+  `services.syncthing.enable`, folder selection through its own web GUI). The
+  comfort backlog is still far from resolved — H through K are entirely
+  `[ ]` — so the loop keeps going per PROMPT.md STEP 5.

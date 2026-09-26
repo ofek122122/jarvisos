@@ -774,5 +774,39 @@ t='jv-dictate runs the built jv-dictate binary, out of the store'
 if grep -qE "ExecStart=$store/[^\"]*-env/bin/jv-dictate\$" <<<"$dictate_out"; then ok "$t"
 else bad "$t" "$(grep ExecStart <<<"$dictate_out")"; fi
 
+# ------------------------------------------------------------------- ssh
+# PLAN G7a. The agent itself is nixpkgs' gcr-ssh-agent, already switched on
+# by modules/apps.nix's gnome-keyring (see modules/ssh.nix's own comment) —
+# `programs.ssh.startAgent` must stay OFF, because its own module refuses to
+# evaluate at all with both agents on ("only one SSH agent can be installed
+# at a time"), which is exactly the failure a `nix build` catches but this
+# fast eval-only gate would not unless it asks by name. modules/ssh.nix's
+# actual job is appending client-comfort defaults to the system-wide
+# /etc/ssh/ssh_config via `programs.ssh.extraConfig`.
+
+t='ssh: startAgent stays off — its own module conflicts with gcr-ssh-agent'
+out=$(nix eval '.#nixosConfigurations.ares' --apply \
+  '(c: c.config.programs.ssh.startAgent)' 2>&1)
+if grep -qx 'false' <<<"$out"; then ok "$t"
+else bad "$t" "$out"; fi
+
+t='ssh: gcr-ssh-agent (via gnome-keyring) is the real per-session agent'
+sock=$(nix eval --json '.#nixosConfigurations.ares' --apply \
+  '(c: c.config.systemd.user.sockets."gcr-ssh-agent".wantedBy)' 2>&1)
+svc=$(nix eval --json '.#nixosConfigurations.ares' --apply \
+  '(c: c.config.systemd.user.services."gcr-ssh-agent".wantedBy)' 2>&1)
+if grep -qx '\["sockets.target"\]' <<<"$sock" && grep -qx '\["default.target"\]' <<<"$svc"; then
+  ok "$t"
+else bad "$t" "socket=$sock service=$svc"; fi
+
+t='ssh client config: comfort defaults reach the real /etc/ssh/ssh_config'
+ssh_config=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+  '(c: c.config.environment.etc."ssh/ssh_config".text)' 2>&1)
+if grep -q '^AddKeysToAgent yes$' <<<"$ssh_config" \
+  && grep -q '^ServerAliveInterval 60$' <<<"$ssh_config" \
+  && grep -q '^ServerAliveCountMax 3$' <<<"$ssh_config"; then
+  ok "$t"
+else bad "$t" "$(tail -10 <<<"$ssh_config")"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -568,7 +568,47 @@ the top unchecked item unless it is blocked.
       `[H]` because the one thing this cannot prove against a fake is
       whether a REAL crashed unit on ares' own session actually comes back
       under systemd's real supervision — see `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] G7. SSH agent + config, VPN support, Syncthing — each declared.
+- [H] G7a. **SSH agent + client config**, split out of G7 (SSH/VPN/Syncthing
+      were one item; this is the smallest, purely-client slice — no daemon
+      exposed, nothing in $HOME). DONE (this commit): `modules/ssh.nix`. The
+      agent half turned out to be ALREADY DONE by a module that was not
+      written for this — `modules/apps.nix`'s `services.gnome.gnome-keyring.
+      enable = true` (there so apps can store secrets) makes nixpkgs'
+      `gcr-ssh-agent` module default ITS `enable` to that same flag, so ares
+      already runs a per-session SSH agent backed by the keyring
+      (`gcr-ssh-agent.socket`/`.service`). `programs.ssh.startAgent` is
+      nixpkgs' OTHER agent, and its own module refuses to evaluate at all
+      with both on ("only one SSH agent can be installed at a time" —
+      caught first by `nixos-rebuild build` failing outright when this was
+      tried, then pinned as a permanent nixtest case so it can't silently
+      come back). So `modules/ssh.nix` leaves `startAgent` off and does the
+      one thing that WAS missing: `programs.ssh.extraConfig` appends
+      `AddKeysToAgent yes` / `ServerAliveInterval 60` / `ServerAliveCountMax
+      3` to the system-wide `/etc/ssh/ssh_config` (agent-agnostic, applies
+      to every user with no dotfile to maintain).
+      Gate: `ops/ralph/nixtest.sh` (+3 cases) reads the real evaluation:
+      `programs.ssh.startAgent` is `false` (guards the conflict from ever
+      reappearing), `gcr-ssh-agent.socket`/`.service` are wanted by
+      `sockets.target`/`default.target` (the real agent this machine uses),
+      and the built `/etc/ssh/ssh_config` carries all three extraConfig
+      lines. `bash ops/ralph/verify.sh`: 2 gates over 3 paths (`hosts/ares/
+      default.nix`, `modules/ssh.nix`, `ops/ralph/nixtest.sh`), GREEN in
+      161.4s (tools 80.0, nixtest 81.3 — 53 prior + 3 new = 56).
+      `nixos-rebuild build --flake .#ares` -> ok (4 derivations: the built
+      `/etc/ssh/ssh_config`, `etc`, `activate`, the rebuilt toplevel). Never
+      switched. No schema, no jv-act, no boot path, no pins, no disko.nix
+      touched. `[H]` because whether `SSH_AUTH_SOCK` actually reaches a real
+      login shell and a real key stays loaded across terminals needs a human
+      session — see `ops/ralph/HUMAN-VERIFY.md`. G7 continues at G7b (VPN
+      support) and G7c (Syncthing), split out for the same reason F5 was.
+- [ ] G7b. **VPN support**, split from G7. NetworkManager VPN plugins
+      declared (openvpn/wireguard/openconnect) so a human can add a VPN
+      connection through nm-applet/nmcli with no further nix change; a real
+      `networking.wireguard.interfaces` peer config is Ofek's own (needs a
+      real endpoint + keys), not this loop's to invent.
+- [ ] G7c. **Syncthing**, split from G7. `services.syncthing.enable` for the
+      `ofek` user, a declared `dataDir`; folder selection happens through its
+      own web GUI (127.0.0.1-only by default) same as any first run.
 - [ ] G8. Sound theme: one quiet, on-brand notification sound.
 - [B] G9. **Narrowed automount** — removable USB only, with the Windows
       NVMe and the 2 TB disk hard-excluded by serial. gvfs force-enables
