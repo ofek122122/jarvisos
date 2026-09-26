@@ -92,12 +92,19 @@ def mkrepo(tmp_path: Path) -> Path:
 
     # Each stub appends its argument to a log and exits with whatever
     # $RED_<name> says, so a test can make exactly one gate fail.
+    #
+    # …and, for D80, one that is red because of the TREE it ran in: a
+    # `tree-<gate>.red` file beside the gate, whose contents it prints as its
+    # failure. That file is untracked, so it is not in the baseline worktree,
+    # which is the only honest way to stage "green at HEAD, red here" — an env
+    # var reaches both runs and could never tell the two apart.
     for name in ("runtests.sh", "cargotest.sh"):
         s = ralph / name
         s.write_text(
             '#!/usr/bin/env bash\n'
             'echo "RAN $1" >> "$RALPH_LOG"\n'
             'echo "output of $1 GATE=${RALPH_GATE:-unset}"\n'
+            'if [ -f "tree-$1.red" ]; then cat "tree-$1.red"; exit 9; fi\n'
             'var="RED_${1//-/_}"\n'
             'exit "${!var:-0}"\n',
             "utf-8",
@@ -645,3 +652,248 @@ def test_the_gate_and_the_notice_cannot_disagree_about_what_reads_what():
     assert "import dependents" in src
     assert "dependents.commands" in src
     assert dependents.RUNTESTS == "bash ops/ralph/runtests.sh"
+
+
+# ------------------------------------------------- whose red is it (PLAN D80)
+#
+# 490d1ad opened on one item, built it, and found the branch red from three
+# commits that had landed by hand while it ran. `tools` is the third suite to
+# everything (Invariant 1) and is named even by a change to `JOURNAL.md`, so
+# somebody else's red leaves NOTHING committable — including the journal entry
+# STEP 3 demands when a gate is red and the work must be reverted. `--baseline`
+# is the way out, and these are the four things it must never get wrong.
+
+
+def touch_a_python_change(root: Path) -> None:
+    (root / "services/svc-a/pkg_a/thing.py").write_text("x = 2\n", "utf-8")
+
+
+def tree_red(root: Path, gate: str, *lines: str) -> None:
+    """Make `gate` red in THIS worktree only, with the failure lines given."""
+    (root / f"tree-{gate}.red").write_text("".join(f"{l}\n" for l in lines), "utf-8")
+
+
+def test_a_failure_that_was_already_red_at_head_is_inherited_and_exits_three(tmp_path):
+    """The whole point. `RED_tools` reaches both runs, so the suite is red in
+    the tree and red at HEAD for the same reason — which is exactly the
+    situation 490d1ad was in, and the one where "revert everything and end the
+    iteration" is the wrong instruction because there is nothing of yours to
+    revert."""
+    root = mkrepo(tmp_path)
+    touch_a_python_change(root)
+    done = run_cli(root, "--baseline", RED_tools="1")
+    assert done.returncode == verify.EXIT_INHERITED, done.stdout + done.stderr
+    assert "INHERITED" in done.stdout
+    assert "GREEN" not in done.stdout          # the repo IS red
+    assert "Do not commit" not in done.stdout  # …but not because of you
+    assert "predate" in done.stdout.lower() or "ALREADY" in done.stdout
+
+
+def test_the_inherited_verdict_re_runs_only_the_gates_that_failed(tmp_path):
+    """D80 expected the flag to double the wall clock. It does not, except in
+    the worst case: a gate that PASSED in your tree cannot have inherited
+    anything, so asking HEAD about it buys nothing and costs its whole price.
+    Two gates run, one is red, and exactly one is asked again."""
+    root = mkrepo(tmp_path)
+    touch_a_python_change(root)
+    done = run_cli(root, "--baseline", RED_tools="1")
+    assert done.returncode == verify.EXIT_INHERITED, done.stdout + done.stderr
+    assert ran(root) == ["svc-a", "tools", "tools"], ran(root)
+
+
+def test_a_failure_the_tree_caused_is_new_and_is_always_fatal(tmp_path):
+    """The other half, and the half that must not be weakened: the marker file
+    is untracked, so the gate is red here and green at HEAD. A flag that let
+    this through would be a way to commit past your own breakage, which is the
+    one thing D80 said it must never become."""
+    root = mkrepo(tmp_path)
+    touch_a_python_change(root)
+    tree_red(root, "tools", "FAILED tests/test_atool.py::test_mine")
+    done = run_cli(root, "--baseline")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "NEW" in done.stdout
+    assert "Do not commit" in done.stdout
+    assert "1 failure is yours" in done.stdout
+
+
+def test_a_new_failure_inside_an_already_red_gate_does_not_ride_in_on_it(tmp_path):
+    """The hole a per-GATE comparison leaves, and the reason the failure LINES
+    are compared too. `tools` is red at HEAD (RED_tools) and red here with a
+    failing test of its own; both runs exit non-zero, so exit status alone says
+    INHERITED and hands your broken test the one label that is not fatal."""
+    root = mkrepo(tmp_path)
+    touch_a_python_change(root)
+    tree_red(root, "tools", "FAILED tests/test_atool.py::test_mine")
+    done = run_cli(root, "--baseline", RED_tools="1")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "CHANGED" in done.stdout
+    assert "INHERITED" not in done.stdout
+    assert "only here: FAILED tests/test_atool.py::test_mine" in done.stdout
+
+
+def test_a_gate_that_does_not_exist_at_head_is_never_inherited(tmp_path):
+    """The second hole, and the subtler one. A gate script you have only just
+    written cannot run at HEAD: `bash` exits 127, which is non-zero, which a
+    naive comparison reads as "red at HEAD too". 127 is not evidence of
+    anything, so the label is UNKNOWN and UNKNOWN is fatal."""
+    root = mkrepo(tmp_path)
+    subprocess.run(
+        ["git", "-C", str(root), "rm", "--cached", "-q", "ops/ralph/cargotest.sh"],
+        check=True,
+    )
+    # Commit the INDEX, not the tree: `git add -A` would put the script
+    # straight back, and the point is a gate that exists here and not there.
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-qm", "the rust runner is not at HEAD any more"],
+        check=True,
+    )
+    (root / "services/crate-x/src/main.rs").write_text("fn main() {;}\n", "utf-8")
+    done = run_cli(root, "--baseline", RED_crate_x="1")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "UNKNOWN" in done.stdout
+    assert "does not exist at" in done.stdout
+    assert "INHERITED" not in done.stdout
+    # …and it never tried to run it there, which would have been the 127.
+    assert ran(root) == ["crate-x"], ran(root)
+
+
+def test_a_baseline_that_cannot_be_established_is_fatal_too(tmp_path):
+    """"Could not tell" must never be the label that lets a failure through,
+    or breaking the baseline becomes the way past your own red. A repo with no
+    commits has no HEAD to add a worktree of."""
+    root = tmp_path / "bare"
+    (root / "services").mkdir(parents=True)
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+    step = verify.Step(command="bash ops/ralph/runtests.sh tools", why=("x",))
+    base = verify.baseline(root, [verify.Result(step=step, status=1, seconds=1.0)])
+    assert [v.label for v in base.verdicts] == [verify.UNKNOWN]
+    assert base.fatal
+    out = "\n".join(verify.report(
+        [verify.Result(step=step, status=1, seconds=1.0)], ["p"], (), base
+    ))
+    assert "Do not commit" in out
+
+
+def test_the_flag_is_opt_in_and_a_red_run_without_it_still_says_do_not_commit(tmp_path):
+    """Two gates, one red, no flag: the verdict this file has always ended on.
+    A red gate whose history nobody asked about is one you must assume is
+    yours — and the verdict says how to ask."""
+    root = mkrepo(tmp_path)
+    touch_a_python_change(root)
+    done = run_cli(root, RED_tools="1")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "Do not commit" in done.stdout
+    assert "--baseline" in done.stdout
+    assert ran(root) == ["svc-a", "tools"], ran(root)  # nothing re-run
+
+
+def test_a_green_run_never_builds_a_baseline(tmp_path):
+    """Nothing failed, so there is nothing to attribute, and the flag must not
+    cost a worktree or a second run of anything."""
+    root = mkrepo(tmp_path)
+    touch_a_python_change(root)
+    done = run_cli(root, "--baseline")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert ran(root) == ["svc-a", "tools"], ran(root)
+    assert "INHERITED" not in done.stdout
+    assert "GREEN" in done.stdout
+
+
+def test_the_baseline_leaves_the_working_tree_and_the_stash_exactly_as_it_found_them(tmp_path):
+    """The rule this repo runs on: this branch is shared with the main checkout
+    and other sessions, so the baseline may not be a `git stash` and may not be
+    a checkout anywhere under `root` — an untracked directory in the repo is a
+    changed path, which is an input to the very plan it is a baseline for."""
+    root = mkrepo(tmp_path)
+    touch_a_python_change(root)
+
+    def status() -> str:
+        return subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain"],
+            capture_output=True, text=True,
+        ).stdout
+
+    before = status()
+    done = run_cli(root, "--baseline", RED_tools="1")
+    assert done.returncode == verify.EXIT_INHERITED, done.stdout + done.stderr
+    assert status() == before, (before, status())
+    assert subprocess.run(
+        ["git", "-C", str(root), "stash", "list"], capture_output=True, text=True
+    ).stdout == ""
+    worktrees = subprocess.run(
+        ["git", "-C", str(root), "worktree", "list", "--porcelain"],
+        capture_output=True, text=True,
+    ).stdout
+    assert worktrees.count("worktree ") == 1, worktrees
+
+
+def test_the_throwaway_worktree_is_outside_the_repo_and_is_removed(tmp_path):
+    """Both halves of the containment rule, asserted on the context manager
+    itself rather than inferred from a clean `git status`."""
+    root = mkrepo(tmp_path)
+    with verify.head_worktree(root) as (where, error):
+        assert error == "" and where is not None
+        assert (where / "README.md").is_file()
+        assert root not in where.parents and where != root
+    assert not where.exists()
+    assert not where.parent.exists()
+
+
+def test_the_report_says_which_gates_it_could_not_read_a_failure_line_from(tmp_path):
+    """The limit, stated rather than implied. The stub's RED_tools path prints
+    no failure line at all, so the two runs are compared by exit status alone —
+    which is the honest answer for a gate whose output nothing here can parse,
+    and it has to be visible in the note beside that gate."""
+    root = mkrepo(tmp_path)
+    touch_a_python_change(root)
+    done = run_cli(root, "--baseline", RED_tools="1")
+    assert "no failure line either run could be compared" in done.stdout
+
+
+def test_the_failure_fingerprint_ignores_what_two_runs_of_one_failure_disagree_about(tmp_path):
+    """Two runs of the SAME failure differ in two ways that are not the
+    failure: the root they ran in (yours vs the throwaway worktree) and a store
+    path rebuilt under a different hash. Neither may read as a new failure, and
+    the summary lines that carry counts and timings must not be in here at
+    all — comparing `792 passed in 66.41s` against `789 passed in 61.02s` would
+    make every run differ from every other."""
+    here, there = tmp_path / "repo", tmp_path / "tmp" / "head"
+    mine = verify.failure_lines(
+        f"792 passed in 66.41s\n"
+        f"FAILED tests/test_a.py::test_x - no {here}/shell/jv-hud/x.qml\n"
+        f"  FAIL  the unit spends /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-thing\n",
+        (here, there),
+    )
+    theirs = verify.failure_lines(
+        f"789 passed in 61.02s\n"
+        f"FAILED tests/test_a.py::test_x - no {there}/shell/jv-hud/x.qml\n"
+        f"  FAIL  the unit spends /nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-thing\n",
+        (here, there),
+    )
+    assert mine == theirs, (mine, theirs)
+    assert len(mine) == 2, mine
+    assert not any("passed" in line for line in mine)
+
+
+def test_listing_the_plan_with_the_flag_says_what_it_would_cost_and_runs_nothing(tmp_path):
+    root = mkrepo(tmp_path)
+    touch_a_python_change(root)
+    done = run_cli(root, "--list", "--baseline")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert ran(root) == []
+    assert "--baseline would then re-run" in done.stdout
+
+
+def test_the_prompt_tells_the_loop_what_exit_three_means():
+    """The mechanism is worth nothing if STEP 3 still reads "red means revert".
+    The whole of D80 is that those are two different instructions, so the
+    prompt has to name the flag, both statuses, and the duty that comes with
+    the lenient one."""
+    doc = PROMPT.read_text("utf-8")
+    assert "--baseline" in doc
+    assert "INHERITED" in doc or "already\n  red at HEAD" in doc
+    assert "JOURNAL" in doc[doc.index("--baseline"):]
+    sh = VERIFY_SH.read_text("utf-8")
+    assert "--baseline" in sh
+    assert str(verify.EXIT_INHERITED) in sh

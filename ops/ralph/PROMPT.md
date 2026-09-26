@@ -48,6 +48,17 @@ excellent, finish it completely, and never break the build.
   `verify.sh` names it, with the paths that asked for it, whenever your change
   is one it reads (B72) — run it yourself then, look at the shots, commit them.
 - Run `nixos-rebuild build --flake .#ares` — it MUST succeed. **NEVER test/switch.**
+- **If `verify.sh` is red, find out whose red it is before you revert anything.**
+  This branch is driven by the loop AND by hand, and `tools` is the third suite
+  to everything — it is named even by a change to `JOURNAL.md` — so somebody
+  else's red makes the whole repo uncommittable, including the journal entry the
+  next bullet asks for. `bash ops/ralph/verify.sh --baseline` re-runs just the
+  failed gates against HEAD in a throwaway worktree and labels each failure
+  (PLAN D80). Exit **1** means at least one is NEW/CHANGED/UNKNOWN — it is
+  yours, so the next bullet applies. Exit **3** means every failure was already
+  red at HEAD, failing the same way: your work is not the problem, so commit it
+  and **name the inherited failures in the JOURNAL entry** so the next iteration
+  does not re-discover them. Never commit a change to a gate that is red.
 - If anything fails and you can't fix it quickly:
   `git checkout -- . && git clean -fd`, append a JOURNAL entry describing the
   dead-end and why, and END the iteration. **Never commit broken code.**
