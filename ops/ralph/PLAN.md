@@ -943,20 +943,69 @@ human-reviewed step.
         tests. The shape that survives a build is the D34/D39 one, which is
         the shape this gate is for.
 
-- [ ] D51. **This gate now starts two brokers and reads neither of their
-      logs.** `jarvisd` for the frames run and a second one for D49's relink
-      both write a file in the stage, and the only thing that ever opens either
-      is D49's failure message. A broker that accepted the bridge and then
-      rejected every subscription, or one logging a decode error per frame, is
-      invisible here — the run would read as a HUD that ignored its frames,
-      which is the wrong repair by a whole process. `tools/qmlerrors.py` cannot
-      be pointed at them: it knows quickshell's `WARN scene:` prefixes and a
-      Rust tracing line is not one, so over a broker's log it reports "nothing
-      threw" whatever it says. The shape is a second small reader — jarvisd's
-      own `ERROR`/`WARN` lines, on the tracing format, with the same
-      `--rerun` courtesy — or a census of what the broker says when it is
-      well. Note the frames run's broker is the SCRIPT's and its log is next to
-      the stage's, so this is one reader over two files. Raised by D49.
+- [x] D51. **This gate started two brokers and read neither of their logs.**
+      (Done — `tools/brokerlog.py`, one invocation per broker at the foot of
+      `ops/ralph/shellload.sh`, pointed by `shells.broker_targets()`.)
+      · **The rule is stricter than "no ERROR lines", and both halves earn it.**
+        Every line has to be a tracing line the broker wrote at INFO or below,
+        AND one of them has to say it is listening on the socket this run told
+        it to bind. The census is the floor: a log nobody wrote has no ERROR
+        lines in it either, which is exactly how the three staged harnesses
+        graded themselves clean before D38. `--listening` is per-broker, which
+        is why this is one invocation per log rather than one scan over both —
+        a reader handed both could only have checked neither.
+      · **Refusing a line it cannot PARSE is what makes it more than a level
+        filter.** What a Rust process writes when it is not well is mostly not
+        tracing: `Error: Permission denied (os error 13)` is what `main`
+        returning `Err` prints (recorded from the flake's own jarvisd), and a
+        panic in a SPAWNED task does not end the process — it leaves the accept
+        loop dead under a run that goes on waiting. Neither has a level to
+        filter on, and this reader did not have to predict either shape.
+      · **Both halves were injected into the real gate and both went red**,
+        in one run, while everything else in it stayed green: `all 4 runs
+        loaded and mapped`, four clean `qmlerrors` scans, exit 1. Injection A
+        put the recorded anyhow line in front of the frames broker; injection B
+        emptied `late-broker.log` before the readers ran. Reverted.
+      · **`NO_COLOR=1` covers the brokers too, and the failure direction is
+        the better one.** tracing colours its level as well, and a coloured
+        broker log parses as NO lines at all — so the census fails and the run
+        goes red rather than green. Red for the wrong reason, which is still
+        the right way round, and is a fixture rather than a sentence.
+      · **The frames broker's socket and log name moved into `shells.py`**
+        (`FRAMES_BUS`, `FRAMES_BROKER_LOG`): the reader has to open the same
+        file the script redirects, and two spellings of one path is how a gate
+        ends up grading a file nobody writes.
+      · Cost: **34.8 s**, unchanged — two file reads. 726 tools tests (19 new).
+
+- [ ] D56. **The decode error D51 was named for is below the level the broker
+      runs at.** PLAN D51 named "a broker logging a decode error per frame" as
+      one of the two faults its reader is for, and that is the half
+      `tools/brokerlog.py` cannot see: `services/jarvisd/src/broker.rs` logs it
+      as `tracing::debug!("conn {id}: {e}")` and `bin/jarvisd.rs` defaults its
+      `EnvFilter` to `info`, so in a shellload run the line is never written.
+      MEASURED — with `RUST_LOG=jarvisd=debug` and four 0xff bytes down the
+      socket the real broker says
+      `DEBUG jarvisd::broker: conn 0: frame too large: 4294967295 bytes`, and
+      `test_the_decode_error_this_reader_was_named_for_is_below_the_level_it_runs_at`
+      holds all three facts together. The knob is the broker's own
+      (`RUST_LOG=jarvisd=debug` on both, in the script, next to `NO_COLOR=1`),
+      and the catch is the reason it was not taken here: `handle_conn`'s read
+      loop logs at that level on ANY read error, and a publisher killed with
+      SIGTERM at teardown could deliver an ECONNRESET rather than a clean EOF —
+      which would make this gate flaky, the one thing worse than a gate that
+      cannot see a fault. So the decision is whether to raise the level and
+      make the reader ignore a *recorded* set of teardown lines (a list of
+      excuses, which rots), or leave it and say so. Raised by D51.
+
+- [ ] D57. **`hudscreens.sh` starts a broker too, and nothing reads its log
+      either.** D51 is wired into `shellload.sh` alone; the other real-quickshell
+      gate runs its own `jarvisd` (it is in that gate's `reads:` list) and has
+      the same hole for the same reason — worse, because what it produces is a
+      sheet of pictures a human compares, so a broker that stopped serving
+      halfway through a 3 m run reads as a HUD that changed. The work is the
+      wiring only: `tools/brokerlog.py` already exists, the gate already knows
+      its own stage, and the one thing to find out is what its broker's socket
+      and log are called. Raised by D51.
 
 - [x] D52. **The corner comes back empty and nothing proves it ever fills
       again.** (Done — `recover()` in `tools/shellload/load.py`, called from

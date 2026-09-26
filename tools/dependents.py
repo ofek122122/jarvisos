@@ -942,6 +942,11 @@ DECLARED_GATES = (
             "shell/jv-bar",
             "shell/jv-hud",
             "shell/jv-notify",
+            # The reader that turns two running brokers into a verdict (D51).
+            # Everything this gate concludes about the HUD is a reading of what
+            # a `jarvisd` did, and a broker that refused the bridge reads from
+            # the corner as a HUD that ignored its frames.
+            "tools/brokerlog.py",
             # The scanner that turns a loaded shell into a verdict. Without it
             # this gate reports that three shells started, which is not the
             # question it was written for.

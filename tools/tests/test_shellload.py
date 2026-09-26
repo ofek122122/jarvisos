@@ -1493,3 +1493,89 @@ def test_the_blind_run_is_counted_in_the_verdict_and_not_only_logged():
     text = DRIVER.read_text("utf-8")
     after = text[text.index("load_blind(stage)", text.index("def main(")):]
     assert "bad += 1" in after[: after.index("if bad:")]
+
+
+# ---------------------------------- and what the BROKERS said (PLAN D51)
+#
+# Two `jarvisd` run in this gate — the script's, for the frames, and the one
+# `relink()` starts on the blind HUD's own socket (D49) — and until D51 the
+# only thing that had ever opened either log was the failure message D49
+# quotes it into. Every claim above about the HUD is a reading of what those
+# brokers did, so a broker that came up and then refused the bridge reads from
+# the corner as a HUD that ignored its frames. These are the checks on the
+# second reader's WIRING; the reader's own rule is in `test_brokerlog.py`.
+
+
+def test_every_broker_this_gate_starts_has_its_log_read():
+    """Two brokers, two entries, and no third: a target list that drifted from
+    the brokers the run really starts is a log nobody reads, which is the
+    silence D51 exists to remove."""
+    targets = shells.broker_targets()
+    assert len(targets) == 2
+    assert (shells.FRAMES_BROKER_LOG, shells.FRAMES_BUS) in targets
+    assert (shells.HUD_RELINK_BROKER_LOG, shells.HUD_BLIND_BUS) in targets
+    names = [name for name, _ in targets]
+    assert len(set(names)) == len(names), names
+    # Two brokers on one socket would be two brokers this gate cannot tell
+    # apart, and the census would pass for whichever wrote first.
+    buses = [bus for _, bus in targets]
+    assert len(set(buses)) == len(buses), buses
+
+
+def test_the_broker_logs_and_the_qml_logs_are_read_by_different_readers():
+    """The mirror of `test_the_late_broker_is_not_graded_as_a_qml_engine`, now
+    that there is something else to grade them with. `qmlerrors.py` over a
+    tracing line says nothing threw whatever the line says, and `brokerlog.py`
+    over a quickshell log refuses it — so the two lists must not overlap in
+    either direction."""
+    qml = {name for name, _ in shells.scan_targets()}
+    brokers = {name for name, _ in shells.broker_targets()}
+    assert qml & brokers == set()
+    assert brokers & {s.attr for s in shells.SHELLS} == set()
+    text = script_text()
+    assert "tools/brokerlog.py" in text
+    assert "shells.broker_targets()" in text
+    assert "$stage/$logname.log" in text
+
+
+def test_the_socket_the_script_hands_over_is_the_one_the_census_is_about():
+    """The census is that each broker announced the path THIS run gave it, so
+    the path the script exports and the path the reader is told have to be one
+    string. They are: both come out of `shells.py`, which is why the script
+    reads the name rather than spelling `bus.sock` itself."""
+    lines = executed_lines()
+    assert 'export JARVIS_BUS="$stage/$busname"' in lines
+    assert any("shells.FRAMES_BROKER_LOG" in ln for ln in lines)
+    assert any("shells.FRAMES_BUS" in ln for ln in lines)
+    assert any('--listening "$stage/$busfile"' in ln for ln in lines)
+    # And nothing spells either of them by hand any more, which is the whole
+    # reason they moved: a second spelling is how a gate ends up grading a
+    # file nobody writes.
+    assert not any("bus.sock" in ln for ln in lines), lines
+    assert not any("jarvisd.log" in ln for ln in lines), lines
+
+
+def test_a_broker_that_went_wrong_invalidates_the_run_it_was_under():
+    """Its verdict has to reach the exit code, and ahead of the loading: a
+    corner with nothing on it is what a broken broker looks like from here, so
+    a run that reported `3 of 4 runs did not load` and exited on that alone
+    would send the reader to the HUD."""
+    text = script_text()
+    assert "broker_status=0" in text
+    assert "|| broker_status=$?" in text
+    assert '[ "$broker_status" -ne 0 ] && exit "$broker_status"' in text
+    assert text.index('[ "$broker_status"') < text.index("exit $load_status")
+    # The QML scan still wins, because a scene that threw was throwing while
+    # everything else here was being measured.
+    assert text.index('[ "$scan_status"') < text.index('[ "$broker_status"')
+
+
+def test_the_broker_reader_is_declared_by_the_gate_that_runs_it():
+    """`tools/brokerlog.py` is named by no nix evaluation and by no import
+    this repo can walk, exactly like `tools/qmlerrors.py` — so a change to it
+    would run nothing unless the gate declares it. It is the half of this gate
+    that can go wrong quietly: a reader that stopped matching what tracing
+    prints would report a healthy broker forever."""
+    assert (ROOT / "tools" / "brokerlog.py").is_file()
+    (gate,) = [g for g in dependents.DECLARED_GATES if g.script == "ops/ralph/shellload.sh"]
+    assert "tools/brokerlog.py" in gate.reads

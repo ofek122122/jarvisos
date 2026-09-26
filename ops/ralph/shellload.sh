@@ -83,6 +83,18 @@
 #     above stays green, this one goes red, and all 721 of the HUD's own
 #     headless QML tests pass. It is the only reading in this repo that can see
 #     a HUD which is linked, silent, and certain it is fine.
+#   · AND BOTH BROKERS ARE NOW READ (PLAN D51), which nothing did until now.
+#     Every claim above about the HUD is a reading of what a `jarvisd` did, and
+#     the only thing that had ever opened either broker's log was the failure
+#     message D49 quotes it into — so a broker that came up and then refused
+#     the bridge's subscription reads from the corner as a HUD that ignored its
+#     frames, which is the wrong repair by a whole process.
+#     `tools/brokerlog.py` is the second reader, because `tools/qmlerrors.py`
+#     knows three QML engines' prefixes and a Rust tracing line is not one of
+#     them: over a broker's log it says "nothing threw" whatever the log says.
+#     The rule is every line is one the broker wrote at INFO or below, plus a
+#     census — it has to have announced the socket this run told it to bind,
+#     which is what keeps a log nobody wrote from reading clean.
 #
 # TWO THINGS THE ENVIRONMENT MUST DO, both measured, neither optional:
 #   1. DBUS_SESSION_BUS_ADDRESS is REPLACED, not inherited. Run without that,
@@ -98,12 +110,16 @@
 #      anything is watching, and `\x1b[33m` in front of every level is not a
 #      prefix `tools/qmlerrors.py` knows — so the scan would come back clean
 #      over a shell that threw on every frame. Same load-bearing line
-#      `hudscreens.sh` carries, for the same reason.
+#      `hudscreens.sh` carries, for the same reason. It covers the brokers too,
+#      for the same reason and with a better failure direction: tracing colours
+#      its level as well, and a coloured broker log parses as NO lines at all,
+#      so `tools/brokerlog.py`'s census fails and the run goes red rather than
+#      green — red for the wrong reason, which is still worth knowing.
 #
 # reads: flake.lock flake.nix personality/theme.toml pkgs/jv-bar pkgs/jv-hud
 #        pkgs/jv-notify services/jarvisd services/jv-hud-bridge services/pylib
-#        shell/jv-bar shell/jv-hud shell/jv-notify tools/qmlerrors.py
-#        tools/shellload
+#        shell/jv-bar shell/jv-hud shell/jv-notify tools/brokerlog.py
+#        tools/qmlerrors.py tools/shellload
 #
 # Declared, like the other two nix gates (PLAN B72): what it reads is a set of
 # flake attributes, and an attribute is not a path any syntax tree names. The
@@ -249,8 +265,20 @@ export NO_COLOR=1
 # cadence changes nothing here, and a number chosen by this gate would be a
 # number the real jarvisd does not run at.
 jarvisd=$(nix build "$root#jarvisd" --no-link --print-out-paths)
-export JARVIS_BUS="$stage/bus.sock"
-"$jarvisd/bin/jarvisd" --bus "$JARVIS_BUS" > "$stage/jarvisd.log" 2>&1 &
+# The socket it binds and the file it writes are named in `shells.py`, not
+# here: the reader at the foot of this script has to open the same log this
+# line redirects, and two spellings of one path is how a gate ends up grading
+# a file nobody writes (PLAN D51).
+IFS=$'\t' read -r brokerlog busname < <("$py/bin/python" - "$tool" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import shells
+
+print(f"{shells.FRAMES_BROKER_LOG}\t{shells.FRAMES_BUS}")
+EOF
+)
+export JARVIS_BUS="$stage/$busname"
+"$jarvisd/bin/jarvisd" --bus "$JARVIS_BUS" > "$stage/$brokerlog.log" 2>&1 &
 buspid=$!
 for _ in $(seq 1 100); do
   [ -S "$JARVIS_BUS" ] && break
@@ -258,7 +286,7 @@ for _ in $(seq 1 100); do
 done
 [ -S "$JARVIS_BUS" ] || {
   echo "shellload: jarvisd never created $JARVIS_BUS" >&2
-  sed -n 1,40p "$stage/jarvisd.log" >&2
+  sed -n 1,40p "$stage/$brokerlog.log" >&2
   exit 1
 }
 
@@ -325,8 +353,40 @@ for logname, root in shells.scan_targets():
 EOF
 )
 
-# A shell that threw is the worse news of the two and the one that invalidates
-# the other: "it loaded" is a claim about a scene that was throwing while it
-# did. So it wins the exit code.
+# AND READ WHAT EACH BROKER SAID (PLAN D51), which is the half of this run
+# nothing has ever opened. Two `jarvisd` run here — the one above and the one
+# `relink()` starts on the blind HUD's own socket (PLAN D49) — and every claim
+# this gate makes about the HUD is a reading of what they did. A broker that
+# came up and then refused the bridge's subscription, or logged an error per
+# frame, reads from the corner as a HUD that ignored its frames, which is the
+# wrong repair by a whole process.
+#
+# Its own reader rather than `tools/qmlerrors.py`: that one knows three QML
+# engines' prefixes and a Rust tracing line is not one of them, so over a
+# broker's log it reports "nothing threw" whatever the log says. One
+# invocation per broker, because the census is that each announced ITS OWN
+# socket and a reader handed both logs could only have checked neither.
+broker_status=0
+while IFS=$'\t' read -r logname busfile; do
+  "$py/bin/python" "$root/tools/brokerlog.py" "$stage/$logname.log" \
+    --listening "$stage/$busfile" --rerun "bash ops/ralph/shellload.sh" \
+    || broker_status=$?
+done < <("$py/bin/python" - "$tool" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import shells
+
+for logname, busfile in shells.broker_targets():
+    print(f"{logname}\t{busfile}")
+EOF
+)
+
+# A shell that threw is the worse news of the three and the one that
+# invalidates the others: "it loaded" is a claim about a scene that was
+# throwing while it did. So it wins the exit code, and the broker's verdict
+# comes next — it invalidates the loading for the same reason one step further
+# out, since a corner with nothing to show is what a broken broker looks like
+# from here.
 [ "$scan_status" -ne 0 ] && exit "$scan_status"
+[ "$broker_status" -ne 0 ] && exit "$broker_status"
 exit $load_status

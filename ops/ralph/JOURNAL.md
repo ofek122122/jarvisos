@@ -13463,3 +13463,75 @@ is not worth chasing.)
   quickshell's `WARN scene:` prefixes; over a Rust tracing line it says
   "nothing threw" whatever it says), so the shape is a second small reader over
   two files. Then **D53** (which D54 waits on), then **D48**, then **D45**.
+
+## 2026-09-26 — iteration 133 — the gate started two brokers and read neither log
+
+- **what**: `tools/brokerlog.py`, a second reader for `ops/ralph/shellload.sh`
+  (PLAN D51). That gate starts two `jarvisd` — the script's, for the frames
+  run, and the one `relink()` starts on the blind HUD's own socket (D49) — and
+  until now the only thing that had ever opened either log was the failure
+  message D49 quotes it into. Every claim the gate makes about the HUD is a
+  reading of what those brokers did: ten plates, then `nothing`, then ten
+  plates again. A broker that came up and then refused the bridge's
+  subscription reads from the corner as a HUD that ignored its frames, which
+  is the wrong repair by a whole process.
+- **why it is its own reader and not `tools/qmlerrors.py`.** That file knows
+  three QML engines' prefixes and a Rust tracing line is none of them, so over
+  a broker's log it reports "nothing threw" whatever the log says — the exact
+  silence it was itself written to remove. Measured in both directions:
+  `qmlerrors.scan()` is empty over a broker log with an ERROR in it, and
+  `brokerlog.scan()` puts all three lines of a quickshell log in its
+  "tracing did not write this" pile rather than grading them.
+- **the rule, and it is stricter than "no ERROR lines" on purpose.** Every
+  line has to be one the broker wrote at INFO or below, AND one of them has to
+  say it is listening on the socket this run told it to bind. The census is the
+  floor under the fault rule: a log nobody wrote has no ERROR lines in it
+  either, which is precisely how the three staged harnesses graded themselves
+  clean before D38. `--listening` is per-broker, so this is one invocation per
+  log — a reader handed both could only have checked neither.
+- **refusing a line it cannot PARSE is what makes it more than a level
+  filter.** What a Rust process writes when it is not well is mostly not
+  tracing at all. `Error: Permission denied (os error 13)` is what `main`
+  returning `Err` prints, and a panic in a SPAWNED task does not end the
+  process — it leaves the accept loop dead under a run that goes on waiting.
+  Neither has a level to filter on, and this reader did not have to predict
+  either shape to catch them.
+- **both halves were injected into the real gate, in one run, and both went
+  red while everything else stayed green** — `all 4 runs loaded and mapped`,
+  four clean `qmlerrors` scans, and exit 1 from the brokers alone. Injection A
+  put the recorded anyhow line in front of the frames broker; injection B
+  emptied `late-broker.log` before the readers ran (the D38 hole, which only
+  the census can catch). Both reverted; `git status` clean of them before the
+  verify run below.
+- **every fixture is recorded from the binary this flake builds**, not
+  invented: the listening line, the coloured listening line, and
+  `DEBUG jarvisd::broker: conn 0: frame too large: 4294967295 bytes` — got by
+  running the real broker with `RUST_LOG=jarvisd=debug` and sending it four
+  0xff bytes. That last one is the limit rather than the coverage, and it is
+  now D56: the decode error D51 named is at DEBUG and the broker defaults to
+  `info`, so in a shellload run it is never written at all.
+- **`NO_COLOR=1` covers the brokers too, and the failure direction is the
+  better one.** tracing colours its level whether or not anything is watching;
+  a coloured broker log parses as NO lines, so the census fails and the run
+  goes red rather than green. It is a fixture rather than a sentence.
+- **one path stopped being spelled twice.** The frames broker's socket and log
+  basename moved into `shells.py` (`FRAMES_BUS`, `FRAMES_BROKER_LOG`) and the
+  script reads them, because the reader has to open the same file the redirect
+  wrote and two spellings of one path is how a gate ends up grading a file
+  nobody writes.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 6 paths (tools **726
+  pass**, 19 of them new; `shellload.sh` **34.8 s** against 34.8 s before — two
+  file reads). `hudscreens.sh` was not named by the gate and did not need to
+  be: no shell QML changed, so there are no pixels to re-photograph. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: tools/brokerlog.py, tools/tests/test_brokerlog.py,
+  ops/ralph/shellload.sh, tools/shellload/shells.py, tools/dependents.py,
+  tools/tests/test_shellload.py, ops/ralph/PLAN.md, ops/ralph/JOURNAL.md
+- next: **D53** — the first quickshell pays for a cold Qt and the other three
+  do not, and all four are given 30 s for it. It is load-bearing now: D52 took
+  the blind engine to 98 s of its 100 s ceiling, so that run cannot grow a
+  fourth act until this moves, and **D54** is waiting behind it. Then **D57**
+  (this reader over `hudscreens.sh`'s broker, which is wiring only), then
+  **D56** (the DEBUG half above, which is a decision about flakiness rather
+  than a build), then **D48**, then **D45**.

@@ -1064,7 +1064,54 @@ def scan_targets() -> list[tuple[str, str]]:
     this exists: the blind HUD is a fourth engine writing a fourth log, and
     a scan that iterated `SHELLS` would have left it unread. Its root is the
     HUD's — it is the same store path, loaded twice.
+
+    QML engines only. The two brokers write logs too and they are next door in
+    `broker_targets()`, because what reads them is a different reader — see
+    `FRAMES_BROKER_LOG` below.
     """
     return [(s.attr, s.root) for s in SHELLS] + [
         (HUD_BLIND_LOG, hud_shell().root)
+    ]
+
+
+# ------------------------------- and what the BROKERS said (PLAN D51)
+#
+# TWO BROKERS RUN HERE AND NOTHING EVER READ EITHER. The script starts one for
+# the frames run and `relink()` starts a second on the blind HUD's own socket
+# (D49), and the only thing that has ever opened either log is the message D49
+# quotes it into when the corner fails. Everything this gate concludes about
+# the HUD — ten plates, then nothing, then ten plates again — is a reading of
+# what those brokers did, so a broker that came up and then refused the
+# bridge's subscription, or logged a decode error per frame, reads here as a
+# HUD that ignored its frames. That is the wrong repair by a whole process.
+#
+# `tools/qmlerrors.py` cannot be pointed at them, and
+# `test_the_late_broker_is_not_graded_as_a_qml_engine` says why: it knows three
+# QML engines' prefixes and a Rust tracing line is not one, so over a broker's
+# log it says "nothing threw" whatever the log says. `tools/brokerlog.py` is
+# the second reader, and the pairs below are what it is pointed at — a log and
+# the socket that broker was told to bind, because its census is that the
+# broker NAMED the path this run gave it.
+
+# The frames run's broker, as the basename of the log the script redirects it
+# to and the socket it binds. Here rather than in the script for the reason the
+# shells' attributes are: the reader below has to open the same two files the
+# broker wrote, and two spellings of one path is how a gate ends up reading a
+# file nobody writes.
+FRAMES_BROKER_LOG = "jarvisd"
+FRAMES_BUS = "bus.sock"
+
+
+def broker_targets() -> list[tuple[str, str]]:
+    """Every broker log this run produces, with the socket it was told to bind.
+
+    Two, and the second is the one D49 added: the same `jarvisd` store path,
+    started by the driver on the blind HUD's own bus after that HUD has been
+    failing to reach it. They are separate entries rather than one scan because
+    the census is per-broker — each has to have announced ITS socket, and a
+    reader given both logs at once could only have checked neither.
+    """
+    return [
+        (FRAMES_BROKER_LOG, FRAMES_BUS),
+        (HUD_RELINK_BROKER_LOG, HUD_BLIND_BUS),
     ]
