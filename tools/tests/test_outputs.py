@@ -24,6 +24,7 @@ real flake. Here we only check they still exist, because a throw deleted is a
 throw that passes every text search for its own message.
 """
 
+import itertools
 import re
 from pathlib import Path
 
@@ -33,6 +34,7 @@ ARES_OUTPUTS = ROOT / "hosts" / "ares" / "outputs.nix"
 SHEET_OUTPUTS = ROOT / "tools" / "wallshots" / "outputs.nix"
 ART = ROOT / "pkgs" / "jarvis-wallpaper" / "default.nix"
 FLAKE = ROOT / "flake.nix"
+DOCTOR = ROOT / "pkgs" / "jarvis-doctor" / "default.nix"
 CLAUDE_MD = ROOT / "CLAUDE.md"
 
 
@@ -317,3 +319,126 @@ def test_the_sheets_outputs_are_this_machines_plus_a_reason():
         f"the sheet adds {extra}, and every one of those is an aspect ratio ares "
         f"already has {sorted(ratios)} — the extra render buys no coverage"
     )
+
+
+# ------------------------------------------------ the desk they add up to
+
+
+def overlap_of(a: dict, b: dict) -> tuple[int, int] | None:
+    """The intersection of two outputs as `(width, height)`, or None.
+
+    `x`/`y` is a top-left corner and the rectangle runs to `x + width`, so two
+    outputs that merely TOUCH share an edge and no pixel: ares' DP-1 begins at
+    2560, which is exactly where the primary ends. Hence `> 0` and not `>= 0`,
+    and hence this is a function rather than four inline `max`es — the strict
+    comparison is the whole claim, and it is worth being able to point a test
+    at it.
+
+    Written again here rather than imported from `test_hudscreens.py`, which
+    makes the same geometric claim about `sheet.OUTPUTS`: that suite is asking
+    whether the HEADLESS harness photographs one screen twice, this one is
+    asking whether the machine's declaration describes a desk, and a single
+    shared predicate would make both green the day it is wrong.
+    """
+    w = min(a["x"] + a["width"], b["x"] + b["width"]) - max(a["x"], b["x"])
+    h = min(a["y"] + a["height"], b["y"] + b["height"]) - max(a["y"], b["y"])
+    return (w, h) if w > 0 and h > 0 else None
+
+
+def test_no_two_monitors_ares_declares_can_show_the_same_pixel():
+    """PLAN E15. Until E14 every output was implicitly at y=0 and a collision
+    needed two equal `x`es; with a `y` in hand any two entries can be declared
+    on top of each other, and nothing noticed — it is a legal Nix file, a
+    successful build, bespoke art composed for both, and a `jarvis-doctor`
+    that PASSES, because check 5 compares each connector's mode and corner on
+    its own and never asks whether the desk they add up to exists.
+
+    This is the claim about ares' own declaration. The claim about ANY
+    declaration is an evaluation-time throw in `pkgs/jarvis-doctor`, and
+    `ops/ralph/nixtest.sh` provokes it; the two are the same rule asked of the
+    file and of the package that spends it.
+    """
+    for a, b in itertools.combinations(declared_outputs(ARES_OUTPUTS), 2):
+        assert overlap_of(a, b) is None, (
+            f"{a['name']} at {a['x']},{a['y']} and {b['name']} at {b['x']},{b['y']} "
+            f"overlap by {overlap_of(a, b)} px — two monitors cannot show the same pixel"
+        )
+
+
+def test_the_overlap_rule_is_read_off_desks_nobody_owns():
+    """…because the test above is green on a predicate that never finds
+    anything, and every `y` ares declares is 0 — the same accidental green E14
+    found twice. So the rule is run against the layouts this machine does not
+    have, where the answer is known and is not "no".
+
+    The legal half is not a formality: a rule that also refuses a touching edge
+    or a gap would refuse ares, whose two 1080p panels begin exactly where the
+    primary ends and leave 360 px of no screen at all under themselves.
+    """
+    at = lambda name, x, y, w=1920, h=1080: {"name": name, "x": x, "y": y, "width": w, "height": h}
+    for what, a, b, want in (
+        ("two panels declared at the same corner", at("A", 0, 0), at("B", 0, 0), (1920, 1080)),
+        ("a panel inside a bigger one", at("A", 0, 0, 2560, 1440), at("B", 100, 100), (1920, 1080)),
+        ("one pixel of a mistyped x", at("A", 0, 0), at("B", 1919, 0), (1, 1080)),
+        ("a panel dropped one row into another", at("A", 0, 0), at("B", 0, 1079), (1920, 1)),
+        ("a stack that only a y can describe", at("A", 0, 0), at("B", 0, -1079), (1920, 1)),
+        ("the edge ares actually has", at("A", 0, 0, 2560, 1440), at("B", 2560, 0), None),
+        ("the gap under ares' panels", at("A", 0, 1080), at("B", 2560, 0), None),
+        ("a monitor mounted above, touching", at("A", 0, 0), at("B", 0, -1080), None),
+        ("a detached panel", at("A", 0, 0), at("B", 9000, -720), None),
+    ):
+        assert overlap_of(a, b) == want, (
+            f"{what}: the rule says {overlap_of(a, b)}, not {want}"
+        )
+        # …and it cannot depend on which one is asked about first.
+        assert overlap_of(b, a) == want, f"{what} reads differently in the other order"
+
+
+def test_the_doctor_refuses_a_layout_whose_monitors_overlap():
+    """The rule where it applies to any declaration and not just to this one.
+    It is here as text for the same reason the wallpaper's five refusals are —
+    this suite runs in a checkout with no nix, and a throw that was deleted
+    passes every text search for its own message, so `ops/ralph/nixtest.sh`
+    overrides the package's `outputs` and provokes both answers.
+
+    What is checked here is what that gate cannot see: that the refusal is
+    reached from the binding every consumer of the declaration goes through.
+    An `overlaps` computed into a `let` nobody forces is a check that never
+    runs, and Nix would say nothing about it.
+    """
+    doctor = DOCTOR.read_text("utf-8")
+    assert re.search(r"else if overlaps != \[ \] then\n\s*throw", doctor), (
+        "pkgs/jarvis-doctor no longer refuses an overlapping layout from inside "
+        "`declared` — a throw in an unforced binding is not a check"
+    )
+    assert "w > 0 && h > 0" in doctor, (
+        "the intersection test is no longer strict: ares' DP-1 begins at 2560, "
+        "which is exactly where the primary ends, so touching edges must pass"
+    )
+    assert re.search(r"overlap by \$\{toString w\}x\$\{toString h\} px", doctor), (
+        "the refusal no longer measures the overlap it found; a 1 px collision "
+        "from a mistyped `x` and a panel declared inside another are different "
+        "mistakes and the message is the only place they can be told apart"
+    )
+
+
+def test_the_sheets_extra_canvas_is_not_a_corner_on_any_desk():
+    """And why the rule above is asked of ares' declaration alone. The contact
+    sheet's list is the same SHAPE — it imports ares' outputs and appends — but
+    what it appends is a CANVAS to compose art at, not a monitor on a desk:
+    `SHEET-21x9` sits at x=0, on top of the primary, and that is meaningless
+    rather than wrong because nothing lays the sheet's list out.
+
+    The absent `y` is what keeps that true, so it is what this asserts. Give
+    that entry a position and the list starts to look like a layout that
+    happens to collide, which is the reading this test exists to prevent.
+    """
+    ares = {o["name"] for o in declared_outputs(ARES_OUTPUTS)}
+    extra = [o for o in declared_outputs(SHEET_OUTPUTS) if o["name"] not in ares]
+    assert extra, "the sheet adds no canvas of its own any more"
+    for out in extra:
+        assert "y" not in out, (
+            f"{out['name']} declares a y — the sheet's extra entries are canvases the "
+            "art is composed at, and a full corner makes the sheet's list read as a "
+            f"desk on which {out['name']} is inside the primary"
+        )

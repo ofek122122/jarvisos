@@ -34,6 +34,19 @@
 # matters: nothing could describe that layout, and everything passed. A zero
 # somebody declared is a decision; a zero nobody wrote is a guess.
 #
+# THE ONE THING NO SINGLE ENTRY BELOW CAN BE WRONG ABOUT is whether they add
+# up to a desk (PLAN E15). With a `y` in hand two monitors can be declared on
+# top of each other, and every gate passed it: a legal Nix file, a successful
+# build, bespoke art composed for both, and a `jarvis-doctor` reporting PASS,
+# because check 5 compares each connector's mode and corner on its own. So the
+# pairwise check lives in `pkgs/jarvis-doctor`, the package that SPENDS the
+# position — an overlap is an evaluation error there, with the collision
+# measured in the message — and `tools/tests/test_outputs.py` asks the same of
+# this file in a checkout with no nix. GAPS ARE LEGAL and this desk has one:
+# 1.4 Mpx of the layout's bounding box is no screen at all, the 360 px under
+# each 1080p panel beside a 1440p primary. Edges that touch are legal too —
+# DP-1 begins at 2560, exactly where HDMI-A-1 ends.
+#
 # `primary = true` belongs to exactly one entry, and the wallpaper leans on it:
 # `jarvisos.png` — the art the lock screen shows and the art every UNDECLARED
 # geometry falls back to — is composed at the primary's size. Two primaries or

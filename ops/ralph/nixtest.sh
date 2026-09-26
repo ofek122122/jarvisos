@@ -305,5 +305,51 @@ else
   bad "$t" "ares declares [$(tr '\t' ' ' <<<"$want" | tr '\n' '|')]; the doctor checks for [$(tr '\t' ' ' <"$tsv" | tr '\n' '|')]"
 fi
 
+# PLAN E15. The two cases above ask what the doctor believes about the machine
+# this flake declares. This pair asks the opposite question — what it does with
+# a declaration that is not a desk — and it is the only kind of question this
+# gate can ask, because the refusal is an evaluation-time `throw`: the Python
+# suites read source text, and a throw that was deleted passes every text
+# search for its own message.
+#
+# The subject is `.#jarvis-doctor` with its `outputs` argument OVERRIDDEN, so
+# both probes run against the package the desktop really gets rather than
+# against a copy of it. Neither builds: `.outPath` instantiates and the throw
+# fires first. ~1.5 s each against a warm eval cache.
+override='d: (d.override { outputs = '
+t='the doctor refuses a layout whose monitors overlap'
+# The colliding pair is deliberately NOT adjacent in the list, and it collides
+# by one row rather than obviously: A and C share 1920x1 px because C is
+# declared one pixel too far down, while B between them is legal. A check that
+# compared each output with the next one — which is what the old `x += width`
+# rule was and what a pairwise loop regresses to — passes this declaration.
+# The message has to carry the measurement too: a check that merely notices
+# cannot tell that typo from a panel declared entirely inside another.
+said=$(nix eval --raw '.#jarvis-doctor' --apply "$override"'[
+  { name = "A"; width = 2560; height = 1440; refresh = "60.000"; x = 0; y = 0; }
+  { name = "B"; width = 1920; height = 1080; refresh = "60.000"; x = 2560; y = 0; }
+  { name = "C"; width = 1920; height = 1080; refresh = "60.000"; x = 100; y = -1079; }
+]; }).outPath' 2>&1)
+if grep -q 'A and C overlap by 1920x1 px at 100,0' <<<"$said"; then ok "$t"
+elif grep -q "^$store/" <<<"$said"; then
+  bad "$t" "two monitors sharing 1920 px of screen evaluated fine, to $(grep "^$store/" <<<"$said" | tail -1)"
+else
+  bad "$t" "the evaluation was refused, but not by the overlap check: $(tail -3 <<<"$said")"
+fi
+
+t='the doctor accepts a gap, a touching edge and a monitor above the primary'
+# The other half, and not a formality: a refusal that also refuses the real
+# desk is a refusal nobody can ship. All three of these are legal and ares has
+# the first two — B's left edge IS A's right edge (2560), B leaves 360 px of no
+# screen under itself beside a taller primary, and C is the layout E14 wrote a
+# `y` for: detached, and above.
+said=$(nix eval --raw '.#jarvis-doctor' --apply "$override"'[
+  { name = "A"; width = 2560; height = 1440; refresh = "60.000"; x = 0; y = 0; }
+  { name = "B"; width = 1920; height = 1080; refresh = "60.000"; x = 2560; y = 0; }
+  { name = "C"; width = 1920; height = 1080; refresh = "60.000"; x = 9000; y = -720; }
+]; }).outPath' 2>&1)
+if grep -q "^$store/" <<<"$said"; then ok "$t"
+else bad "$t" "a desk with a gap in it was refused: $(tail -5 <<<"$said")"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
