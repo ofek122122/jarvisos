@@ -66,6 +66,13 @@
 #     reading that can tell a plate REFUSING (every state machine under this
 #     corner is built to, and a refusal draws the same nothing a calm machine
 #     does) from a plate with nothing to say.
+#   · AND THEN THAT RUN IS GIVEN A BUS, which is the more dangerous half
+#     (PLAN D49). `LinkState` never clears the flag its grace set, so a plate
+#     that latched on forever passes the census above exactly as the shipped
+#     one does — and a permanent NO BUS over a healthy machine teaches the user
+#     to ignore the one plate that qualifies all the others. A real broker is
+#     started on the very socket that HUD has been failing to reach, the bridge
+#     retries forever by design, and the corner has to go DARK again.
 #
 # TWO THINGS THE ENVIRONMENT MUST DO, both measured, neither optional:
 #   1. DBUS_SESSION_BUS_ADDRESS is REPLACED, not inherited. Run without that,
@@ -247,6 +254,11 @@ done
 
 export JV_SHELLLOAD_STAGE="$stage"
 export GDBUS_BIN="$glib/bin/gdbus"
+# The broker, handed over rather than rebuilt: the blind HUD's second act needs
+# one started on ITS bus, after it has been failing to connect (PLAN D49), and
+# the driver may not build anything. Same store path as the broker above, so
+# the two acts of that run cannot be about two different brokers.
+export JARVISD_BIN="$jarvisd/bin/jarvisd"
 # The compositor's own IPC, which is the only thing here that can say whether a
 # surface MAPPED rather than merely loaded (PLAN D44).
 export SWAYMSG_BIN="$sway/bin/swaymsg"

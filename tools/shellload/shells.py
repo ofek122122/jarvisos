@@ -827,17 +827,114 @@ def hud_corner_plates(said: str, monitor: str) -> list[str] | None:
 # nobody scanned reports nothing.
 HUD_BLIND_LOG = "jv-hud-blind"
 
-# The bus that is not there, as a name under the stage. A path rather than an
-# empty string: `jv-hud-bridge` falls back to its own default when `--bus` and
-# `$JARVIS_BUS` are both empty, and a bridge that quietly found the machine's
-# real socket would be a HUD this gate never blinded. Nothing creates it.
-HUD_BLIND_BUS = "no-bus.sock"
+# The bus that is not there YET, as a name under the stage. A path rather than
+# an empty string: `jv-hud-bridge` falls back to its own default when `--bus`
+# and `$JARVIS_BUS` are both empty, and a bridge that quietly found the
+# machine's real socket would be a HUD this gate never blinded.
+#
+# `late-` rather than `no-`, and that is D49 rather than a rename: nothing
+# creates this path while the blind census runs, and then the driver starts a
+# real broker ON it and the HUD has to let go. So it is a socket that arrives
+# late, which is the whole second half of what this run now measures.
+HUD_BLIND_BUS = "late-bus.sock"
 
 # How long the blind corner is given to name `link`. It is the one wait here
 # that is mostly a real wait rather than a ceiling — the grace below is 5 s of
 # it by design — and the headroom on top is held by
 # `test_the_blind_run_outlasts_the_grace_it_is_about`.
 HUD_BLIND_TIMEOUT_S = 12.0
+
+
+# --------------------------------------- and then the bus comes back (D49)
+#
+# THE HALF THAT IS MORE DANGEROUS THAN THE BLINDNESS, and it is the one D47
+# could not walk. `core/LinkState.qml` deliberately does NOT clear `waited`
+# when the link returns — `blind` goes false because `linked` went true, and
+# the next outage clears the flag when it starts. That is correct, and it is
+# also one property away from the worst fault this HUD can have: a `link`
+# plate that latched on forever is a permanent NO BUS over a healthy machine,
+# which teaches the user to ignore the one plate that qualifies all the others.
+# A HUD that had it would pass the blind census above exactly as the shipped
+# one does.
+#
+# So the blind run gets a second act. A real broker — the same `jarvisd` the
+# flake builds and the script already realized — is started on the very path
+# the HUD's bridge has been failing to connect to, and the corner has to go
+# DARK: `hud_corner_plates` spells an empty corner `nothing` rather than as an
+# absence, for exactly this reading.
+#
+# It costs no new machinery. The bridge retries forever by design (see
+# `bridge_max_backoff_s()`), so nothing has to be restarted and nothing has to
+# be told; the only thing this adds to the run is the waiting.
+
+# What the corner must name once the bus is there: nothing at all. Empty on
+# purpose, and it is an expectation rather than an omission — every plate above
+# `link` needs a frame nobody is publishing on this broker, so the one thing
+# that may change is the plate about the pipe. A corner that still said `link`
+# is the latch this run is for; one that said anything else is a plate that
+# started guessing the moment it could see a bus.
+HUD_PLATES_RELINKED: tuple[str, ...] = ()
+
+# Where the late broker's own output goes, as a basename under the stage. Its
+# own file, and deliberately NOT in `scan_targets()`: that scan is
+# `tools/qmlerrors.py` over what a QML engine said, and a broker's log is not
+# a QML log — a Rust tracing line under a scanner that knows quickshell's
+# prefixes would be graded by a reader of the wrong language. It is quoted
+# into the failure message instead, which is where it is worth having.
+HUD_RELINK_BROKER_LOG = "late-broker"
+
+# How long the broker gets to bind that socket before this gives up. Short,
+# unlike every Qt wait here, and the asymmetry is the point: binding a unix
+# socket is not a cold font cache, so a broker that has not bound in five
+# seconds is not going to, and the run should say THAT rather than spending
+# the corner's whole budget waiting for a HUD that has nothing to connect to.
+HUD_RELINK_BUS_TIMEOUT_S = 4.0
+
+# How long the corner then gets to go dark. This is a real wait rather than a
+# ceiling, like the blind one, and what it has to outlast is the BRIDGE's own
+# patience rather than the HUD's: the bridge has been failing to connect for
+# several seconds by now, so its backoff has already doubled its way up to the
+# maximum, and the broker can appear one instant after a failed attempt.
+# `test_the_relink_wait_outlasts_the_backoff_it_is_about` holds it above that
+# maximum, read out of the bridge rather than copied.
+HUD_RELINK_TIMEOUT_S = 16.0
+
+
+def bridge_path() -> pathlib.Path:
+    """`services/jv-hud-bridge/jv_hud_bridge/bridge.py`, which decides the wait.
+
+    The process the HUD's own wrapper pins, and the only thing between the
+    broker appearing and a plate hearing about it.
+    """
+    return (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "services"
+        / "jv-hud-bridge"
+        / "jv_hud_bridge"
+        / "bridge.py"
+    )
+
+
+def bridge_max_backoff_s(bridge_py: str) -> float:
+    """The longest the bridge will wait between two connect attempts.
+
+    READ rather than copied, for the reason `link_grace_s()` gives about the
+    grace: this is a duration the gate has to OUTLAST, so a stale copy of it
+    would make the run flaky rather than red. A bridge given more patience
+    than `HUD_RELINK_TIMEOUT_S` allows is a gate that fails a HUD which was
+    about to recover — and the test that holds the two apart reads this.
+
+    Imported by regex rather than by `import`: `shells.py` is stdlib-only on
+    purpose (a test with no compositor and no service venv runs all of it),
+    and the bridge's module imports the bus client.
+    """
+    found = re.search(r"^MAX_BACKOFF_S\s*=\s*([0-9.]+)\s*$", bridge_py, re.M)
+    if not found:
+        raise ValueError(
+            "services/jv-hud-bridge/jv_hud_bridge/bridge.py no longer declares "
+            "`MAX_BACKOFF_S = <number>` — the relink wait is derived from it"
+        )
+    return float(found.group(1))
 
 
 def hud_shell() -> Shell:

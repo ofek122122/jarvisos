@@ -30,6 +30,13 @@ The corner then has to name exactly `link` — which is both the first proof
 anywhere that this HUD ever admits it is blind, and the only reading that can
 tell a plate REFUSING from a plate with nothing to say.
 
+AND THAT RUN HAS A SECOND ACT, which is the more dangerous half (PLAN D49): a
+real broker is started on the very path that HUD has been failing to reach, and
+the corner has to go DARK again. `LinkState` never clears the flag its grace
+set, so a plate that latched on forever — a permanent NO BUS over a healthy
+machine, which teaches the user to ignore the one plate that qualifies all the
+others — passes the blind census exactly as the shipped HUD does.
+
 THE COMPOSITOR IS ASKED TWO THINGS, and both are here because a log line
 cannot answer either (PLAN D44). First, ONCE, that sway really has the three
 monitors `shells.OUTPUTS` declares — every shell builds one surface per
@@ -350,6 +357,18 @@ def wake_hud(stage: Path) -> Proc:
         raise
 
 
+def spell(plates: list[str]) -> str:
+    """How many plates, in the corner's own vocabulary.
+
+    `nothing` rather than "0 plates", because that is the word the QML logs
+    for an empty corner and the word `hud_corner_plates` parses back — and
+    since D49 an empty corner is an EXPECTATION here, not only a failure.
+    """
+    if not plates:
+        return "nothing"
+    return f"{len(plates)} plate{'' if len(plates) == 1 else 's'}"
+
+
 def corner_census(
     name: str,
     hudlog: Path,
@@ -361,9 +380,12 @@ def corner_census(
 ) -> None:
     """Wait until every monitor's corner names exactly `want`.
 
-    Shared by the two HUD runs, which is the only reason it is a function:
-    one has a broker and ten lit plates, the other has none and exactly one
-    (PLAN D47), and the way a corner is READ is the same question both times.
+    Shared by every reading of a corner here, which is the only reason it is
+    a function: one run has a broker and ten lit plates, the blind one has
+    none and exactly one (PLAN D47), and the same blind HUD once the bus
+    arrives has to have NOTHING on it (PLAN D49). The way a corner is READ is
+    the same question all three times, and two copies of it would be two
+    answers.
     `name` is which of the two runs is being read, because both write the
     same line and a report that did not say which would send a reader to the
     wrong log. `because` is what the caller did to deserve an answer, for the
@@ -381,10 +403,7 @@ def corner_census(
             for out in shells.OUTPUTS
         }
         if all(plates == want for plates in got.values()):
-            log(
-                f"  {name}: the corner names {len(want)} "
-                f"plate{'' if len(want) == 1 else 's'} on every monitor"
-            )
+            log(f"  {name}: the corner names {spell(want)} on every monitor")
             return
         time.sleep(shells.MAPPED_POLL_S)
     # Named per monitor and per plate, because the two ways this fails are
@@ -392,23 +411,27 @@ def corner_census(
     # surface that was never built, and one naming nine plates is one plate
     # that never lit.
     report = []
-    for name, plates in got.items():
+    # `monitor` rather than `name`, which is the run: the raise below is headed
+    # by which of the HUD's runs this is, and a loop variable called `name`
+    # quietly retitled every failure after the last monitor it looked at.
+    for monitor, plates in got.items():
         if plates == want:
             continue
         if plates is None:
-            report.append(f"{name}: never said anything about its corner")
+            report.append(f"{monitor}: never said anything about its corner")
             continue
         short = [p for p in want if p not in plates]
         extra = [p for p in plates if p not in want]
         report.append(
-            f"{name}: showed [{' '.join(plates) or 'nothing'}]"
+            f"{monitor}: showed [{' '.join(plates) or 'nothing'}]"
             + (f", missing {short}" if short else "")
             + (f", unexpected {extra}" if extra else "")
             + ("" if short or extra else " — in the wrong order")
         )
     raise Fail(
         f"{name}: after {timeout:.0f}s of {because}, the corner should have been "
-        f"showing [{' '.join(want)}] on every monitor. " + "; ".join(report)
+        f"showing [{' '.join(want) or 'nothing'}] on every monitor. "
+        + "; ".join(report)
     )
 
 
@@ -521,9 +544,95 @@ def load_blind(stage: Path) -> None:
         # D44 section in `shells.py`).
         check_zone(shell, "while", up=True)
         log(f"  {shells.HUD_BLIND_LOG}: took no space off any monitor")
+        # And then the bus arrives. Same quickshell, same surface, same log.
+        relink(stage, proc)
     finally:
         proc.stop()
     check_zone(shell, "after", up=False)
+
+
+def relink(stage: Path, hud: Proc) -> None:
+    """Give the blind HUD a bus, and require it to stop saying NO BUS (D49).
+
+    The dangerous half, and the one D47 could not walk. `core/LinkState.qml`
+    does not clear `waited` when the link returns — `blind` goes false because
+    `linked` went true — so a `link` plate one edit away from latching forever
+    passes the census above exactly as the shipped one does. A permanent NO BUS
+    over a healthy machine is the worst fault this corner can have: it teaches
+    the user to ignore the one plate that qualifies all the others.
+
+    Nothing has to be restarted and nothing has to be told. The bridge the
+    HUD's own wrapper pins retries forever by design, so a broker started on
+    the very path it has been failing to reach is the whole intervention — and
+    the corner has to go DARK, which `shells.hud_corner_plates` spells
+    `nothing` rather than as an absence, for exactly this reading.
+
+    AND THAT READING IS NOT VACUOUS, which is the whole reason this is called
+    from inside `load_blind` rather than being a run of its own. An empty corner
+    is what a HUD that never lit anything looks like too — but the blind census
+    has already required the NEWEST corner line on every monitor to be `link`,
+    and `hud_corner_plates` reads the newest. So the only way this passes is a
+    line the HUD wrote after the broker arrived.
+
+    The BROKER IS THE SCRIPT'S, arriving in an environment variable like every
+    other binary here: realizing something out of the flake is the one thing in
+    this harness that is not a measurement, and a driver that could produce a
+    broker could produce a different one.
+
+    Its log is quoted into the failure rather than scanned. `tools/qmlerrors.py`
+    reads what a QML engine said; a broker's tracing lines under a scanner that
+    knows quickshell's prefixes would be graded by a reader of the wrong
+    language — so the one place it is worth having is the message a reader of
+    this failure needs, which is "did the thing I started even come up".
+    """
+    bus = stage / shells.HUD_BLIND_BUS
+    broker = Proc(
+        shells.HUD_RELINK_BROKER_LOG,
+        [need("JARVISD_BIN"), "--bus", str(bus)],
+        stage / f"{shells.HUD_RELINK_BROKER_LOG}.log",
+    )
+    try:
+        # The socket first, and on its own short budget: a broker that never
+        # bound is not a HUD that latched, and the corner's whole wait spent on
+        # a socket that was never there would report the wrong repair. Both
+        # halves of that are measured — a broker given a bad argument comes back
+        # as its own exit and its own stderr, and one that comes up and never
+        # binds as the four seconds it was given.
+        deadline = time.monotonic() + shells.HUD_RELINK_BUS_TIMEOUT_S
+        while not bus.is_socket():
+            if broker.p.poll() is not None:
+                raise Fail(
+                    f"the broker exited with {broker.p.returncode} instead of "
+                    f"listening on {bus.name}:\n{broker.tail()}"
+                )
+            if time.monotonic() > deadline:
+                raise Fail(
+                    f"the broker never created {bus.name} in "
+                    f"{shells.HUD_RELINK_BUS_TIMEOUT_S:.0f}s:\n{broker.tail()}"
+                )
+            time.sleep(shells.MAPPED_POLL_S)
+        log(f"  {shells.HUD_BLIND_LOG}: a broker is now listening on {bus.name}")
+        try:
+            corner_census(
+                shells.HUD_BLIND_LOG,
+                hud.logpath,
+                list(shells.HUD_PLATES_RELINKED),
+                shells.HUD_RELINK_TIMEOUT_S,
+                because=(
+                    "a bus that is there now and the bridge's own "
+                    f"{shells.bridge_max_backoff_s(shells.bridge_path().read_text('utf-8')):.0f}s "
+                    "worst-case retry"
+                ),
+                alive=broker,
+            )
+        except Fail as exc:
+            # The broker's own account, appended: the two ways this fails —
+            # a plate that latched on, and a broker that came up and then
+            # refused the bridge — are different repairs and read the same
+            # from the corner alone.
+            raise Fail(f"{exc}\nthe broker said:\n{broker.tail(600)}") from None
+    finally:
+        broker.stop()
 
 
 def main() -> int:

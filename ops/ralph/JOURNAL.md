@@ -13283,3 +13283,94 @@ is not worth chasing.)
   `link` to `nothing` — about 2 s. Then **D50** (the ceiling test is 2 s from
   its limit and the next wait breaks the arithmetic, not the gate), then
   **D48**, then **D45**.
+
+## 2026-09-26 — iteration 132 — the plate had to let go (PLAN D49 + D50)
+
+- built: **the blind run has a second act.** D47 proved the HUD says NO BUS;
+  nothing proved it ever STOPS. `core/LinkState.qml` deliberately never clears
+  the flag its grace set — `blind` goes false because `linked` went true — so a
+  `link` plate one edit away from latching forever passed D47's census exactly
+  as the shipped one does, and a permanent NO BUS over a healthy machine is the
+  worst fault this corner can have: it teaches the user to ignore the one plate
+  that qualifies all the others. So `load_blind` now starts a real broker on
+  the very socket that HUD has spent five seconds failing to reach, and the
+  corner has to go **DARK** — `nothing` on all three monitors, which
+  `hud_corner_plates` has spelled as a word rather than an absence since D43,
+  for exactly this reading.
+- **the reading is not vacuous, and that is why it is inside `load_blind`
+  rather than a run of its own.** An empty corner is also what a HUD that never
+  lit anything looks like. But the blind census has already required the NEWEST
+  line on every monitor to be `link`, and the census reads the newest — so the
+  only line that can satisfy `HUD_PLATES_RELINKED` is one the HUD wrote after
+  the broker arrived. The ordering is asserted, not assumed.
+- **the injection that works is not the obvious one, and it is the measurement
+  worth keeping.** `blind: root.waited` in `LinkState.qml` — the latch this
+  item is about — CANNOT BE BUILT: two of the HUD's own QML tests fail and
+  `pkgs/jv-hud` goes red before the gate starts. The element's own suite
+  already covers the element, which is good news of the D47 kind. What no
+  headless engine can cover is `Bus.qml`, the Quickshell half — and dropping
+  the bridge's own `{"t":"link","up":true}` line there ends this run **1**,
+  reporting `HEADLESS-1: showed [link], unexpected ['link']` on all three
+  monitors and taking the frames run down with it. That is the shipped-level
+  shape of this fault: a bridge that reports a live bus to a panel that goes on
+  saying it is blind. Nothing in this repo could see it before.
+- **both of the broker's own failure paths report themselves, and they are
+  different repairs.** A bad argument comes back as `the broker exited with 2
+  instead of listening on late-bus.sock` plus its stderr; a broker that comes up
+  and never binds as `never created late-bus.sock in 4s`. The socket gets its
+  own short budget on purpose — spending the corner's 16 s on a socket that was
+  never there reports the wrong repair — and the broker's log is quoted into the
+  census failure too, because a latched plate and a broker that refused the
+  bridge read identically from the corner alone. (The run above shows that
+  working: `jarvisd listening on …/late-bus.sock` printed under a corner that
+  still said `link`.)
+- **the wait is DERIVED, like the grace and unlike every expectation here.**
+  `bridge_max_backoff_s()` reads `MAX_BACKOFF_S` out of
+  `services/jv-hud-bridge`: by the time the broker appears the bridge's backoff
+  has doubled its way to the 8 s ceiling and the socket can arrive one instant
+  after a failed attempt, so `HUD_RELINK_TIMEOUT_S` is held above it by a test
+  that reads the bridge. A stale copy would make the gate flaky rather than red.
+  `HUD_BLIND_BUS` is `late-bus.sock` now, because `no-` stopped being true.
+- **and D50, which had to come with it: the ceiling is per-ENGINE.** The old
+  test summed every timeout in `shells.py` into one number ≤ 150 s and D47 left
+  it at 148, so this relink would have read as a cost problem when it is nine
+  seconds of waiting. Worse, the sum was not the worst case — it left out
+  `READY_TIMEOUT_S` entirely, 30 s per engine, and a quickshell that comes up
+  and then holds still forever is exactly the run a ceiling is for.
+  `engine_ceilings()` now states one bound per engine in `scan_targets()` (54 s
+  bar and notifier, 94 s frames run, 87 s blind run, all ≤ 100) — the claim
+  that stays true as runs are added — with the run's own 4× ceiling asserted
+  beside it so nobody reads a third of the truth. Neither is a budget: the
+  MEASURED run is 34.8 s.
+- **one real bug, found by touching it:** `corner_census`'s failure report
+  looped `for name, plates in got.items()`, shadowing the run name, so every
+  multi-monitor failure was headed by the LAST monitor rather than by which of
+  the HUD's runs it was about. Fixed; the injection above is the proof
+  (`jv-hud-blind: after 16s of …`).
+- **no QML changed, and no shell.** The whole slice is the harness plus one
+  export: the shipped HUD already lets go of the plate, and nothing had ever
+  watched it do so.
+- tests: `bash ops/ralph/verify.sh` GREEN — 2 gates over 4 paths (tools **701
+  pass**, 8 of them new; `shellload.sh` **34.8 s** against 32.0 s before — 2.6 s
+  for the second act). All three injections above were run against the full
+  gate: two ended 1 with the messages quoted, the third could not be built and
+  says so. Every one reverted, and `git status` was clean of them before the
+  verify run. `hudscreens.sh` was NOT named by the gate and did not need to be:
+  no shell QML is touched, so there are no pixels to re-photograph. build:
+  `nixos-rebuild build --flake .#ares` green. No schema change, no jv-act, no
+  boot path, no pins. Never tested, never switched.
+- files: ops/ralph/shellload.sh, tools/shellload/load.py,
+  tools/shellload/shells.py, tools/tests/test_shellload.py, ops/ralph/PLAN.md,
+  ops/ralph/JOURNAL.md
+- next: **D52** — the corner comes back empty and nothing proves it ever fills
+  again. The engine that was blind is never shown a frame; the ten-plate census
+  runs on a different quickshell that had a broker from birth. So nothing
+  anywhere proves a HUD which SURVIVED an outage can still light a plate, and
+  every cache in `BusModel` was emptied on the drop, `HealthState` threw away
+  its roster, and the subscription carrying frames is the bridge's second
+  rather than its first. `publish.py` against the late broker plus one more
+  census on the blind engine's own log is ~2 s, and it would make that run the
+  only place here where the whole outage cycle is walked end to end. Then
+  **D51** (two brokers, neither log read — and `qmlerrors.py` is the wrong
+  reader for a Rust log, so over one it says "nothing threw" whatever it says),
+  then **D48**, then **D45**.

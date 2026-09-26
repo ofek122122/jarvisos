@@ -943,6 +943,50 @@ human-reviewed step.
         tests. The shape that survives a build is the D34/D39 one, which is
         the shape this gate is for.
 
+- [ ] D51. **This gate now starts two brokers and reads neither of their
+      logs.** `jarvisd` for the frames run and a second one for D49's relink
+      both write a file in the stage, and the only thing that ever opens either
+      is D49's failure message. A broker that accepted the bridge and then
+      rejected every subscription, or one logging a decode error per frame, is
+      invisible here — the run would read as a HUD that ignored its frames,
+      which is the wrong repair by a whole process. `tools/qmlerrors.py` cannot
+      be pointed at them: it knows quickshell's `WARN scene:` prefixes and a
+      Rust tracing line is not one, so over a broker's log it reports "nothing
+      threw" whatever it says. The shape is a second small reader — jarvisd's
+      own `ERROR`/`WARN` lines, on the tracing format, with the same
+      `--rerun` courtesy — or a census of what the broker says when it is
+      well. Note the frames run's broker is the SCRIPT's and its log is next to
+      the stage's, so this is one reader over two files. Raised by D49.
+
+- [ ] D52. **The corner comes back empty and nothing proves it ever fills
+      again.** D49 takes the blind HUD from `link` to `nothing`, which is the
+      latch it was written for — but the engine that was blind is never shown a
+      frame. The ten-plate census runs on a DIFFERENT quickshell, one that had
+      a broker from the moment it started, so nothing anywhere proves that a
+      HUD which survived an outage can still light a plate: every cache in
+      `core/BusModel.qml` was emptied on the drop, `HealthState` threw away its
+      roster of lives, and the subscription that carries frames is the
+      bridge's second one rather than its first. The shape is cheap and it is
+      already built: `publish.py` against the late broker, then
+      `corner_census(..., HUD_PLATES_LIT)` on the blind engine's own log — the
+      same publisher, the same census, about 2 s and one more `Proc`. It would
+      make the blind run the only place in this repo where the whole outage
+      cycle (blind → says so → recovers → reports the machine again) is walked
+      end to end. Raised by D49.
+
+- [ ] D53. **The first quickshell pays for a cold Qt and the other three do
+      not, and all four are given 30 s for it.** `READY_TIMEOUT_S` is written
+      against the cold-font-cache argument, which is true of engine one and
+      false of engines two, three and four — they load 0.40 s after their
+      predecessor on a warm cache, measured on every run in the journal. That
+      one number is 120 s of the run's 289 s pathological ceiling (D50), and
+      it is the cheapest place to shrink it: a first-engine timeout and a
+      warm-engine timeout, or a ceiling derived from the previous engine's
+      MEASURED load time. Worth doing only with the D50 arithmetic in front of
+      you — this is a bound on a hung engine, not a budget, so the value of
+      shrinking it is that the bound stays honest rather than that the gate
+      gets faster. Raised by D50.
+
 - [ ] D48. **A lit corner threw 25,992 times in about two seconds and nobody
       knows which of two things that measures.** The D43 injection put a
       throwing binding in `Bus.latest()` and the log came back with 25,992
@@ -958,37 +1002,67 @@ human-reviewed step.
       measurement is a counter in a `var` binding under the same lit corner,
       with the no-broker run as its control. Raised by D43.
 
-- [ ] D49. **The HUD is now proved to say it is blind, and nothing proves it
-      ever stops saying it.** `core/LinkState.qml` deliberately does NOT clear
-      `waited` when the link returns — `blind` goes false because `linked` went
-      true, and the next outage clears the flag when it starts — and that is
-      the one path D47 does not walk. A plate that latched on forever would
-      pass the new run exactly as it passes now, and it is the worst kind of
-      HUD fault there is: a permanent NO BUS over a healthy machine, which
-      teaches the user to ignore the one plate that qualifies all the others.
-      The shape is cheap and the bridge already does the work: it retries
-      forever, so `jarvisd` started on the very path the blind run was pointed
-      at should turn the corner from `link` to `nothing` within the retry
-      cadence. That is a second `Proc` in `load_blind`, a second
-      `corner_census` for the empty corner, and about 2 s. Note the census
-      would be reading a corner going DARK, which `hud_corner_plates` already
-      spells as `nothing` rather than as an absence — for exactly this. Raised
-      by D47.
+- [x] D49. **The HUD is now proved to say it is blind, and nothing proved it
+      ever stops saying it.** (Done.) `load_blind` has a second act: a real
+      broker on the very socket that HUD has been failing to reach, and the
+      corner has to go DARK again.
+      · **THE READING IS NOT VACUOUS, and that is why it lives inside
+        `load_blind`.** An empty corner is also what a HUD that never lit
+        anything looks like — but the blind census has already required the
+        NEWEST corner line on every monitor to be `link`, and
+        `hud_corner_plates` reads the newest. So the only line that can satisfy
+        `HUD_PLATES_RELINKED` is one the HUD wrote after the broker arrived.
+      · **THE INJECTION THAT WORKS IS NOT THE OBVIOUS ONE, and that is the
+        measurement worth keeping.** `blind: root.waited` in `LinkState.qml` —
+        the latch this item is about — cannot be built: two of the HUD's own
+        QML tests fail and `pkgs/jv-hud` goes red before the gate runs. The
+        element's own suite already covers the element. What it cannot cover is
+        `Bus.qml`, the Quickshell half no headless engine can build: dropping
+        the bridge's `{"t":"link","up":true}` line there ends this run 1 with
+        `HEADLESS-1: showed [link], unexpected ['link']` on all three monitors,
+        and takes the frames run down with it. That is the shipped-level shape
+        of this fault, and nothing in this repo could see it before.
+      · **BOTH OF THE BROKER'S OWN FAILURE PATHS REPORT THEMSELVES.** A bad
+        argument comes back as `the broker exited with 2 instead of listening
+        on late-bus.sock` plus its stderr; a broker that comes up and never
+        binds as `never created late-bus.sock in 4s`. The socket has its own
+        short budget on purpose — spending the corner's 16 s on a socket that
+        was never there would report the wrong repair — and the broker's log is
+        quoted into the census failure too, because a latched plate and a
+        broker that refused the bridge read identically from the corner alone.
+      · `HUD_BLIND_BUS` is now `late-bus.sock`: nothing creates it while the
+        blind census runs, and then something does. The wait is derived, like
+        the grace — `bridge_max_backoff_s()` reads `MAX_BACKOFF_S` out of
+        `services/jv-hud-bridge`, because by the time the broker appears the
+        bridge's backoff has doubled its way to the ceiling and the socket can
+        arrive one instant after a failed attempt.
+      · The broker's own log is NOT scanned: `tools/qmlerrors.py` reads what a
+        QML engine said, and a Rust tracing line under it would be graded by a
+        reader of the wrong language (see D51).
+      · Cost: 34.8 s against 32.0 s before — 2.6 s for the second act.
 
-- [ ] D50. **The gate's worst-case ceiling is 2 s from its own limit, and the
-      next wait anybody adds breaks the test rather than the gate.**
-      `test_the_gate_still_costs_seconds_and_not_minutes` sums every timeout in
-      `shells.py` and asserts ≤ 150 s; D47 took it from 136 to 148 (four runs ×
-      three mapped readings, two HUD censuses, one blind wait), and
-      `HUD_BLIND_TIMEOUT_S` was set to 12 s rather than 15 partly to fit. The
-      MEASURED run is 32 s, so the ceiling is now about 4.6× the truth and the
-      next honest addition will read as a cost problem when it is an
-      arithmetic one. Two shapes: raise the number with the reason written
-      down (it is a bound on a pathological run, not a budget), or make the
-      ceiling per-ENGINE — the argument the test really wants to make is that
-      no single engine can hang this gate for minutes, and four engines each
-      bounded at 35 s is that argument stated where it stays true as runs are
-      added. Raised by D47.
+- [x] D50. **The gate's worst-case ceiling was 2 s from its own limit, and the
+      next wait anybody added would have broken the test rather than the
+      gate.** (Done, and it found a hole rather than only moving a number.) The
+      ceiling is per-ENGINE now — `engine_ceilings()` in
+      `test_shellload.py`, one entry per engine in `scan_targets()`, asserted
+      against `ENGINE_CEILING_S = 100` — because that is the claim that stays
+      true as runs are added: this gate starts a fresh quickshell per reading
+      and no one of them may hang for minutes.
+      · **AND THE OLD SUM WAS NOT THE WORST CASE.** It left out
+        `READY_TIMEOUT_S` entirely — 30 s per engine, 120 s of the run — and a
+        quickshell that comes up and then says nothing is exactly the run a
+        ceiling is for. It was the one run the ceiling did not cover.
+      · The per-engine numbers today: 54 s for the bar and the notifier
+        (`READY` + three mapped readings), 94 s for the frames run (the
+        publisher's first round and the ten-plate census), 87 s for the blind
+        run (the grace, the socket, the corner going dark). `RUN_CEILING_S` is
+        asserted too, and only to keep it exactly four times the per-engine
+        bound: the engines are sequential, so a per-engine ceiling is not a
+        ceiling on the run, and a reader who saw only the small number would be
+        reading a third of the true worst case (see D53).
+      · Neither number is a budget. The MEASURED run is 34.8 s and that is what
+        the gate's price claim rests on.
 
 - [x] D44. **"It loaded" is not "it mapped", and nothing asked the second
       question for two of the three shells.** (Done.) `shellload.sh` now puts

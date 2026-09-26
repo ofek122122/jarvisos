@@ -569,16 +569,72 @@ def test_the_monitors_the_compositor_really_has_are_checked_before_any_shell():
     assert '"-t", "get_outputs"' in text
 
 
-def test_the_gate_still_costs_seconds_and_not_minutes():
+# The ceiling on what one hung engine can cost, and it is a bound on a
+# PATHOLOGICAL run rather than a budget (PLAN D50). Nothing here is expected to
+# spend a whole timeout: the measured run is 32 s, which is the number the
+# gate's price claim rests on and the one its header quotes. What this is for is
+# the run where a quickshell comes up and then holds still forever — it has to
+# end, be reported, and not take the afternoon with it.
+ENGINE_CEILING_S = 100.0
+
+# And what the whole run can cost if EVERY engine does that, which is four
+# times the above and is asserted only to keep it four times the above: the
+# engines are sequential, so a ceiling per engine is not a ceiling on the run,
+# and a reader who saw only the per-engine number would be reading a third of
+# the true worst case.
+RUN_CEILING_S = 300.0
+
+
+def engine_ceilings() -> dict[str, float]:
+    """The worst case of every wait ONE engine of this gate can spend.
+
+    Per engine, which is D50's repair of a test that summed the whole run into
+    a single number. Two things were wrong with the sum. It broke on the next
+    honest addition rather than on a cost problem — D47 took it from 136 to 148
+    against a limit of 150, so the D49 relink would have read as expensive when
+    it is nine seconds of waiting on a corner. And what it summed was not the
+    worst case: `READY_TIMEOUT_S` was left out entirely, which is 30 s per
+    engine of pathological wait — a quickshell that maps nothing and says
+    nothing is exactly the run a ceiling exists for, and it was the one run the
+    ceiling did not cover.
+
+    Stated as an argument about ONE ENGINE because that is the claim that stays
+    true as runs are added: this gate starts a fresh quickshell per reading, and
+    no one of them may hang for minutes.
+    """
+    # Every engine pays for these: the load, and the three compositor readings
+    # around it (before / while / after, PLAN D44).
+    base = shells.READY_TIMEOUT_S + shells.MAPPED_TIMEOUT_S * 3
+    out = {shell.attr: base for shell in shells.SHELLS}
+    # The frames run waits for the publisher's first round and then for the
+    # corner to name ten plates.
+    out[shells.hud_shell().attr] = base + shells.HUD_LIT_TIMEOUT_S * 2
+    # And the blind run waits out the grace, then the socket, then the corner
+    # going dark again (PLAN D49).
+    out[shells.HUD_BLIND_LOG] = (
+        base
+        + shells.HUD_BLIND_TIMEOUT_S
+        + shells.HUD_RELINK_BUS_TIMEOUT_S
+        + shells.HUD_RELINK_TIMEOUT_S
+    )
+    return out
+
+
+def test_no_single_engine_can_hang_this_gate_for_minutes():
     """The whole argument for this being a step rather than a named command.
-    Everything here is polled, and a poll with a generous timeout is how a 25 s
-    gate becomes a 3-minute one — so every ceiling is bounded and small, and
-    the worst case is one timeout per reading per shell plus the HUD's two."""
-    runs = len(shells.SHELLS) + 1  # the blind HUD is a fourth (PLAN D47)
-    worst = shells.MAPPED_TIMEOUT_S * 3 * runs
-    worst += shells.HUD_LIT_TIMEOUT_S * 2
-    worst += shells.HUD_BLIND_TIMEOUT_S
-    assert worst <= 150, worst
+    Everything here is polled, and a poll with a generous timeout is how a 32 s
+    gate becomes a 3-minute one — so every wait is bounded, and the bound is
+    per engine (PLAN D50) because that is the claim that survives the next run
+    somebody adds."""
+    ceilings = engine_ceilings()
+    # Every engine this gate really starts has a ceiling, and nothing else does:
+    # a run added to the driver with no wait written down here is a run outside
+    # this claim.
+    assert sorted(ceilings) == sorted(name for name, _ in shells.scan_targets())
+    for engine, worst in ceilings.items():
+        assert worst <= ENGINE_CEILING_S, (engine, worst)
+    assert sum(ceilings.values()) <= RUN_CEILING_S, ceilings
+    assert RUN_CEILING_S <= ENGINE_CEILING_S * len(ceilings)
     assert 0 < shells.MAPPED_POLL_S <= 0.25
     # And the frames go out faster than the plate that needs them goes stale,
     # or the ceiling above is spent waiting for a corner that keeps dimming.
@@ -970,6 +1026,22 @@ def test_the_broker_is_realized_from_the_flake_and_started_by_the_script():
         assert "jarvisd" not in text, half.name
 
 
+def test_the_broker_the_blind_run_starts_is_the_one_the_script_already_made():
+    """D49 needs a broker STARTED after its HUD has been failing to connect, so
+    the driver starts one — and it may still not build one. It arrives in an
+    environment variable, out of the same store path the script realized for the
+    frames run, because two acts of one run measured against two different
+    brokers is not one measurement."""
+    assert 'export JARVISD_BIN="$jarvisd/bin/jarvisd"' in script_text()
+    assert script_text().index("jarvisd=$(nix build") < script_text().index(
+        'export JARVISD_BIN='
+    )
+    text = code_lines(DRIVER)
+    assert 'need("JARVISD_BIN")' in text
+    # The only path it may name is the bus, which is the stage's.
+    assert "/nix/store" not in text
+
+
 def test_the_bus_is_this_runs_own_socket_and_not_the_machines():
     """The same rule the session bus gets, for the same reason. The real one is
     `/run/jarvis/bus.sock`; a gate that published eleven composed frames onto
@@ -1039,21 +1111,29 @@ def test_the_only_thing_changed_about_the_blind_run_is_the_bus():
     assert "shells.HUD_BLIND_BUS" in found.group(2)
 
 
-def test_the_bus_the_blind_run_is_given_is_one_nothing_creates():
+def test_the_bus_the_blind_run_is_given_is_one_nothing_creates_in_time():
     """A path rather than an empty string, and a path under the run's own
     stage. `jv-hud-bridge` falls back to its own default when `--bus` and
     `$JARVIS_BUS` are both empty, so a blank would be a HUD that quietly found
-    the machine's real socket — and this gate would have blinded nothing."""
+    the machine's real socket — and this gate would have blinded nothing.
+
+    "In time" is D49: the socket does eventually arrive, because the second act
+    starts a real broker on it. What must not exist is a socket there BEFORE the
+    blind census, which is what the two rules below are about — the machine's
+    own bus, and the one the script starts for the frames run."""
     assert shells.HUD_BLIND_BUS
     assert not shells.HUD_BLIND_BUS.startswith("/")
     # Not the socket the script really starts jarvisd on, which is the one
     # thing it could collide with.
     real = next(line for line in executed_lines() if "JARVIS_BUS=" in line)
     assert shells.HUD_BLIND_BUS not in real, real
-    # And nothing creates it: it is named by the constant in both places that
-    # mention it, and the name itself appears nowhere a file is made.
-    both = "\n".join(executed_lines()) + "\n" + DRIVER.read_text("utf-8")
-    assert shells.HUD_BLIND_BUS not in both, shells.HUD_BLIND_BUS
+    # And the script never touches it: the name is spelled once, in `shells.py`,
+    # and reaches both the HUD's environment and the late broker's argv through
+    # the constant.
+    assert shells.HUD_BLIND_BUS not in "\n".join(executed_lines())
+    driver = code_lines(DRIVER)
+    assert shells.HUD_BLIND_BUS not in driver
+    assert driver.count("shells.HUD_BLIND_BUS") == 2
 
 
 def test_the_blind_corner_must_name_the_dark_plate_and_nothing_else():
@@ -1071,13 +1151,14 @@ def test_the_blind_corner_must_name_the_dark_plate_and_nothing_else():
     assert not set(shells.HUD_PLATES_LIT) & set(shells.HUD_PLATES_DARK)
 
 
-def test_both_hud_runs_read_the_corner_the_same_way():
-    """One census, two callers. The way a corner is READ — newest line per
-    monitor, every monitor, exact order — is the same question whether there
-    are ten plates on it or one, and two copies of it would be two answers."""
+def test_every_reading_of_the_corner_is_the_same_reading():
+    """One census, three callers. The way a corner is READ — newest line per
+    monitor, every monitor, exact order — is the same question whether there are
+    ten plates on it, one, or none, and two copies of it would be two answers.
+    The third caller is D49's: the same blind HUD once the bus arrives."""
     text = DRIVER.read_text("utf-8")
     assert text.count("def corner_census(") == 1
-    assert text.count("corner_census(") == 3  # the definition and two callers
+    assert text.count("corner_census(") == 4  # the definition and three callers
 
 
 def test_the_blind_run_outlasts_the_grace_it_is_about():
@@ -1108,6 +1189,133 @@ def test_the_grace_is_read_out_of_the_qml_rather_than_copied_into_this_gate():
     # default nobody chose.
     with pytest.raises(ValueError):
         shells.link_grace_s("QtObject { property real somethingElse: 5.0 }")
+
+
+# ------------------------------- and then the bus comes back (PLAN D49)
+#
+# The other half of the blind run, and the more dangerous one. `LinkState`
+# deliberately never clears the flag its grace set, so a `link` plate that
+# latched on forever passes the blind census exactly as the shipped HUD does —
+# and a permanent NO BUS over a healthy machine teaches the user to ignore the
+# one plate that qualifies all the others. These are the checks on that second
+# act that do not need a compositor.
+
+
+def test_the_blind_run_does_not_end_with_the_hud_still_saying_no_bus():
+    """The fault this act exists for, stated as the shape of the driver: the
+    blind census is not the last thing that happens to that HUD. The broker
+    arrives on its bus and the same surface, the same engine and the same log
+    have to report a corner that went dark."""
+    text = DRIVER.read_text("utf-8")
+    blind = text[text.index("def load_blind(") : text.index("def main(")]
+    assert "def relink(" in blind
+    assert "relink(stage, proc)" in blind
+    # The same engine's log, or this is a claim about some other HUD.
+    assert "hud.logpath" in blind
+    assert "list(shells.HUD_PLATES_RELINKED)" in blind
+
+
+def test_the_corner_that_comes_back_is_empty_and_that_is_an_expectation():
+    """`HUD_PLATES_RELINKED` is deliberately empty, and empty is a reading
+    rather than an absence: `hud_corner_plates` parses the QML's own word
+    `nothing`. Two ways to fail it, and they are different faults — a corner
+    still naming `link` is the latch, and a corner naming anything else is a
+    plate that started guessing the moment it could see a bus."""
+    assert shells.HUD_PLATES_RELINKED == ()
+    assert shells.hud_corner_plates(
+        shells.hud_corner_line("HEADLESS-1", ()), "HEADLESS-1"
+    ) == list(shells.HUD_PLATES_RELINKED)
+    # And nothing on this broker publishes a frame, so no other plate has
+    # anything to say: the publisher is the frames run's alone.
+    relink = DRIVER.read_text("utf-8")
+    relink = relink[relink.index("def relink(") :]
+    assert "PUBLISH" not in relink
+    assert "HUD_FRAMES" not in relink
+
+
+def test_the_empty_corner_is_only_read_after_the_hud_said_it_was_blind():
+    """What makes that reading mean anything. An empty corner is also what a HUD
+    that never lit a plate looks like — so this only counts because the blind
+    census has already required the NEWEST line on every monitor to be `link`,
+    and `hud_corner_plates` reads the newest. Order, therefore, is load-bearing:
+    the relink is inside `load_blind`, after its census."""
+    text = DRIVER.read_text("utf-8")
+    blind = text[text.index("def load_blind(") : text.index("def relink(")]
+    assert blind.index("HUD_PLATES_DARK") < blind.index("relink(stage, proc)")
+    # And the newest line is what the census reads, which is the property the
+    # order above leans on.
+    said = "\n".join(
+        [
+            shells.hud_corner_line("HEADLESS-1", ("link",)),
+            shells.hud_corner_line("HEADLESS-1", ()),
+        ]
+    )
+    assert shells.hud_corner_plates(said, "HEADLESS-1") == []
+
+
+def test_the_relink_wait_outlasts_the_retry_it_is_waiting_for():
+    """Like the grace, this is a real wait rather than a ceiling — and what it
+    has to outlast is the BRIDGE's patience, not the HUD's. By the time the
+    broker appears the bridge has been failing for several seconds, so its
+    backoff has doubled its way to the maximum and the socket can arrive one
+    instant after a failed attempt. Headroom on top for the connect, the
+    subscribe and the fade the plate leaves on."""
+    backoff = shells.bridge_max_backoff_s(shells.bridge_path().read_text("utf-8"))
+    assert backoff > 0
+    assert shells.HUD_RELINK_TIMEOUT_S >= backoff + 5, (
+        backoff,
+        shells.HUD_RELINK_TIMEOUT_S,
+    )
+    # The socket is a different kind of wait and is bounded separately: binding
+    # one is not a cold font cache, so a broker that has not bound in that long
+    # is not going to — and spending the corner's budget on it would report the
+    # wrong repair.
+    assert shells.HUD_RELINK_BUS_TIMEOUT_S < shells.HUD_RELINK_TIMEOUT_S
+
+
+def test_the_backoff_is_read_out_of_the_bridge_rather_than_copied():
+    """The same rule `link_grace_s` follows, for the same reason: a duration the
+    gate has to OUTLAST must be read, or a stale copy makes the run flaky rather
+    than red. A bridge given more patience than the wait above allows is a gate
+    that fails a HUD which was about to recover."""
+    assert shells.bridge_path().is_file()
+    assert "shells.bridge_max_backoff_s(" in DRIVER.read_text("utf-8")
+    with pytest.raises(ValueError):
+        shells.bridge_max_backoff_s("FIRST_BACKOFF_S = 0.5\n")
+    # And it really READS: a bridge that declared a different number gets a
+    # different answer, which is what tells this apart from a constant with a
+    # file path next to it. Checked this way rather than by scanning `shells.py`
+    # for the value, the way the grace is: `MAPPED_TIMEOUT_S` is coincidentally
+    # the same 8.0, so a value scan would be asserting that two unrelated
+    # numbers stay unequal.
+    assert shells.bridge_max_backoff_s("MAX_BACKOFF_S = 99.5\n") == 99.5
+
+
+def test_the_late_broker_is_not_graded_as_a_qml_engine():
+    """`tools/qmlerrors.py` reads what a QML engine said. A broker's tracing
+    lines under a scanner that knows quickshell's prefixes would be graded by a
+    reader of the wrong language — and worse, would read clean whatever it said.
+    Its log is quoted into the failure message instead, which is the one place
+    "did the thing I started even come up" is worth having."""
+    assert shells.HUD_RELINK_BROKER_LOG not in [
+        name for name, _ in shells.scan_targets()
+    ]
+    assert shells.HUD_RELINK_BROKER_LOG not in [s.attr for s in shells.SHELLS]
+    assert shells.HUD_RELINK_BROKER_LOG != shells.HUD_BLIND_LOG
+    relink = DRIVER.read_text("utf-8")
+    relink = relink[relink.index("def relink(") :]
+    assert "broker.tail(" in relink
+
+
+def test_the_late_broker_is_stopped_by_the_driver_that_started_it():
+    """The script's trap only knows the pids it started. A broker left holding
+    a socket in a directory about to be deleted is the shape of a leak this
+    harness has had before, so it is stopped in a `finally` like the publisher —
+    on the failing path too, which is the one that matters."""
+    relink = DRIVER.read_text("utf-8")
+    relink = relink[relink.index("def relink(") :]
+    assert "finally:" in relink
+    assert relink.index("finally:") < relink.index("broker.stop()")
 
 
 def test_the_blind_runs_log_is_scanned_like_every_other_engines():
