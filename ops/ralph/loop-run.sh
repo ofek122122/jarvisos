@@ -26,13 +26,26 @@ STOP="$WT/.ralph-STOP"
 # model choice here dominates everything else. Sonnet does this class of work
 # well; override with RALPH_MODEL=opus for a stretch of genuinely hard items.
 MODEL="${RALPH_MODEL:-sonnet}"
-# A systemd user service inherits no locale, so every Qt tool the QML gates run
-# prints a four-line "locale C is not UTF-8" warning. Harmless in itself, but it
-# floods the `tail -50` below — the only window into an iteration that dies —
-# and did exactly that when iteration 3 crashed. Give Qt the UTF-8 locale it
-# wants. LANG only: LC_ALL would also reset collation, which tests may rely on.
-export LANG=C.UTF-8
-BOOTSTRAP='Read ops/ralph/PROMPT.md in full and follow it exactly for ONE iteration, then stop. Working directory is this repository, on branch ralph/auto. Obey ops/ralph/GUARDRAILS.md absolutely. The repo is your only memory between iterations.'
+# A systemd user service inherits no locale, so Qt prints a four-line "locale C
+# is not UTF-8" warning per invocation. `export LANG` here does NOT silence it —
+# the QML gates run inside nix build sandboxes, which scrub the environment, so
+# the setting cannot reach them (tried in 328daec; the warnings kept coming).
+# Silencing it properly means touching the derivations for a cosmetic, so
+# instead the noise is filtered out of the tail below, which is the only thing
+# it was actually hurting: the 50-line window into an iteration that dies.
+export LANG=C.UTF-8   # harmless, and does fix the non-sandboxed callers
+
+# THE NEVER-BACKGROUND RULE LIVES HERE, not only in PROMPT.md. Twice now an
+# iteration has backgrounded its verify gate, said "waiting for nixtest.sh to
+# complete", ended its turn, and died holding finished work (iteration 3 of the
+# first run, iteration 8 of the third). PROMPT.md STEP 3 already forbids it and
+# that was not enough: a headless agent's own harness tells it backgrounded work
+# re-invokes it automatically, which is true interactively and FALSE under -p.
+# A rule in a file it reads loses to an affordance in the prompt it runs under,
+# so the rule goes in the prompt it runs under.
+BOOTSTRAP='Read ops/ralph/PROMPT.md in full and follow it exactly for ONE iteration, then stop. Working directory is this repository, on branch ralph/auto. Obey ops/ralph/GUARDRAILS.md absolutely. The repo is your only memory between iterations.
+
+CRITICAL, AND IT OVERRIDES YOUR INSTINCTS: you are `claude -p`. Your turn ending IS your process being killed. There is no background-task notification, no re-invocation, no next turn — whatever your harness normally tells you about backgrounded work does not apply here. NEVER pass run_in_background, never say "waiting for X to complete", never end your turn expecting to be woken. Run every command — including ops/ralph/verify.sh and nixos-rebuild build, which legitimately take several minutes each — in the FOREGROUND, and sit blocked on the exit code inside this one turn. Minutes of silence while a gate runs is correct and expected. Two previous iterations died exactly this way and their finished work was orphaned.'
 
 cd "$WT" || { echo "ralph: worktree $WT missing — run the one-time setup"; exit 1; }
 [ -x "$CLAUDE" ] || { echo "ralph: claude not found"; exit 1; }
@@ -65,7 +78,11 @@ while :; do
   echo "=========== ralph iteration $i @ $(date -u +%FT%TZ) ==========="
   # A fresh, autonomous, headless agent iteration. Its own verify gate + commit
   # + push live in PROMPT.md; guardrails keep it on ralph/auto and off the OS.
-  "$CLAUDE" -p --model "$MODEL" --dangerously-skip-permissions "$BOOTSTRAP" 2>&1 | tail -50 || true
+  # The grep strips Qt's unsilenceable locale warning (see the LANG comment
+  # above) so the 50 lines kept are 50 lines of the agent, not of boilerplate.
+  "$CLAUDE" -p --model "$MODEL" --dangerously-skip-permissions "$BOOTSTRAP" 2>&1 \
+    | grep -vE "Detected locale|Qt depends on a UTF-8 locale|If this causes problems, reconfigure|for more information\.$" \
+    | tail -50 || true
   echo "=========== ralph iteration $i complete ==========="
   sleep 10   # a breather; also throttles a tight failure loop
 done
