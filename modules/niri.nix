@@ -50,6 +50,9 @@
 # window-rule/workspace of its own (it is a themed dmenu popup, not a window
 # niri places). "Boot Windows" is deliberately not one of its choices — see
 # pkgs/jv-power-menu/default.nix's own comment and PLAN H2b.
+#
+# PLAN H3 adds clipboard history (pkgs/jv-clip-menu), the same shape again —
+# its own `clipboard-binds.kdl`, no window-rule (another themed dmenu popup).
 { lib, self, ... }:
 let
   outputs = import ../hosts/ares/outputs.nix;
@@ -137,16 +140,29 @@ let
         Mod+Shift+Escape hotkey-overlay-title="Power menu: lock / suspend / reboot / shut down" { spawn "jv-power-menu"; }
     }
   '';
+
+  # PLAN H3: clipboard history. Same shape as H2 — no window-rule/workspace
+  # (a dmenu popup, not a placed window), just its own include and bind file.
+  clipboardRule = ''
+    include "clipboard-binds.kdl"
+  '';
+
+  clipboardBinds = ''
+    binds {
+        Mod+Shift+C hotkey-overlay-title="Clipboard history" { spawn "jv-clip-menu"; }
+    }
+  '';
 in
 {
-  # `spawn "jv-scratchterm"`/`spawn "jv-power-menu"` (above) look the name up
-  # on PATH exactly the way config-base.kdl's own `spawn "jv-lock"` does
-  # (modules/theme.nix puts jv-lock on PATH the same way) — niri's `spawn`
-  # execs argv[0] via the environment it started in, not a store path this
-  # module could pin into the KDL text itself.
+  # `spawn "jv-scratchterm"`/`spawn "jv-power-menu"`/`spawn "jv-clip-menu"`
+  # (above) look the name up on PATH exactly the way config-base.kdl's own
+  # `spawn "jv-lock"` does (modules/theme.nix puts jv-lock on PATH the same
+  # way) — niri's `spawn` execs argv[0] via the environment it started in,
+  # not a store path this module could pin into the KDL text itself.
   environment.systemPackages = [
     self.packages.x86_64-linux.jv-scratchterm
     self.packages.x86_64-linux.jv-power-menu
+    self.packages.x86_64-linux.jv-clip-menu
   ];
 
   environment.etc."niri/config.kdl".text =
@@ -156,8 +172,10 @@ in
       (builtins.readFile ./niri/config-base.kdl)
     + lib.concatMapStrings outputStanza outputs
     + scratchtermRule
-    + powerMenuRule;
+    + powerMenuRule
+    + clipboardRule;
 
   environment.etc."niri/scratchterm-binds.kdl".text = scratchtermBinds;
   environment.etc."niri/power-menu-binds.kdl".text = powerMenuBinds;
+  environment.etc."niri/clipboard-binds.kdl".text = clipboardBinds;
 }

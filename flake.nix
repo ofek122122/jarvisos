@@ -164,6 +164,11 @@
         jv-power-menu = pkgs.callPackage ./pkgs/jv-power-menu {
           inherit (self.packages.${system}) jv-lock;
         };
+        # jv-clip-menu — PLAN H3: clipboard history, the first "super-menu
+        # mode" — a themed dmenu pick over cliphist's own history
+        # (modules/clipboard.nix runs the store daemons; modules/niri.nix
+        # wires the keybind).
+        jv-clip-menu = pkgs.callPackage ./pkgs/jv-clip-menu { };
         default = self.packages.${system}.jarvis-doctor;
       };
 

@@ -902,8 +902,67 @@ the top unchecked item unless it is blocked.
       already declined to cross unreviewed) — see **R12** in
       `docs/optimization-backlog.md` and the question in
       `ops/ralph/NEEDS-DECISION.md`. Ask, do not implement.
-- [ ] H3. Super-menu modes: clipboard history, emoji picker, calculator, unit
-      converter, recent files. One mode per iteration is fine.
+- [H] H3a. Super-menu modes, split into one item per mode (one per iteration
+      is fine, per the original H3): **clipboard history**. The same shape
+      H1/H2 already established
+      picker (`cliphist list | fuzzel --dmenu | cliphist decode | wl-copy`,
+      never `wl-paste` itself — a picker that populated its own history would
+      be a sensor observing its own output, the same bug class F5c's `[H]`
+      list warns about); `modules/clipboard.nix` is the daemon half, two
+      `wl-paste --type {text,image} --watch cliphist store` user services
+      (cliphist's own documented pair — one watcher per MIME class, since a
+      single watcher only ever reports the type it started with) under
+      `graphical-session.target`, the same shape `modules/comfort.nix`'s
+      jv-idle/jv-nightlight already use; `modules/niri.nix` wires **Mod+Shift+
+      C** through its own `clipboard-binds.kdl` (a second top-level `binds{}`
+      node in config.kdl is a hard niri parse error — the same reason H1/H2
+      each got their own included file). Wayland-only (`wl-copy`, never
+      `xclip`/`xsel` — CLAUDE.md: "Wayland only, never X11-first").
+      Tests: `tools/tests/test_clip_menu.py` (8 cases, the same technique
+      `test_power_menu.py` uses — the script is pulled straight out of
+      `pkgs/jv-clip-menu/default.nix`'s own `text` attribute and run against
+      fake `cliphist`/`fuzzel`/`wl-copy` stubs on PATH): selecting an entry
+      hands `cliphist decode` the WHOLE selected line (id and all, not just
+      the human-readable preview after the tab) and copies exactly what
+      decode returns; cancelling (fuzzel exits non-zero) or an empty
+      selection touches neither `decode` nor `wl-copy`; the full history is
+      listed before the menu is shown; fuzzel runs in `--dmenu` mode; two
+      static checks — no `xclip`/`xsel`/`xdotool` reference, and no
+      `wl-paste` reference (that daemon is `modules/clipboard.nix`'s job, not
+      the picker's). `ops/ralph/nixtest.sh` (+6 cases, 78 total): the
+      clipboard include lands in the built `/etc/niri/config.kdl` as a
+      relative path, the built `clipboard-binds.kdl` carries the real bind
+      and spawn name, `jv-clip-menu` reaches `environment.systemPackages`,
+      `niri validate` accepts all four files (`config.kdl` +
+      `scratchterm-binds.kdl` + `power-menu-binds.kdl` +
+      `clipboard-binds.kdl`) together, `jv-clip-menu` pins
+      cliphist/fuzzel/wl-clipboard into its own PATH ahead of the ambient
+      one (the same guarantee H1/H2's own PATH-pinning cases check), and
+      both `jv-clip-store-{text,image}` units exist, are wired to
+      `graphical-session.target`, and run the exact `wl-paste --type <mime>
+      --watch cliphist store` command line for their own MIME type.
+      `bash ops/ralph/runtests.sh tools`: 980 passed (was 972).
+      `bash ops/ralph/nixtest.sh`: 78 passed (was 72). `bash ops/ralph/
+      verify.sh`: 3 gates over 7 paths, GREEN in 223.0s (tools 81.3,
+      nixtest 100.5, shellload 41.3). `ops/ralph/hudscreens.sh` was run by
+      hand because `flake.nix` changed (a new package added, nothing
+      HUD-visible): all 10 real-compositor shots matched the sheet already
+      committed at HEAD (7 of 10 differed only by compositor rounding,
+      restored to the committed bytes, the same "no HUD regression" result
+      H2 saw). `nixos-rebuild build --flake .#ares` -> ok (16 derivations:
+      both new `/etc/niri/*.kdl` files, the two `jv-clip-store-*` units,
+      `jv-clip-menu`'s package, `system-path`/`system-units`/`user-units`/
+      `etc`/`activate`/toplevel). Never switched. No schema, no jv-act, no
+      boot path, no pins, no disko.nix touched.
+      `[H]` because whether the popup looks right and whether cliphist
+      actually round-trips real clipboard content (text AND an image) needs
+      a real niri session and a human pressing Mod+Shift+C — see
+      `ops/ralph/HUMAN-VERIFY.md`.
+- [ ] H3b. Super-menu modes: emoji picker. Same shape as H3a — its own
+      package, its own keybind and included binds file in `modules/niri.nix`.
+- [ ] H3c. Super-menu modes: calculator. Same shape as H3a.
+- [ ] H3d. Super-menu modes: unit converter. Same shape as H3a.
+- [ ] H3e. Super-menu modes: recent files. Same shape as H3a.
 - [ ] H4. Quick-settings panel: wifi, bluetooth, volume, brightness, night
       light, do-not-disturb.
 - [ ] H5. Window rules (per-app workspace/floating/size) — declared.

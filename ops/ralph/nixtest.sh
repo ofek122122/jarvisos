@@ -566,12 +566,34 @@ if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
   if grep -qx 'jv-power-menu' <<<"$sys_pkgs"; then ok "$t"
   else bad "$t" "jv-power-menu missing from environment.systemPackages"; fi
 
+  # PLAN H3: clipboard history. Same shape again — no window-rule/workspace,
+  # just its own include and bind file.
+  clip_binds_etc_err=$(mktemp)
+  clip_binds_etc=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+    '(c: c.config.environment.etc."niri/clipboard-binds.kdl".text)' 2>"$clip_binds_etc_err")
+  rm -f "$clip_binds_etc_err"
+
+  t='the clipboard menu include is in config.kdl, as a relative path'
+  if grep -qF 'include "clipboard-binds.kdl"' <<<"$etc" \
+     && ! grep -q 'include "/' <<<"$etc"; then ok "$t"
+  else bad "$t" "found no relative clipboard include: $(grep -n include <<<"$etc")"; fi
+
+  t='the built clipboard-binds.kdl is not a Nix evaluation error'
+  if [ -n "$clip_binds_etc" ] && grep -qF 'Mod+Shift+C' <<<"$clip_binds_etc" \
+     && grep -qF 'spawn "jv-clip-menu"' <<<"$clip_binds_etc"; then ok "$t"
+  else bad "$t" "$clip_binds_etc"; fi
+
+  t='the clipboard menu is on PATH, because a keybind can only spawn a name'
+  if grep -qx 'jv-clip-menu' <<<"$sys_pkgs"; then ok "$t"
+  else bad "$t" "jv-clip-menu missing from environment.systemPackages"; fi
+
   t='niri itself accepts the config this flake would install'
   niri_bin=$(nix build --no-link --print-out-paths '.#nixosConfigurations.ares.pkgs.niri' 2>&1 | tail -1)
   tmpd=$(mktemp -d)
   printf '%s' "$etc" > "$tmpd/config.kdl"
   printf '%s' "$binds_etc" > "$tmpd/scratchterm-binds.kdl"
   printf '%s' "$power_binds_etc" > "$tmpd/power-menu-binds.kdl"
+  printf '%s' "$clip_binds_etc" > "$tmpd/clipboard-binds.kdl"
   validated=""
   if [ -x "$niri_bin/bin/niri" ]; then
     validated=$("$niri_bin/bin/niri" validate -c "$tmpd/config.kdl" 2>&1)
@@ -595,6 +617,27 @@ if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
   if grep -q "PATH=\"$store/[^\"]*fuzzel[^\"]*/bin:$store/[^\"]*systemd[^\"]*/bin:$store/[^\"]*jv-lock[^\"]*/bin" <<<"$power_script"; then
     ok "$t"
   else bad "$t" "jv-power-menu at ${power_menu_bin:-<not built>}: $(head -5 <<<"$power_script")"; fi
+
+  t='jv-clip-menu pins cliphist/fuzzel/wl-clipboard into its own PATH, never trusts the ambient one'
+  clip_menu_bin=$(nix build --no-link --print-out-paths '.#jv-clip-menu' 2>&1 | tail -1)
+  clip_script=""
+  [ -x "$clip_menu_bin/bin/jv-clip-menu" ] && clip_script=$(cat "$clip_menu_bin/bin/jv-clip-menu")
+  if grep -q "PATH=\"$store/[^\"]*cliphist[^\"]*/bin:$store/[^\"]*fuzzel[^\"]*/bin:$store/[^\"]*wl-clipboard[^\"]*/bin" <<<"$clip_script"; then
+    ok "$t"
+  else bad "$t" "jv-clip-menu at ${clip_menu_bin:-<not built>}: $(head -5 <<<"$clip_script")"; fi
+
+  t='clipboard history: both wl-paste watchers (text + image) are wired to graphical-session.target'
+  clip_text_unit=$(unit jv-clip-store-text.service '')
+  clip_image_unit=$(unit jv-clip-store-image.service '')
+  if is_unit "$clip_text_unit" && is_unit "$clip_image_unit" \
+     && grep -q 'WantedBy=graphical-session.target' <<<"$clip_text_unit" \
+     && grep -q 'WantedBy=graphical-session.target' <<<"$clip_image_unit"; then ok "$t"
+  else bad "$t" "text unit: $(tail -3 <<<"$clip_text_unit"); image unit: $(tail -3 <<<"$clip_image_unit")"; fi
+
+  t='clipboard history: each watcher runs wl-paste --type <its mime> --watch cliphist store'
+  if grep -qE "ExecStart=$store/[^\"]*wl-clipboard[^\"]*/bin/wl-paste --type text --watch $store/[^\"]*cliphist[^\"]*/bin/cliphist store" <<<"$clip_text_unit" \
+     && grep -qE "ExecStart=$store/[^\"]*wl-clipboard[^\"]*/bin/wl-paste --type image --watch $store/[^\"]*cliphist[^\"]*/bin/cliphist store" <<<"$clip_image_unit"; then ok "$t"
+  else bad "$t" "text: $(tail -3 <<<"$clip_text_unit"); image: $(tail -3 <<<"$clip_image_unit")"; fi
 fi
 
 # ---------------------------------------------------------- comfort basics

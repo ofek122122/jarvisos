@@ -25,6 +25,7 @@
     ../../modules/vpn.nix
     ../../modules/syncthing.nix
     ../../modules/dictate.nix
+    ../../modules/clipboard.nix
     ../../modules/windows-compat.nix
     ../../modules/jarvis-services.nix
     ../../modules/boot-grub.nix
