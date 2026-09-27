@@ -44,6 +44,12 @@
 # absolute), which is also what lets `ops/ralph/nixtest.sh` validate both
 # files together out of a throwaway directory that is never `/etc/niri`
 # itself.
+#
+# PLAN H2 adds a power menu (pkgs/jv-power-menu) the same way as H1's
+# keybind: its own `include`d file, `power-menu-binds.kdl`, since it needs no
+# window-rule/workspace of its own (it is a themed dmenu popup, not a window
+# niri places). "Boot Windows" is deliberately not one of its choices — see
+# pkgs/jv-power-menu/default.nix's own comment and PLAN H2b.
 { lib, self, ... }:
 let
   outputs = import ../hosts/ares/outputs.nix;
@@ -115,14 +121,33 @@ let
         Mod+Grave hotkey-overlay-title="Toggle the scratchpad terminal" { spawn "jv-scratchterm"; }
     }
   '';
+
+  # PLAN H2: the power menu. It needs no window-rule/workspace of its own —
+  # jv-power-menu is a themed dmenu popup, not a window niri has to place —
+  # so its half of the tail is only the include line; the bind itself gets
+  # its OWN included file for the same reason scratchtermBinds does (a
+  # second top-level `binds { }` node in config.kdl is a hard parse error,
+  # but each `include`d file gets its own single allowance).
+  powerMenuRule = ''
+    include "power-menu-binds.kdl"
+  '';
+
+  powerMenuBinds = ''
+    binds {
+        Mod+Shift+Escape hotkey-overlay-title="Power menu: lock / suspend / reboot / shut down" { spawn "jv-power-menu"; }
+    }
+  '';
 in
 {
-  # `spawn "jv-scratchterm"` (scratchtermBinds above) looks the name up on
-  # PATH exactly the way config-base.kdl's own `spawn "jv-lock"` does
+  # `spawn "jv-scratchterm"`/`spawn "jv-power-menu"` (above) look the name up
+  # on PATH exactly the way config-base.kdl's own `spawn "jv-lock"` does
   # (modules/theme.nix puts jv-lock on PATH the same way) — niri's `spawn`
   # execs argv[0] via the environment it started in, not a store path this
   # module could pin into the KDL text itself.
-  environment.systemPackages = [ self.packages.x86_64-linux.jv-scratchterm ];
+  environment.systemPackages = [
+    self.packages.x86_64-linux.jv-scratchterm
+    self.packages.x86_64-linux.jv-power-menu
+  ];
 
   environment.etc."niri/config.kdl".text =
     builtins.replaceStrings
@@ -130,7 +155,9 @@ in
       [ (token "ember") (token "line") (token "warn") (token "risk") ]
       (builtins.readFile ./niri/config-base.kdl)
     + lib.concatMapStrings outputStanza outputs
-    + scratchtermRule;
+    + scratchtermRule
+    + powerMenuRule;
 
   environment.etc."niri/scratchterm-binds.kdl".text = scratchtermBinds;
+  environment.etc."niri/power-menu-binds.kdl".text = powerMenuBinds;
 }

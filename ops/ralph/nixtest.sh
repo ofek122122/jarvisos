@@ -542,11 +542,36 @@ if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
      && grep -qF 'spawn "jv-scratchterm"' <<<"$binds_etc"; then ok "$t"
   else bad "$t" "$binds_etc"; fi
 
+  # PLAN H2: the power menu. Same shape as H1's own bind — it needs no
+  # window-rule/workspace (a dmenu popup, not a placed window), so only its
+  # include and its own bind file matter here.
+  power_binds_etc_err=$(mktemp)
+  power_binds_etc=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+    '(c: c.config.environment.etc."niri/power-menu-binds.kdl".text)' 2>"$power_binds_etc_err")
+  rm -f "$power_binds_etc_err"
+
+  t='the power menu include is in config.kdl, as a relative path'
+  if grep -qF 'include "power-menu-binds.kdl"' <<<"$etc" \
+     && ! grep -q 'include "/' <<<"$etc"; then ok "$t"
+  else bad "$t" "found no relative power-menu include: $(grep -n include <<<"$etc")"; fi
+
+  t='the built power-menu-binds.kdl is not a Nix evaluation error'
+  if [ -n "$power_binds_etc" ] && grep -qF 'Mod+Shift+Escape' <<<"$power_binds_etc" \
+     && grep -qF 'spawn "jv-power-menu"' <<<"$power_binds_etc"; then ok "$t"
+  else bad "$t" "$power_binds_etc"; fi
+
+  t='the power menu is on PATH, because a keybind can only spawn a name'
+  sys_pkgs=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+    '(c: builtins.concatStringsSep "\n" (map (p: p.name) c.config.environment.systemPackages))' 2>&1)
+  if grep -qx 'jv-power-menu' <<<"$sys_pkgs"; then ok "$t"
+  else bad "$t" "jv-power-menu missing from environment.systemPackages"; fi
+
   t='niri itself accepts the config this flake would install'
   niri_bin=$(nix build --no-link --print-out-paths '.#nixosConfigurations.ares.pkgs.niri' 2>&1 | tail -1)
   tmpd=$(mktemp -d)
   printf '%s' "$etc" > "$tmpd/config.kdl"
   printf '%s' "$binds_etc" > "$tmpd/scratchterm-binds.kdl"
+  printf '%s' "$power_binds_etc" > "$tmpd/power-menu-binds.kdl"
   validated=""
   if [ -x "$niri_bin/bin/niri" ]; then
     validated=$("$niri_bin/bin/niri" validate -c "$tmpd/config.kdl" 2>&1)
@@ -562,6 +587,14 @@ if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
   if grep -q "PATH=\"$store/[^\"]*niri[^\"]*/bin:$store/[^\"]*jq[^\"]*/bin:$store/[^\"]*alacritty[^\"]*/bin" <<<"$script"; then
     ok "$t"
   else bad "$t" "jv-scratchterm at ${scratchterm_bin:-<not built>}: $(head -5 <<<"$script")"; fi
+
+  t='jv-power-menu pins fuzzel/systemctl/jv-lock into its own PATH, never trusts the ambient one'
+  power_menu_bin=$(nix build --no-link --print-out-paths '.#jv-power-menu' 2>&1 | tail -1)
+  power_script=""
+  [ -x "$power_menu_bin/bin/jv-power-menu" ] && power_script=$(cat "$power_menu_bin/bin/jv-power-menu")
+  if grep -q "PATH=\"$store/[^\"]*fuzzel[^\"]*/bin:$store/[^\"]*systemd[^\"]*/bin:$store/[^\"]*jv-lock[^\"]*/bin" <<<"$power_script"; then
+    ok "$t"
+  else bad "$t" "jv-power-menu at ${power_menu_bin:-<not built>}: $(head -5 <<<"$power_script")"; fi
 fi
 
 # ---------------------------------------------------------- comfort basics

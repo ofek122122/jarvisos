@@ -80,3 +80,25 @@ confirmation (it can type into anything — a terminal, a password field).
 are being built behind a *fake* injector, so adopting the real tool later is a
 one-call change.
 
+## H2b — "Boot Windows" in the power menu: which mechanism, and do you have the NVRAM entry it needs?
+
+**The decision:** the power menu itself (lock/suspend/reboot/shut down) shipped
+this iteration with no "Boot Windows" fifth option, because that one option
+needs either `modules/boot-grub.nix` changed (turning on `default = "saved"`,
+which this file currently refuses on purpose — "a predictable default beats
+convenience") or a brand-new privilege letting the desktop session write an
+`efibootmgr` firmware NVRAM variable. Both are exactly the two classes of
+change GUARDRAILS reserves for a human: `modules/boot-*.nix` by name, and a new
+privileged grant with no confirmation step by consequence. Write-up: **R12** in
+`docs/optimization-backlog.md`.
+
+**What it needs from you:** run `efibootmgr -v` on ares and say whether a
+native "Windows Boot Manager" NVRAM entry already exists (this decides which of
+the two shapes R12 lays out is even possible), then pick a shape and review
+the boot-config change or the privilege grant it needs.
+
+**Not blocking the rest:** PLAN H2's four other entries (Lock, Suspend, Reboot,
+Shut Down) are built, tested and require neither change — adding a fifth once
+this is reviewed is a one-line addition to `pkgs/jv-power-menu`'s existing
+`case` statement.
+

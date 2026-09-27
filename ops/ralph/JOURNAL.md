@@ -17112,3 +17112,86 @@ work was entirely in `shell/jv-hud/`.
   pressing Mod+Grave — see HUMAN-VERIFY.md. Track H (input, window and
   visual comfort) continues at H2 (power menu) — H1 is its only item done
   so far, so the loop keeps going per PROMPT.md STEP 5.
+
+## 2026-09-27 — power menu: lock / suspend / reboot / shut down (PLAN H2)
+- built: `pkgs/jv-power-menu` is a `writeShellApplication` that pipes four
+  labels — "Lock", "Suspend", "Reboot", "Shut Down" — into `fuzzel --dmenu`
+  with no `--config` flag, so it reuses the SAME `/etc/xdg/fuzzel/fuzzel.ini`
+  `modules/theme.nix` already declares for the plain Mod+D launcher rather
+  than spending a second palette to keep in step (`modules/super-menu.nix`'s
+  own `jarvis-menu.ini` is a different case — a full icon grid genuinely
+  needs its own config). It execs `jv-lock` (reused, not a second lock
+  mechanism of its own) / `systemctl suspend` / `systemctl reboot` /
+  `systemctl poweroff` on the answer. Cancelling (Escape) is fuzzel exiting
+  non-zero with nothing on stdout, which `|| exit 0` turns into a clean
+  no-op rather than an error. No second confirmation dialog was added:
+  opening the menu (one deliberate key press) and picking an item (a second
+  deliberate step) already clear the bar invariant 3 sets for a
+  human-invoked destructive action — the same tier `nixos-rebuild`/PLAN F3's
+  `jv-snapshot-restore` sit at, not a bus-driven `jv-act` capability.
+  `modules/niri.nix` wires the bind the same way H1 did: a window-rule/
+  workspace pair can join `config-base.kdl`'s tail directly (niri's own
+  "multipart" nodes), but a keybind cannot — a second top-level `binds { }`
+  node in the same file is a hard parse error — so `Mod+Shift+Escape`
+  (checked free of every other bind in `config-base.kdl` by grep first)
+  lives in its OWN second included file, `/etc/niri/power-menu-binds.kdl`,
+  alongside H1's `scratchterm-binds.kdl` rather than crammed into it (one
+  concern per included file). The menu needs no window-rule/workspace of
+  its own — it is a themed dmenu popup, not a window niri has to place — so
+  its half of config.kdl's tail is only the `include` line.
+  **"Boot Windows" is deliberately not one of the four options.** Checked
+  before writing anything: `modules/boot-grub.nix` sets `default = 0` and
+  refuses `savedefault`/`default = "saved"` on purpose ("a predictable
+  default beats convenience"), so a one-shot GRUB `grub-reboot` needs that
+  file changed — GUARDRAILS human-review-only by name. The alternative,
+  `efibootmgr --bootnext` (a firmware NVRAM one-shot CLAUDE.md itself already
+  carves out as safe in principle — "writes firmware NVRAM variables only,
+  not any disk"), needs (a) confirming a native "Windows Boot Manager" NVRAM
+  entry actually exists on ares, which nothing in a git worktree can check,
+  and (b) a brand-new privilege letting the desktop session write that one
+  NVRAM variable — the same class of unreviewed privileged-actuator boundary
+  R10 already declined to cross for the game-launch VRAM handoff. Filed as
+  PLAN H2b (`[B]`), with the full write-up as **R12** in
+  `docs/optimization-backlog.md` and the question in
+  `ops/ralph/NEEDS-DECISION.md`.
+- tests: `tools/tests/test_power_menu.py` (11 cases, new) — the script is
+  pulled straight out of `pkgs/jv-power-menu/default.nix`'s own `text`
+  attribute (the same technique H1's suite uses) and run against fake
+  `fuzzel`/`systemctl`/`jv-lock` stubs on PATH: each of the four labels
+  drives exactly the right command and touches nothing else (Lock never
+  touches systemctl; Suspend/Reboot/Shut Down never touch jv-lock),
+  cancelling the menu invokes neither, an unrecognised answer invokes
+  neither, the four options are offered to fuzzel's stdin in the declared
+  order, `--dmenu` is the mode asked for, and two static checks — the
+  script never references a boot-loader tool (`grub-reboot`/`efibootmgr`/
+  `grub-set-default`/`shutdown`/`loginctl`/`halt`) or the word "Windows" at
+  all, so the H2b split cannot silently regrow inside this file unreviewed.
+  `ops/ralph/nixtest.sh` (+4 cases, 72 total): the include lands in the
+  built `/etc/niri/config.kdl` as a relative path, the built
+  `power-menu-binds.kdl` is not a Nix evaluation error and carries the real
+  bind, `jv-power-menu` reaches `environment.systemPackages`, and
+  `niri validate` accepts all three files (`config.kdl` +
+  `scratchterm-binds.kdl` + `power-menu-binds.kdl`) together out of one
+  throwaway directory; the existing "pins its own PATH" case for
+  `jv-scratchterm` gets a sibling for `jv-power-menu` (fuzzel/systemd/
+  jv-lock, in that order, ahead of the inherited PATH). `bash ops/ralph/
+  runtests.sh tools`: 972 passed (was 961). `bash ops/ralph/nixtest.sh`: 72
+  passed (was 68). `bash ops/ralph/verify.sh`: 3 gates over 5 paths, GREEN
+  in 217.9s (tools 81.2, nixtest 95.4, shellload 41.4). `ops/ralph/
+  hudscreens.sh` was run by hand because `flake.nix` changed (a new package
+  added, nothing HUD-visible): all 10 real-compositor shots matched the
+  sheet already committed at HEAD byte-for-byte.
+- build: `nixos-rebuild build --flake .#ares` -> ok (14 derivations: both
+  new `/etc/niri/*.kdl` files, `jv-power-menu`'s package, `system-path`/
+  `system-units`/`user-units`/`etc`/`activate`/toplevel). Never switched. No
+  schema, no jv-act, no boot path, no pins, no disko.nix touched.
+- files: modules/niri.nix, pkgs/jv-power-menu/default.nix (new), flake.nix,
+  tools/tests/test_power_menu.py (new), ops/ralph/nixtest.sh,
+  ops/ralph/PLAN.md, ops/ralph/HUMAN-VERIFY.md, ops/ralph/NEEDS-DECISION.md,
+  docs/optimization-backlog.md
+- next: `[H]` because whether the popup actually looks right and whether
+  `suspend`/`reboot`/`poweroff` really do the thing on this hardware needs a
+  real niri session and a human pressing Mod+Shift+Escape — see
+  HUMAN-VERIFY.md. Track H continues at H3 (super-menu modes) — H2b is
+  filed as `[B]` and will not be re-attempted until Ofek answers
+  NEEDS-DECISION.md.

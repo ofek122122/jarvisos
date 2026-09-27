@@ -158,6 +158,12 @@
         # jv-scratchterm — PLAN H1: the drop-down scratchpad terminal's
         # toggle (modules/niri.nix wires its window-rule/workspace/keybind).
         jv-scratchterm = pkgs.callPackage ./pkgs/jv-scratchterm { };
+        # jv-power-menu — PLAN H2: lock/suspend/reboot/shut-down, one themed
+        # dmenu pick (modules/niri.nix wires its keybind). Reuses jv-lock
+        # rather than a second lock mechanism of its own.
+        jv-power-menu = pkgs.callPackage ./pkgs/jv-power-menu {
+          inherit (self.packages.${system}) jv-lock;
+        };
         default = self.packages.${system}.jarvis-doctor;
       };
 
