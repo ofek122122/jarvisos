@@ -498,17 +498,70 @@ if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
   if [ "$rows" -gt 0 ] && [ -z "$missing" ]; then ok "$t"
   else bad "$t" "hosts/ares/outputs.nix names ${rows:-0} output(s); missing from /etc/niri/config.kdl:${missing:-<all>}"; fi
 
+  # PLAN H1: the drop-down scratchpad terminal. Its window-rule/workspace
+  # join config.kdl's own tail directly (ordinary "multipart" KDL nodes), but
+  # its keybind cannot — a second top-level `binds { }` node in the SAME file
+  # is a hard niri parse error, checked by hand against a real
+  # `niri validate` before modules/niri.nix was written this way — so it
+  # lives in a second file, `scratchterm-binds.kdl`, pulled in by a path
+  # RELATIVE to config.kdl's own directory. `niri validate` on config.kdl
+  # ALONE, the way F1 checked it, would silently never parse that bind at
+  # all (a relative include that resolves to nothing next to a lone tmpfile
+  # is not an error niri reports against the including file) — so both are
+  # written into the SAME throwaway directory here, standing in for
+  # `/etc/niri/` without ever touching it.
+  # Stderr kept apart from stdout for the same reason the $etc read above
+  # does: a harmless "Git tree is dirty" warning landing as line 1 of the
+  # file handed to `niri validate` below would be reported as a syntax
+  # error that is niri's complaint about nix, not about this module.
+  binds_etc_err=$(mktemp)
+  binds_etc=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+    '(c: c.config.environment.etc."niri/scratchterm-binds.kdl".text)' 2>"$binds_etc_err")
+  rm -f "$binds_etc_err"
+
+  t='the scratchpad terminal workspace/window-rule/include are in config.kdl'
+  if grep -qF 'workspace "jv-scratch"' <<<"$etc" \
+     && grep -qF 'app-id=r#"^jv-scratchterm$"#' <<<"$etc" \
+     && grep -qF 'include "scratchterm-binds.kdl"' <<<"$etc"; then ok "$t"
+  else bad "$t" "$(grep -n 'jv-scratch\|include' <<<"$etc")"; fi
+
+  t='the scratchpad workspace is pinned to the declared PRIMARY output'
+  primary=$(nix eval --raw --file hosts/ares/outputs.nix --apply \
+    'l: (builtins.head (builtins.filter (o: o.primary or false) l)).name' 2>&1)
+  if [ -n "$primary" ] && grep -qF "workspace \"jv-scratch\" {
+    open-on-output \"$primary\"" <<<"$etc"; then ok "$t"
+  else bad "$t" "primary output '$primary' not pinned: $(grep -A1 'workspace \"jv-scratch\"' <<<"$etc")"; fi
+
+  t='the include is a relative path, never /etc/niri itself'
+  if grep -qF 'include "scratchterm-binds.kdl"' <<<"$etc" \
+     && ! grep -q 'include "/' <<<"$etc"; then ok "$t"
+  else bad "$t" "found an absolute include: $(grep -n include <<<"$etc")"; fi
+
+  t='the built scratchterm-binds.kdl is not a Nix evaluation error'
+  if [ -n "$binds_etc" ] && grep -qF 'Mod+Grave' <<<"$binds_etc" \
+     && grep -qF 'spawn "jv-scratchterm"' <<<"$binds_etc"; then ok "$t"
+  else bad "$t" "$binds_etc"; fi
+
   t='niri itself accepts the config this flake would install'
   niri_bin=$(nix build --no-link --print-out-paths '.#nixosConfigurations.ares.pkgs.niri' 2>&1 | tail -1)
-  tmp=$(mktemp)
-  printf '%s' "$etc" > "$tmp"
+  tmpd=$(mktemp -d)
+  printf '%s' "$etc" > "$tmpd/config.kdl"
+  printf '%s' "$binds_etc" > "$tmpd/scratchterm-binds.kdl"
   validated=""
   if [ -x "$niri_bin/bin/niri" ]; then
-    validated=$("$niri_bin/bin/niri" validate -c "$tmp" 2>&1)
+    validated=$("$niri_bin/bin/niri" validate -c "$tmpd/config.kdl" 2>&1)
   fi
-  rm -f "$tmp"
+  rm -rf "$tmpd"
   if grep -q 'config is valid' <<<"$validated"; then ok "$t"
   else bad "$t" "niri at ${niri_bin:-<not built>} said: $(tail -5 <<<"$validated")"; fi
+
+  t='jv-scratchterm pins niri/jq/alacritty into its own PATH, never trusts the ambient one'
+  scratchterm_bin=$(nix build --no-link --print-out-paths '.#jv-scratchterm' 2>&1 | tail -1)
+  script=""
+  [ -x "$scratchterm_bin/bin/jv-scratchterm" ] && script=$(cat "$scratchterm_bin/bin/jv-scratchterm")
+  if grep -q "PATH=\"$store/[^\"]*niri[^\"]*/bin:$store/[^\"]*jq[^\"]*/bin:$store/[^\"]*alacritty[^\"]*/bin" <<<"$script"; then
+    ok "$t"
+  else bad "$t" "jv-scratchterm at ${scratchterm_bin:-<not built>}: $(head -5 <<<"$script")"; fi
 fi
 
 # ---------------------------------------------------------- comfort basics

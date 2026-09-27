@@ -17023,3 +17023,92 @@ work was entirely in `shell/jv-hud/`.
   `[H]`. The comfort backlog is still far from resolved — Track H (input,
   window and visual comfort) is next, entirely `[ ]` — so the loop keeps
   going per PROMPT.md STEP 5.
+
+## 2026-09-27 — drop-down scratchpad terminal (PLAN H1)
+- built: `modules/niri.nix` appends a named workspace, `jv-scratch`, pinned
+  to ares' declared PRIMARY output (`hosts/ares/outputs.nix`'s own
+  `primary = true` entry, not a second guess at which monitor that is),
+  plus a window-rule matching `jv-scratchterm` that is niri's own documented
+  "dropdown terminal" recipe verbatim (its wiki, Configuration: Window Rules
+  > `default-floating-position`: "you can use single-side relative-to to get
+  a dropdown-like effect") — floating, anchored to the top edge, 80% wide,
+  half the screen tall. `pkgs/jv-scratchterm` is the toggle script: the
+  named workspace's own `is_active` (niri's docs — "named workspaces always
+  exist, even when they have no windows") already answers "is it on screen
+  right now", so the script needs no state file of its own the way G4's disk
+  warning did. Three cases, checked in order: the workspace is active ->
+  hide (`focus-workspace-previous`); it is not active but a `jv-scratchterm`
+  window already exists -> show (`focus-workspace jv-scratch`); neither ->
+  spawn `alacritty --class jv-scratchterm` (the window-rule places/sizes it)
+  then show, so the very first press already shows something instead of
+  merely creating it in the background.
+  The keybind could not join `config-base.kdl`'s own `binds { }` block, or
+  even a second one appended after it: empirically checked against this
+  exact ares' real `niri validate` before committing to the design, a second
+  top-level `binds { }` node in the SAME config file is a hard parse error
+  ("duplicate node `binds`, single node expected") — niri's parser
+  (`niri-config/src/lib.rs`, vendored at
+  `/nix/store/*-niri-26.04/niri-config`) has an explicit whitelist of
+  "multipart" node names allowed to repeat (`output`, `spawn-at-startup`,
+  `spawn-sh-at-startup`, `window-rule`, `layer-rule`, `workspace`,
+  `include`) and `binds` is not on it, even though its own comment describes
+  merging multiple bind sets ("import some preconfigured-dots.kdl, then
+  override some binds with your own"). The workspace/window-rule DO join
+  config.kdl's tail directly — both ARE on that whitelist, the same reason
+  F1's per-output stanzas already worked this way. The fix for the bind is
+  niri's own escape hatch: each `include`d file gets its own single
+  `binds { }` allowance (verified the same way — two files, one `include`
+  line, `niri validate` green), so the new bind lives in a second declared
+  file, `/etc/niri/scratchterm-binds.kdl`, pulled in by a path RELATIVE to
+  config.kdl's own directory rather than absolute — which is also what lets
+  `ops/ralph/nixtest.sh` validate both files together out of a throwaway
+  directory that is never `/etc/niri` itself.
+- tests: `tools/tests/test_scratchterm.py` (8 cases, new) — the script is
+  pulled straight out of `pkgs/jv-scratchterm/default.nix`'s own `text`
+  attribute (the same technique `test_update_notifier.py`/
+  `test_disk_space_warning.py` use) and run against fake `niri`/`alacritty`
+  stubs on PATH, with the REAL `jq` (parsing the stub's own JSON is exactly
+  the thing under test): first press spawns the terminal and shows it, a
+  press while hidden shows it without spawning a second one, a press while
+  shown hides it via `focus-workspace-previous` and never calls
+  `focus-workspace jv-scratch`, hiding never even queries whether the window
+  exists (nothing left to ask once the workspace is known active — the
+  cheaper, correct short-circuit), the script never names a terminal other
+  than alacritty, and its own hardcoded app-id/workspace name are exactly
+  the ones `modules/niri.nix` declares (a rename on one side without the
+  other is caught here, not discovered at a real keypress). `ops/ralph/
+  nixtest.sh` (+5 cases, 68 total): the workspace/window-rule/include all
+  land in the built `/etc/niri/config.kdl`; the workspace is pinned to the
+  REAL declared primary output read off `hosts/ares/outputs.nix` (not
+  assumed to be `HDMI-A-1`); the include path is relative, never absolute;
+  the second etc file (`scratchterm-binds.kdl`) is not a Nix evaluation
+  error and carries the real bind; `niri validate` accepts BOTH files
+  together out of one throwaway directory — the case that would have
+  silently passed a `niri validate` on `config.kdl` alone, since a relative
+  include resolving to nothing next to a lone tmpfile is not an error niri
+  reports against the including file, so this is the gate that actually
+  proves the bind reaches niri and not just that config.kdl parses; and the
+  built `jv-scratchterm` wrapper's own `PATH=` pins real `niri`/`jq`/
+  `alacritty` store paths ahead of the inherited one (through
+  `$NIX_STORE_DIR`, not a hardcoded `/nix/store` — `test_nixtest.py` caught
+  the first draft doing exactly that). `bash ops/ralph/runtests.sh tools`:
+  961 passed (was 954). `bash ops/ralph/nixtest.sh`: 68 passed (was 63).
+  `bash ops/ralph/verify.sh`: 3 gates over 5 paths, GREEN in 214.2s (tools
+  80.7, nixtest 92.2, shellload 41.3). `ops/ralph/hudscreens.sh` was run by
+  hand because `flake.nix` changed (a new package added, nothing
+  HUD-visible): all 10 real-compositor shots matched the sheet already
+  committed at HEAD byte-for-byte.
+- build: `nixos-rebuild build --flake .#ares` -> ok (14 derivations: both
+  new `/etc/niri/*.kdl` files, `jv-scratchterm`'s package, `system-path`/
+  `system-units`/`user-units`/`etc`/`activate`/toplevel). Never switched. No
+  schema, no jv-act, no boot path, no pins, no disko.nix touched.
+- files: modules/niri.nix, pkgs/jv-scratchterm/default.nix (new),
+  flake.nix, tools/tests/test_scratchterm.py (new), ops/ralph/nixtest.sh,
+  ops/ralph/PLAN.md, ops/ralph/HUMAN-VERIFY.md
+- next: `[H]` because whether the floating window actually looks and
+  behaves like a dropdown — the right size, the right corner, hiding
+  without closing whatever is running inside it, showing the SAME terminal
+  again rather than a new one — needs a real niri session and a human
+  pressing Mod+Grave — see HUMAN-VERIFY.md. Track H (input, window and
+  visual comfort) continues at H2 (power menu) — H1 is its only item done
+  so far, so the loop keeps going per PROMPT.md STEP 5.

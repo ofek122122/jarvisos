@@ -155,6 +155,9 @@
         # once per crossing when the disk holding /nix/store gets full
         # (modules/disk-space-warning.nix wires the timer).
         jv-disk-space-warning = pkgs.callPackage ./pkgs/jv-disk-space-warning { };
+        # jv-scratchterm — PLAN H1: the drop-down scratchpad terminal's
+        # toggle (modules/niri.nix wires its window-rule/workspace/keybind).
+        jv-scratchterm = pkgs.callPackage ./pkgs/jv-scratchterm { };
         default = self.packages.${system}.jarvis-doctor;
       };
 

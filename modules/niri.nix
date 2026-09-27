@@ -25,7 +25,26 @@
 # already composes the wallpaper for and E13 already checks the doctor
 # against, so this is the THIRD place that list is spent and not a second
 # place the layout is decided.
-{ lib, ... }:
+#
+# PLAN H1 adds a drop-down scratchpad terminal (pkgs/jv-scratchterm) the same
+# way: appended after config-base.kdl, never spliced into it. Its
+# window-rule and named workspace are ordinary "multipart" KDL nodes (niri's
+# own parser, niri-config/src/lib.rs, explicitly allows repeats of
+# `window-rule`/`workspace`/`output`/`include`), so they join the tail
+# straight after the output stanzas. Its keybind cannot: `binds` is NOT in
+# that multipart list, and a SECOND top-level `binds { }` node is a hard
+# parse error ("duplicate node `binds`, single node expected" — checked by
+# hand against this exact ares' `niri validate` before writing this comment,
+# since the wiki never says so). The one thing niri's own parser treats
+# differently is `include "other.kdl"`: each included file gets its own
+# `binds { }` allowance, and the config's own doc comment for that merge path
+# ("import some preconfigured-dots.kdl, then override some binds with your
+# own") is exactly this shape. So the new bind lives in a second `/etc/niri/`
+# file, pulled in with a path RELATIVE to config.kdl's own directory (not
+# absolute), which is also what lets `ops/ralph/nixtest.sh` validate both
+# files together out of a throwaway directory that is never `/etc/niri`
+# itself.
+{ lib, self, ... }:
 let
   outputs = import ../hosts/ares/outputs.nix;
 
@@ -59,12 +78,59 @@ let
     theme.palette.${name} or (throw ''
       modules/niri.nix spends the colour "${name}", and [palette] in
       personality/theme.toml does not have it.'');
+
+  # PLAN H1: which output the scratchpad terminal's workspace is pinned to —
+  # ares' own declared primary (hosts/ares/outputs.nix), not a second guess
+  # at which monitor that is.
+  primaryOutput = lib.findFirst (o: o.primary or false) (throw ''
+    modules/niri.nix pins the scratchpad terminal's workspace to the primary
+    output, and hosts/ares/outputs.nix names none of its monitors
+    `primary = true`.'') outputs;
+
+  # The workspace + window-rule half of H1: both are "multipart" KDL nodes
+  # (niri accepts any number of them), so they join the tail directly.
+  scratchtermRule = ''
+    workspace "jv-scratch" {
+        open-on-output "${primaryOutput.name}"
+    }
+
+    window-rule {
+        match app-id=r#"^jv-scratchterm$"#
+        open-on-workspace "jv-scratch"
+        open-floating true
+        default-floating-position x=0 y=0 relative-to="top"
+        default-window-height { proportion 0.5; }
+        default-column-width { proportion 0.8; }
+    }
+
+    include "scratchterm-binds.kdl"
+  '';
+
+  # The keybind half of H1, in its own file: a second top-level `binds { }`
+  # node in the SAME file is a hard niri parse error ("duplicate node
+  # `binds`"), but niri merges one `binds { }` per INCLUDED file — see the
+  # comment at the top of this module.
+  scratchtermBinds = ''
+    binds {
+        Mod+Grave hotkey-overlay-title="Toggle the scratchpad terminal" { spawn "jv-scratchterm"; }
+    }
+  '';
 in
 {
+  # `spawn "jv-scratchterm"` (scratchtermBinds above) looks the name up on
+  # PATH exactly the way config-base.kdl's own `spawn "jv-lock"` does
+  # (modules/theme.nix puts jv-lock on PATH the same way) — niri's `spawn`
+  # execs argv[0] via the environment it started in, not a store path this
+  # module could pin into the KDL text itself.
+  environment.systemPackages = [ self.packages.x86_64-linux.jv-scratchterm ];
+
   environment.etc."niri/config.kdl".text =
     builtins.replaceStrings
       [ "@@EMBER@@" "@@LINE@@" "@@WARN@@" "@@RISK@@" ]
       [ (token "ember") (token "line") (token "warn") (token "risk") ]
       (builtins.readFile ./niri/config-base.kdl)
-    + lib.concatMapStrings outputStanza outputs;
+    + lib.concatMapStrings outputStanza outputs
+    + scratchtermRule;
+
+  environment.etc."niri/scratchterm-binds.kdl".text = scratchtermBinds;
 }
