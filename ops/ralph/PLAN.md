@@ -958,8 +958,81 @@ the top unchecked item unless it is blocked.
       actually round-trips real clipboard content (text AND an image) needs
       a real niri session and a human pressing Mod+Shift+C — see
       `ops/ralph/HUMAN-VERIFY.md`.
-- [ ] H3b. Super-menu modes: emoji picker. Same shape as H3a — its own
-      package, its own keybind and included binds file in `modules/niri.nix`.
+- [H] H3b. Super-menu modes: **emoji picker**. Same shape as H3a's clipboard
+      history — its own package (`pkgs/jv-emoji-menu`), its own keybind
+      (**Mod+E**, checked free of every other bind in `config-base.kdl` and
+      every other included binds file by grep first) and its own included
+      binds file, `/etc/niri/emoji-binds.kdl` (a second top-level `binds { }`
+      node in `config.kdl` is a hard niri parse error, the same reason H1/H2/
+      H3a each got their own included file). Unlike H3a there is no daemon
+      half: an emoji is not a signal anything observes over time, it is a
+      fixed table, so `modules/clipboard.nix` gains no sibling.
+      The table (110 entries: smileys, gestures, hearts, animals, food,
+      activities, travel, symbols) is baked into `pkgs/jv-emoji-menu/
+      default.nix`'s own `text` rather than fetched at build or run time —
+      CLAUDE.md's privacy invariant ("no frame or audio ever leaves the
+      machine") already means every model here is local, and the same
+      "nothing this OS depends on reaches outside the machine" reasoning
+      extends to a keybind's own data, so this is a curated literal, not a
+      network fetch this loop cannot review the far end of. Each line is
+      `"<glyph> <name>"`; `fuzzel --dmenu --prompt "Emoji:  "` (same themed
+      popup, `/etc/xdg/fuzzel/fuzzel.ini` via `modules/theme.nix`, no second
+      palette) hands back the WHOLE selected line, and the script keeps only
+      the text up to the first space (`''${choice%% *}`, escaped for Nix's
+      `''` string, the same escape `test_clip_menu.py`'s own `script_text()`
+      already anticipated by name) and copies exactly that with `wl-copy` —
+      Wayland-only (CLAUDE.md: "Wayland only, never X11-first"), never
+      `xclip`/`xsel`, and never a synthetic keystroke (`wtype`/`ydotool`):
+      invariant 3 reserves injecting input for `jv-act` alone, and a themed
+      dmenu plus a clipboard write sits at the same "two deliberate human
+      steps, no jv-act capability needed" tier H2's own comment argues for a
+      destructive menu, let alone a copy. No second confirmation dialog,
+      same reasoning as H2/H3a. Cancelling (Escape) is fuzzel exiting
+      non-zero with nothing on stdout, turned into a clean no-op by
+      `|| exit 0`; an empty selection is caught explicitly.
+      Tests: `tools/tests/test_emoji_menu.py` (9 cases, new) — the same
+      technique H3a's suite uses: the script is pulled straight out of
+      `pkgs/jv-emoji-menu/default.nix`'s own `text` attribute and run
+      against fake `fuzzel`/`wl-copy` stubs on PATH. Cases: selecting an
+      entry copies only the glyph before the first space; a multi-word name
+      ("rolling on the floor laughing") still yields only the glyph;
+      cancelling (fuzzel exits non-zero) or an empty selection touches
+      `wl-copy` not at all; `--dmenu` is the mode asked for; the table
+      offered on fuzzel's stdin has at least 50 entries and every one
+      carries both a glyph and a name; two static checks — no `xclip`/
+      `xsel`/`xdotool` reference, and no `wtype`/`ydotool` reference (a
+      picker that typed the glyph in rather than only writing the
+      clipboard would cross invariant 3's line). `ops/ralph/nixtest.sh`
+      (+5 cases, 83 total): the emoji include lands in the built
+      `/etc/niri/config.kdl` as a relative path, the built `emoji-binds.kdl`
+      is not a Nix evaluation error and carries the real bind and spawn
+      name, `jv-emoji-menu` reaches `environment.systemPackages`, `niri
+      validate` accepts all FIVE files (`config.kdl` + `scratchterm-binds.
+      kdl` + `power-menu-binds.kdl` + `clipboard-binds.kdl` +
+      `emoji-binds.kdl`) together out of one throwaway directory,
+      `jv-emoji-menu` pins fuzzel/wl-clipboard into its own PATH ahead of
+      the ambient one (the same guarantee every other menu's own case
+      checks), and a second case re-reads that same built script for
+      `wtype`/`ydotool` — the evaluation-level mirror of the static Python
+      check, since the built wrapper is the artifact a real keybind
+      actually spawns. `bash ops/ralph/runtests.sh tools`: 989 passed (was
+      980). `bash ops/ralph/nixtest.sh`: 83 passed (was 78). `bash
+      ops/ralph/verify.sh`: 3 gates over 5 paths, GREEN in 224.8s (tools
+      81.8, nixtest 101.6, shellload 41.3). `ops/ralph/hudscreens.sh` was
+      run by hand because `flake.nix` changed (a new package added, nothing
+      HUD-visible): all 10 real-compositor shots matched the sheet already
+      committed at HEAD (8 of 10 differed only by the compositor's own
+      rounding, restored to the committed bytes before comparison — the
+      same "no HUD regression" result H3a saw for the same reason).
+      `nixos-rebuild build --flake .#ares` -> ok (14 derivations: the new
+      `/etc/niri/emoji-binds.kdl` and the rebuilt `config.kdl`,
+      `jv-emoji-menu`'s package, `system-path`/`system-units`/
+      `user-units`/`etc`/`activate`/toplevel). Never switched. No schema,
+      no jv-act, no boot path, no pins, no disko.nix touched.
+      `[H]` because whether the popup looks right and whether the copied
+      glyph actually pastes as a real emoji character needs a real niri
+      session and a human pressing Mod+E — see `ops/ralph/HUMAN-VERIFY.md`.
+      Track H continues at H3c (calculator), the next super-menu mode.
 - [ ] H3c. Super-menu modes: calculator. Same shape as H3a.
 - [ ] H3d. Super-menu modes: unit converter. Same shape as H3a.
 - [ ] H3e. Super-menu modes: recent files. Same shape as H3a.

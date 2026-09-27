@@ -53,6 +53,9 @@
 #
 # PLAN H3 adds clipboard history (pkgs/jv-clip-menu), the same shape again —
 # its own `clipboard-binds.kdl`, no window-rule (another themed dmenu popup).
+#
+# PLAN H3b adds the emoji picker (pkgs/jv-emoji-menu), the same shape once
+# more — its own `emoji-binds.kdl`, no window-rule.
 { lib, self, ... }:
 let
   outputs = import ../hosts/ares/outputs.nix;
@@ -152,6 +155,20 @@ let
         Mod+Shift+C hotkey-overlay-title="Clipboard history" { spawn "jv-clip-menu"; }
     }
   '';
+
+  # PLAN H3b: the emoji picker. Same shape as H2/H3 — no window-rule/
+  # workspace (a dmenu popup, not a placed window), just its own include
+  # and bind file. `Mod+E` is free (checked against config-base.kdl and
+  # every other included binds file by grep first).
+  emojiRule = ''
+    include "emoji-binds.kdl"
+  '';
+
+  emojiBinds = ''
+    binds {
+        Mod+E hotkey-overlay-title="Emoji picker" { spawn "jv-emoji-menu"; }
+    }
+  '';
 in
 {
   # `spawn "jv-scratchterm"`/`spawn "jv-power-menu"`/`spawn "jv-clip-menu"`
@@ -163,6 +180,7 @@ in
     self.packages.x86_64-linux.jv-scratchterm
     self.packages.x86_64-linux.jv-power-menu
     self.packages.x86_64-linux.jv-clip-menu
+    self.packages.x86_64-linux.jv-emoji-menu
   ];
 
   environment.etc."niri/config.kdl".text =
@@ -173,9 +191,11 @@ in
     + lib.concatMapStrings outputStanza outputs
     + scratchtermRule
     + powerMenuRule
-    + clipboardRule;
+    + clipboardRule
+    + emojiRule;
 
   environment.etc."niri/scratchterm-binds.kdl".text = scratchtermBinds;
   environment.etc."niri/power-menu-binds.kdl".text = powerMenuBinds;
   environment.etc."niri/clipboard-binds.kdl".text = clipboardBinds;
+  environment.etc."niri/emoji-binds.kdl".text = emojiBinds;
 }

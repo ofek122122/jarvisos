@@ -587,6 +587,27 @@ if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
   if grep -qx 'jv-clip-menu' <<<"$sys_pkgs"; then ok "$t"
   else bad "$t" "jv-clip-menu missing from environment.systemPackages"; fi
 
+  # PLAN H3b: the emoji picker. Same shape again — no window-rule/workspace,
+  # just its own include and bind file.
+  emoji_binds_etc_err=$(mktemp)
+  emoji_binds_etc=$(nix eval --raw '.#nixosConfigurations.ares' --apply \
+    '(c: c.config.environment.etc."niri/emoji-binds.kdl".text)' 2>"$emoji_binds_etc_err")
+  rm -f "$emoji_binds_etc_err"
+
+  t='the emoji menu include is in config.kdl, as a relative path'
+  if grep -qF 'include "emoji-binds.kdl"' <<<"$etc" \
+     && ! grep -q 'include "/' <<<"$etc"; then ok "$t"
+  else bad "$t" "found no relative emoji include: $(grep -n include <<<"$etc")"; fi
+
+  t='the built emoji-binds.kdl is not a Nix evaluation error'
+  if [ -n "$emoji_binds_etc" ] && grep -qF 'Mod+E' <<<"$emoji_binds_etc" \
+     && grep -qF 'spawn "jv-emoji-menu"' <<<"$emoji_binds_etc"; then ok "$t"
+  else bad "$t" "$emoji_binds_etc"; fi
+
+  t='the emoji menu is on PATH, because a keybind can only spawn a name'
+  if grep -qx 'jv-emoji-menu' <<<"$sys_pkgs"; then ok "$t"
+  else bad "$t" "jv-emoji-menu missing from environment.systemPackages"; fi
+
   t='niri itself accepts the config this flake would install'
   niri_bin=$(nix build --no-link --print-out-paths '.#nixosConfigurations.ares.pkgs.niri' 2>&1 | tail -1)
   tmpd=$(mktemp -d)
@@ -594,6 +615,7 @@ if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
   printf '%s' "$binds_etc" > "$tmpd/scratchterm-binds.kdl"
   printf '%s' "$power_binds_etc" > "$tmpd/power-menu-binds.kdl"
   printf '%s' "$clip_binds_etc" > "$tmpd/clipboard-binds.kdl"
+  printf '%s' "$emoji_binds_etc" > "$tmpd/emoji-binds.kdl"
   validated=""
   if [ -x "$niri_bin/bin/niri" ]; then
     validated=$("$niri_bin/bin/niri" validate -c "$tmpd/config.kdl" 2>&1)
@@ -638,6 +660,18 @@ if [ "$etc_rc" -eq 0 ] && [ -n "$etc" ]; then
   if grep -qE "ExecStart=$store/[^\"]*wl-clipboard[^\"]*/bin/wl-paste --type text --watch $store/[^\"]*cliphist[^\"]*/bin/cliphist store" <<<"$clip_text_unit" \
      && grep -qE "ExecStart=$store/[^\"]*wl-clipboard[^\"]*/bin/wl-paste --type image --watch $store/[^\"]*cliphist[^\"]*/bin/cliphist store" <<<"$clip_image_unit"; then ok "$t"
   else bad "$t" "text: $(tail -3 <<<"$clip_text_unit"); image: $(tail -3 <<<"$clip_image_unit")"; fi
+
+  t='jv-emoji-menu pins fuzzel/wl-clipboard into its own PATH, never trusts the ambient one'
+  emoji_menu_bin=$(nix build --no-link --print-out-paths '.#jv-emoji-menu' 2>&1 | tail -1)
+  emoji_script=""
+  [ -x "$emoji_menu_bin/bin/jv-emoji-menu" ] && emoji_script=$(cat "$emoji_menu_bin/bin/jv-emoji-menu")
+  if grep -q "PATH=\"$store/[^\"]*fuzzel[^\"]*/bin:$store/[^\"]*wl-clipboard[^\"]*/bin" <<<"$emoji_script"; then
+    ok "$t"
+  else bad "$t" "jv-emoji-menu at ${emoji_menu_bin:-<not built>}: $(head -5 <<<"$emoji_script")"; fi
+
+  t='jv-emoji-menu never spawns a synthetic keystroke (wtype/ydotool) — a clipboard write only'
+  if [ -n "$emoji_script" ] && ! grep -qE 'wtype|ydotool' <<<"$emoji_script"; then ok "$t"
+  else bad "$t" "jv-emoji-menu at ${emoji_menu_bin:-<not built>}: $(head -5 <<<"$emoji_script")"; fi
 fi
 
 # ---------------------------------------------------------- comfort basics

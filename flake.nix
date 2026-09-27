@@ -169,6 +169,12 @@
         # (modules/clipboard.nix runs the store daemons; modules/niri.nix
         # wires the keybind).
         jv-clip-menu = pkgs.callPackage ./pkgs/jv-clip-menu { };
+        # jv-emoji-menu — PLAN H3b: emoji picker, the second "super-menu
+        # mode" — a themed dmenu pick over a curated emoji table baked into
+        # the derivation (modules/niri.nix wires the keybind; no daemon,
+        # unlike H3a, since an emoji is a fixed table, not an observed
+        # history).
+        jv-emoji-menu = pkgs.callPackage ./pkgs/jv-emoji-menu { };
         default = self.packages.${system}.jarvis-doctor;
       };
 
