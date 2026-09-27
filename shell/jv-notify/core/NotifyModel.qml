@@ -150,6 +150,13 @@ QtObject {
   // (§06: earned emptiness, and 0 fps for a corner with nothing in it).
   readonly property bool anyLit: root.entries.length > 0
 
+  // Fires once for a GENUINELY NEW notification — never for a replacement
+  // (the same sender updating a download's own progress under the id it
+  // already sent). PLAN G8's one arrival chime listens for exactly this: a
+  // corner that chimed on every progress update would turn "40%, then 80%"
+  // into two notifications' worth of noise for one piece of news.
+  signal arrived()
+
   // --- taking one in ----------------------------------------------------
 
   // Add or replace a notification. `record` is what the server half read off
@@ -174,10 +181,12 @@ QtObject {
 
     const next = root.entries.slice();
     const at = root.indexOf(key);
-    if (at < 0)
+    if (at < 0) {
       next.push(entry);
-    else
+      root.arrived();
+    } else {
       next[at] = entry; // one story, same place in the stack
+    }
     root.entries = next;
     root.arm();
   }

@@ -12,10 +12,12 @@
 # pin a plate over your work — can never reach a `nixos-rebuild build`, let
 # alone a screen.
 #
-# Nothing is pinned into the wrapper, because this shell runs no child process
-# and reads no file: its whole input is the D-Bus session bus. That is the
-# smallest surface of the three shells and the reason this derivation has the
-# fewest arguments.
+# Its whole INPUT is the D-Bus session bus — nothing is pinned into the
+# wrapper for reading. Its one OUTPUT besides the corner itself is PLAN G8's
+# arrival chime: `pw-play` and `jv-notify-sound`'s generated .wav are pinned
+# the same way `pkgs/jv-bar` pins `niri` (`JV_BAR_NIRI`), so the store path a
+# real session plays is exactly the one this flake declares rather than
+# whatever `pw-play` happens to resolve to on $PATH.
 {
   lib,
   stdenvNoCC,
@@ -23,6 +25,8 @@
   python3,
   quickshell,
   qt6,
+  pipewire,
+  jv-notify-sound,
 }:
 stdenvNoCC.mkDerivation {
   pname = "jv-notify";
@@ -79,7 +83,9 @@ stdenvNoCC.mkDerivation {
     # The tests are a build gate, not part of the shell quickshell loads.
     rm -rf $out/share/jv-notify/tests
     makeWrapper ${lib.getExe quickshell} $out/bin/jv-notify \
-      --add-flags "-p $out/share/jv-notify/shell.qml"
+      --add-flags "-p $out/share/jv-notify/shell.qml" \
+      --set JV_NOTIFY_PLAY ${pipewire}/bin/pw-play \
+      --set JV_NOTIFY_SOUND ${jv-notify-sound}/share/jv-notify-sound/arrived.wav
     runHook postInstall
   '';
 

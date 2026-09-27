@@ -16945,3 +16945,81 @@ work was entirely in `shell/jv-hud/`.
   notification sound). The comfort backlog is still far from resolved — H
   through K are entirely `[ ]` — so the loop keeps going per PROMPT.md
   STEP 5.
+
+## 2026-09-27 — notification arrival chime (PLAN G8)
+- built: `tools/gen_notify_sound.py` renders PLAN G8's one arrival chime from
+  pure arithmetic — a rising fourth (330 Hz -> 440 Hz), ~195ms, peak 0.22 of
+  full scale, each note ramping to exactly zero at both ends — rather than
+  checking in a binary `.wav`, the same "no binary blob, generated at build
+  time" discipline `pkgs/jarvis-wallpaper` already uses for the desktop art:
+  the sound is reviewable as the two frequencies/durations/peak level rather
+  than as an opaque file nobody can diff. `pkgs/jv-notify-sound` (new,
+  `runCommand` + the generator) builds it as its own package rather than a
+  step inside jv-notify's own derivation, so a change to the sound's
+  arithmetic never drags a full quickshell+qmllint rebuild along for no
+  reason. `pkgs/jv-notify` takes it as an input and pins BOTH it and
+  `pipewire`'s `pw-play` into its own wrapper (`JV_NOTIFY_SOUND`/
+  `JV_NOTIFY_PLAY`) — the same "pin the store path, never trust $PATH" rule
+  `jv-bar` already follows for `niri`. `flake.nix` wires `jv-notify-sound` in
+  through `self.packages.${system}`, the same shape `jv-wall` takes
+  `jarvis-wallpaper`.
+  The trigger is a new `signal arrived()` on `shell/jv-notify/core/
+  NotifyModel.qml`, fired from `push()` only when a notification's key is
+  genuinely NEW — never when a sender reuses an id to update one already on
+  screen (a download at 40%, then 80%), since that is one piece of news, not
+  two chimes. `Notifications.qml` — the untestable half; quickshell links its
+  QML plugin into its own binary, so no other engine can import it, which is
+  why nothing in this file is reachable by a headless test — listens with
+  `onArrived:` and fires `Quickshell.execDetached([pw-play, --volume, 0.35,
+  the wav])`: fire and forget, so overlapping arrivals may overlap their
+  chimes exactly like every other desktop notification sound, not a bug to
+  queue around. It stays silent if `JV_NOTIFY_SOUND` is unset (a checkout run
+  outside its wrapper), never guessing a path — the same fallback idiom
+  `Niri.qml` already uses for `JV_BAR_NIRI`. `pw-play --volume 0.35` is a
+  second, independent quiet decision layered on the chime's own low peak, so
+  the two compose rather than one silently overriding the other.
+- tests: `tools/tests/test_gen_notify_sound.py` (8 cases, new): deterministic
+  across calls, peak amplitude never exceeds `PEAK`, total duration between
+  50ms and 500ms, first and last sample both exactly 0.0 (click-free), each
+  of the two notes actually reaches its own full envelope (catches a
+  `FADE_S` big enough to swallow a whole note), `NOTES` itself proven
+  non-overlapping (so the mixer's clamp stays a safety net and never
+  load-bearing), and the CLI's `write_wav` round-trips through real 16-bit
+  PCM via the stdlib `wave` module. `shell/jv-notify/tests/tst_notifymodel.
+  qml` (+1 case, 30 total): `arrived` fires exactly once for a new id, does
+  not fire again when the same id updates in place, and fires again for a
+  genuinely different one. `ops/ralph/nixtest.sh` (+2 cases, 63 total):
+  builds `.#jv-notify-sound` and reads a real RIFF/WAVE header off the actual
+  output (never assumed from the generator's own claim), and builds
+  `.#jv-notify` and greps the BUILT wrapper script for both env vars pointing
+  at the real store paths of `pw-play` and the built chime — the same "read
+  the built bytes, not the source" discipline the lock screen's argv checks
+  already use. `bash ops/ralph/runtests.sh tools`: 954 passed (was 946).
+  `bash ops/ralph/notifytest.sh`: 30 passed (was 29). `bash
+  ops/ralph/nixtest.sh`: 63 passed (was 61). `bash ops/ralph/verify.sh`: 5
+  gates over 9 paths, GREEN in 250.0s (tools 80.1, notifytest 3.6,
+  notifyshots 25.4, nixtest 99.2, shellload 41.8) — notifyshots' 11 shots and
+  shellload's real-quickshell jv-notify load both unaffected, since this
+  change is audio-only and touches no drawn pixel. `ops/ralph/hudscreens.sh`
+  was run by hand because `flake.nix` changed (a new package added): all 10
+  real-compositor shots matched the sheet already committed at HEAD
+  byte-for-byte, so nothing new to commit under `docs/hud/screens`.
+- build: `nixos-rebuild build --flake .#ares` -> ok (13 derivations: the
+  rebuilt `jv-notify` unit/package, `dbus-1`/`polkit`/`dbus-broker`
+  X-Restart-Triggers and their units, `system-path`/`system-units`/
+  `user-units`/`etc`/`activate`/toplevel). Never switched. No schema, no
+  jv-act, no boot path, no pins, no disko.nix touched.
+- files: tools/gen_notify_sound.py (new), tools/tests/test_gen_notify_sound.py
+  (new), pkgs/jv-notify-sound/default.nix (new), pkgs/jv-notify/default.nix,
+  flake.nix, shell/jv-notify/core/NotifyModel.qml,
+  shell/jv-notify/Notifications.qml, shell/jv-notify/tests/tst_notifymodel.qml,
+  ops/ralph/nixtest.sh, ops/ralph/PLAN.md, ops/ralph/HUMAN-VERIFY.md
+- next: `[H]` because nothing in this worktree can play audio or send a real
+  D-Bus notification into a running session — whether the chime is actually
+  audible, at the right quiet volume, and fires once per genuine arrival (not
+  per replacement) on real hardware needs a human — see HUMAN-VERIFY.md.
+  **G8 is now resolved**; Track G (system comfort) is fully done — G9/G10 are
+  both `[B]`, filed in NEEDS-DECISION.md, and every other G item is `[x]`/
+  `[H]`. The comfort backlog is still far from resolved — Track H (input,
+  window and visual comfort) is next, entirely `[ ]` — so the loop keeps
+  going per PROMPT.md STEP 5.

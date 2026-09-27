@@ -70,13 +70,21 @@
         # into the wrapper rather than found on PATH, the same rule the HUD's
         # bridge follows. modules/desktop.nix runs that same `pkgs.niri`.
         jv-bar = pkgs.callPackage ./pkgs/jv-bar { };
+        # jv-notify-sound — PLAN G8's one arrival chime, rendered from
+        # arithmetic at build time (no binary blob), the same discipline
+        # jarvis-wallpaper uses for the desktop art.
+        jv-notify-sound = pkgs.callPackage ./pkgs/jv-notify-sound { };
         # jv-notify — the notification corner (blueprint §06, PLAN D2), and
         # this machine's org.freedesktop.Notifications daemon. Same shape as
         # the other two shells: the QML in the store plus a wrapped
         # quickshell, with qmllint and the headless notifier tests as its
-        # check phase. It takes no extra argument at all — the daemon runs no
-        # child process and reads no file, only the session bus.
-        jv-notify = pkgs.callPackage ./pkgs/jv-notify { };
+        # check phase. Its own input is only the session bus; the one thing
+        # pinned into its wrapper is PLAN G8's arrival chime (`pw-play` plus
+        # `jv-notify-sound`'s generated .wav), the same "pin the store path,
+        # never trust $PATH" rule `jv-bar` follows for `niri`.
+        jv-notify = pkgs.callPackage ./pkgs/jv-notify {
+          jv-notify-sound = self.packages.${system}.jv-notify-sound;
+        };
         # jv-lock — the lock screen (blueprint §06, PLAN D3), and the one
         # surface here that is NOT a Quickshell shell: it is
         # swaylock-effects with its whole argv fixed at build time, because

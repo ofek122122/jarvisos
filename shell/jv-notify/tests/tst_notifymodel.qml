@@ -382,6 +382,31 @@ TestCase {
     compare(model.toasts[0].deadline, 5, "its dwell starts again: the news is fresh");
   }
 
+  function test_arrived_fires_once_per_genuinely_new_notification_and_never_for_an_update() {
+    // PLAN G8: jv-notify's one arrival chime listens for `arrived`, and the
+    // failure mode that matters is a download's own progress update — "40%,
+    // then 80%" under the SAME id — sounding like two notifications instead
+    // of the one piece of news it is.
+    const model = makeModel();
+    let count = 0;
+    model.arrived.connect(() => count++);
+
+    model.push(sent("dl", {
+      "summary": "Downloading 40%"
+    }));
+    compare(count, 1, "a genuinely new notification chimes");
+
+    model.push(sent("dl", {
+      "summary": "Downloading 80%"
+    }));
+    compare(count, 1, "the same id updating in place must not chime again");
+
+    model.push(sent("other", {
+      "summary": "Mail"
+    }));
+    compare(count, 2, "a second, distinct notification chimes again");
+  }
+
   function test_a_notification_its_sender_withdraws_leaves_the_corner() {
     const model = makeModel();
     const handle = fakeHandle();

@@ -53,6 +53,22 @@ Singleton {
     // clock is corrected. This is the only reason the model takes an injected
     // one: the tests have no ElapsedTimer to give it.
     monotonic: () => sinceStart.elapsed()
+
+    // PLAN G8, blueprint §06's "Sound as UI": one quiet, on-brand cue for
+    // "a notification arrived" (never for the same id updating in place —
+    // `arrived`'s own doc comment in core/NotifyModel.qml is where that
+    // distinction is made and tested). `pw-play` and the generated chime are
+    // both pinned into this wrapper by pkgs/jv-notify, never looked up on
+    // $PATH or guessed at a path — so a checkout run straight from the
+    // source tree (no wrapper, no env) stays silent rather than guessing.
+    // `execDetached` fires and forgets: overlapping arrivals may overlap
+    // their chimes, which is the same behaviour every other desktop
+    // notification sound has, not a bug this corner needs to queue around.
+    onArrived: {
+      const sound = Quickshell.env("JV_NOTIFY_SOUND");
+      if (sound)
+        Quickshell.execDetached([Quickshell.env("JV_NOTIFY_PLAY") || "pw-play", "--volume", "0.35", sound]);
+    }
   }
 
   ElapsedTimer {

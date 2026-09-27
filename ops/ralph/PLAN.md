@@ -680,7 +680,63 @@ the top unchecked item unless it is blocked.
       switched session — see `ops/ralph/HUMAN-VERIFY.md`. **G7 is now fully
       resolved** (G7a/G7b/G7c all `[H]`); Track G continues at G8 (sound
       theme).
-- [ ] G8. Sound theme: one quiet, on-brand notification sound.
+- [H] G8. **Sound theme: one quiet, on-brand notification sound.** DONE (this
+      commit): `tools/gen_notify_sound.py` renders the chime from pure
+      arithmetic (a rising fourth, 330 Hz -> 440 Hz, ~195ms, peak 0.22 of full
+      scale, each note ramping to exactly zero at both ends) rather than
+      checking in a binary `.wav` — the same "no binary blob, generated at
+      build time" discipline `pkgs/jarvis-wallpaper` uses for the desktop art,
+      so the sound is reviewable as the numbers that make it. `pkgs/jv-notify-
+      sound` (new, `runCommand` + the generator) builds it; `pkgs/jv-notify`
+      takes it as an input and pins BOTH it and `pipewire`'s `pw-play` into
+      its own wrapper (`JV_NOTIFY_SOUND`/`JV_NOTIFY_PLAY`), the same "pin the
+      store path, never trust $PATH" rule `jv-bar` already follows for
+      `niri`. `flake.nix` wires `jv-notify-sound` in via
+      `self.packages.${system}`, the same shape `jv-wall` takes
+      `jarvis-wallpaper`.
+      The trigger is a new `signal arrived()` on `shell/jv-notify/core/
+      NotifyModel.qml`, fired from `push()` only when a notification's key is
+      genuinely NEW — never when a sender reuses an id to update one already
+      on screen (a download at 40%, then 80%), since that is one piece of
+      news, not two. `Notifications.qml` (the untestable half — quickshell
+      links its QML plugin into its own binary, so no other engine can import
+      it, hence nothing in this file is reachable by a headless test) listens
+      with `onArrived:` and fires `Quickshell.execDetached([...])` — fire and
+      forget, so overlapping arrivals may overlap their chimes exactly like
+      every other desktop notification sound, not a bug to queue around — and
+      stays silent if `JV_NOTIFY_SOUND` is unset (a checkout run outside its
+      wrapper), never guessing a path. `pw-play --volume 0.35` is a second,
+      independent quiet decision on top of the chime's own low peak, so the
+      two compose rather than one silently overriding the other.
+      Tests: `tools/tests/test_gen_notify_sound.py` (8 cases) — deterministic
+      across calls, peak amplitude never exceeds `PEAK`, total duration
+      between 50ms and 500ms, both the first and last sample are exactly
+      0.0 (click-free), each of the two notes actually reaches its own full
+      envelope (catches a `FADE_S` that swallowed a whole note), `NOTES`
+      itself proven non-overlapping (so the mixer's clamp stays a safety net
+      and never load-bearing), and the CLI's `write_wav` round-trips through
+      real 16-bit PCM via the stdlib `wave` module. `shell/jv-notify/tests/
+      tst_notifymodel.qml` (+1 case, 30 total) proves `arrived` fires exactly
+      once for a new id, not again when the same id updates, and again for a
+      genuinely different one. `ops/ralph/nixtest.sh` (+2 cases) builds
+      `.#jv-notify-sound` and reads a real RIFF/WAVE header off the output
+      (not assumed from the generator's own claim), and builds `.#jv-notify`
+      and greps the BUILT wrapper script for both env vars pointing at the
+      real store paths of `pw-play` and the built chime — the same "read the
+      built bytes, not the source" discipline the lock screen's argv checks
+      already use.
+      `bash ops/ralph/notifytest.sh`: 30 passed (was 29). `bash
+      ops/ralph/runtests.sh tools`: 954 passed (was 946). `bash
+      ops/ralph/nixtest.sh`: 63 passed (was 61). `nix build --no-link
+      .#jv-notify-sound` and `.#jv-notify` both green (qmllint -W 0 and the
+      headless notifier tests both still pass in `jv-notify`'s own check
+      phase). `nixos-rebuild build --flake .#ares` green. No schema, no
+      jv-act, no boot path, no pins, no disko.nix touched.
+      `[H]` because nothing in this worktree can play audio or send a real
+      D-Bus notification into a running session — whether the chime is
+      actually audible, at the right quiet volume, and fires once per genuine
+      arrival (not per replacement) on real hardware needs a human — see
+      `ops/ralph/HUMAN-VERIFY.md`.
 - [B] G9. **Narrowed automount** — removable USB only, with the Windows
       NVMe and the 2 TB disk hard-excluded by serial. gvfs force-enables
       udisks2, which security.nix disables on purpose, so this needs Ofek's

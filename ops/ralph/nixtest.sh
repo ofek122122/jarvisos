@@ -863,5 +863,36 @@ data_dir=$(nix eval --raw '.#nixosConfigurations.ares.config.services.syncthing.
 if [ "$data_dir" = '/home/ofek/Sync' ]; then ok "$t"
 else bad "$t" "dataDir=$data_dir"; fi
 
+# ---------------------------------------------------------- notify sound
+# PLAN G8, blueprint §06's "Sound as UI". pkgs/jv-notify-sound renders the
+# chime from pure arithmetic (tools/gen_notify_sound.py, proven against
+# tools/tests/test_gen_notify_sound.py in a bare checkout) and pkgs/jv-notify
+# pins it — and `pw-play` — into its own wrapper, the one thing only an
+# evaluation can see: whether the BUILT jv-notify actually spends the BUILT
+# jv-notify-sound, both read out of the real store paths rather than assumed
+# from either package's source.
+
+t='jv-notify-sound builds a real mono .wav, not an empty or malformed file'
+sound=$(nix build --no-link --print-out-paths '.#jv-notify-sound' 2>&1 | tail -1)
+wav="$sound/share/jv-notify-sound/arrived.wav"
+if [ ! -f "$wav" ]; then bad "$t" "\`nix build .#jv-notify-sound\` said: $sound"
+elif [ "$(head -c4 "$wav")" = "RIFF" ] && [ "$(dd if="$wav" bs=1 skip=8 count=4 2>/dev/null)" = "WAVE" ]; then
+  ok "$t"
+else bad "$t" "no RIFF/WAVE header at $wav"; fi
+
+t='jv-notify pins pw-play and the built chime into its own wrapper, not $PATH'
+notify=$(nix build --no-link --print-out-paths '.#jv-notify' 2>&1 | tail -1)
+script="$notify/bin/jv-notify"
+if [ ! -f "$script" ]; then
+  bad "$t" "\`nix build .#jv-notify\` said: $notify"
+else
+  play_line=$(grep -o "JV_NOTIFY_PLAY='[^']*'" "$script")
+  sound_line=$(grep -o "JV_NOTIFY_SOUND='[^']*'" "$script")
+  if [[ "$play_line" == "JV_NOTIFY_PLAY='$store/"*"/bin/pw-play'" ]] \
+    && [ "$sound_line" = "JV_NOTIFY_SOUND='$wav'" ]; then
+    ok "$t"
+  else bad "$t" "play=$play_line sound=$sound_line (expected sound=JV_NOTIFY_SOUND='$wav')"; fi
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
